@@ -1,0 +1,18 @@
+title = "Sigil gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Example fixture YAMLs reference *Env variable names, not values"
+paths = [
+  '''^examples/.*\.yaml$''',
+  '''^tests/SigilBuild\.Schema\.Tests/Fixtures/.*\.yaml$''',
+]
+
+[[allowlists]]
+description = "Schema doc examples"
+paths = [
+  '''^schemas/sigil-schema\.json$''',
+  '''^docs/rfcs/.*\.md$''',
+]

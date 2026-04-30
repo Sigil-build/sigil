@@ -35,8 +35,8 @@ RFC blocks the merge.
 | `sigil.exe` (Native AOT, win-x64, Release, stripped) | ≤ 15 MB |
 | `SigilBuild.UpdateSdk.dll` (NuGet, framework-dependent) | ≤ 500 KB |
 
-The Sprint 1 baseline measurement of `sigil.exe` size goes here once Task 4 has
-been run on a Windows host: `<fill in MB once measured>`.
+Sprint 1 baseline (CI run on `windows-latest`, `aot publish (win-x64)`):
+`sigil.exe` = **0.88 MB**.
 
 ### Reliability & quality gates
 

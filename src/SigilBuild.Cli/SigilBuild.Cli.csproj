@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>SigilBuild.Cli</RootNamespace>
+    <AssemblyName>sigil</AssemblyName>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>sigil</ToolCommandName>
+    <PackageId>SigilBuild</PackageId>
+    <Version>0.0.1-alpha</Version>
+    <Description>Sigil — declarative desktop-software distribution CLI.</Description>
+    <PackageTags>installer;packaging;codesigning;msix;delta-update</PackageTags>
+    <!-- AOT properties enabled in Task 4 -->
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\SigilBuild.Core\SigilBuild.Core.csproj" />
+  </ItemGroup>
+</Project>

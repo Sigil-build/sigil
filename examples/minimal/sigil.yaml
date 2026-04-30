@@ -1,0 +1,10 @@
+spec: v1.0
+
+app:
+  id: com.example.MinimalApp
+  name: Minimal App
+  version: 0.1.0
+  publisher: Example Inc.
+
+build:
+  source: ./out

@@ -1,0 +1,40 @@
+spec: v1.0
+
+app:
+  id: com.example.AzureSignedApp
+  name: Azure-Signed App
+  version: 2.0.0
+  publisher: Example Inc.
+
+build:
+  source: ./out
+  deterministic: true
+
+package:
+  formats: [msix]
+  architectures: [x64, arm64]
+  msix:
+    publisher: "CN=Example Inc."
+    logo: ./assets/logo.png
+
+sign:
+  provider: azure-trusted-signing
+  azureTrustedSigning:
+    endpoint: https://eus.codesigning.azure.net/
+    accountName: example-signing-account
+    certificateProfile: example-profile
+    tenantIdEnv: AZURE_TENANT_ID
+    clientIdEnv: AZURE_CLIENT_ID
+    clientSecretEnv: AZURE_CLIENT_SECRET
+
+publish:
+  github:
+    repo: example-org/example-app
+    tagPrefix: v
+    draft: false
+
+updates:
+  channel: stable
+  manifestUrl: https://updates.example.com/example-app/manifest.json
+  deltaTargets: 3
+  signingKey: ./keys/update-signing.ed25519

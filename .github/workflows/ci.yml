@@ -1,0 +1,82 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: dotnet info
+        run: dotnet --info
+
+      - name: restore
+        run: dotnet restore Sigil.sln
+
+      - name: build
+        run: dotnet build Sigil.sln --configuration Release --no-restore
+
+      - name: test
+        run: dotnet test Sigil.sln --configuration Release --no-build --logger "trx;LogFileName=test-results.trx" --collect:"XPlat Code Coverage"
+
+      - name: upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}
+          path: '**/TestResults/**/*.trx'
+
+  aot-publish:
+    name: aot publish (win-x64)
+    runs-on: windows-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: aot publish
+        run: dotnet publish src/SigilBuild.Cli -c Release -r win-x64 -p:PublishAot=true -o publish/win-x64
+
+      - name: smoke test
+        shell: pwsh
+        run: |
+          $exe = "publish/win-x64/sigil.exe"
+          if (-not (Test-Path $exe)) { throw "binary not produced at $exe" }
+          $size = (Get-Item $exe).Length
+          $sizeMb = [math]::Round($size / 1MB, 2)
+          Write-Host "sigil.exe size: $sizeMb MB"
+          if ($size -gt 15MB) { throw "sigil.exe is $sizeMb MB, exceeds 15 MB budget" }
+          $output = & $exe --version
+          if ($LASTEXITCODE -ne 0) { throw "sigil --version exited $LASTEXITCODE" }
+          if ($output.Trim() -ne "0.0.1-alpha") { throw "expected '0.0.1-alpha', got '$output'" }
+
+      - name: upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: sigil-win-x64
+          path: publish/win-x64/sigil.exe
+          if-no-files-found: error

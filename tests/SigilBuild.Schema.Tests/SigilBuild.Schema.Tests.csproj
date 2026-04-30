@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="NJsonSchema" />
+    <PackageReference Include="NJsonSchema.Yaml" />
+    <PackageReference Include="YamlDotNet" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\schemas\sigil-schema.json" Link="sigil-schema.json"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Fixtures\**\*.yaml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\examples\**\sigil.yaml" Link="examples\%(RecursiveDir)sigil.yaml"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+</Project>

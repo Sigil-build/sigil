@@ -1,0 +1,40 @@
+# .NET build output
+bin/
+obj/
+out/
+publish/
+*.user
+*.suo
+*.userprefs
+
+# IDEs
+.vs/
+.vscode/
+.idea/
+*.swp
+
+# Test results
+TestResults/
+coverage/
+*.trx
+*.coverage
+*.coveragexml
+
+# Tool output
+.tools/
+*.nupkg
+*.snupkg
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets (defense in depth — gitleaks is the real gate)
+*.pfx
+*.p12
+*.pem
+*.key
+appsettings.Local.json
+.env
+.env.*
+!.env.example

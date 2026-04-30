@@ -1,0 +1,11 @@
+# Default owners for everything in the repo
+*       @Sigil-build/maintainers
+
+# Architecture changes need a tech lead review
+/product-architect-package/architecture/    @Sigil-build/tech-leads
+/product-architect-package/decisions.md     @Sigil-build/tech-leads
+
+# CI / build / packaging plumbing
+/.github/                                   @Sigil-build/devops
+/Directory.*.props                          @Sigil-build/devops
+/global.json                                @Sigil-build/devops

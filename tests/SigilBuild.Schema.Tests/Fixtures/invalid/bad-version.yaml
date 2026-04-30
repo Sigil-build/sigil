@@ -1,0 +1,8 @@
+spec: v1.0
+app:
+  id: com.example.App
+  name: Example
+  version: not-a-semver
+  publisher: Example Inc.
+build:
+  source: ./out

@@ -1,0 +1,219 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sigil.build/schemas/v1/sigil-schema.json",
+  "title": "Sigil manifest",
+  "description": "Sigil v1.0 manifest (sigil.yaml). Single source of truth for pack -> sign -> publish -> update.",
+  "type": "object",
+  "required": ["spec", "app", "build"],
+  "additionalProperties": false,
+  "properties": {
+    "spec": {
+      "type": "string",
+      "description": "Manifest schema version. Pinned to v1.0 for the MVP.",
+      "const": "v1.0"
+    },
+    "app": {
+      "type": "object",
+      "required": ["id", "name", "version", "publisher"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Reverse-DNS application id, e.g. com.example.MyApp.",
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(\\.[A-Za-z][A-Za-z0-9]*)+$",
+          "minLength": 3,
+          "maxLength": 255
+        },
+        "name": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "version": {
+          "type": "string",
+          "description": "Semantic version (Semver 2.0.0).",
+          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+        },
+        "publisher": {
+          "type": "string",
+          "description": "Display name or X.500 distinguished name (CN=...).",
+          "minLength": 1
+        },
+        "description": { "type": "string" },
+        "homepage": { "type": "string", "format": "uri" }
+      }
+    },
+    "build": {
+      "type": "object",
+      "required": ["source"],
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "Path (relative to manifest) to the directory whose contents will be packaged.",
+          "minLength": 1
+        },
+        "include": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Glob patterns (relative to source) to include. Defaults to ['**/*']."
+        },
+        "exclude": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Glob patterns (relative to source) to exclude."
+        },
+        "deterministic": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reproducible build: sort entries, fixed mtimes, no host metadata."
+        }
+      }
+    },
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "formats": {
+          "type": "array",
+          "items": { "enum": ["msix", "zip"] },
+          "minItems": 1,
+          "uniqueItems": true,
+          "default": ["zip"]
+        },
+        "architectures": {
+          "type": "array",
+          "items": { "enum": ["x64", "arm64"] },
+          "minItems": 1,
+          "uniqueItems": true,
+          "default": ["x64"]
+        },
+        "msix": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "publisher": {
+              "type": "string",
+              "description": "X.500 distinguished name; must match the signing cert subject."
+            },
+            "logo": {
+              "type": "string",
+              "description": "Path to a master logo (PNG, square). Sigil will resize for tiles."
+            },
+            "capabilities": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "sign": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "enum": ["none", "local", "azure-trusted-signing"],
+          "default": "none"
+        },
+        "local": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["pfx"],
+          "properties": {
+            "pfx": { "type": "string", "description": "Path to a .pfx file." },
+            "passwordEnv": {
+              "type": "string",
+              "description": "Name of the environment variable holding the PFX password."
+            },
+            "timestampUrl": {
+              "type": "string",
+              "format": "uri",
+              "default": "http://timestamp.digicert.com"
+            }
+          }
+        },
+        "azureTrustedSigning": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["endpoint", "accountName", "certificateProfile"],
+          "properties": {
+            "endpoint": { "type": "string", "format": "uri" },
+            "accountName": { "type": "string", "minLength": 1 },
+            "certificateProfile": { "type": "string", "minLength": 1 },
+            "tenantIdEnv": { "type": "string", "default": "AZURE_TENANT_ID" },
+            "clientIdEnv": { "type": "string", "default": "AZURE_CLIENT_ID" },
+            "clientSecretEnv": { "type": "string", "default": "AZURE_CLIENT_SECRET" }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "provider": { "const": "local" } }, "required": ["provider"] },
+          "then": { "required": ["local"] }
+        },
+        {
+          "if": {
+            "properties": { "provider": { "const": "azure-trusted-signing" } },
+            "required": ["provider"]
+          },
+          "then": { "required": ["azureTrustedSigning"] }
+        }
+      ]
+    },
+    "publish": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "github": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["repo"],
+          "properties": {
+            "repo": { "type": "string", "pattern": "^[^/]+/[^/]+$" },
+            "tagPrefix": { "type": "string", "default": "v" },
+            "draft": { "type": "boolean", "default": false }
+          }
+        }
+      }
+    },
+    "updates": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "channel": { "type": "string", "default": "stable", "minLength": 1 },
+        "manifestUrl": { "type": "string", "format": "uri" },
+        "deltaTargets": {
+          "type": "integer",
+          "description": "How many previous versions to generate delta patches against.",
+          "minimum": 0,
+          "maximum": 20,
+          "default": 3
+        },
+        "signingKey": {
+          "type": "string",
+          "description": "Path to an Ed25519 private key (PEM) used to sign the update manifest."
+        }
+      }
+    },
+    "installer": {
+      "type": "object",
+      "description": "Branded Windows installer wizard config. Implementation lands in Sprint 5b.",
+      "additionalProperties": false,
+      "properties": {
+        "brand": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "logo": { "type": "string" },
+            "hero": { "type": "string" },
+            "primaryColor": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            "accentColor": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            }
+          }
+        }
+      }
+    }
+  }
+}

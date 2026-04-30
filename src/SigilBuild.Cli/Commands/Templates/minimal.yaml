@@ -1,0 +1,10 @@
+spec: v1.0
+
+app:
+  id: {APP_ID}
+  name: {APP_NAME}
+  version: {APP_VERSION}
+  publisher: {PUBLISHER}
+
+build:
+  source: ./out

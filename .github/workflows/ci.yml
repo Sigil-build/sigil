@@ -74,6 +74,31 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "sigil --version exited $LASTEXITCODE" }
           if ($output.Trim() -ne "0.0.1-alpha") { throw "expected '0.0.1-alpha', got '$output'" }
 
+      - name: aot smoke - validate
+        shell: pwsh
+        run: |
+          @"
+          spec: v1.0
+          app:
+            id: com.example.Smoke
+            name: Smoke
+            version: 0.1.0
+            publisher: Smoke Inc.
+          build:
+            source: ./out
+          "@ | Set-Content -Path smoke.yaml -Encoding utf8
+          $output = & ./publish/win-x64/sigil.exe validate smoke.yaml
+          if ($LASTEXITCODE -ne 0) { throw "validate failed: $output" }
+
+      - name: aot smoke - init
+        shell: pwsh
+        run: |
+          & ./publish/win-x64/sigil.exe init --non-interactive --out gen.yaml `
+            --app-id com.example.G --app-name G --version 0.1.0 --publisher G
+          if ($LASTEXITCODE -ne 0) { throw "init failed" }
+          & ./publish/win-x64/sigil.exe validate gen.yaml
+          if ($LASTEXITCODE -ne 0) { throw "validate-of-generated failed" }
+
       - name: upload binary
         uses: actions/upload-artifact@v4
         with:

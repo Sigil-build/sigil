@@ -1,0 +1,25 @@
+spec: v1.0
+
+app:
+  id: {APP_ID}
+  name: {APP_NAME}
+  version: {APP_VERSION}
+  publisher: {PUBLISHER}
+
+build:
+  source: ./out
+  deterministic: true
+
+package:
+  formats: [msix]
+  architectures: [x64, arm64]
+  msix:
+    publisher: "CN={PUBLISHER}"
+    logo: ./assets/logo.png
+
+sign:
+  provider: azure-trusted-signing
+  azureTrustedSigning:
+    endpoint: https://eus.codesigning.azure.net/
+    accountName: your-signing-account
+    certificateProfile: your-profile

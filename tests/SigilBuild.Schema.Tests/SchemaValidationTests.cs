@@ -127,9 +127,11 @@ public class SchemaValidationTests
             string.Join("; ", errors.Select(e => e.ToString())));
     }
 
+    public static IEnumerable<object[]> InvalidFixturePaths() =>
+        Directory.EnumerateFiles("Fixtures/invalid", "*.yaml").Select(p => new object[] { p });
+
     [Theory]
-    [InlineData("Fixtures/invalid/missing-app.yaml")]
-    [InlineData("Fixtures/invalid/bad-version.yaml")]
+    [MemberData(nameof(InvalidFixturePaths))]
     public async Task InvalidFixtures_AreRejected(string yamlPath)
     {
         var schema = await LoadSchemaAsync();

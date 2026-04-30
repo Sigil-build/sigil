@@ -1,0 +1,33 @@
+spec: v1.0
+
+app:
+  id: com.example.LocalSignedApp
+  name: Local-Signed App
+  version: 1.2.3
+  publisher: Example Inc.
+  description: Demonstrates MSIX packaging with a local PFX signing cert.
+  homepage: https://example.com
+
+build:
+  source: ./out
+  include:
+    - "**/*"
+  exclude:
+    - "**/*.pdb"
+    - "**/*.xml"
+  deterministic: true
+
+package:
+  formats: [msix, zip]
+  architectures: [x64]
+  msix:
+    publisher: "CN=Example Inc., O=Example Inc., C=US"
+    logo: ./assets/logo.png
+    capabilities: [internetClient]
+
+sign:
+  provider: local
+  local:
+    pfx: ./certs/codesign.pfx
+    passwordEnv: SIGIL_PFX_PASSWORD
+    timestampUrl: http://timestamp.digicert.com

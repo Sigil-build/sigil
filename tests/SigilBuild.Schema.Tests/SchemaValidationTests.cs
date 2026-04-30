@@ -1,9 +1,11 @@
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
 using NJsonSchema;
-using YamlDotNet.Serialization;
+using YamlDotNet.RepresentationModel;
 using Xunit;
 
 namespace SigilBuild.Schema.Tests;
@@ -20,12 +22,92 @@ public class SchemaValidationTests
 
     private static string YamlToJson(string yamlText)
     {
-        var deserializer = new DeserializerBuilder().Build();
-        var yamlObject = deserializer.Deserialize(new StringReader(yamlText));
-        var serializer = new SerializerBuilder()
-            .JsonCompatible()
-            .Build();
-        return serializer.Serialize(yamlObject ?? new object());
+        var stream = new YamlStream();
+        stream.Load(new StringReader(yamlText));
+        if (stream.Documents.Count == 0)
+        {
+            return "null";
+        }
+
+        using var ms = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(ms))
+        {
+            WriteNode(writer, stream.Documents[0].RootNode);
+        }
+        return System.Text.Encoding.UTF8.GetString(ms.ToArray());
+    }
+
+    private static void WriteNode(Utf8JsonWriter writer, YamlNode node)
+    {
+        switch (node)
+        {
+            case YamlMappingNode map:
+                writer.WriteStartObject();
+                foreach (var kv in map.Children)
+                {
+                    writer.WritePropertyName(((YamlScalarNode)kv.Key).Value ?? string.Empty);
+                    WriteNode(writer, kv.Value);
+                }
+                writer.WriteEndObject();
+                break;
+            case YamlSequenceNode seq:
+                writer.WriteStartArray();
+                foreach (var child in seq.Children)
+                {
+                    WriteNode(writer, child);
+                }
+                writer.WriteEndArray();
+                break;
+            case YamlScalarNode scalar:
+                WriteScalar(writer, scalar);
+                break;
+            default:
+                writer.WriteNullValue();
+                break;
+        }
+    }
+
+    private static void WriteScalar(Utf8JsonWriter writer, YamlScalarNode scalar)
+    {
+        var value = scalar.Value;
+        if (value is null)
+        {
+            writer.WriteNullValue();
+            return;
+        }
+
+        // Quoted strings keep their string type
+        if (scalar.Style is YamlDotNet.Core.ScalarStyle.DoubleQuoted or YamlDotNet.Core.ScalarStyle.SingleQuoted)
+        {
+            writer.WriteStringValue(value);
+            return;
+        }
+
+        if (value.Length == 0 || value == "~" || value.Equals("null", System.StringComparison.OrdinalIgnoreCase))
+        {
+            writer.WriteNullValue();
+            return;
+        }
+
+        if (bool.TryParse(value, out var b))
+        {
+            writer.WriteBooleanValue(b);
+            return;
+        }
+
+        if (long.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var i))
+        {
+            writer.WriteNumberValue(i);
+            return;
+        }
+
+        if (double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d))
+        {
+            writer.WriteNumberValue(d);
+            return;
+        }
+
+        writer.WriteStringValue(value);
     }
 
     [Theory]

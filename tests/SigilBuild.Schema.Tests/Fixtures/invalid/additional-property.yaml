@@ -1,0 +1,9 @@
+spec: v1.0
+app:
+  id: com.example.App
+  name: Example
+  version: 0.1.0
+  publisher: Example Inc.
+  unknownField: nope
+build:
+  source: ./out

@@ -39,6 +39,33 @@ public class InitCommandTests
     }
 
     [Fact]
+    public async Task Init_AzureSigningTemplate_EmitsAzureProviderBlock()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var exit = await Program.MainAsync(new[]
+            {
+                "init", "--non-interactive",
+                "--template", "azure-signing",
+                "--out", Path.Combine(dir, "sigil.yaml"),
+                "--app-id", "com.example.AzureApp", "--app-name", "AzureApp",
+                "--version", "1.0.0", "--publisher", "Acme",
+            });
+            exit.Should().Be(0);
+
+            var written = await File.ReadAllTextAsync(Path.Combine(dir, "sigil.yaml"));
+            written.Should().Contain("provider: azure-trusted-signing");
+            written.Should().Contain("certificateProfile");
+            written.Should().Contain("id: com.example.AzureApp");
+            written.Should().NotContain("{APP_");
+            written.Should().NotContain("{PUBLISHER}");
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
     public async Task Init_FileExistsWithoutForce_ExitsOne()
     {
         var dir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());

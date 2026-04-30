@@ -11,7 +11,7 @@ public static class InitCommand
     public static Command Build()
     {
         var nonInteractive = new Option<bool>("--non-interactive", "Do not prompt; require all inputs as flags");
-        var template = new Option<string>("--template", () => "minimal", "Template name: minimal | msix | full");
+        var template = new Option<string>("--template", () => "minimal", "Template name: minimal | msix | azure-signing | full");
         var output = new Option<string>("--out", () => "sigil.yaml", "Output file path");
         var force = new Option<bool>("--force", "Overwrite if the output file already exists");
         var appId = new Option<string?>("--app-id", "Reverse-DNS app id");

@@ -29,5 +29,9 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\SigilBuild.Core\SigilBuild.Core.csproj" />
+    <PackageReference Include="System.CommandLine" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Commands\Templates\*.yaml" />
   </ItemGroup>
 </Project>

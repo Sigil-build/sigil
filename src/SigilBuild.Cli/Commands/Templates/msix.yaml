@@ -1,0 +1,23 @@
+spec: v1.0
+
+app:
+  id: {APP_ID}
+  name: {APP_NAME}
+  version: {APP_VERSION}
+  publisher: {PUBLISHER}
+
+build:
+  source: ./out
+
+package:
+  formats: [msix, zip]
+  architectures: [x64]
+  msix:
+    publisher: "CN={PUBLISHER}"
+    logo: ./assets/logo.png
+
+sign:
+  provider: local
+  local:
+    pfx: ./certs/codesign.pfx
+    passwordEnv: SIGIL_PFX_PASSWORD

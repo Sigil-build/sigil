@@ -38,3 +38,4 @@ appsettings.Local.json
 .env
 .env.*
 !.env.example
+./docs/

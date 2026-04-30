@@ -9,7 +9,23 @@
     <Version>0.0.1-alpha</Version>
     <Description>Sigil — declarative desktop-software distribution CLI.</Description>
     <PackageTags>installer;packaging;codesigning;msix;delta-update</PackageTags>
-    <!-- AOT properties enabled in Task 4 -->
+
+    <!-- Native AOT -->
+    <PublishAot>true</PublishAot>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <TrimMode>full</TrimMode>
+    <IlcOptimizationPreference>Size</IlcOptimizationPreference>
+    <StripSymbols>true</StripSymbols>
+    <DebuggerSupport>false</DebuggerSupport>
+    <EventSourceSupport>false</EventSourceSupport>
+    <HttpActivityPropagationSupport>false</HttpActivityPropagationSupport>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+
+    <!-- Surface AOT compatibility issues at build time, not run time -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <EnableAotAnalyzer>true</EnableAotAnalyzer>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+    <EnableSingleFileAnalyzer>true</EnableSingleFileAnalyzer>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\SigilBuild.Core\SigilBuild.Core.csproj" />

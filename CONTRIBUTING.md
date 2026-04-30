@@ -24,6 +24,22 @@ To exercise the Native AOT publish (Windows only in Sprint 1):
 dotnet publish src/SigilBuild.Cli -c Release -r win-x64 -p:PublishAot=true
 ```
 
+## Install git hooks (recommended)
+
+Set up the local pre-commit hooks so secrets are caught before they reach the remote:
+
+```bash
+# macOS / Linux
+./scripts/install-hooks.sh
+
+# Windows (PowerShell)
+./scripts/install-hooks.ps1
+```
+
+This points `core.hooksPath` at `.githooks/`, which currently runs `gitleaks protect`
+on every commit. Install gitleaks first: <https://github.com/gitleaks/gitleaks#installing>.
+The hook is a no-op if gitleaks is not on `PATH` — you'll get a friendly skip message.
+
 ## Coding conventions
 
 - File-scoped namespaces, nullable reference types on, `TreatWarningsAsErrors=true`.

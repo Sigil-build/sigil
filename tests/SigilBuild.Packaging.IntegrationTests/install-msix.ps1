@@ -1,17 +1,24 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [string]$MsixPath,
-    [Parameter(Mandatory)] [string]$ExpectedAppId
+    [Parameter(Mandatory)] [string]$ExpectedAppId,
+    # Use when the package is unsigned (requires Windows 11 + Developer Mode).
+    # For signed packages, omit this flag and run setup-test-cert.ps1 first.
+    [switch]$AllowUnsigned
 )
 
 $ErrorActionPreference = 'Stop'
 
 if (-not (Test-Path $MsixPath)) { throw "MSIX not found: $MsixPath" }
 
-# A self-signed test cert must be trusted on the VM; this script assumes that step
-# is already done (Windows blocks Add-AppxPackage of unsigned packages).
 Write-Host "Installing $MsixPath ..."
-Add-AppxPackage -Path $MsixPath -ForceApplicationShutdown
+if ($AllowUnsigned) {
+    Add-AppxPackage -Path $MsixPath -ForceApplicationShutdown -AllowUnsigned
+} else {
+    # Signed package path: the signing cert must already be trusted.
+    # Run setup-test-cert.ps1 once before calling this script without -AllowUnsigned.
+    Add-AppxPackage -Path $MsixPath -ForceApplicationShutdown
+}
 
 $installed = Get-AppxPackage -Name $ExpectedAppId
 if (-not $installed) { throw "Package '$ExpectedAppId' is not installed after Add-AppxPackage" }

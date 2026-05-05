@@ -16,7 +16,8 @@ public static class LogoAssetGenerator
     public static void Generate(string masterLogoPath, string outputDirectory)
     {
         Directory.CreateDirectory(outputDirectory);
-        using var master = SKBitmap.Decode(masterLogoPath)
+        // Read into memory first so the native decoder does not hold a file lock on Windows.
+        using var master = SKBitmap.Decode(File.ReadAllBytes(masterLogoPath))
             ?? throw new IOException($"unable to decode '{masterLogoPath}'");
 
         foreach (var (name, w, h) in Tiles)

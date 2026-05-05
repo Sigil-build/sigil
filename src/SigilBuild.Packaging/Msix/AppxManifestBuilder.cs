@@ -18,6 +18,10 @@ public static class AppxManifestBuilder
         var quad = ToQuadVersion(manifest.App.Version);
         var publisher = msix.Publisher ?? $"CN={manifest.App.Publisher}";
         var archAttr = arch == TargetArchitecture.Arm64 ? "arm64" : "x64";
+        // Executable name is the last segment of the reverse-DNS App.Id.
+        // App.Name is a display name and may contain spaces, making it an invalid filename.
+        // e.g. "com.example.LocalSignedApp" → "LocalSignedApp.exe"
+        var execName = DeriveExeName(manifest.App.Id);
 
         var doc = new XDocument(
             new XElement(Ns + "Package",
@@ -42,7 +46,7 @@ public static class AppxManifestBuilder
                 new XElement(Ns + "Applications",
                     new XElement(Ns + "Application",
                         new XAttribute("Id", "App"),
-                        new XAttribute("Executable", $"{manifest.App.Name}.exe"),
+                        new XAttribute("Executable", $"{execName}.exe"),
                         new XAttribute("EntryPoint", "Windows.FullTrustApplication"),
                         new XElement(Uap + "VisualElements",
                             new XAttribute("DisplayName", manifest.App.Name),
@@ -72,6 +76,12 @@ public static class AppxManifestBuilder
         // runFullTrust is required for Windows.FullTrustApplication entry point.
         element.Add(new XElement(Rescap + "Capability", new XAttribute("Name", "runFullTrust")));
         return element;
+    }
+
+    private static string DeriveExeName(string appId)
+    {
+        var dot = appId.LastIndexOf('.');
+        return dot >= 0 ? appId[(dot + 1)..] : appId;
     }
 
     private static string ToQuadVersion(string semver)

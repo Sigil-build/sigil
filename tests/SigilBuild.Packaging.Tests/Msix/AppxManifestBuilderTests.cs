@@ -41,6 +41,30 @@ public class AppxManifestBuilderTests
         var capsElement = doc.Root.Element(ns + "Capabilities")!;
         capsElement.Elements(ns + "Capability")
             .Should().ContainSingle(c => c.Attribute("Name")!.Value == "internetClient");
+
+        // Executable derives from last segment of App.Id, not App.Name (which may contain spaces).
+        var app = doc.Root.Element(ns + "Applications")!.Element(ns + "Application")!;
+        app.Attribute("Executable")!.Value.Should().Be("App.exe");
+    }
+
+    [Fact]
+    public void Build_SpacedAppName_ExecutableDerivesFromId()
+    {
+        var manifest = new SigilManifest(
+            Spec: "v1.0",
+            App: new AppSection("com.example.LocalSignedApp", "Local-Signed App", "1.2.3", "Example Inc.", null, null),
+            Build: new BuildSection("./out", null, null, true),
+            Package: new PackageSection(
+                new[] { PackageFormat.Msix },
+                new[] { TargetArchitecture.X64 },
+                new MsixOptions("CN=Example Inc.", null, null)),
+            Sign: null, Publish: null, Updates: null, Installer: null,
+            Location: SourceLocation.Unknown);
+
+        var xml = AppxManifestBuilder.Build(manifest, TargetArchitecture.X64);
+        XNamespace ns = "http://schemas.microsoft.com/appx/manifest/foundation/windows10";
+        var app = XDocument.Parse(xml).Root!.Element(ns + "Applications")!.Element(ns + "Application")!;
+        app.Attribute("Executable")!.Value.Should().Be("LocalSignedApp.exe");
     }
 
     [Fact]

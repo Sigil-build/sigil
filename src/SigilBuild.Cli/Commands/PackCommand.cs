@@ -1,9 +1,6 @@
-using System;
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.IO;
-using System.Threading;
-using System.Threading.Tasks;
 using SigilBuild.Core.Configuration;
 using SigilBuild.Core.Diagnostics;
 using SigilBuild.Core.Manifest;
@@ -53,7 +50,7 @@ public static class PackCommand
 
                 var result = await packager.PackAsync(manifest,
                     new PackOptions(sourceDir, outDir, format, arch),
-                    CancellationToken.None);
+                    ctx.GetCancellationToken());
 
                 DiagnosticReporter.Write(Console.Error, result.Diagnostics, useColor: false);
                 if (result.Artifact is null) { ctx.ExitCode = 1; return; }

@@ -39,7 +39,14 @@ public sealed class MakeAppxRunner
         foreach (var a in args) psi.ArgumentList.Add(a);
 
         using var proc = new Process { StartInfo = psi };
-        proc.Start();
+        try
+        {
+            proc.Start();
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            return new MakeAppxResult(-1, string.Empty, $"Failed to launch '{_exePath}': {ex.Message}");
+        }
         var stdoutTask = proc.StandardOutput.ReadToEndAsync(ct);
         var stderrTask = proc.StandardError.ReadToEndAsync(ct);
         await proc.WaitForExitAsync(ct);

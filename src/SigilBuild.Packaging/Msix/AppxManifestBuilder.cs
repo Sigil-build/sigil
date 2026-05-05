@@ -52,7 +52,9 @@ public static class AppxManifestBuilder
                             new XAttribute("Square44x44Logo", "Assets\\Square44x44Logo.png")))),
                 BuildCapabilities(msix.Capabilities ?? Array.Empty<string>())));
 
-        var settings = new XmlWriterSettings { Indent = true, OmitXmlDeclaration = false, Encoding = System.Text.Encoding.UTF8 };
+        // OmitXmlDeclaration=true: MakeAppx.exe rejects manifests that carry a BOM or
+        // an XML declaration whose encoding attribute conflicts with the file's actual encoding.
+        var settings = new XmlWriterSettings { Indent = true, OmitXmlDeclaration = true, Encoding = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false) };
         var sb = new System.Text.StringBuilder();
         using (var w = XmlWriter.Create(sb, settings))
         {
@@ -67,6 +69,8 @@ public static class AppxManifestBuilder
         var element = new XElement(Ns + "Capabilities");
         foreach (var c in caps)
             element.Add(new XElement(Ns + "Capability", new XAttribute("Name", c)));
+        // runFullTrust is required for Windows.FullTrustApplication entry point.
+        element.Add(new XElement(Rescap + "Capability", new XAttribute("Name", "runFullTrust")));
         return element;
     }
 

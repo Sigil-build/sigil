@@ -1,3 +1,4 @@
+using System.Threading.Tasks;
 using FluentAssertions;
 using SigilBuild.Cli;
 using Xunit;
@@ -10,21 +11,21 @@ public class VersionCommandTests
     [InlineData("--version")]
     [InlineData("-v")]
     [InlineData("version")]
-    public void Main_WithVersionFlag_ReturnsZero(string arg)
+    public async Task Main_WithVersionFlag_ReturnsZero(string arg)
     {
-        var exitCode = Program.Main(new[] { arg });
+        var exitCode = await Program.MainAsync(new[] { arg });
         exitCode.Should().Be(0);
     }
 
     [Fact]
-    public void Main_WithVersionFlag_PrintsAssemblyVersion()
+    public async Task Main_WithVersionFlag_PrintsAssemblyVersion()
     {
         using var sw = new System.IO.StringWriter();
         var originalOut = System.Console.Out;
         System.Console.SetOut(sw);
         try
         {
-            Program.Main(new[] { "--version" });
+            await Program.MainAsync(new[] { "--version" });
         }
         finally
         {
@@ -35,9 +36,9 @@ public class VersionCommandTests
     }
 
     [Fact]
-    public void Main_WithNoArgs_ReturnsNonZero()
+    public async Task Main_WithNoArgs_ReturnsNonZero()
     {
-        var exitCode = Program.Main(System.Array.Empty<string>());
+        var exitCode = await Program.MainAsync(System.Array.Empty<string>());
         exitCode.Should().NotBe(0);
     }
 }

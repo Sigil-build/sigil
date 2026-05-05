@@ -1,0 +1,8 @@
+spec: v1.0
+app:
+  id: not_reverse_dns
+  name: Example
+  version: 0.1.0
+  publisher: Example Inc.
+build:
+  source: ./out

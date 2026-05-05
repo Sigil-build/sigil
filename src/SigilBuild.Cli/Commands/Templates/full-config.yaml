@@ -1,0 +1,49 @@
+spec: v1.0
+
+app:
+  id: {APP_ID}
+  name: {APP_NAME}
+  version: {APP_VERSION}
+  publisher: {PUBLISHER}
+  description: Exercises every Sigil v1.0 feature.
+  homepage: https://example.com/full
+
+build:
+  source: ./out
+  include: ["**/*"]
+  exclude: ["**/*.pdb", "**/*.xml", "**/.git/**"]
+  deterministic: true
+
+package:
+  formats: [msix, zip]
+  architectures: [x64, arm64]
+  msix:
+    publisher: "CN={PUBLISHER}"
+    logo: ./assets/logo.png
+    capabilities: [internetClient, internetClientServer]
+
+sign:
+  provider: azure-trusted-signing
+  azureTrustedSigning:
+    endpoint: https://eus.codesigning.azure.net/
+    accountName: example-signing-account
+    certificateProfile: example-profile
+
+publish:
+  github:
+    repo: example-org/example-app
+    tagPrefix: v
+    draft: false
+
+updates:
+  channel: stable
+  manifestUrl: https://updates.example.com/example-app/manifest.json
+  deltaTargets: 5
+  signingKey: ./keys/update-signing.ed25519
+
+installer:
+  brand:
+    logo: ./brand/logo.svg
+    hero: ./brand/hero.png
+    primaryColor: "#1F2937"
+    accentColor: "#3B82F6"

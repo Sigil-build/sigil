@@ -15,6 +15,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SigilBuild.Cli.Tests", "tes
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SigilBuild.Schema.Tests", "tests\SigilBuild.Schema.Tests\SigilBuild.Schema.Tests.csproj", "{52A5EF87-22EB-4CE5-8709-EB82CC8AF383}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SigilBuild.Core.Tests", "tests\SigilBuild.Core.Tests\SigilBuild.Core.Tests.csproj", "{33A2BCC9-FB71-42C4-9CBC-A956A5AD73CF}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -73,6 +75,18 @@ Global
 		{52A5EF87-22EB-4CE5-8709-EB82CC8AF383}.Release|x64.Build.0 = Release|Any CPU
 		{52A5EF87-22EB-4CE5-8709-EB82CC8AF383}.Release|x86.ActiveCfg = Release|Any CPU
 		{52A5EF87-22EB-4CE5-8709-EB82CC8AF383}.Release|x86.Build.0 = Release|Any CPU
+		{33A2BCC9-FB71-42C4-9CBC-A956A5AD73CF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{33A2BCC9-FB71-42C4-9CBC-A956A5AD73CF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{33A2BCC9-FB71-42C4-9CBC-A956A5AD73CF}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{33A2BCC9-FB71-42C4-9CBC-A956A5AD73CF}.Debug|x64.Build.0 = Debug|Any CPU
+		{33A2BCC9-FB71-42C4-9CBC-A956A5AD73CF}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{33A2BCC9-FB71-42C4-9CBC-A956A5AD73CF}.Debug|x86.Build.0 = Debug|Any CPU
+		{33A2BCC9-FB71-42C4-9CBC-A956A5AD73CF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{33A2BCC9-FB71-42C4-9CBC-A956A5AD73CF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{33A2BCC9-FB71-42C4-9CBC-A956A5AD73CF}.Release|x64.ActiveCfg = Release|Any CPU
+		{33A2BCC9-FB71-42C4-9CBC-A956A5AD73CF}.Release|x64.Build.0 = Release|Any CPU
+		{33A2BCC9-FB71-42C4-9CBC-A956A5AD73CF}.Release|x86.ActiveCfg = Release|Any CPU
+		{33A2BCC9-FB71-42C4-9CBC-A956A5AD73CF}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -82,5 +96,6 @@ Global
 		{927A14E8-B2FA-4AAE-9367-1D67E34336D5} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{D6470EDF-D016-4BC7-8812-DB4298851CC2} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{52A5EF87-22EB-4CE5-8709-EB82CC8AF383} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{33A2BCC9-FB71-42C4-9CBC-A956A5AD73CF} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

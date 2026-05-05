@@ -3,4 +3,12 @@
     <IsAotCompatible>true</IsAotCompatible>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="YamlDotNet" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\schemas\sigil-schema.json"
+                      Link="Configuration\Embedded\sigil-schema.json"
+                      LogicalName="SigilBuild.Core.Configuration.Embedded.sigil-schema.json" />
+  </ItemGroup>
 </Project>

@@ -1,7 +1,5 @@
-using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Security.Cryptography;
 using System.Text.Json;
 using SigilBuild.Core.Manifest;
 using SigilBuild.Packaging.Common;
@@ -28,19 +26,12 @@ public static class SigilManifestJsonWriter
             writer.WriteStartObject();
             writer.WriteString("path", f.RelativePath);
             writer.WriteNumber("size", f.Length);
-            writer.WriteString("sha256", HashFile(f.AbsolutePath));
+            writer.WriteString("sha256", ManifestHasher.Sha256(f.AbsolutePath));
             writer.WriteEndObject();
         }
         writer.WriteEndArray();
         writer.WriteEndObject();
         writer.Flush();
         return ms.ToArray();
-    }
-
-    private static string HashFile(string path)
-    {
-        using var stream = File.OpenRead(path);
-        var hash = SHA256.HashData(stream);
-        return Convert.ToHexString(hash).ToLowerInvariant();
     }
 }

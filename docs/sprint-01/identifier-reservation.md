@@ -4,17 +4,17 @@ Per [decisions.md#D-007](../../product-architect-package/decisions.md) and [deci
 
 ## Day-1 must-do (Sprint 1 exit gate)
 
-- [ ] GitHub org `Sigil-build` exists (already done — verify access)
-- [ ] Public repo `Sigil-build/sigil` created with MIT license, default branch `main`
+- [x] GitHub org `Sigil-build` exists (already done — verify access)
+- [x] Public repo `Sigil-build/sigil` created with MIT license, default branch `main`
 - [ ] Private repo `Sigil-build/cloud` created (empty placeholder, no code)
-- [ ] Branch protection on `Sigil-build/sigil:main`:
+- [x] Branch protection on `Sigil-build/sigil:main`:
   - Require PR before merging
   - Require 1 approving review
   - Require status checks: `ci / build (ubuntu-latest)`, `ci / build (windows-latest)`, `ci / build (macos-latest)`, `secret-scan`
   - Require linear history
   - Block force pushes
 - [ ] CODEOWNERS file is enforced (set in branch protection "require review from Code Owners")
-- [ ] Domain `sigil.build` registered and pointed at placeholder
+- [x] Domain `sigil.build` registered and pointed at placeholder
 - [ ] Domain `sigil.me` 301-redirect → `sigil.build`
 - [ ] NuGet ID `SigilBuild` reserved (push empty `0.0.0-reserved` package): see "Reservation push" below
 - [ ] Defensive registration: `sigil.cloud`, `sigil.dev` (only if free; skip if taken)

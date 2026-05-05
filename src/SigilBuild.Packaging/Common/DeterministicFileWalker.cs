@@ -31,6 +31,7 @@ public static class DeterministicFileWalker
                 var abs = Path.Combine(sourceFull, rel);
                 var len = new FileInfo(abs).Length;
                 return new WalkedFile(abs, rel, len);
-            });
+            })
+            .ToList();
     }
 }

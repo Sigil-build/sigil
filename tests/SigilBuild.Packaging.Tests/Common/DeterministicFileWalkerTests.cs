@@ -39,4 +39,27 @@ public class DeterministicFileWalkerTests
 
         files.Select(f => f.RelativePath.Replace('\\', '/')).Should().Equal("app.exe", "readme.txt");
     }
+
+    [Fact]
+    public void Walk_EmptyDirectory_ReturnsEmptySequence()
+    {
+        var emptyDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(emptyDir);
+        try
+        {
+            var files = DeterministicFileWalker.Walk(emptyDir, include: null, exclude: null).ToArray();
+            files.Should().BeEmpty();
+        }
+        finally { Directory.Delete(emptyDir, recursive: true); }
+    }
+
+    [Fact]
+    public void Walk_IncludePatternWithNoMatches_ReturnsEmptySequence()
+    {
+        var files = DeterministicFileWalker.Walk(Source,
+            include: new[] { "**/*.dll" },
+            exclude: null).ToArray();
+
+        files.Should().BeEmpty();
+    }
 }

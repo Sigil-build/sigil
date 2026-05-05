@@ -29,6 +29,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\SigilBuild.Core\SigilBuild.Core.csproj" />
+    <ProjectReference Include="..\SigilBuild.Packaging\SigilBuild.Packaging.csproj" />
     <PackageReference Include="System.CommandLine" />
   </ItemGroup>
   <ItemGroup>

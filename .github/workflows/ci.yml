@@ -99,6 +99,24 @@ jobs:
           & ./publish/win-x64/sigil.exe validate gen.yaml
           if ($LASTEXITCODE -ne 0) { throw "validate-of-generated failed" }
 
+      - name: aot publish — installer host
+        run: dotnet publish src/SigilBuild.Installer.Host -c Release -r win-x64 -p:PublishAot=true -p:SigilAotPublish=true -o publish/installer
+
+      - name: smoke — installer.exe exists and within 40 MB
+        shell: pwsh
+        run: |
+          if (-not (Test-Path publish/installer/installer.exe)) { throw "installer.exe missing" }
+          $sizeMb = [math]::Round((Get-Item publish/installer/installer.exe).Length / 1MB, 2)
+          Write-Host "installer.exe size: $sizeMb MB"
+          if ($sizeMb -gt 40) { throw "installer.exe is $sizeMb MB, exceeds 40 MB budget" }
+
+      - name: upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-win-x64
+          path: publish/installer/installer.exe
+          if-no-files-found: error
+
       - name: upload binary
         uses: actions/upload-artifact@v4
         with:

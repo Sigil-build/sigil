@@ -36,6 +36,9 @@ It also flips compiled bindings on by default. Every `{Binding Foo}` against an 
 - **Trim warnings:** None. The Fluent theme in Avalonia 12.0.2 is fully trim-safe — no Fluent-specific IL2026 suppressions required.
 - **Avalonia 12.0.x release date:** 12.0.2 stable confirmed on NuGet as of 2026-05-06.
 - **Version pinned in Directory.Packages.props:** 12.0.2
+- **Installer host binary (win-x64 AOT, full build):** 16.48 MB (`publish/installer-x64/installer.exe`); full publish folder includes `libSkiaSharp.dll` ~11 MB, `av_libglesv2.dll` ~5 MB, `libHarfBuzzSharp.dll` ~2 MB as separate native DLLs. Well within the 40 MB CI budget.
+- **Installer host binary (win-arm64 AOT, full build):** AOT publish requires MSVC ARM64 build tools (`C++ ARM64 build tools` workload) — not installed locally. See Step 9.3 CI job for the intended result; CI (`windows-latest`) has the full MSVC toolchain.
+- **IL2026/IL3050 warnings from installer host build:** Zero.
 
 ## Open issues
 

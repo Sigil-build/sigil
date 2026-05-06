@@ -28,7 +28,9 @@
     </Border>
 
     <!-- Content host -->
-    <ContentControl Grid.Row="0" Grid.Column="1" Margin="32" Content="{Binding}" />
+    <ContentControl Grid.Row="0" Grid.Column="1" Margin="32"
+                    Content="{Binding}"
+                    ContentTemplate="{StaticResource ScreenSelector}" />
 
     <!-- Footer -->
     <Border Grid.Row="1" Grid.Column="1" BorderBrush="#E5E7EB" BorderThickness="0,1,0,0" Padding="16,8">

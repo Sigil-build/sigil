@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using SigilBuild.Core.Diagnostics;
 using SigilBuild.Core.Manifest;
 using SigilBuild.Packaging.Common;
+using SigilBuild.Packaging.Installer;
 
 namespace SigilBuild.Packaging.Msix;
 
@@ -53,6 +54,16 @@ public sealed class MsixPackager : IPackager
                 LogoAssetGenerator.Generate(logo, assetsDir);
             else
                 CreatePlaceholderAssets(assetsDir);
+
+            if (manifest.Installer is not null)
+            {
+                var envExe = Environment.GetEnvironmentVariable("SIGIL_INSTALLER_HOST_EXE");
+                var hostExe = envExe ?? Path.Combine(AppContext.BaseDirectory, "installer", "installer.exe");
+                // When env var is explicitly set, treat it as authoritative — Bundle will throw if missing.
+                // On the fallback path, skip silently if the host binary hasn't been published yet.
+                if (envExe is not null || File.Exists(hostExe))
+                    InstallerHostBundler.Bundle(manifest, hostExe, stagingDir);
+            }
 
             Directory.CreateDirectory(options.OutputDirectory);
             var archStr = options.Architecture.ToString().ToLowerInvariant();

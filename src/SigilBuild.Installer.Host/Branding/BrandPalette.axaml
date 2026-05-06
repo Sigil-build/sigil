@@ -1,0 +1,10 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Color x:Key="PrimaryColor">#1F2937</Color>
+  <Color x:Key="AccentColor">#3B82F6</Color>
+  <Color x:Key="GradientStartColor">#0F172A</Color>
+  <Color x:Key="GradientMidColor">#1E1B4B</Color>
+  <Color x:Key="GradientEndColor">#4F46E5</Color>
+  <SolidColorBrush x:Key="PrimaryBrush" Color="{DynamicResource PrimaryColor}" />
+  <SolidColorBrush x:Key="AccentBrush" Color="{DynamicResource AccentColor}" />
+</ResourceDictionary>

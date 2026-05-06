@@ -18,12 +18,19 @@
     <PackageVersion Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
     <!-- Packaging -->
     <PackageVersion Include="Microsoft.Extensions.FileSystemGlobbing" Version="9.0.0" />
-    <!-- Logo resize -->
-    <PackageVersion Include="SkiaSharp" Version="3.116.1" />
-    <PackageVersion Include="SkiaSharp.NativeAssets.Win32" Version="3.116.1" />
-    <PackageVersion Include="SkiaSharp.NativeAssets.Linux" Version="3.116.1" />
+    <!-- Logo resize — bumped to 3.119.4-preview.1.1 to satisfy Avalonia 12 transitive requirement -->
+    <PackageVersion Include="SkiaSharp" Version="3.119.4-preview.1.1" />
+    <PackageVersion Include="SkiaSharp.NativeAssets.Win32" Version="3.119.4-preview.1.1" />
+    <PackageVersion Include="SkiaSharp.NativeAssets.Linux" Version="3.119.4-preview.1.1" />
     <!-- Roslyn analyzer / source generator -->
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.11.0" />
     <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" />
+    <!-- Avalonia installer host -->
+    <PackageVersion Include="Avalonia" Version="12.0.2" />
+    <PackageVersion Include="Avalonia.Desktop" Version="12.0.2" />
+    <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.0.2" />
+    <PackageVersion Include="Avalonia.Headless" Version="12.0.2" />
+    <PackageVersion Include="Avalonia.Headless.XUnit" Version="12.0.2" />
+    <PackageVersion Include="Svg.Skia" Version="2.0.0.4" />
   </ItemGroup>
 </Project>

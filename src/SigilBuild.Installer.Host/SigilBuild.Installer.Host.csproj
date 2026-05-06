@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>SigilBuild.Installer.Host</RootNamespace>
+    <AssemblyName>installer</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+
+    <!-- AOT — Avalonia 12 makes this clean -->
+    <PublishAot Condition="'$(SigilAotPublish)' == 'true'">true</PublishAot>
+    <IsAotCompatible>true</IsAotCompatible>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <DebuggerSupport>false</DebuggerSupport>
+
+    <!-- Avalonia 12: compiled bindings on by default. Belt-and-suspenders. -->
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <EnableAvaloniaXamlCompilation>true</EnableAvaloniaXamlCompilation>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="Svg.Skia" />
+  </ItemGroup>
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\**" />
+  </ItemGroup>
+</Project>

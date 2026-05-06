@@ -1,0 +1,43 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:SigilBuild.Installer.Host.ViewModels"
+        x:Class="SigilBuild.Installer.Host.Views.InstallerWindow"
+        x:DataType="vm:InstallerViewModel"
+        Title="{Binding Brand.AppName}"
+        Width="800" Height="500"
+        CanResize="False"
+        WindowStartupLocation="CenterScreen"
+        WindowDecorations="BorderOnly">
+
+  <Grid ColumnDefinitions="240,*" RowDefinitions="*,56">
+
+    <!-- Sidebar with brand gradient + logo -->
+    <Border Grid.Row="0" Grid.Column="0" Grid.RowSpan="2">
+      <Border.Background>
+        <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+          <GradientStop Offset="0" Color="{DynamicResource GradientStartColor}" />
+          <GradientStop Offset="0.5" Color="{DynamicResource GradientMidColor}" />
+          <GradientStop Offset="1" Color="{DynamicResource GradientEndColor}" />
+        </LinearGradientBrush>
+      </Border.Background>
+      <StackPanel Margin="24" Spacing="16">
+        <Image Source="avares://installer/Assets/default-logo.png" Height="48" HorizontalAlignment="Left" />
+        <TextBlock Text="{Binding Brand.AppName}" Foreground="White" FontSize="22" FontWeight="SemiBold" />
+        <TextBlock Text="{Binding Brand.Publisher}" Foreground="#CCFFFFFF" FontSize="13" />
+      </StackPanel>
+    </Border>
+
+    <!-- Content host -->
+    <ContentControl Grid.Row="0" Grid.Column="1" Margin="32" Content="{Binding}" />
+
+    <!-- Footer -->
+    <Border Grid.Row="1" Grid.Column="1" BorderBrush="#E5E7EB" BorderThickness="0,1,0,0" Padding="16,8">
+      <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right">
+        <Button Content="Back" IsEnabled="{Binding CanGoBack}" Click="OnBack" />
+        <Button Content="Next" IsEnabled="{Binding CanGoNext}" Click="OnNext" Background="{DynamicResource AccentBrush}" Foreground="White" />
+        <Button Content="Cancel" Click="OnCancel" />
+      </StackPanel>
+    </Border>
+
+  </Grid>
+</Window>

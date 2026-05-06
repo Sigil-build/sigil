@@ -2,6 +2,7 @@
   <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
   <PropertyGroup>
     <!-- xUnit test names use underscores by convention; allow constant arrays in InlineData -->
-    <NoWarn>$(NoWarn);CA1707;CA1861</NoWarn>
+    <!-- CA1822: AvaloniaFact/AvaloniaTheory methods look static to the analyser but are dispatched by the Avalonia test runner on the UI thread -->
+    <NoWarn>$(NoWarn);CA1707;CA1861;CA1822</NoWarn>
   </PropertyGroup>
 </Project>

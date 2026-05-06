@@ -12,14 +12,15 @@
     The Subject must match the Publisher attribute in AppxManifest.xml exactly.
 
 .PARAMETER Subject
-    Certificate subject — must match the 'publisher' field in sigil.yaml exactly.
+    Certificate subject - must match the 'publisher' field in sigil.yaml exactly.
     Default: "CN=Example Inc., O=Example Inc., C=US"
 
 .PARAMETER MsixPath
     Path to the .msix file to sign. If omitted, only the cert is created/trusted.
 
 .PARAMETER PfxPath
-    Where to save the exported PFX. Default: tests\SigilBuild.Packaging.IntegrationTests\test-codesign.pfx
+    Where to save the exported PFX.
+    Default: tests\SigilBuild.Packaging.IntegrationTests\test-codesign.pfx
 
 .EXAMPLE
     # Create cert + sign the MSIX in one step
@@ -27,14 +28,14 @@
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
-    [string]$Subject  = "CN=Example Inc., O=Example Inc., C=US",
-    [string]$MsixPath = "",
+    [string]$Subject  = 'CN=Example Inc., O=Example Inc., C=US',
+    [string]$MsixPath = '',
     [string]$PfxPath  = "$PSScriptRoot\test-codesign.pfx"
 )
 
 $ErrorActionPreference = 'Stop'
 
-# ── 1. Create self-signed cert ──────────────────────────────────────────────
+# 1. Create self-signed cert
 Write-Host "Creating self-signed certificate: $Subject"
 $cert = New-SelfSignedCertificate `
     -Subject $Subject `
@@ -45,20 +46,20 @@ $cert = New-SelfSignedCertificate `
 
 Write-Host "  Thumbprint: $($cert.Thumbprint)"
 
-# ── 2. Trust it as a root CA (required for Add-AppxPackage) ─────────────────
-Write-Host "Installing cert into LocalMachine\Root (requires elevation)..."
-$store = New-Object System.Security.Cryptography.X509Certificates.X509Store("Root", "LocalMachine")
-$store.Open("ReadWrite")
+# 2. Trust it as a root CA (required for Add-AppxPackage)
+Write-Host 'Installing cert into LocalMachine\Root (requires elevation)...'
+$store = New-Object System.Security.Cryptography.X509Certificates.X509Store('Root', 'LocalMachine')
+$store.Open('ReadWrite')
 $store.Add($cert)
 $store.Close()
-Write-Host "  Trusted."
+Write-Host '  Trusted.'
 
-# ── 3. Export PFX (for use with sigil sign in Phase 3) ──────────────────────
-$pfxPassword = ConvertTo-SecureString "SigilTest1!" -AsPlainText -Force
+# 3. Export PFX (for use with sigil sign in Phase 3)
+$pfxPassword = ConvertTo-SecureString 'SigilTest1!' -AsPlainText -Force
 Export-PfxCertificate -Cert $cert -FilePath $PfxPath -Password $pfxPassword | Out-Null
 Write-Host "  PFX exported to: $PfxPath  (password: SigilTest1!)"
 
-# ── 4. Sign the MSIX (if provided) ──────────────────────────────────────────
+# 4. Sign the MSIX (if provided)
 if ($MsixPath -and (Test-Path $MsixPath)) {
     # Locate signtool.exe from the Windows SDK
     $sdkBins = @(
@@ -74,20 +75,20 @@ if ($MsixPath -and (Test-Path $MsixPath)) {
             if ($signtool) { break }
         }
     }
-    if (-not $signtool) { throw "signtool.exe not found — install the Windows 10/11 SDK." }
+    if (-not $signtool) { throw 'signtool.exe not found - install the Windows 10/11 SDK.' }
 
     Write-Host "Signing $MsixPath with signtool..."
     & $signtool sign /fd SHA256 /a /sha1 $cert.Thumbprint $MsixPath
     if ($LASTEXITCODE -ne 0) { throw "signtool exited $LASTEXITCODE" }
-    Write-Host "  Signed."
+    Write-Host '  Signed.'
 
-    Write-Host ""
-    Write-Host "Done. Now run:"
-    Write-Host "  .\install-msix.ps1 -MsixPath '$MsixPath' -ExpectedAppId <your-app-id>"
+    Write-Host ''
+    Write-Host 'Done. Now run:'
+    Write-Host "  .\install-msix.ps1 -MsixPath '$MsixPath' -ExpectedAppId com.example.LocalSignedApp"
 } else {
-    Write-Host ""
-    Write-Host "Cert ready. To sign your MSIX, run:"
-    Write-Host "  .\setup-test-cert.ps1 -MsixPath <path-to.msix>"
-    Write-Host "Or use signtool directly:"
-    Write-Host "  signtool sign /fd SHA256 /sha1 $($cert.Thumbprint) <path-to.msix>"
+    Write-Host ''
+    Write-Host 'Cert ready. To sign your MSIX, run:'
+    Write-Host '  .\setup-test-cert.ps1 -MsixPath path\to\your.msix'
+    Write-Host 'Or use signtool directly:'
+    Write-Host "  signtool sign /fd SHA256 /sha1 $($cert.Thumbprint) path\to\your.msix"
 }

@@ -1,0 +1,6 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="SigilBuild.Installer.Host.Views.Screens.CustomView">
+  <!-- No x:DataType — this screen has no ViewModel bindings; it is a v1.x placeholder -->
+  <TextBlock Text="Custom screen — extend per app needs (v1.x)." />
+</UserControl>

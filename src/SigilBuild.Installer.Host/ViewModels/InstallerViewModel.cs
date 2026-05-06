@@ -39,6 +39,13 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
         set { if (_licenseAccepted != value) { _licenseAccepted = value; OnPropertyChanged(); } }
     }
 
+    private bool _launchAfterInstall = true;
+    public bool LaunchAfterInstall
+    {
+        get => _launchAfterInstall;
+        set { if (_launchAfterInstall != value) { _launchAfterInstall = value; OnPropertyChanged(); } }
+    }
+
     public string InstallPath
     {
         get => _installPath;

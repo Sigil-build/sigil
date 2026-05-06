@@ -39,3 +39,4 @@ appsettings.Local.json
 .env.*
 !.env.example
 ./docs/
+dist/

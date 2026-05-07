@@ -143,7 +143,10 @@ public static class ManifestParser
             Logo: GetScalar(brand, "logo"),
             Hero: GetScalar(brand, "hero"),
             PrimaryColor: GetScalar(brand, "primaryColor"),
-            AccentColor: GetScalar(brand, "accentColor")));
+            AccentColor: GetScalar(brand, "accentColor"),
+            GradientStart: GetScalar(brand, "gradientStart"),
+            GradientMid: GetScalar(brand, "gradientMid"),
+            GradientEnd: GetScalar(brand, "gradientEnd")));
     }
 
     private static PackageFormat ParseFormat(string s) => s switch

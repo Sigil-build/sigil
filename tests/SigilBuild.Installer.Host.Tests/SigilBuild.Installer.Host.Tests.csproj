@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- xUnit v3 (required by Avalonia.Headless.XUnit 12.x) runs tests out-of-process and needs an app host exe -->
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <!-- xunit.v3 is required by Avalonia.Headless.XUnit 12.x; provides the entry-point generator -->
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="Avalonia.Headless" />
+    <PackageReference Include="Avalonia.Headless.XUnit" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\SigilBuild.Installer.Host\SigilBuild.Installer.Host.csproj" />
+    <ProjectReference Include="..\..\src\SigilBuild.Core\SigilBuild.Core.csproj" />
+    <ProjectReference Include="..\..\src\SigilBuild.Packaging\SigilBuild.Packaging.csproj" />
+  </ItemGroup>
+</Project>

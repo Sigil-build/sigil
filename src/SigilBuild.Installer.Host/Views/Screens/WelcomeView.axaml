@@ -1,0 +1,12 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:SigilBuild.Installer.Host.ViewModels"
+             x:DataType="vm:InstallerViewModel"
+             x:Class="SigilBuild.Installer.Host.Views.Screens.WelcomeView">
+  <StackPanel Spacing="16">
+    <TextBlock x:Name="Heading" FontSize="28" FontWeight="Bold"
+               Text="{Binding Brand.AppName, StringFormat='Welcome to {0} setup'}" />
+    <TextBlock TextWrapping="Wrap" Foreground="#4B5563"
+               Text="This wizard will guide you through installation. Click Next to continue." />
+  </StackPanel>
+</UserControl>

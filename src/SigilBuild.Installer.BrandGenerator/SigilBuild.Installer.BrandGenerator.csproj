@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- Targets net10.0 for AOT compatibility. When a real Roslyn ISourceGenerator is added,
+         restore netstandard2.0 multi-targeting and IsRoslynComponent=true. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+</Project>

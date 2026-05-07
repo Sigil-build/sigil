@@ -13,7 +13,11 @@
 # Counts are static occurrences in .wxs source via `grep -E -o`.
 # Re-running with the same args is idempotent.
 
-set -euo pipefail
+# NOTE: pipefail is intentionally NOT set. Many regex rows have zero matches in
+# a given file, which makes `grep -E -o ... | wc -l` exit non-zero — under
+# pipefail (combined with `inherit_errexit`), that aborts the count loop
+# silently. errexit + nounset still apply.
+set -eu
 
 # Each entry is "label|regex". Regexes are POSIX-extended (grep -E).
 patterns=(

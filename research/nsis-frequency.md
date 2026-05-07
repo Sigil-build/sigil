@@ -20,14 +20,14 @@ All 5 primary files were present at HEAD, so no fallbacks (`example1.nsi`, `Mode
 | `CreateDirectory` | 1 | 0 | 0 | 2 | 1 | 4 |
 | `Delete` | 3 | 3 | 3 | 6 | 2 | 17 |
 | `RmDir` | 2 | 1 | 1 | 5 | 2 | 11 |
-| `WriteRegStr/DWORD/Bin/MultiStr/ExpandStr` | 5 | 6 | 3 | 8 | 1 | 23 |
+| `WriteRegStr/DWORD/Bin/MultiStr/ExpandStr/None` | 5 | 6 | 3 | 8 | 1 | 23 |
 | `DeleteRegValue` | 0 | 0 | 0 | 0 | 0 | 0 |
 | `DeleteRegKey` | 2 | 1 | 1 | 2 | 1 | 7 |
 | `CreateShortCut` | 2 | 1 | 1 | 3 | 1 | 8 |
-| `Exec/ExecWait/nsExec::Exec` | 0 | 0 | 0 | 2 | 0 | 2 |
+| `Exec/ExecWait/ExecShell/nsExec::*` | 0 | 0 | 0 | 2 | 0 | 2 |
 | `WriteINIStr` | 0 | 0 | 0 | 4 | 0 | 4 |
 | `IfFileExists` | 0 | 0 | 0 | 2 | 0 | 2 |
-| `${If}` | 0 | 2 | 0 | 0 | 0 | 2 |
+| `${If}/${ElseIf}/${Else}/${EndIf}` | 0 | 2 | 0 | 0 | 0 | 2 |
 | `MessageBox` | 0 | 2 | 0 | 19 | 0 | 21 |
 | `nsDialogs::Create` | 0 | 0 | 0 | 0 | 0 | 0 |
 | `SimpleSC::*` | 0 | 0 | 0 | 0 | 0 | 0 |
@@ -40,7 +40,7 @@ All 5 primary files were present at HEAD, so no fallbacks (`example1.nsi`, `Mode
 
 ## Top-3 most-frequent constructs (per-slot survey)
 
-1. `WriteRegStr/DWORD/Bin/MultiStr/ExpandStr` — **23 occurrences**, present in every slot. Almost all are uninstall-key writes (`DisplayName`, `DisplayIcon`, `UninstallString`, etc.) under `Software\Microsoft\Windows\CurrentVersion\Uninstall\…`. Registry writes are the universal payload of an NSIS installer.
+1. `WriteRegStr/DWORD/Bin/MultiStr/ExpandStr/None` — **23 occurrences**, present in every slot. Almost all are uninstall-key writes (`DisplayName`, `DisplayIcon`, `UninstallString`, etc.) under `Software\Microsoft\Windows\CurrentVersion\Uninstall\…`. Registry writes are the universal payload of an NSIS installer.
 2. `MessageBox` — **21 occurrences**, dominated by `app-bigtest` (19) which exercises informational, error, and yes/no dialog variants. `app-shared` adds 2 admin-rights guards (`MessageBox MB_IconStop "Administrator rights required!"`).
 3. `Delete` — **17 occurrences**, present in every slot. Uninstall sections enumerate per-file deletions explicitly — there is no NSIS equivalent of MSI's automatic component teardown.
 
@@ -56,14 +56,14 @@ All 5 primary files were present at HEAD, so no fallbacks (`example1.nsi`, `Mode
 | `CreateDirectory` | 12 |
 | `Delete` | 53 |
 | `RmDir` | 28 |
-| `WriteRegStr/DWORD/Bin/MultiStr/ExpandStr` | 89 |
+| `WriteRegStr/DWORD/Bin/MultiStr/ExpandStr/None` | 89 |
 | `DeleteRegValue` | 12 |
 | `DeleteRegKey` | 33 |
 | `CreateShortCut` | 12 |
-| `Exec/ExecWait/nsExec::Exec` | 24 |
+| `Exec/ExecWait/ExecShell/nsExec::*` | 24 |
 | `WriteINIStr` | 19 |
 | `IfFileExists` | 13 |
-| `${If}` | 341 |
+| `${If}/${ElseIf}/${Else}/${EndIf}` | 341 |
 | `MessageBox` | 87 |
 | `nsDialogs::Create` | 7 |
 | `SimpleSC::*` | 0 |
@@ -76,7 +76,7 @@ All 5 primary files were present at HEAD, so no fallbacks (`example1.nsi`, `Mode
 
 ### Top-3 corpus-wide
 
-1. `${If}` — **341** (LogicLib `${If} … ${ElseIf} … ${EndIf}` chains saturate the corpus; many appear inside macros and helper functions, especially in the `Contrib/Modern UI 2/` and `Contrib/InstallOptions/` examples).
+1. `${If}/${ElseIf}/${Else}/${EndIf}` — **341** total markers (LogicLib `${If} … ${ElseIf} … ${EndIf}` chains; the count includes both opening and closing markers, so dynamic conditional density is roughly half this number — call it ~170 conditional blocks). Many appear inside macros and helper functions, especially in the `Contrib/Modern UI 2/` and `Contrib/InstallOptions/` examples.
 2. `File` — **243** (the canonical payload primitive — every example that ships any binary or asset uses `File` at least once, often inside `Section` blocks repeated across `r0..rN` install paths).
 3. `Push/Pop` — **195** (NSIS's argument-passing convention — every plugin-style function uses it; macros that wrap plugin calls multiply the count).
 

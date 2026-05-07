@@ -2,7 +2,7 @@ using System.Collections.Generic;
 
 namespace SigilBuild.Core.Manifest;
 
-public enum PackageFormat { Msix, Zip }
+public enum PackageFormat { Msix, Zip, Exe }
 public enum TargetArchitecture { X64, Arm64 }
 
 public sealed record MsixOptions(

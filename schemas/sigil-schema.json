@@ -6,6 +6,70 @@
   "type": "object",
   "required": ["spec", "app", "build"],
   "additionalProperties": false,
+  "definitions": {
+    "Parameters": {
+      "type": "object",
+      "description": "Install-time / pack-time parameter declarations consumed by the wrapper installer (Sprint 5c).",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["type"],
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["string", "path", "bool", "int", "enum", "secret"]
+          },
+          "default": {},
+          "values": { "type": "array", "items": { "type": "string" } },
+          "install_time": { "type": "boolean", "default": false },
+          "description": { "type": "string" },
+          "pattern": { "type": "string" },
+          "min": { "type": "integer" },
+          "max": { "type": "integer" }
+        }
+      }
+    },
+    "InstallStep": {
+      "type": "object",
+      "description": "A single declarative install step. Per-type parameter shapes are validated by the typed deserializer (Sprint 5c, Task 9), not in JSON Schema.",
+      "required": ["id", "type"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": {
+          "type": "string",
+          "enum": [
+            "file_copy", "directory_create", "file_delete", "directory_delete",
+            "registry_write", "registry_delete_value", "registry_delete_key",
+            "shortcut_create", "env_set", "run_program"
+          ]
+        },
+        "when": { "type": "string" },
+        "on_failure": { "type": "string", "enum": ["rollback", "continue", "fail"] }
+      }
+    },
+    "InstallStepList": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "type"],
+        "additionalProperties": true,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "type": {
+            "type": "string",
+            "enum": [
+              "file_copy", "directory_create", "file_delete", "directory_delete",
+              "registry_write", "registry_delete_value", "registry_delete_key",
+              "shortcut_create", "env_set", "run_program"
+            ]
+          },
+          "when": { "type": "string" },
+          "on_failure": { "type": "string", "enum": ["rollback", "continue", "fail"] }
+        }
+      }
+    }
+  },
   "properties": {
     "spec": {
       "type": "string",
@@ -72,7 +136,7 @@
       "properties": {
         "formats": {
           "type": "array",
-          "items": { "enum": ["msix", "zip"] },
+          "items": { "enum": ["msix", "zip", "exe"] },
           "minItems": 1,
           "uniqueItems": true,
           "default": ["zip"]
@@ -212,6 +276,94 @@
               "pattern": "^#[0-9A-Fa-f]{6}$"
             }
           }
+        }
+      }
+    },
+    "parameters": {
+      "type": "object",
+      "description": "Install-time / pack-time parameter declarations consumed by the wrapper installer (Sprint 5c).",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["type"],
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["string", "path", "bool", "int", "enum", "secret"]
+          },
+          "default": {},
+          "values": { "type": "array", "items": { "type": "string" } },
+          "install_time": { "type": "boolean", "default": false },
+          "description": { "type": "string" },
+          "pattern": { "type": "string" },
+          "min": { "type": "integer" },
+          "max": { "type": "integer" }
+        }
+      }
+    },
+    "install_steps": {
+      "type": "array",
+      "description": "Main install-time step list executed by the wrapper installer (Sprint 5c). Per-step parameter shapes are validated by the typed deserializer.",
+      "items": {
+        "type": "object",
+        "required": ["id", "type"],
+        "additionalProperties": true,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "type": {
+            "type": "string",
+            "enum": [
+              "file_copy", "directory_create", "file_delete", "directory_delete",
+              "registry_write", "registry_delete_value", "registry_delete_key",
+              "shortcut_create", "env_set", "run_program"
+            ]
+          },
+          "when": { "type": "string" },
+          "on_failure": { "type": "string", "enum": ["rollback", "continue", "fail"] }
+        }
+      }
+    },
+    "pre_install": {
+      "type": "array",
+      "description": "Steps executed before the main install_steps block.",
+      "items": {
+        "type": "object",
+        "required": ["id", "type"],
+        "additionalProperties": true,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "type": {
+            "type": "string",
+            "enum": [
+              "file_copy", "directory_create", "file_delete", "directory_delete",
+              "registry_write", "registry_delete_value", "registry_delete_key",
+              "shortcut_create", "env_set", "run_program"
+            ]
+          },
+          "when": { "type": "string" },
+          "on_failure": { "type": "string", "enum": ["rollback", "continue", "fail"] }
+        }
+      }
+    },
+    "post_install": {
+      "type": "array",
+      "description": "Steps executed after the main install_steps block.",
+      "items": {
+        "type": "object",
+        "required": ["id", "type"],
+        "additionalProperties": true,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "type": {
+            "type": "string",
+            "enum": [
+              "file_copy", "directory_create", "file_delete", "directory_delete",
+              "registry_write", "registry_delete_value", "registry_delete_key",
+              "shortcut_create", "env_set", "run_program"
+            ]
+          },
+          "when": { "type": "string" },
+          "on_failure": { "type": "string", "enum": ["rollback", "continue", "fail"] }
         }
       }
     }

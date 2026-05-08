@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>SigilBuild.Wrapper</RootNamespace>
+    <AssemblyName>SigilBuild.Wrapper</AssemblyName>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <PublishAot>true</PublishAot>
+    <!-- InvariantGlobalization=true is required for AOT size targets (skips ICU
+         loading) and is correct for path/registry comparisons (avoids the
+         Turkish-I problem). Wrapper code that needs a UI culture (e.g. localized
+         install-wizard error text) MUST use ordinal/invariant comparisons; constructing
+         `new CultureInfo("ru-RU")` will throw `CultureNotFoundException` at runtime.
+         If real localization is needed, revisit this together with ADR-008. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <TrimMode>full</TrimMode>
+    <IlcOptimizationPreference>Size</IlcOptimizationPreference>
+    <!-- RuntimeIdentifier and SelfContained are intentionally NOT pinned at the
+         project level. Pinning them forces every `dotnet build` (including the
+         macOS / Linux CI test jobs that just want the .dll for ProjectReference
+         resolution) into a RID-specific bin/<RID>/ subfolder, which dependent
+         test projects can't find on non-Windows hosts.
+
+         AOT publishing passes them at the CLI:
+             dotnet publish src/SigilBuild.Wrapper -c Release -r win-x64 -p:PublishAot=true
+         (PublishAot=true implicitly sets SelfContained=true; -r supplies the
+         RID. See .github/workflows/wrapper-vm-tests.yml.) -->
+    <!-- Required for [LibraryImport] source-generated P/Invokes used by
+         Engine/WrapperBlob.cs (FindResource / LoadResource). The generated
+         marshalling code is unsafe but never user-authored. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\SigilBuild.Core\SigilBuild.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Step implementations and the IStep interface are intentionally
+         internal — they are the wrapper runtime's private contract, not a
+         third-party extension surface. The test project drives them
+         directly and so needs InternalsVisibleTo. -->
+    <InternalsVisibleTo Include="SigilBuild.Wrapper.Tests" />
+    <!-- The packager builds the SIGIL_BLOB_V1 JSON via the same internal
+         DTOs + source-generated context the wrapper uses to read it back. -->
+    <InternalsVisibleTo Include="SigilBuild.Packaging" />
+    <InternalsVisibleTo Include="SigilBuild.Packaging.Tests" />
+  </ItemGroup>
+</Project>

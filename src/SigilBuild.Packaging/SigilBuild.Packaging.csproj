@@ -2,14 +2,31 @@
   <PropertyGroup>
     <IsAotCompatible>true</IsAotCompatible>
     <IsPackable>false</IsPackable>
+    <!-- Required for [LibraryImport] source-generated P/Invokes used by
+         ExeWrapper/WrapperResourceWriter.cs (BeginUpdateResource etc.). -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\SigilBuild.Core\SigilBuild.Core.csproj" />
     <ProjectReference Include="..\SigilBuild.Installer.BrandGenerator\SigilBuild.Installer.BrandGenerator.csproj"
                       ReferenceOutputAssembly="true" />
+    <!-- The wrapper project is OutputType=Exe but emits a regular managed
+         assembly that the packager needs at compile time so it can build the
+         JSON blob via the same source-generated SerializerContext used by
+         the wrapper runtime at install time (single source of truth for the
+         SIGIL_BLOB_V1 wire schema). PrivateAssets="all" prevents the wrapper
+         binary from flowing through to Packaging consumers. -->
+    <ProjectReference Include="..\SigilBuild.Wrapper\SigilBuild.Wrapper.csproj"
+                      ReferenceOutputAssembly="true"
+                      PrivateAssets="all" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.FileSystemGlobbing" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Test project drives the internal WrapperResourceWriter and the
+         WrapperRuntimeLocator directly. -->
+    <InternalsVisibleTo Include="SigilBuild.Packaging.Tests" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="SkiaSharp" />

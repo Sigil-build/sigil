@@ -37,9 +37,19 @@ public static class PackCommand
             foreach (var format in formats)
             foreach (var arch in arches)
             {
-                IPackager packager = format == PackageFormat.Msix
-                    ? (IPackager)new MsixPackager()
-                    : new ZipPackager();
+                // TODO(Task 14): wire ExeWrapperPackager once the AOT runtime
+                // is published into runtimes/win-x64/. Until then, PackageFormat.Exe
+                // cannot reach this code path because ManifestParser.ParseFormat
+                // rejects "exe" — but the explicit switch makes the gap visible.
+                IPackager packager = format switch
+                {
+                    PackageFormat.Msix => new MsixPackager(),
+                    PackageFormat.Zip => new ZipPackager(),
+                    PackageFormat.Exe => throw new System.NotSupportedException(
+                        "PackageFormat.Exe dispatch lands in Task 14 (resource embed); " +
+                        "see src/SigilBuild.Packaging/ExeWrapper/ExeWrapperPackager.cs."),
+                    _ => throw new System.NotSupportedException($"unknown format {format}"),
+                };
 
                 var sourceDir = System.IO.Path.IsPathRooted(manifest.Build.Source)
                     ? manifest.Build.Source

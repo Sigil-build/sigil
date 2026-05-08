@@ -65,5 +65,10 @@ if ($schema.definitions) {
     }
 }
 
-Set-Content -Path $OutPath -Value $sb.ToString() -Encoding utf8 -NoNewline
+# Always write UTF-8 without BOM so output is byte-identical across PS 5.1
+# (which adds a BOM on -Encoding utf8) and pwsh 7+ (which doesn't).
+[System.IO.File]::WriteAllText(
+    [System.IO.Path]::GetFullPath($OutPath),
+    $sb.ToString(),
+    [System.Text.UTF8Encoding]::new($false))
 Write-Host "wrote $OutPath"

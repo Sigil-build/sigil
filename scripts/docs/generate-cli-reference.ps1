@@ -51,12 +51,12 @@ $sb = New-Object System.Text.StringBuilder
 [void]$sb.AppendLine('| Command | Description |')
 [void]$sb.AppendLine('|---|---|')
 foreach ($cmd in $subcommands) {
-    [void]$sb.AppendLine("| [`sigil $($cmd.Name)`](#sigil-$($cmd.Name)) | $($cmd.Description) |")
+    [void]$sb.AppendLine("| [``sigil $($cmd.Name)``](#sigil-$($cmd.Name)) | $($cmd.Description) |")
 }
 [void]$sb.AppendLine()
 
 foreach ($cmd in $subcommands) {
-    [void]$sb.AppendLine("## `sigil $($cmd.Name)`")
+    [void]$sb.AppendLine("## ``sigil $($cmd.Name)``")
     [void]$sb.AppendLine()
     $cmdHelp = & dotnet run --project $CliProject --no-build -- $cmd.Name --help 2>&1
     [void]$sb.AppendLine('```')
@@ -65,5 +65,10 @@ foreach ($cmd in $subcommands) {
     [void]$sb.AppendLine()
 }
 
-Set-Content -Path $OutPath -Value $sb.ToString() -Encoding utf8 -NoNewline
+# Always write UTF-8 without BOM so output is byte-identical across PS 5.1
+# (which adds a BOM on -Encoding utf8) and pwsh 7+ (which doesn't).
+[System.IO.File]::WriteAllText(
+    [System.IO.Path]::GetFullPath($OutPath),
+    $sb.ToString(),
+    [System.Text.UTF8Encoding]::new($false))
 Write-Host "wrote $OutPath ($($subcommands.Count) subcommands)"

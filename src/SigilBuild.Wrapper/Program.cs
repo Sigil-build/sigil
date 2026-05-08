@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using SigilBuild.Core.Manifest;
 using SigilBuild.Wrapper.Cli;
@@ -21,15 +22,45 @@ internal static class Program
             var blob = WrapperBlob.LoadFromSelf(); // stubbed in Task 12; real impl Task 14
             var parsed = CommandLineParser.Parse(args, blob.Parameters);
             var ctx = StepContext.From(blob, parsed);
-            var steps = parsed.Mode switch
-            {
-                WrapperMode.Install => blob.InstallSteps,
-                WrapperMode.Update => blob.UpdateSteps,
-                WrapperMode.Uninstall => Array.Empty<InstallStep>(), // Task 19 wires this
-                _ => Array.Empty<InstallStep>(),
-            };
 
-            var result = await new InstallEngine().RunAsync(steps, ctx).ConfigureAwait(false);
+            // Phase routing per mode:
+            //   Install  → pre_install + install_steps + post_install (Task 18).
+            //   Update   → update_steps only; the manifest does not currently
+            //              model update-time pre/post hooks.
+            //   Uninstall → wired in Task 19 (auto-derived uninstall steps).
+            IReadOnlyList<InstallStep> preInstall;
+            IEnumerable<InstallStep> mainSteps;
+            IReadOnlyList<InstallStep> postInstall;
+            switch (parsed.Mode)
+            {
+                case WrapperMode.Install:
+                    preInstall = blob.PreInstall;
+                    mainSteps = blob.InstallSteps;
+                    postInstall = blob.PostInstall;
+                    break;
+                case WrapperMode.Update:
+                    preInstall = Array.Empty<InstallStep>();
+                    mainSteps = blob.UpdateSteps;
+                    postInstall = Array.Empty<InstallStep>();
+                    break;
+                case WrapperMode.Uninstall:
+                    // TODO(Task 19): route to auto-derived uninstall steps.
+                    preInstall = Array.Empty<InstallStep>();
+                    mainSteps = Array.Empty<InstallStep>();
+                    postInstall = Array.Empty<InstallStep>();
+                    break;
+                default:
+                    preInstall = Array.Empty<InstallStep>();
+                    mainSteps = Array.Empty<InstallStep>();
+                    postInstall = Array.Empty<InstallStep>();
+                    break;
+            }
+
+            var result = await new InstallEngine().RunAsync(
+                preInstall: preInstall,
+                installSteps: mainSteps,
+                postInstall: postInstall,
+                ctx: ctx).ConfigureAwait(false);
             return result.Success ? 0 : 1;
         }
         catch (UsageException ex)

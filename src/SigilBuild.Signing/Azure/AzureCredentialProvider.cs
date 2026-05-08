@@ -14,10 +14,18 @@ public class AzureCredentialProvider
     private static readonly string[] s_scopes = ["https://codesigning.azure.net/.default"];
 
     private readonly AzureTrustedSigningConfig _config;
+    private readonly Func<TokenCredential> _credentialFactory;
     private AccessToken? _cachedToken;
     private readonly object _lock = new();
 
-    public AzureCredentialProvider(AzureTrustedSigningConfig config) { _config = config; }
+    public AzureCredentialProvider(AzureTrustedSigningConfig config)
+        : this(config, credentialFactory: null) { }
+
+    public AzureCredentialProvider(AzureTrustedSigningConfig config, Func<TokenCredential>? credentialFactory)
+    {
+        _config = config;
+        _credentialFactory = credentialFactory ?? CreateCredential;
+    }
 
     public TokenCredential CreateCredential()
     {
@@ -35,7 +43,7 @@ public class AzureCredentialProvider
                 return t.Token;
         }
 
-        var cred = CreateCredential();
+        var cred = _credentialFactory();
         var ctx = new TokenRequestContext(s_scopes);
         var token = await cred.GetTokenAsync(ctx, ct);
         lock (_lock) _cachedToken = token;

@@ -60,7 +60,10 @@ public static class ManifestParser
             Updates: MapUpdates(GetMapping(root, "updates")),
             Installer: MapInstaller(GetMapping(root, "installer")),
             Location: loc,
-            Parameters: ParseParameters(GetMapping(root, "parameters"), diagnostics, file));
+            Parameters: ParseParameters(GetMapping(root, "parameters"), diagnostics, file),
+            InstallSteps: ParseInstallSteps(GetSequenceOfMappings(root, "install_steps"), diagnostics, file),
+            PreInstall: ParseInstallSteps(GetSequenceOfMappings(root, "pre_install"), diagnostics, file),
+            PostInstall: ParseInstallSteps(GetSequenceOfMappings(root, "post_install"), diagnostics, file));
     }
 
     private static AppSection MapApp(YamlMappingNode node) => new(
@@ -197,6 +200,279 @@ public static class ManifestParser
         return dict;
     }
 
+    // Per-step "known field" allowlists. Hoisted to static readonly fields so the
+    // analyzer (CA1861) doesn't fault us for allocating them on every step parse.
+    private static readonly string[] FileCopyFields            = { "id", "type", "when", "on_failure", "from", "to", "overwrite" };
+    private static readonly string[] DirectoryCreateFields     = { "id", "type", "when", "on_failure", "path" };
+    private static readonly string[] FileDeleteFields          = { "id", "type", "when", "on_failure", "path", "if_missing" };
+    private static readonly string[] DirectoryDeleteFields     = { "id", "type", "when", "on_failure", "path", "recursive" };
+    private static readonly string[] RegistryWriteFields       = { "id", "type", "when", "on_failure", "hive", "key", "name", "type_value", "value_type", "value", "view" };
+    private static readonly string[] RegistryDeleteValueFields = { "id", "type", "when", "on_failure", "hive", "key", "name", "view" };
+    private static readonly string[] RegistryDeleteKeyFields   = { "id", "type", "when", "on_failure", "hive", "key", "recursive", "view" };
+    private static readonly string[] ShortcutCreateFields      = { "id", "type", "when", "on_failure", "target", "location", "name", "args", "working_dir", "icon", "description" };
+    private static readonly string[] EnvSetFields              = { "id", "type", "when", "on_failure", "name", "value", "scope", "action", "separator" };
+    private static readonly string[] RunProgramFields          = { "id", "type", "when", "on_failure", "program", "args", "wait", "cwd", "expected_exit_codes", "timeout_seconds" };
+
+    private static List<InstallStep>? ParseInstallSteps(
+        List<YamlMappingNode>? nodes, List<Diagnostic> diagnostics, string fileName)
+    {
+        if (nodes is null) return null;
+        var list = new List<InstallStep>(nodes.Count);
+        foreach (var node in nodes)
+        {
+            var step = ParseInstallStep(node, diagnostics, fileName);
+            if (step is not null) list.Add(step);
+        }
+        return list;
+    }
+
+    private static InstallStep? ParseInstallStep(
+        YamlMappingNode node, List<Diagnostic> diagnostics, string fileName)
+    {
+        var loc = new SourceLocation(fileName, (int)node.Start.Line, (int)node.Start.Column);
+        var id = GetScalar(node, "id");
+        var typeStr = GetScalar(node, "type");
+
+        if (string.IsNullOrEmpty(id))
+        {
+            diagnostics.Add(new Diagnostic(
+                DiagnosticSeverity.Error,
+                DiagnosticCodes.MissingRequiredStepField,
+                "install step is missing required field 'id'",
+                loc,
+                "https://docs.sigil.build/diagnostics/SIG0232"));
+            return null;
+        }
+
+        if (string.IsNullOrEmpty(typeStr))
+        {
+            diagnostics.Add(new Diagnostic(
+                DiagnosticSeverity.Error,
+                DiagnosticCodes.MissingRequiredStepField,
+                $"install step '{id}' is missing required field 'type'",
+                loc,
+                "https://docs.sigil.build/diagnostics/SIG0232"));
+            return null;
+        }
+
+        var when = GetScalar(node, "when");
+        var onFailure = ParseOnFailure(GetScalar(node, "on_failure"));
+
+        return typeStr switch
+        {
+            "file_copy"             => BuildFileCopy(node, id!, when, onFailure, diagnostics, loc),
+            "directory_create"      => BuildDirectoryCreate(node, id!, when, onFailure, diagnostics, loc),
+            "file_delete"           => BuildFileDelete(node, id!, when, onFailure, diagnostics, loc),
+            "directory_delete"      => BuildDirectoryDelete(node, id!, when, onFailure, diagnostics, loc),
+            "registry_write"        => BuildRegistryWrite(node, id!, when, onFailure, diagnostics, loc),
+            "registry_delete_value" => BuildRegistryDeleteValue(node, id!, when, onFailure, diagnostics, loc),
+            "registry_delete_key"   => BuildRegistryDeleteKey(node, id!, when, onFailure, diagnostics, loc),
+            "shortcut_create"       => BuildShortcutCreate(node, id!, when, onFailure, diagnostics, loc),
+            "env_set"               => BuildEnvSet(node, id!, when, onFailure, diagnostics, loc),
+            "run_program"           => BuildRunProgram(node, id!, when, onFailure, diagnostics, loc),
+            _ => ReportUnknownStepType(id!, typeStr!, loc, diagnostics),
+        };
+    }
+
+    private static InstallStep? ReportUnknownStepType(
+        string id, string typeStr, SourceLocation loc, List<Diagnostic> diagnostics)
+    {
+        diagnostics.Add(new Diagnostic(
+            DiagnosticSeverity.Error,
+            DiagnosticCodes.UnknownStepType,
+            $"unknown install step type '{typeStr}' for step '{id}'",
+            loc,
+            "https://docs.sigil.build/diagnostics/SIG0230"));
+        return null;
+    }
+
+    private static OnFailure ParseOnFailure(string? raw) => raw switch
+    {
+        "rollback" => OnFailure.Rollback,
+        "continue" => OnFailure.Continue,
+        "fail"     => OnFailure.Fail,
+        null       => OnFailure.Fail,
+        _          => OnFailure.Fail,
+    };
+
+    private static InstallStep.FileCopy? BuildFileCopy(
+        YamlMappingNode node, string id, string? when, OnFailure onFailure,
+        List<Diagnostic> diagnostics, SourceLocation loc)
+    {
+        var from = GetScalar(node, "from");
+        var to = GetScalar(node, "to");
+        if (from is null) { ReportMissingField(id, "file_copy", "from", loc, diagnostics); return null; }
+        if (to is null)   { ReportMissingField(id, "file_copy", "to",   loc, diagnostics); return null; }
+        var overwrite = GetBool(node, "overwrite", defaultValue: true);
+        ReportUnknownStepFields(node, id, "file_copy", FileCopyFields, loc, diagnostics);
+        return new InstallStep.FileCopy(id, from, to, overwrite, when, onFailure);
+    }
+
+    private static InstallStep.DirectoryCreate? BuildDirectoryCreate(
+        YamlMappingNode node, string id, string? when, OnFailure onFailure,
+        List<Diagnostic> diagnostics, SourceLocation loc)
+    {
+        var path = GetScalar(node, "path");
+        if (path is null) { ReportMissingField(id, "directory_create", "path", loc, diagnostics); return null; }
+        ReportUnknownStepFields(node, id, "directory_create", DirectoryCreateFields, loc, diagnostics);
+        return new InstallStep.DirectoryCreate(id, path, when, onFailure);
+    }
+
+    private static InstallStep.FileDelete? BuildFileDelete(
+        YamlMappingNode node, string id, string? when, OnFailure onFailure,
+        List<Diagnostic> diagnostics, SourceLocation loc)
+    {
+        var path = GetScalar(node, "path");
+        if (path is null) { ReportMissingField(id, "file_delete", "path", loc, diagnostics); return null; }
+        var ifMissing = GetScalar(node, "if_missing") ?? "fail";
+        ReportUnknownStepFields(node, id, "file_delete", FileDeleteFields, loc, diagnostics);
+        return new InstallStep.FileDelete(id, path, ifMissing, when, onFailure);
+    }
+
+    private static InstallStep.DirectoryDelete? BuildDirectoryDelete(
+        YamlMappingNode node, string id, string? when, OnFailure onFailure,
+        List<Diagnostic> diagnostics, SourceLocation loc)
+    {
+        var path = GetScalar(node, "path");
+        if (path is null) { ReportMissingField(id, "directory_delete", "path", loc, diagnostics); return null; }
+        var recursive = GetBool(node, "recursive", defaultValue: false);
+        ReportUnknownStepFields(node, id, "directory_delete", DirectoryDeleteFields, loc, diagnostics);
+        return new InstallStep.DirectoryDelete(id, path, recursive, when, onFailure);
+    }
+
+    private static InstallStep.RegistryWrite? BuildRegistryWrite(
+        YamlMappingNode node, string id, string? when, OnFailure onFailure,
+        List<Diagnostic> diagnostics, SourceLocation loc)
+    {
+        var hive = GetScalar(node, "hive");
+        var key = GetScalar(node, "key");
+        var name = GetScalar(node, "name");
+        var typeValue = GetScalar(node, "type_value") ?? GetScalar(node, "value_type");
+        if (hive is null) { ReportMissingField(id, "registry_write", "hive", loc, diagnostics); return null; }
+        if (key  is null) { ReportMissingField(id, "registry_write", "key",  loc, diagnostics); return null; }
+        if (name is null) { ReportMissingField(id, "registry_write", "name", loc, diagnostics); return null; }
+        // The step-level "type" field is reused for the step kind — registry value type
+        // travels under the alias "type_value" (or "value_type"). If not provided, default to REG_SZ.
+        var view = GetScalar(node, "view") ?? "native";
+        var rawValue = GetRawValue(node, "value");
+        ReportUnknownStepFields(node, id, "registry_write", RegistryWriteFields, loc, diagnostics);
+        return new InstallStep.RegistryWrite(id, hive, key, name, typeValue ?? "REG_SZ", rawValue, view, when, onFailure);
+    }
+
+    private static InstallStep.RegistryDeleteValue? BuildRegistryDeleteValue(
+        YamlMappingNode node, string id, string? when, OnFailure onFailure,
+        List<Diagnostic> diagnostics, SourceLocation loc)
+    {
+        var hive = GetScalar(node, "hive");
+        var key = GetScalar(node, "key");
+        var name = GetScalar(node, "name");
+        if (hive is null) { ReportMissingField(id, "registry_delete_value", "hive", loc, diagnostics); return null; }
+        if (key  is null) { ReportMissingField(id, "registry_delete_value", "key",  loc, diagnostics); return null; }
+        if (name is null) { ReportMissingField(id, "registry_delete_value", "name", loc, diagnostics); return null; }
+        var view = GetScalar(node, "view") ?? "native";
+        ReportUnknownStepFields(node, id, "registry_delete_value", RegistryDeleteValueFields, loc, diagnostics);
+        return new InstallStep.RegistryDeleteValue(id, hive, key, name, view, when, onFailure);
+    }
+
+    private static InstallStep.RegistryDeleteKey? BuildRegistryDeleteKey(
+        YamlMappingNode node, string id, string? when, OnFailure onFailure,
+        List<Diagnostic> diagnostics, SourceLocation loc)
+    {
+        var hive = GetScalar(node, "hive");
+        var key = GetScalar(node, "key");
+        if (hive is null) { ReportMissingField(id, "registry_delete_key", "hive", loc, diagnostics); return null; }
+        if (key  is null) { ReportMissingField(id, "registry_delete_key", "key",  loc, diagnostics); return null; }
+        var recursive = GetBool(node, "recursive", defaultValue: false);
+        var view = GetScalar(node, "view") ?? "native";
+        ReportUnknownStepFields(node, id, "registry_delete_key", RegistryDeleteKeyFields, loc, diagnostics);
+        return new InstallStep.RegistryDeleteKey(id, hive, key, recursive, view, when, onFailure);
+    }
+
+    private static InstallStep.ShortcutCreate? BuildShortcutCreate(
+        YamlMappingNode node, string id, string? when, OnFailure onFailure,
+        List<Diagnostic> diagnostics, SourceLocation loc)
+    {
+        var target = GetScalar(node, "target");
+        var location = GetScalar(node, "location");
+        var name = GetScalar(node, "name");
+        if (target   is null) { ReportMissingField(id, "shortcut_create", "target",   loc, diagnostics); return null; }
+        if (location is null) { ReportMissingField(id, "shortcut_create", "location", loc, diagnostics); return null; }
+        if (name     is null) { ReportMissingField(id, "shortcut_create", "name",     loc, diagnostics); return null; }
+        var args = GetSequence(node, "args");
+        var workingDir = GetScalar(node, "working_dir");
+        var icon = GetScalar(node, "icon");
+        var description = GetScalar(node, "description");
+        ReportUnknownStepFields(node, id, "shortcut_create", ShortcutCreateFields, loc, diagnostics);
+        return new InstallStep.ShortcutCreate(id, target, location, name, args, workingDir, icon, description, when, onFailure);
+    }
+
+    private static InstallStep.EnvSet? BuildEnvSet(
+        YamlMappingNode node, string id, string? when, OnFailure onFailure,
+        List<Diagnostic> diagnostics, SourceLocation loc)
+    {
+        var name = GetScalar(node, "name");
+        var value = GetScalar(node, "value");
+        if (name  is null) { ReportMissingField(id, "env_set", "name",  loc, diagnostics); return null; }
+        if (value is null) { ReportMissingField(id, "env_set", "value", loc, diagnostics); return null; }
+        var scope = GetScalar(node, "scope") ?? "user";
+        var action = GetScalar(node, "action") ?? "set";
+        var separator = GetScalar(node, "separator") ?? ";";
+        ReportUnknownStepFields(node, id, "env_set", EnvSetFields, loc, diagnostics);
+        return new InstallStep.EnvSet(id, name, value, scope, action, separator, when, onFailure);
+    }
+
+    private static InstallStep.RunProgram? BuildRunProgram(
+        YamlMappingNode node, string id, string? when, OnFailure onFailure,
+        List<Diagnostic> diagnostics, SourceLocation loc)
+    {
+        var program = GetScalar(node, "program");
+        if (program is null) { ReportMissingField(id, "run_program", "program", loc, diagnostics); return null; }
+        var args = GetSequence(node, "args");
+        var wait = GetBool(node, "wait", defaultValue: true);
+        var cwd = GetScalar(node, "cwd");
+        var expectedExitCodes = GetIntSequence(node, "expected_exit_codes");
+        var timeoutSeconds = GetNullableInt(node, "timeout_seconds");
+        ReportUnknownStepFields(node, id, "run_program", RunProgramFields, loc, diagnostics);
+        return new InstallStep.RunProgram(id, program, args, wait, cwd, expectedExitCodes, timeoutSeconds, when, onFailure);
+    }
+
+    private static void ReportMissingField(
+        string id, string stepType, string field, SourceLocation loc, List<Diagnostic> diagnostics)
+    {
+        diagnostics.Add(new Diagnostic(
+            DiagnosticSeverity.Error,
+            DiagnosticCodes.MissingRequiredStepField,
+            $"install step '{id}' (type {stepType}) is missing required field '{field}'",
+            loc,
+            "https://docs.sigil.build/diagnostics/SIG0232"));
+    }
+
+    private static void ReportUnknownStepFields(
+        YamlMappingNode node, string id, string stepType,
+        string[] knownFields, SourceLocation loc, List<Diagnostic> diagnostics)
+    {
+        foreach (var kvp in node.Children)
+        {
+            if (kvp.Key is not YamlScalarNode keyNode) continue;
+            var key = keyNode.Value;
+            if (key is null) continue;
+            var known = false;
+            foreach (var f in knownFields)
+            {
+                if (string.Equals(f, key, System.StringComparison.Ordinal)) { known = true; break; }
+            }
+            if (!known)
+            {
+                diagnostics.Add(new Diagnostic(
+                    DiagnosticSeverity.Warning,
+                    DiagnosticCodes.StepParameterMismatch,
+                    $"install step '{id}' (type {stepType}) has unknown field '{key}' — ignored",
+                    loc,
+                    "https://docs.sigil.build/diagnostics/SIG0231"));
+            }
+        }
+    }
+
     private static bool TryParseParameterType(string? raw, out ParameterType type)
     {
         switch (raw)
@@ -281,5 +557,44 @@ public static class ManifestParser
         if (parent.Children.TryGetValue(new YamlScalarNode(key), out var node) && node is YamlSequenceNode seq)
             return seq.Children.OfType<YamlScalarNode>().Select(s => s.Value ?? "").ToArray();
         return null;
+    }
+
+    private static int[]? GetIntSequence(YamlMappingNode parent, string key)
+    {
+        if (parent.Children.TryGetValue(new YamlScalarNode(key), out var node) && node is YamlSequenceNode seq)
+        {
+            var list = new List<int>(seq.Children.Count);
+            foreach (var child in seq.Children.OfType<YamlScalarNode>())
+            {
+                if (int.TryParse(child.Value, out var n)) list.Add(n);
+            }
+            return list.ToArray();
+        }
+        return null;
+    }
+
+    private static List<YamlMappingNode>? GetSequenceOfMappings(YamlMappingNode parent, string key)
+    {
+        if (parent.Children.TryGetValue(new YamlScalarNode(key), out var node) && node is YamlSequenceNode seq)
+        {
+            var list = new List<YamlMappingNode>(seq.Children.Count);
+            foreach (var child in seq.Children)
+            {
+                if (child is YamlMappingNode m) list.Add(m);
+            }
+            return list;
+        }
+        return null;
+    }
+
+    private static object? GetRawValue(YamlMappingNode parent, string key)
+    {
+        if (!parent.Children.TryGetValue(new YamlScalarNode(key), out var node)) return null;
+        return node switch
+        {
+            YamlScalarNode s => s.Value,
+            YamlSequenceNode seq => seq.Children.OfType<YamlScalarNode>().Select(c => c.Value ?? "").ToArray(),
+            _ => null,
+        };
     }
 }

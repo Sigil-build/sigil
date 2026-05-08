@@ -1,0 +1,42 @@
+spec: v1.0
+
+app:
+  id: com.example.MultiEdition
+  name: MultiEdition
+  version: 1.0.0
+  publisher: SigilBuild
+
+build:
+  source: ./payload
+
+package:
+  formats: [exe]
+  architectures: [x64]
+
+parameters:
+  edition:
+    type: enum
+    values: [community, professional, enterprise]
+    default: community
+    install_time: true
+    description: Which feature set to install.
+  install_dir:
+    type: path
+    default: "%ProgramFiles%\\MultiEdition"
+    install_time: true
+
+install_steps:
+  - id: copy-base
+    type: file_copy
+    from: payload/base/**
+    to: ${parameters.install_dir}
+  - id: copy-pro
+    type: file_copy
+    from: payload/pro/**
+    to: "${parameters.install_dir}\\pro"
+    when: "parameters.edition in ['professional', 'enterprise']"
+  - id: copy-ent
+    type: file_copy
+    from: payload/ent/**
+    to: "${parameters.install_dir}\\enterprise"
+    when: "parameters.edition == 'enterprise'"

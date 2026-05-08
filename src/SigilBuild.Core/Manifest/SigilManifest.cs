@@ -12,4 +12,7 @@ public sealed record SigilManifest(
     UpdatesSection? Updates,
     InstallerSection? Installer,
     SourceLocation Location,
-    IReadOnlyDictionary<string, ParameterDefinition>? Parameters = null);
+    IReadOnlyDictionary<string, ParameterDefinition>? Parameters = null,
+    IReadOnlyList<InstallStep>? InstallSteps = null,
+    IReadOnlyList<InstallStep>? PreInstall = null,
+    IReadOnlyList<InstallStep>? PostInstall = null);

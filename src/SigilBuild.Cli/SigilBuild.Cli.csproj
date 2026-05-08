@@ -30,6 +30,7 @@
   <ItemGroup>
     <ProjectReference Include="..\SigilBuild.Core\SigilBuild.Core.csproj" />
     <ProjectReference Include="..\SigilBuild.Packaging\SigilBuild.Packaging.csproj" />
+    <ProjectReference Include="..\SigilBuild.Signing\SigilBuild.Signing.csproj" />
     <PackageReference Include="System.CommandLine" />
   </ItemGroup>
   <ItemGroup>

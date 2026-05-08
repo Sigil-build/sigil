@@ -19,4 +19,14 @@
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
   </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\SigilBuild.Core\SigilBuild.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Step implementations and the IStep interface are intentionally
+         internal — they are the wrapper runtime's private contract, not a
+         third-party extension surface. The test project drives them
+         directly and so needs InternalsVisibleTo. -->
+    <InternalsVisibleTo Include="SigilBuild.Wrapper.Tests" />
+  </ItemGroup>
 </Project>

@@ -1,0 +1,79 @@
+spec: v1.0
+
+app:
+  id: com.example.hellowixkiller
+  name: HelloWiXKiller
+  version: 1.0.0
+  publisher: SigilBuild
+
+build:
+  source: ./payload
+
+package:
+  formats: [exe]
+  architectures: [x64]
+
+parameters:
+  install_dir:
+    type: path
+    default: "%ProgramFiles%\\HelloWiXKiller"
+    install_time: true
+  registered_user:
+    type: string
+    default: "Default User"
+    install_time: true
+
+install_steps:
+  - id: copy-app
+    type: file_copy
+    from: payload/**
+    to: ${parameters.install_dir}
+  - id: reg-displayname
+    type: registry_write
+    hive: HKCU
+    key: "Software\\HelloWiXKiller"
+    name: DisplayName
+    type_value: REG_SZ
+    value: HelloWiXKiller
+  - id: reg-version
+    type: registry_write
+    hive: HKCU
+    key: "Software\\HelloWiXKiller"
+    name: Version
+    type_value: REG_SZ
+    value: "1.0.0"
+  - id: reg-installdir
+    type: registry_write
+    hive: HKCU
+    key: "Software\\HelloWiXKiller"
+    name: InstallDir
+    type_value: REG_EXPAND_SZ
+    value: ${parameters.install_dir}
+  - id: reg-user
+    type: registry_write
+    hive: HKCU
+    key: "Software\\HelloWiXKiller"
+    name: RegisteredUser
+    type_value: REG_SZ
+    value: ${parameters.registered_user}
+  - id: shortcut-startmenu
+    type: shortcut_create
+    target: "${parameters.install_dir}\\app.exe"
+    location: "${parameters.install_dir}\\StartMenu"
+    name: HelloWiXKiller
+    description: "Launch HelloWiXKiller"
+  - id: shortcut-desktop
+    type: shortcut_create
+    target: "${parameters.install_dir}\\app.exe"
+    location: "${parameters.install_dir}\\Desktop"
+    name: HelloWiXKiller-Desktop
+    description: "Launch HelloWiXKiller"
+
+post_install:
+  - id: post-mark-installed
+    type: registry_write
+    hive: HKCU
+    key: "Software\\HelloWiXKiller"
+    name: PostInstallCompleted
+    type_value: REG_DWORD
+    value: 1

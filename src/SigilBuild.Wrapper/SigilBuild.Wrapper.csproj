@@ -18,6 +18,10 @@
     <IlcOptimizationPreference>Size</IlcOptimizationPreference>
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <!-- Required for [LibraryImport] source-generated P/Invokes used by
+         Engine/WrapperBlob.cs (FindResource / LoadResource). The generated
+         marshalling code is unsafe but never user-authored. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\SigilBuild.Core\SigilBuild.Core.csproj" />
@@ -28,5 +32,9 @@
          third-party extension surface. The test project drives them
          directly and so needs InternalsVisibleTo. -->
     <InternalsVisibleTo Include="SigilBuild.Wrapper.Tests" />
+    <!-- The packager builds the SIGIL_BLOB_V1 JSON via the same internal
+         DTOs + source-generated context the wrapper uses to read it back. -->
+    <InternalsVisibleTo Include="SigilBuild.Packaging" />
+    <InternalsVisibleTo Include="SigilBuild.Packaging.Tests" />
   </ItemGroup>
 </Project>

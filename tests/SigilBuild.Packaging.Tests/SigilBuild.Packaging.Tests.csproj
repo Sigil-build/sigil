@@ -2,6 +2,9 @@
   <PropertyGroup>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <!-- Test-only: required for the [LibraryImport] reader used to verify the
+         WrapperResourceWriter round-trip without launching the wrapper exe. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
@@ -12,6 +15,9 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\SigilBuild.Packaging\SigilBuild.Packaging.csproj" />
+    <!-- Direct reference so the round-trip test can call into the same
+         JSON DTOs and SerializerContext that the wrapper runtime uses. -->
+    <ProjectReference Include="..\..\src\SigilBuild.Wrapper\SigilBuild.Wrapper.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Fixtures\**\*" CopyToOutputDirectory="PreserveNewest" />

@@ -1,4 +1,6 @@
 using System.Linq;
+using System.Runtime.Versioning;
+using Microsoft.Win32;
 
 namespace SigilBuild.Wrapper.Engine;
 
@@ -74,4 +76,122 @@ public abstract record RollbackRecord
             return System.Threading.Tasks.Task.CompletedTask;
         }
     }
+
+    /// <summary>
+    /// Restore a single registry value to its prior state. If the value was
+    /// previously absent the rollback deletes whatever the step wrote;
+    /// otherwise it re-writes the captured value with its captured kind.
+    /// No-op on non-Windows hosts so the type can travel through the
+    /// platform-neutral journal API.
+    /// </summary>
+    public sealed record RestoreRegistryValue(
+        string Hive,
+        string Key,
+        string Name,
+        string View,
+        string? PriorTypeStr,
+        object? PriorValue,
+        bool PreviouslyAbsent) : RollbackRecord
+    {
+        public override System.Threading.Tasks.Task UndoAsync(System.Threading.CancellationToken ct)
+        {
+            if (!System.OperatingSystem.IsWindows())
+            {
+                return System.Threading.Tasks.Task.CompletedTask;
+            }
+
+            return UndoOnWindows();
+        }
+
+        [SupportedOSPlatform("windows")]
+        private System.Threading.Tasks.Task UndoOnWindows()
+        {
+            var hive = RegistryHelper.ParseHive(Hive);
+            var view = RegistryHelper.ParseView(View);
+
+            using var baseKey = RegistryKey.OpenBaseKey(hive, view);
+
+            if (PreviouslyAbsent)
+            {
+                // The value didn't exist before; if the step created it, scrub it.
+                using var sub = baseKey.OpenSubKey(Key, writable: true);
+                if (sub is null)
+                {
+                    return System.Threading.Tasks.Task.CompletedTask;
+                }
+#pragma warning disable CA1031 // Best-effort undo; missing values are fine.
+                try { sub.DeleteValue(Name, throwOnMissingValue: false); }
+                catch { /* best-effort */ }
+#pragma warning restore CA1031
+            }
+            else if (PriorValue is not null && PriorTypeStr is not null)
+            {
+                // Re-create the parent key if the step deleted it (delete_value
+                // never deletes the key, but delete_key on a parent could).
+                using var sub = baseKey.CreateSubKey(Key, writable: true);
+                if (sub is null)
+                {
+                    return System.Threading.Tasks.Task.CompletedTask;
+                }
+                sub.SetValue(Name, PriorValue, RegistryHelper.ParseValueKind(PriorTypeStr));
+            }
+            return System.Threading.Tasks.Task.CompletedTask;
+        }
+    }
+
+    /// <summary>
+    /// Restore a registry key whose immediate values were captured before
+    /// deletion. Recursive subtree restore is an acknowledged gap — only
+    /// the values directly under the key are re-created. If the key was
+    /// previously absent the rollback is a no-op.
+    /// </summary>
+    public sealed record RestoreRegistryKey(
+        string Hive,
+        string Key,
+        string View,
+        System.Collections.Generic.IReadOnlyList<RegistryValueSnapshot> ValuesAtKeyLevel,
+        bool PreviouslyAbsent) : RollbackRecord
+    {
+        public override System.Threading.Tasks.Task UndoAsync(System.Threading.CancellationToken ct)
+        {
+            if (!System.OperatingSystem.IsWindows())
+            {
+                return System.Threading.Tasks.Task.CompletedTask;
+            }
+            if (PreviouslyAbsent)
+            {
+                return System.Threading.Tasks.Task.CompletedTask;
+            }
+            return UndoOnWindows();
+        }
+
+        [SupportedOSPlatform("windows")]
+        private System.Threading.Tasks.Task UndoOnWindows()
+        {
+            var hive = RegistryHelper.ParseHive(Hive);
+            var view = RegistryHelper.ParseView(View);
+            using var baseKey = RegistryKey.OpenBaseKey(hive, view);
+            using var sub = baseKey.CreateSubKey(Key, writable: true);
+            if (sub is null)
+            {
+                return System.Threading.Tasks.Task.CompletedTask;
+            }
+            foreach (var snap in ValuesAtKeyLevel)
+            {
+                if (snap.Value is null)
+                {
+                    continue;
+                }
+                sub.SetValue(snap.Name, snap.Value, RegistryHelper.ParseValueKind(snap.TypeStr));
+            }
+            return System.Threading.Tasks.Task.CompletedTask;
+        }
+    }
 }
+
+/// <summary>
+/// Captured state of a single registry value at the moment it was
+/// snapshotted by <see cref="RollbackRecord.RestoreRegistryKey"/>. Held
+/// outside the record's parameter list to keep the public API readable.
+/// </summary>
+public readonly record struct RegistryValueSnapshot(string Name, string TypeStr, object? Value);

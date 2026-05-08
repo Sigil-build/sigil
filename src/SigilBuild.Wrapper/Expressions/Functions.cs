@@ -45,11 +45,20 @@ internal static class Functions
 
             ["file_exists"] = a => File.Exists(ToStringOrNull(a[0])),
 
-            ["registry_exists"] = a => RegistryHelper.Exists(
+            ["registry_exists"] = a => RegistryExists(
                 ToStringOrNull(a[0]),
                 ToStringOrNull(a[1]),
                 ToStringOrNull(a[2])),
         };
+
+    // Indirection so the analyzer sees an OS guard for the Windows-only
+    // `Engine.RegistryHelper.Exists`. The wrapper itself only ships on
+    // Windows (RID=win-x64), but Functions.cs is platform-agnostic.
+    private static bool RegistryExists(string? hive, string? key, string? name)
+    {
+        if (!OperatingSystem.IsWindows()) return false;
+        return SigilBuild.Wrapper.Engine.RegistryHelper.Exists(hive, key, name);
+    }
 
     private static string? ToStringOrNull(object? value) =>
         value is null ? null : Convert.ToString(value, CultureInfo.InvariantCulture);

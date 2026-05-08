@@ -153,6 +153,10 @@ public static class ManifestParser
     {
         "msix" => PackageFormat.Msix,
         "zip" => PackageFormat.Zip,
+        // TODO(Task 8/9): add "exe" => PackageFormat.Exe once the schema enum
+        // and CLI dispatch are wired (see PackCommand.cs). The PackageFormat.Exe
+        // enum value already exists (added in Task 7) but is not yet reachable
+        // through the YAML→typed-graph bridge.
         _ => throw new YamlException($"unknown package format '{s}'"),
     };
 

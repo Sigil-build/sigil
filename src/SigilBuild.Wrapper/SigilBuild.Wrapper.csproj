@@ -7,6 +7,12 @@
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <PublishAot>true</PublishAot>
+    <!-- InvariantGlobalization=true is required for AOT size targets (skips ICU
+         loading) and is correct for path/registry comparisons (avoids the
+         Turkish-I problem). Wrapper code that needs a UI culture (e.g. localized
+         install-wizard error text) MUST use ordinal/invariant comparisons; constructing
+         `new CultureInfo("ru-RU")` will throw `CultureNotFoundException` at runtime.
+         If real localization is needed, revisit this together with ADR-008. -->
     <InvariantGlobalization>true</InvariantGlobalization>
     <TrimMode>full</TrimMode>
     <IlcOptimizationPreference>Size</IlcOptimizationPreference>

@@ -29,12 +29,19 @@ public sealed class ExeWrapperPackager : IPackager
         // Locate the AOT-published wrapper runtime.
         var stubPath = WrapperRuntimeLocator.Locate();
 
-        // Output filename: <appName>-Setup.exe under options.OutputDirectory.
-        var outputName = $"{manifest.App.Name}-Setup.exe";
+        // Output filename mirrors the Zip/Msix convention: id-version-arch tag.
+        // Sanitize the user-controlled App.Name segment against path-traversal /
+        // illegal characters so a malicious or accidental manifest cannot escape
+        // the output directory.
+        var archStr = options.Architecture.ToString().ToLowerInvariant();
+        var safeName = SanitizeFileNameSegment(manifest.App.Name);
+        var outputName = $"{safeName}-{manifest.App.Version}-{archStr}-Setup.exe";
         var outputPath = Path.Combine(options.OutputDirectory, outputName);
 
         Directory.CreateDirectory(options.OutputDirectory);
-        File.Copy(stubPath, outputPath, overwrite: true);
+        if (File.Exists(outputPath))
+            File.Delete(outputPath);
+        File.Copy(stubPath, outputPath);
 
         // Embed step blob + payload — stubbed for Task 7; lands in Task 14.
         // (See WrapperResourceWriter.)
@@ -46,5 +53,26 @@ public sealed class ExeWrapperPackager : IPackager
 
         var artifact = new PackedArtifact(outputPath, sha256, size);
         return Task.FromResult(new PackResult(artifact, Array.Empty<Diagnostic>()));
+    }
+
+    private static string SanitizeFileNameSegment(string segment)
+    {
+        if (string.IsNullOrWhiteSpace(segment))
+            return "app";
+
+        var invalid = Path.GetInvalidFileNameChars();
+        Span<char> buffer = stackalloc char[segment.Length];
+        var i = 0;
+        foreach (var c in segment)
+        {
+            // Reject path separators outright (they're in InvalidFileNameChars on Windows
+            // but listed defensively for cross-platform clarity).
+            if (c is '/' or '\\' or ':' || Array.IndexOf(invalid, c) >= 0)
+                buffer[i++] = '_';
+            else
+                buffer[i++] = c;
+        }
+        var sanitized = new string(buffer[..i]).Trim('.', ' ');
+        return string.IsNullOrEmpty(sanitized) ? "app" : sanitized;
     }
 }

@@ -1,0 +1,54 @@
+name: docs
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - src/**
+      - schemas/**
+      - docs/**
+      - scripts/docs/**
+      - .github/workflows/docs.yml
+
+concurrency:
+  group: docs-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  drift-check:
+    name: docs drift check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: build CLI (needed by generate-cli-reference)
+        run: dotnet build src/SigilBuild.Cli/SigilBuild.Cli.csproj --nologo
+
+      - name: regenerate cli-reference.md
+        run: pwsh scripts/docs/generate-cli-reference.ps1
+
+      - name: regenerate manifest-reference.md
+        run: pwsh scripts/docs/generate-manifest-reference.ps1
+
+      - name: regenerate API docs (no-op until docfx is wired)
+        run: pwsh scripts/docs/generate-api-docs.ps1
+
+      - name: fail if docs/ has drift
+        run: |
+          if [[ -n "$(git status --porcelain docs/)" ]]; then
+            echo "::error::docs/ is out of sync with src/, schemas/, or XML doc comments."
+            echo "Run scripts/docs/generate-*.ps1 locally (or /update-docs in Claude Code) and commit the result."
+            git status --porcelain docs/
+            git diff -- docs/ | head -200
+            exit 1
+          fi
+          echo "docs/ is in sync."

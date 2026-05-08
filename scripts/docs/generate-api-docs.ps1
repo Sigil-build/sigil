@@ -31,7 +31,7 @@ if (-not (Get-Command docfx -ErrorAction SilentlyContinue)) {
 }
 
 if (-not (Test-Path $DocfxConfig)) {
-    Write-Host "docfx.json not found at $DocfxConfig — API doc generation not yet wired."
+    Write-Host "docfx.json not found at $DocfxConfig -- API doc generation not yet wired."
     Write-Host "When ready: run 'docfx init' and commit docfx.json + a metadata stub."
     exit 0
 }

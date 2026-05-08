@@ -31,8 +31,9 @@ public static class ManifestParser
             var root = stream.Documents[0].RootNode as YamlMappingNode
                 ?? throw new YamlException("root must be a mapping");
 
-            var manifest = MapManifest(root, fileName);
-            return new ParseResult(manifest, Array.Empty<Diagnostic>());
+            var diagnostics = new List<Diagnostic>();
+            var manifest = MapManifest(root, fileName, diagnostics);
+            return new ParseResult(manifest, diagnostics);
         }
         catch (YamlException ex)
         {
@@ -46,7 +47,7 @@ public static class ManifestParser
         }
     }
 
-    private static SigilManifest MapManifest(YamlMappingNode root, string file)
+    private static SigilManifest MapManifest(YamlMappingNode root, string file, List<Diagnostic> diagnostics)
     {
         var loc = new SourceLocation(file, (int)root.Start.Line, (int)root.Start.Column);
         return new SigilManifest(
@@ -58,7 +59,8 @@ public static class ManifestParser
             Publish: MapPublish(GetMapping(root, "publish")),
             Updates: MapUpdates(GetMapping(root, "updates")),
             Installer: MapInstaller(GetMapping(root, "installer")),
-            Location: loc);
+            Location: loc,
+            Parameters: ParseParameters(GetMapping(root, "parameters"), diagnostics, file));
     }
 
     private static AppSection MapApp(YamlMappingNode node) => new(
@@ -149,14 +151,88 @@ public static class ManifestParser
             GradientEnd: GetScalar(brand, "gradientEnd")));
     }
 
+    private static Dictionary<string, ParameterDefinition>? ParseParameters(
+        YamlMappingNode? node, List<Diagnostic> diagnostics, string fileName)
+    {
+        if (node is null) return null;
+        var dict = new Dictionary<string, ParameterDefinition>(StringComparer.Ordinal);
+        foreach (var kvp in node.Children)
+        {
+            if (kvp.Key is not YamlScalarNode keyNode || kvp.Value is not YamlMappingNode value)
+                continue;
+
+            var name = keyNode.Value ?? string.Empty;
+            var typeStr = GetScalar(value, "type");
+            if (!TryParseParameterType(typeStr, out var type))
+            {
+                var loc = new SourceLocation(fileName, (int)keyNode.Start.Line, (int)keyNode.Start.Column);
+                diagnostics.Add(new Diagnostic(
+                    DiagnosticSeverity.Error,
+                    DiagnosticCodes.UnknownParameterType,
+                    $"unknown parameter type '{typeStr}' for parameter '{name}'",
+                    loc,
+                    "https://docs.sigil.build/diagnostics/SIG0210"));
+                continue;
+            }
+
+            var values = GetSequence(value, "values");
+            var installTime = GetBool(value, "install_time", defaultValue: false);
+            var description = GetScalar(value, "description");
+            var pattern = GetScalar(value, "pattern");
+            var min = GetNullableInt(value, "min");
+            var max = GetNullableInt(value, "max");
+            var defaultValue = ReadDefault(value, type);
+
+            dict[name] = new ParameterDefinition(
+                Name: name,
+                Type: type,
+                Default: defaultValue,
+                EnumValues: values,
+                InstallTime: installTime,
+                Description: description,
+                Pattern: pattern,
+                Min: min,
+                Max: max);
+        }
+        return dict;
+    }
+
+    private static bool TryParseParameterType(string? raw, out ParameterType type)
+    {
+        switch (raw)
+        {
+            case "string": type = ParameterType.String; return true;
+            case "path":   type = ParameterType.Path;   return true;
+            case "bool":   type = ParameterType.Bool;   return true;
+            case "int":    type = ParameterType.Int;    return true;
+            case "enum":   type = ParameterType.Enum;   return true;
+            case "secret": type = ParameterType.Secret; return true;
+            default:       type = default;              return false;
+        }
+    }
+
+    private static object? ReadDefault(YamlMappingNode node, ParameterType type)
+    {
+        if (!node.Children.TryGetValue(new YamlScalarNode("default"), out var raw)
+            || raw is not YamlScalarNode scalar
+            || scalar.Value is null)
+        {
+            return null;
+        }
+
+        return type switch
+        {
+            ParameterType.Bool => bool.TryParse(scalar.Value, out var b) ? b : (object?)scalar.Value,
+            ParameterType.Int  => int.TryParse(scalar.Value, out var i)  ? i : (object?)scalar.Value,
+            _ => scalar.Value,
+        };
+    }
+
     private static PackageFormat ParseFormat(string s) => s switch
     {
         "msix" => PackageFormat.Msix,
         "zip" => PackageFormat.Zip,
-        // TODO(Task 8/9): add "exe" => PackageFormat.Exe once the schema enum
-        // and CLI dispatch are wired (see PackCommand.cs). The PackageFormat.Exe
-        // enum value already exists (added in Task 7) but is not yet reachable
-        // through the YAML→typed-graph bridge.
+        "exe" => PackageFormat.Exe,
         _ => throw new YamlException($"unknown package format '{s}'"),
     };
 
@@ -186,6 +262,12 @@ public static class ManifestParser
     {
         var s = GetScalar(parent, key);
         return s is not null && int.TryParse(s, out var n) ? n : defaultValue;
+    }
+
+    private static int? GetNullableInt(YamlMappingNode parent, string key)
+    {
+        var s = GetScalar(parent, key);
+        return s is not null && int.TryParse(s, out var n) ? n : null;
     }
 
     private static bool GetBool(YamlMappingNode parent, string key, bool defaultValue)

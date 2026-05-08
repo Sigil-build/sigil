@@ -8,4 +8,8 @@ public static class DiagnosticCodes
     public const string SchemaViolation = "SIG0010";
     public const string EnvVariableMissing = "SIG0020";
     public const string MissingOptionalField = "SIG0050";
+
+    // SIG02xx — parameters: block (Sprint 5c, Task 8)
+    public const string UnknownParameterType = "SIG0210";
+    public const string ParameterValidationFailure = "SIG0220";
 }

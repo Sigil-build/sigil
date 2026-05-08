@@ -6,6 +6,30 @@
   "type": "object",
   "required": ["spec", "app", "build"],
   "additionalProperties": false,
+  "definitions": {
+    "Parameters": {
+      "type": "object",
+      "description": "Install-time / pack-time parameter declarations consumed by the wrapper installer (Sprint 5c).",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["type"],
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["string", "path", "bool", "int", "enum", "secret"]
+          },
+          "default": {},
+          "values": { "type": "array", "items": { "type": "string" } },
+          "install_time": { "type": "boolean", "default": false },
+          "description": { "type": "string" },
+          "pattern": { "type": "string" },
+          "min": { "type": "integer" },
+          "max": { "type": "integer" }
+        }
+      }
+    }
+  },
   "properties": {
     "spec": {
       "type": "string",
@@ -72,7 +96,7 @@
       "properties": {
         "formats": {
           "type": "array",
-          "items": { "enum": ["msix", "zip"] },
+          "items": { "enum": ["msix", "zip", "exe"] },
           "minItems": 1,
           "uniqueItems": true,
           "default": ["zip"]
@@ -212,6 +236,28 @@
               "pattern": "^#[0-9A-Fa-f]{6}$"
             }
           }
+        }
+      }
+    },
+    "parameters": {
+      "type": "object",
+      "description": "Install-time / pack-time parameter declarations consumed by the wrapper installer (Sprint 5c).",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["type"],
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["string", "path", "bool", "int", "enum", "secret"]
+          },
+          "default": {},
+          "values": { "type": "array", "items": { "type": "string" } },
+          "install_time": { "type": "boolean", "default": false },
+          "description": { "type": "string" },
+          "pattern": { "type": "string" },
+          "min": { "type": "integer" },
+          "max": { "type": "integer" }
         }
       }
     }

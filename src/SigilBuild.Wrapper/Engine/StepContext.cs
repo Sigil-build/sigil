@@ -1,5 +1,7 @@
 namespace SigilBuild.Wrapper.Engine;
 
+using SigilBuild.Wrapper.Cli;
+
 /// <summary>
 /// Immutable view over the resolved environment for a single install run.
 /// Backs both expression evaluation (<c>When</c> clauses) and string
@@ -18,6 +20,55 @@ public sealed class StepContext
 
     public static StepContext Empty { get; } =
         new StepContext(new System.Collections.Generic.Dictionary<string, object?>());
+
+    /// <summary>
+    /// Build a <see cref="StepContext"/> by materializing parameter overrides
+    /// from <paramref name="parsed"/> against the schema in <paramref name="blob"/>,
+    /// then layering the <c>system.*</c> and <c>env.*</c> namespaces used by
+    /// the expression evaluator's <c>When</c> clauses and by
+    /// <see cref="Resolve"/> templates.
+    /// </summary>
+    /// <remarks>
+    /// Resolution precedence for each declared parameter is
+    /// CLI override → schema default → <c>null</c>. Undeclared CLI params
+    /// can never reach this method — <see cref="CommandLineParser.Parse"/>
+    /// rejects them up-front.
+    /// </remarks>
+    internal static StepContext From(WrapperBlob blob, ParsedCommandLine parsed)
+    {
+        System.ArgumentNullException.ThrowIfNull(blob);
+        System.ArgumentNullException.ThrowIfNull(parsed);
+
+        var dict = new System.Collections.Generic.Dictionary<string, object?>(System.StringComparer.Ordinal);
+
+        // Materialise parameter values: CLI override → schema default → null.
+        foreach (var def in blob.Parameters)
+        {
+            var key = "parameters." + def.Name;
+            if (parsed.Values.TryGetValue(def.Name, out var v))
+            {
+                dict[key] = v;
+            }
+            else if (def.Default is not null)
+            {
+                dict[key] = def.Default;
+            }
+            else
+            {
+                dict[key] = null;
+            }
+        }
+
+        // System context (used by the expression evaluator's `system.*` namespace).
+        dict["system.os"] = System.Environment.OSVersion.Version.ToString();
+        dict["system.arch"] = System.Runtime.InteropServices.RuntimeInformation
+                                  .ProcessArchitecture.ToString().ToLowerInvariant();
+
+        // Env context (only the well-known PATH for now; full env exposure is policy-deferred).
+        dict["env.PATH"] = System.Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+
+        return new StepContext(dict);
+    }
 
     /// <summary>Substitute <c>${parameters.foo}</c> patterns in <paramref name="template"/>.</summary>
     public string Resolve(string template)

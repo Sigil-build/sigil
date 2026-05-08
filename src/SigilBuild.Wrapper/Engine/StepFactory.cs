@@ -18,8 +18,10 @@ internal static class StepFactory
         InstallStep.RegistryDeleteValue rdv => new RegistryDeleteValueStep(rdv),
         InstallStep.RegistryDeleteKey rdk   => new RegistryDeleteKeyStep(rdk),
         InstallStep.ShortcutCreate sc       => new ShortcutCreateStep(sc),
+        InstallStep.EnvSet es               => new EnvSetStep(es),
 #pragma warning restore CA1416
+        InstallStep.RunProgram rp      => new RunProgramStep(rp),
         _ => throw new System.NotSupportedException(
-            $"step type '{spec.GetType().Name}' is not implemented in Task 11/15/16; lands in Task 17."),
+            $"step type '{spec.GetType().Name}' is not implemented in the current sprint."),
     };
 }

@@ -1,6 +1,7 @@
 using System.Linq;
 using System.Runtime.Versioning;
 using Microsoft.Win32;
+using SigilBuild.Wrapper.Steps;
 
 namespace SigilBuild.Wrapper.Engine;
 
@@ -163,6 +164,65 @@ public abstract record RollbackRecord
             }
             return System.Threading.Tasks.Task.CompletedTask;
         }
+    }
+
+    /// <summary>
+    /// Restore a Windows environment variable to its prior state. If
+    /// <paramref name="PreviouslyAbsent"/> is true the rollback deletes the
+    /// value the step wrote; otherwise it re-writes <paramref name="PriorValue"/>
+    /// as <c>REG_SZ</c>. After restoration a best-effort
+    /// <c>WM_SETTINGCHANGE</c> broadcast notifies running shells of the
+    /// reverted state. No-op on non-Windows hosts so the type can travel
+    /// through the platform-neutral journal API.
+    /// </summary>
+    public sealed record RestoreEnv(
+        string Scope,
+        string Name,
+        string? PriorValue,
+        bool PreviouslyAbsent) : RollbackRecord
+    {
+        public override System.Threading.Tasks.Task UndoAsync(System.Threading.CancellationToken ct)
+        {
+            if (!System.OperatingSystem.IsWindows())
+            {
+                return System.Threading.Tasks.Task.CompletedTask;
+            }
+            UndoOnWindows();
+            return System.Threading.Tasks.Task.CompletedTask;
+        }
+
+        [SupportedOSPlatform("windows")]
+        private void UndoOnWindows()
+        {
+            using var key = OpenEnvKey(Scope, writable: true);
+            if (key is null)
+            {
+                return;
+            }
+
+            if (PreviouslyAbsent)
+            {
+#pragma warning disable CA1031 // Best-effort undo: a missing value is fine.
+                try { key.DeleteValue(Name, throwOnMissingValue: false); }
+                catch { /* best-effort */ }
+#pragma warning restore CA1031
+            }
+            else if (PriorValue is not null)
+            {
+                key.SetValue(Name, PriorValue, RegistryValueKind.String);
+            }
+
+            EnvBroadcast.NotifySettingChange();
+        }
+
+        [SupportedOSPlatform("windows")]
+        private static RegistryKey? OpenEnvKey(string scope, bool writable) => scope switch
+        {
+            "user"    => Registry.CurrentUser.OpenSubKey("Environment", writable),
+            "machine" => Registry.LocalMachine.OpenSubKey(
+                @"System\CurrentControlSet\Control\Session Manager\Environment", writable),
+            _ => throw new System.ArgumentException($"unknown env scope '{scope}'"),
+        };
     }
 
     /// <summary>

@@ -9,6 +9,9 @@
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="coverlet.collector" />
     <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="Microsoft.Extensions.Http.Polly" />
+    <PackageReference Include="Polly" />
+    <PackageReference Include="Polly.Extensions.Http" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\SigilBuild.Signing\SigilBuild.Signing.csproj" />

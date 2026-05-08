@@ -88,10 +88,35 @@ public static class ManifestLoader
         return diagnostics;
     }
 
+    /// <summary>
+    /// Per-call regex timeout. Pattern and value both come from user-controlled
+    /// inputs (manifest author + install-time entry); a pathological pattern
+    /// like <c>^(a+)+$</c> against a long value is a classic ReDoS. 1 second is
+    /// generous enough that legitimate complex patterns finish, short enough
+    /// that abuse fails fast.
+    /// </summary>
+    private static readonly System.TimeSpan RegexTimeout = System.TimeSpan.FromSeconds(1);
+
     private static string? ValidateSampleValue(ParameterDefinition def, string value)
     {
-        if (def.Pattern is not null && !Regex.IsMatch(value, def.Pattern))
-            return $"does not match pattern '{def.Pattern}'";
+        if (def.Pattern is not null)
+        {
+            try
+            {
+                if (!Regex.IsMatch(value, def.Pattern, RegexOptions.None, RegexTimeout))
+                    return $"does not match pattern '{def.Pattern}'";
+            }
+            catch (System.ArgumentException)
+            {
+                // Pattern itself is unparseable — surface as a parameter-level
+                // failure instead of bubbling a stack trace to the caller.
+                return $"has an unparseable pattern '{def.Pattern}'";
+            }
+            catch (RegexMatchTimeoutException)
+            {
+                return $"timed out matching pattern '{def.Pattern}' (possible ReDoS)";
+            }
+        }
 
         if (def.Type == ParameterType.Int)
         {

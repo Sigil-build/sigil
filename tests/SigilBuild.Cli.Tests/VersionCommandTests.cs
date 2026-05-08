@@ -5,6 +5,7 @@ using Xunit;
 
 namespace SigilBuild.Cli.Tests;
 
+[Collection("CliCommands")]
 public class VersionCommandTests
 {
     [Theory]

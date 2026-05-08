@@ -6,6 +6,7 @@ using Xunit;
 
 namespace SigilBuild.Cli.Tests.Commands;
 
+[Collection("CliCommands")]
 public sealed class SignCommandTests
 {
     [Fact]

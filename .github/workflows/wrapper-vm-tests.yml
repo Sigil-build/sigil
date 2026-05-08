@@ -1,0 +1,55 @@
+# wrapper-vm-tests
+#
+# Opt-in CI job for the multi-edition install integration test (Sprint 5c,
+# WBS 2.24, Task 13). The job is currently DISABLED via `if: false` because
+# the underlying flow has two prerequisites that are not yet wired:
+#
+#   1. The AOT-published `SigilBuild.Wrapper.exe` must be staged under
+#      `runtimes/win-x64/` next to the test assembly so
+#      `WrapperRuntimeLocator.Locate()` succeeds. See
+#      `src/SigilBuild.Packaging/ExeWrapper/WrapperRuntimeLocator.cs`.
+#   2. (Future) A real Windows Sandbox `.wsb` profile, if/when we harden the
+#      `VmSandbox` helper from a host-process runner to true OS isolation.
+#
+# To enable: flip `if: false` to `if: true`, add the publish-and-copy step
+# below the placeholder, and remove this banner.
+name: wrapper-vm-tests
+
+# Opt-in: only runs on demand. Until the AOT runtime publish + Windows
+# Sandbox config land, this job is a no-op shell intentionally.
+on:
+  workflow_dispatch:
+  # push: ... (intentionally NOT enabled on push — opt-in until the AOT
+  # publish-and-copy step is wired into the build pipeline)
+
+permissions:
+  contents: read
+
+jobs:
+  wrapper-vm-tests:
+    runs-on: windows-latest
+    if: false  # disabled by default; flip to true once AOT publish lands
+    env:
+      SIGIL_VM_TESTS: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Publish wrapper AOT runtime
+        run: |
+          dotnet publish src/SigilBuild.Wrapper -c Release -r win-x64 -p:PublishAot=true
+          # TODO: copy the published exe into the test project's runtimes/win-x64/.
+          # Tracked separately as part of the SDK packaging story.
+
+      - name: Run integration tests
+        run: dotnet test tests/SigilBuild.Wrapper.IntegrationTests/SigilBuild.Wrapper.IntegrationTests.csproj --logger "trx;LogFileName=wrapper-vm-tests.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wrapper-vm-test-results
+          path: '**/TestResults/**/*.trx'

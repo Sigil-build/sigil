@@ -78,6 +78,32 @@ public abstract record RollbackRecord
     }
 
     /// <summary>
+    /// Delete a shortcut <c>.lnk</c> that the <c>shortcut_create</c> step
+    /// materialised. Best-effort — a missing file (already cleaned up by an
+    /// earlier failed save) is treated as success.
+    /// </summary>
+    public sealed record DeleteShortcut(string Path) : RollbackRecord
+    {
+        public override System.Threading.Tasks.Task UndoAsync(System.Threading.CancellationToken ct)
+        {
+            if (System.IO.File.Exists(Path))
+            {
+#pragma warning disable CA1031 // Best-effort undo — failure to delete a stray .lnk should not cascade.
+                try
+                {
+                    System.IO.File.Delete(Path);
+                }
+                catch
+                {
+                    // Best-effort; swallow.
+                }
+#pragma warning restore CA1031
+            }
+            return System.Threading.Tasks.Task.CompletedTask;
+        }
+    }
+
+    /// <summary>
     /// Restore a single registry value to its prior state. If the value was
     /// previously absent the rollback deletes whatever the step wrote;
     /// otherwise it re-writes the captured value with its captured kind.

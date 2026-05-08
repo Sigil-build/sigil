@@ -13,12 +13,13 @@ internal static class StepFactory
     {
         InstallStep.FileCopy fc        => new FileCopyStep(fc),
         InstallStep.DirectoryCreate dc => new DirectoryCreateStep(dc),
-#pragma warning disable CA1416 // Wrapper RID is win-x64; registry steps guard via OperatingSystem.IsWindows().
+#pragma warning disable CA1416 // Wrapper RID is win-x64; Windows-only steps guard via OperatingSystem.IsWindows().
         InstallStep.RegistryWrite rw        => new RegistryWriteStep(rw),
         InstallStep.RegistryDeleteValue rdv => new RegistryDeleteValueStep(rdv),
         InstallStep.RegistryDeleteKey rdk   => new RegistryDeleteKeyStep(rdk),
+        InstallStep.ShortcutCreate sc       => new ShortcutCreateStep(sc),
 #pragma warning restore CA1416
         _ => throw new System.NotSupportedException(
-            $"step type '{spec.GetType().Name}' is not implemented in Task 11/15; lands in Task 16-17."),
+            $"step type '{spec.GetType().Name}' is not implemented in Task 11/15/16; lands in Task 17."),
     };
 }

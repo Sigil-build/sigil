@@ -16,8 +16,16 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <TrimMode>full</TrimMode>
     <IlcOptimizationPreference>Size</IlcOptimizationPreference>
-    <SelfContained>true</SelfContained>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <!-- RuntimeIdentifier and SelfContained are intentionally NOT pinned at the
+         project level. Pinning them forces every `dotnet build` (including the
+         macOS / Linux CI test jobs that just want the .dll for ProjectReference
+         resolution) into a RID-specific bin/<RID>/ subfolder, which dependent
+         test projects can't find on non-Windows hosts.
+
+         AOT publishing passes them at the CLI:
+             dotnet publish src/SigilBuild.Wrapper -c Release -r win-x64 -p:PublishAot=true
+         (PublishAot=true implicitly sets SelfContained=true; -r supplies the
+         RID. See .github/workflows/wrapper-vm-tests.yml.) -->
     <!-- Required for [LibraryImport] source-generated P/Invokes used by
          Engine/WrapperBlob.cs (FindResource / LoadResource). The generated
          marshalling code is unsafe but never user-authored. -->

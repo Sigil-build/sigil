@@ -4,5 +4,7 @@
     <!-- xUnit test names use underscores by convention; allow constant arrays in InlineData -->
     <!-- CA1822: AvaloniaFact/AvaloniaTheory methods look static to the analyser but are dispatched by the Avalonia test runner on the UI thread -->
     <NoWarn>$(NoWarn);CA1707;CA1861;CA1822</NoWarn>
+    <!-- Test projects are never AOT-published; trim analysis on Release would flag fakes that use reflection-based JsonContent.Create / anonymous-type serialization. -->
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
   </PropertyGroup>
 </Project>

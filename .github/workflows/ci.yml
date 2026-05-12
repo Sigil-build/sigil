@@ -40,6 +40,33 @@ jobs:
       - name: test
         run: dotnet test Sigil.sln --configuration Release --no-build --logger "trx;LogFileName=test-results.trx" --collect:"XPlat Code Coverage"
 
+      - name: enforce coverage ≥ 80%
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import glob, re, sys
+          files = glob.glob('**/TestResults/**/coverage.cobertura.xml', recursive=True)
+          if not files:
+              print("::error::no coverage.cobertura.xml files found — ensure coverlet is installed")
+              sys.exit(1)
+          rates = []
+          for f in files:
+              with open(f) as fh:
+                  m = re.search(r'<coverage[^>]*\sline-rate="([0-9.]+)"', fh.read())
+                  if m:
+                      rates.append(float(m.group(1)))
+          if not rates:
+              print("::error::could not parse line-rate from any coverage file")
+              sys.exit(1)
+          avg = sum(rates) / len(rates)
+          print(f"average line coverage across {len(rates)} test project(s): {avg:.2%}")
+          if avg < 0.80:
+              print(f"::error::coverage {avg:.2%} is below the 80% threshold")
+              sys.exit(1)
+          PY
+
       - name: upload test results
         if: always()
         uses: actions/upload-artifact@v4
@@ -99,6 +126,19 @@ jobs:
           & ./publish/win-x64/sigil.exe validate gen.yaml
           if ($LASTEXITCODE -ne 0) { throw "validate-of-generated failed" }
 
+      - name: aot smoke - validate examples
+        shell: pwsh
+        run: |
+          $required = @('minimal', 'msix-local-sign', 'azure-trusted-signing', 'full')
+          $missing = $required | Where-Object { -not (Test-Path "examples/$_/sigil.yaml") }
+          if ($missing.Count -gt 0) { throw "missing example manifests: $($missing -join ', ')" }
+          $examples = Get-ChildItem -Path examples -Filter sigil.yaml -Recurse
+          foreach ($example in $examples) {
+            Write-Host "validating $($example.FullName)"
+            & ./publish/win-x64/sigil.exe validate $example.FullName
+            if ($LASTEXITCODE -ne 0) { throw "validate failed for $($example.FullName)" }
+          }
+
       - name: aot publish — installer host
         run: dotnet publish src/SigilBuild.Installer.Host -c Release -r win-x64 -p:PublishAot=true -p:SigilAotPublish=true -o publish/installer
 
@@ -115,6 +155,24 @@ jobs:
         with:
           name: installer-win-x64
           path: publish/installer/installer.exe
+          if-no-files-found: error
+
+      - name: aot publish — installer host (arm64)
+        run: dotnet publish src/SigilBuild.Installer.Host -c Release -r win-arm64 -p:PublishAot=true -p:SigilAotPublish=true -o publish/installer-arm64
+
+      - name: smoke — installer.exe (arm64) exists and within 40 MB
+        shell: pwsh
+        run: |
+          if (-not (Test-Path publish/installer-arm64/installer.exe)) { throw "installer.exe (arm64) missing" }
+          $sizeMb = [math]::Round((Get-Item publish/installer-arm64/installer.exe).Length / 1MB, 2)
+          Write-Host "installer.exe (arm64) size: $sizeMb MB"
+          if ($sizeMb -gt 40) { throw "installer.exe (arm64) is $sizeMb MB, exceeds 40 MB budget" }
+
+      - name: upload installer artifact (arm64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-win-arm64
+          path: publish/installer-arm64/installer.exe
           if-no-files-found: error
 
       - name: upload binary

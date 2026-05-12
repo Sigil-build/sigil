@@ -273,6 +273,70 @@ public abstract record RollbackRecord
             return System.Threading.Tasks.Task.CompletedTask;
         }
     }
+
+    /// <summary>
+    /// Restores a file that was deleted by <c>file_delete</c>. The bytes were
+    /// stashed to a temp path before deletion; rollback copies them back.
+    /// If the stash is gone (already cleaned up) the record is a no-op.
+    /// </summary>
+    public sealed record RestoreDeletedFile(string OriginalPath, string StashPath) : RollbackRecord
+    {
+        public override System.Threading.Tasks.Task UndoAsync(System.Threading.CancellationToken ct)
+        {
+            if (System.IO.File.Exists(StashPath))
+            {
+                System.IO.Directory.CreateDirectory(
+                    System.IO.Path.GetDirectoryName(OriginalPath)!);
+                System.IO.File.Copy(StashPath, OriginalPath, overwrite: true);
+#pragma warning disable CA1031 // Best-effort stash cleanup; a leftover temp file is harmless.
+                try { System.IO.File.Delete(StashPath); }
+                catch { /* best-effort */ }
+#pragma warning restore CA1031
+            }
+            return System.Threading.Tasks.Task.CompletedTask;
+        }
+    }
+
+    /// <summary>
+    /// Restores a directory subtree that was deleted by <c>directory_delete</c>.
+    /// The subtree was copied to <paramref name="StashPath"/> before deletion;
+    /// rollback moves it back recursively. If the stash is gone the record is
+    /// a no-op.
+    /// </summary>
+    public sealed record RestoreDeletedDirectory(string OriginalPath, string StashPath) : RollbackRecord
+    {
+        public override System.Threading.Tasks.Task UndoAsync(System.Threading.CancellationToken ct)
+        {
+            if (!System.IO.Directory.Exists(StashPath))
+            {
+                return System.Threading.Tasks.Task.CompletedTask;
+            }
+
+            System.IO.Directory.CreateDirectory(OriginalPath);
+            CopyDirectoryRecursive(StashPath, OriginalPath);
+#pragma warning disable CA1031 // Best-effort stash cleanup.
+            try { System.IO.Directory.Delete(StashPath, recursive: true); }
+            catch { /* best-effort */ }
+#pragma warning restore CA1031
+            return System.Threading.Tasks.Task.CompletedTask;
+        }
+
+        private static void CopyDirectoryRecursive(string source, string destination)
+        {
+            foreach (var file in System.IO.Directory.EnumerateFiles(source, "*", System.IO.SearchOption.TopDirectoryOnly))
+            {
+                var rel = System.IO.Path.GetFileName(file);
+                System.IO.File.Copy(file, System.IO.Path.Combine(destination, rel), overwrite: true);
+            }
+            foreach (var dir in System.IO.Directory.EnumerateDirectories(source, "*", System.IO.SearchOption.TopDirectoryOnly))
+            {
+                var rel = System.IO.Path.GetFileName(dir);
+                var destSub = System.IO.Path.Combine(destination, rel);
+                System.IO.Directory.CreateDirectory(destSub);
+                CopyDirectoryRecursive(dir, destSub);
+            }
+        }
+    }
 }
 
 /// <summary>

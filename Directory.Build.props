@@ -17,4 +17,17 @@
     <RepositoryUrl>https://github.com/Sigil-build/sigil</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>
+
+  <!--
+    AOT/trim regression guard: surface IL2xxx and AOT trim warnings on every
+    Release build. Combined with TreatWarningsAsErrors=true above, any new
+    reflection-dependent code that would fail at AOT-publish time is caught
+    during the normal CI build — no separate dotnet-publish step needed.
+
+    Debug builds are excluded (Condition on Configuration) to avoid slowing
+    the inner dev loop; the full trim analysis only runs when building Release.
+  -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+  </PropertyGroup>
 </Project>

@@ -4,6 +4,7 @@ using System.Linq;
 
 namespace SigilBuild.Packaging.Msix;
 
+[System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage(Justification = "Wraps vswhere.exe + Windows registry; exercised only in Windows integration tests.")]
 public static class WindowsSdkLocator
 {
     private static readonly string[] DefaultRoots =

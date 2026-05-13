@@ -8,6 +8,7 @@ using SigilBuild.Core.Manifest;
 
 namespace SigilBuild.Signing.Local;
 
+[System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage(Justification = "Orchestrates SignToolRunner over signtool.exe + a real PFX; exercised only in the manual Windows integration runbook.")]
 public sealed class LocalPfxSigner : ISigningProvider
 {
     private readonly LocalSignConfig _config;

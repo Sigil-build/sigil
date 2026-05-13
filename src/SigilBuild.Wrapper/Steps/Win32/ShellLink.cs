@@ -1,6 +1,7 @@
 namespace SigilBuild.Wrapper.Steps.Win32;
 
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -33,6 +34,7 @@ using System.Runtime.Versioning;
 /// </para>
 /// </remarks>
 [SupportedOSPlatform("windows")]
+[ExcludeFromCodeCoverage(Justification = "Win32 COM interop (CoCreateInstance + IShellLinkW + IPersistFile); exercised only by Windows installer integration tests.")]
 internal static class ShellLink
 {
     private static readonly Guid CLSID_ShellLink =
@@ -284,6 +286,7 @@ internal partial interface IPersistFile
 /// the marshalling stub is source-generated, keeping us AOT-compatible.
 /// </summary>
 [SupportedOSPlatform("windows")]
+[ExcludeFromCodeCoverage(Justification = "Direct P/Invokes into ole32.dll; exercised only by Windows installer integration tests.")]
 internal static partial class CoMarshalImports
 {
     [LibraryImport("ole32.dll", EntryPoint = "CoInitializeEx", SetLastError = false)]

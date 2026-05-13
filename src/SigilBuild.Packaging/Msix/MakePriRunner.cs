@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 
 namespace SigilBuild.Packaging.Msix;
 
+[System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage(Justification = "Wraps MakePri.exe from the Windows SDK; exercised only in Windows integration tests.")]
 public sealed class MakePriRunner
 {
     private readonly string _exePath;

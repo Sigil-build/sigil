@@ -9,6 +9,7 @@ namespace SigilBuild.Signing.Local;
 
 public sealed record SignToolResult(int ExitCode, string StdOut, string StdErr);
 
+[System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage(Justification = "Wraps signtool.exe from the Windows SDK; exercised only in Windows integration tests with a real PFX.")]
 public sealed class SignToolRunner
 {
     private readonly string _exePath;

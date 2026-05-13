@@ -8,6 +8,7 @@ using SigilBuild.Core.Manifest;
 
 namespace SigilBuild.Signing.Azure;
 
+[System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage(Justification = "Orchestrates a live Azure Trusted Signing tenant via REST + ClientSecretCredential; exercised only in the manual integration runbook with real secrets.")]
 public sealed class AzureTrustedSigner : ISigningProvider
 {
     private readonly AzureTrustedSigningConfig _config;

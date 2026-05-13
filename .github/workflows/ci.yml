@@ -33,13 +33,13 @@ jobs:
         run: dotnet --info
 
       - name: restore
-        run: dotnet restore Sigil.sln
+        run: dotnet restore Sigil.slnx
 
       - name: build
-        run: dotnet build Sigil.sln --configuration Release --no-restore
+        run: dotnet build Sigil.slnx --configuration Release --no-restore
 
       - name: test
-        run: dotnet test Sigil.sln --configuration Release --no-build --logger "trx;LogFileName=test-results.trx" --collect:"XPlat Code Coverage"
+        run: dotnet test Sigil.slnx --configuration Release --no-build --logger "trx;LogFileName=test-results.trx" --collect:"XPlat Code Coverage"
 
       - name: enforce coverage threshold
         shell: bash

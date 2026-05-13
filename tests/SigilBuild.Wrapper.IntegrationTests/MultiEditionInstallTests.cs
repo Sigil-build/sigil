@@ -29,11 +29,11 @@ public class MultiEditionInstallTests
 
     private static string FindManifest()
     {
-        // Walk up from AppContext.BaseDirectory to find the repo root by Sigil.sln.
+        // Walk up from AppContext.BaseDirectory to find the repo root by Sigil.slnx.
         var dir = System.AppContext.BaseDirectory;
         while (dir is not null)
         {
-            if (File.Exists(Path.Combine(dir, "Sigil.sln")))
+            if (File.Exists(Path.Combine(dir, "Sigil.slnx")))
             {
                 break;
             }
@@ -41,7 +41,7 @@ public class MultiEditionInstallTests
         }
         if (dir is null)
         {
-            throw new System.InvalidOperationException("could not locate Sigil.sln");
+            throw new System.InvalidOperationException("could not locate Sigil.slnx");
         }
         return Path.Combine(dir, ManifestRel.Replace('/', Path.DirectorySeparatorChar));
     }

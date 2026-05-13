@@ -5,6 +5,7 @@ using SigilBuild.Core.Configuration;
 using SigilBuild.Core.Diagnostics;
 using SigilBuild.Core.Manifest;
 using SigilBuild.Packaging;
+using SigilBuild.Packaging.ExeWrapper;
 using SigilBuild.Packaging.Msix;
 using SigilBuild.Packaging.Zip;
 
@@ -37,17 +38,15 @@ public static class PackCommand
             foreach (var format in formats)
             foreach (var arch in arches)
             {
-                // TODO(Task 14): wire ExeWrapperPackager once the AOT runtime
-                // is published into runtimes/win-x64/. Until then, PackageFormat.Exe
-                // cannot reach this code path because ManifestParser.ParseFormat
-                // rejects "exe" — but the explicit switch makes the gap visible.
+                // EXE-wrapper dispatch requires the AOT-published SigilBuild.Wrapper
+                // runtime to be staged at runtimes/win-x64/SigilBuild.Wrapper.exe next
+                // to the SDK. When it's missing, ExeWrapperPackager returns a SIG0120
+                // diagnostic rather than throwing.
                 IPackager packager = format switch
                 {
                     PackageFormat.Msix => new MsixPackager(),
                     PackageFormat.Zip => new ZipPackager(),
-                    PackageFormat.Exe => throw new System.NotSupportedException(
-                        "PackageFormat.Exe dispatch lands in Task 14 (resource embed); " +
-                        "see src/SigilBuild.Packaging/ExeWrapper/ExeWrapperPackager.cs."),
+                    PackageFormat.Exe => new ExeWrapperPackager(),
                     _ => throw new System.NotSupportedException($"unknown format {format}"),
                 };
 

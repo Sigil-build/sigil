@@ -33,8 +33,24 @@ public sealed class ExeWrapperPackager : IPackager
         ArgumentNullException.ThrowIfNull(manifest);
         ArgumentNullException.ThrowIfNull(options);
 
-        // Locate the AOT-published wrapper runtime.
-        var stubPath = WrapperRuntimeLocator.Locate();
+        // Locate the AOT-published wrapper runtime. Surface the missing-runtime
+        // case as a SIG0120 diagnostic — the dev workflow expects build-wrappers
+        // to stage the AOT exe alongside the SDK before pack-time.
+        string stubPath;
+        try
+        {
+            stubPath = WrapperRuntimeLocator.Locate();
+        }
+        catch (FileNotFoundException ex)
+        {
+            return new PackResult(null, new[]
+            {
+                new Diagnostic(DiagnosticSeverity.Error, "SIG0120",
+                    $"EXE-wrapper packaging requires the AOT-published SigilBuild.Wrapper runtime. {ex.Message}",
+                    SourceLocation.Unknown,
+                    "https://docs.sigil.build/diagnostics/SIG0120"),
+            });
+        }
 
         // Output filename mirrors the Zip/Msix convention: id-version-arch tag.
         // Sanitize the user-controlled App.Name segment against path-traversal /

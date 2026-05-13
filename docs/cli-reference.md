@@ -6,6 +6,7 @@
 | [`sigil validate`](#sigil-validate) | <path>  Validate a sigil.yaml manifest [default: sigil.yaml] |
 | [`sigil init`](#sigil-init) | Create a new sigil.yaml manifest |
 | [`sigil pack`](#sigil-pack) | <path>      Pack the app per the manifest [default: sigil.yaml] |
+| [`sigil sign`](#sigil-sign) | <path>      Sign an artifact per the manifest's sign provider [default: sigil.yaml] |
 
 ## `sigil validate`
 
@@ -60,5 +61,22 @@ Arguments:
 Options:
   --out <out>     Output directory [default: ./dist]
   -?, -h, --help  Show help and usage information
+```
+
+## `sigil sign`
+
+```
+Description:
+  Sign an artifact per the manifest's sign provider
+
+Usage:
+  sigil sign [<path>] [options]
+
+Arguments:
+  <path>  Path to manifest [default: sigil.yaml]
+
+Options:
+  --artifact <artifact> (REQUIRED)  Artifact file to sign
+  -?, -h, --help                    Show help and usage information
 ```
 

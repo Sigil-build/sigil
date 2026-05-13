@@ -41,7 +41,13 @@ jobs:
         run: dotnet test Sigil.sln --configuration Release --no-build --logger "trx;LogFileName=test-results.trx" --collect:"XPlat Code Coverage"
 
       - name: enforce coverage threshold
-        if: matrix.os == 'ubuntu-latest'
+        # Run on windows-latest because many step executors and packaging tests
+        # are gated on OperatingSystem.IsWindows() (Registry/Env/Shortcut/RunProgram
+        # steps, MsixPackager, AppxManifest, etc.) and silently skip on Linux —
+        # so Linux coverage drops by ~17 pp vs Windows. Until we either merge
+        # coverage across the matrix or add cross-platform fakes, the Windows
+        # job is the authoritative measurement.
+        if: matrix.os == 'windows-latest'
         shell: bash
         run: |
           set -euo pipefail

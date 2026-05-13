@@ -15,12 +15,13 @@ permissions:
 
 jobs:
   build:
-    name: build (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+    name: build
+    # Sigil's MVP target is Windows-only (NSIS / WiX replacement). MSIX,
+    # signtool, the EXE-wrapper runtime, registry steps, COM shortcuts and
+    # the brand-aware installer.exe all only make sense on Windows. Linux
+    # and macOS legs were dropped on 2026-05-13; revisit only if a real
+    # cross-platform packaging story enters scope post-MVP.
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -41,13 +42,6 @@ jobs:
         run: dotnet test Sigil.sln --configuration Release --no-build --logger "trx;LogFileName=test-results.trx" --collect:"XPlat Code Coverage"
 
       - name: enforce coverage threshold
-        # Run on windows-latest because many step executors and packaging tests
-        # are gated on OperatingSystem.IsWindows() (Registry/Env/Shortcut/RunProgram
-        # steps, MsixPackager, AppxManifest, etc.) and silently skip on Linux —
-        # so Linux coverage drops by ~17 pp vs Windows. Until we either merge
-        # coverage across the matrix or add cross-platform fakes, the Windows
-        # job is the authoritative measurement.
-        if: matrix.os == 'windows-latest'
         shell: bash
         run: |
           set -euo pipefail
@@ -111,7 +105,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-${{ matrix.os }}
+          name: test-results
           path: '**/TestResults/**/*.trx'
 
   aot-publish:

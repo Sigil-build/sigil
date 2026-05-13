@@ -163,6 +163,11 @@
             "capabilities": {
               "type": "array",
               "items": { "type": "string" }
+            },
+            "runWack": {
+              "type": "boolean",
+              "default": false,
+              "description": "If true, run the Windows App Certification Kit (appcert.exe) against the packed MSIX. Emits SIG0111 (warning) when WACK isn't installed and SIG0112 (error) when WACK reports failures. WBS 2.9."
             }
           }
         }

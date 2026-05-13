@@ -91,7 +91,8 @@ public static class ManifestParser
         return new PackageSection(formats, arches, msix is null ? null : new MsixOptions(
             Publisher: GetScalar(msix, "publisher"),
             Logo: GetScalar(msix, "logo"),
-            Capabilities: GetSequence(msix, "capabilities")));
+            Capabilities: GetSequence(msix, "capabilities"),
+            RunWack: GetBool(msix, "runWack", defaultValue: false)));
     }
 
     private static SignSection? MapSign(YamlMappingNode? node)

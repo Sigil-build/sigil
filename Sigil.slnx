@@ -18,8 +18,10 @@
     <Project Path="tests/SigilBuild.Core.Tests/SigilBuild.Core.Tests.csproj" />
     <Project Path="tests/SigilBuild.Installer.BrandGenerator.Tests/SigilBuild.Installer.BrandGenerator.Tests.csproj" />
     <Project Path="tests/SigilBuild.Installer.Host.Tests/SigilBuild.Installer.Host.Tests.csproj" />
+    <Project Path="tests/SigilBuild.Packaging.IntegrationTests/SigilBuild.Packaging.IntegrationTests.csproj" />
     <Project Path="tests/SigilBuild.Packaging.Tests/SigilBuild.Packaging.Tests.csproj" />
     <Project Path="tests/SigilBuild.Schema.Tests/SigilBuild.Schema.Tests.csproj" />
+    <Project Path="tests/SigilBuild.Signing.IntegrationTests/SigilBuild.Signing.IntegrationTests.csproj" />
     <Project Path="tests/SigilBuild.Signing.Tests/SigilBuild.Signing.Tests.csproj" />
     <Project Path="tests/SigilBuild.Wrapper.IntegrationTests/SigilBuild.Wrapper.IntegrationTests.csproj" />
     <Project Path="tests/SigilBuild.Wrapper.Tests/SigilBuild.Wrapper.Tests.csproj" />

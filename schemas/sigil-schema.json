@@ -263,7 +263,7 @@
     },
     "installer": {
       "type": "object",
-      "description": "Branded Windows installer wizard config. Implementation lands in Sprint 5b.",
+      "description": "Branded Windows installer wizard config (Phase 2.5 / D-011). Tokens are emitted at pack time by BrandTokenEmitter; WCAG-AA contrast is enforced against white text.",
       "additionalProperties": false,
       "properties": {
         "brand": {
@@ -279,6 +279,21 @@
             "accentColor": {
               "type": "string",
               "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            "gradientStart": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "description": "First stop of the three-stop sidebar gradient."
+            },
+            "gradientMid": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "description": "Middle stop of the three-stop sidebar gradient."
+            },
+            "gradientEnd": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "description": "Last stop of the three-stop sidebar gradient."
             }
           }
         }

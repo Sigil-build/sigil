@@ -11,8 +11,10 @@ internal static class StepFactory
     // own RunAsync still re-checks via OperatingSystem.IsWindows().
     public static IStep Create(InstallStep spec) => spec switch
     {
-        InstallStep.FileCopy fc        => new FileCopyStep(fc),
-        InstallStep.DirectoryCreate dc => new DirectoryCreateStep(dc),
+        InstallStep.FileCopy fc           => new FileCopyStep(fc),
+        InstallStep.DirectoryCreate dc    => new DirectoryCreateStep(dc),
+        InstallStep.FileDelete fd         => new FileDeleteStep(fd),
+        InstallStep.DirectoryDelete dd    => new DirectoryDeleteStep(dd),
 #pragma warning disable CA1416 // Wrapper RID is win-x64; Windows-only steps guard via OperatingSystem.IsWindows().
         InstallStep.RegistryWrite rw        => new RegistryWriteStep(rw),
         InstallStep.RegistryDeleteValue rdv => new RegistryDeleteValueStep(rdv),

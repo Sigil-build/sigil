@@ -18,6 +18,7 @@ public static class Program
         root.AddCommand(ValidateCommand.Build());
         root.AddCommand(InitCommand.Build());
         root.AddCommand(PackCommand.Build());
+        root.AddCommand(SignCommand.Build());
 
         // Custom --version handling so the existing exact-match tests still pass.
         if (args.Length > 0 && (args[0] == "--version" || args[0] == "-v" || args[0] == "version"))

@@ -15,12 +15,13 @@ permissions:
 
 jobs:
   build:
-    name: build (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+    name: build
+    # Sigil's MVP target is Windows-only (NSIS / WiX replacement). MSIX,
+    # signtool, the EXE-wrapper runtime, registry steps, COM shortcuts and
+    # the brand-aware installer.exe all only make sense on Windows. Linux
+    # and macOS legs were dropped on 2026-05-13; revisit only if a real
+    # cross-platform packaging story enters scope post-MVP.
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -40,11 +41,71 @@ jobs:
       - name: test
         run: dotnet test Sigil.sln --configuration Release --no-build --logger "trx;LogFileName=test-results.trx" --collect:"XPlat Code Coverage"
 
+      - name: enforce coverage threshold
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          # Coverlet emits one cobertura file per test project. Each file
+          # instruments every production assembly the test project transitively
+          # references — so the same source line shows up in many reports with
+          # different hit counts. Computing a sum or arithmetic average across
+          # reports double-counts and skews the result toward 0%. Compute the
+          # true union instead: for each unique (assembly, file, line), record
+          # max(hits) across all reports, then sum.
+          #
+          # WBS targets per CLAUDE.md are Core >=80% / Signing+SDK >=85%; the
+          # gate here enforces a project-wide stop-gap of 65% (6pp under the
+          # measured baseline) and prints per-assembly numbers so regressions
+          # in any one component are visible. Integration-only wrappers
+          # (signtool/MakeAppx/Azure/COM) carry [ExcludeFromCodeCoverage].
+          import glob, sys, xml.etree.ElementTree as ET
+          from collections import defaultdict
+          THRESHOLD = 0.65
+          files = glob.glob('**/TestResults/**/coverage.cobertura.xml', recursive=True)
+          if not files:
+              print("::error::no coverage.cobertura.xml files found — ensure coverlet is installed")
+              sys.exit(1)
+          union_hits = defaultdict(int)         # (asm, file, line_num) -> max hits
+          asm_keys = defaultdict(set)           # asm -> set of (file, line_num)
+          for f in files:
+              tree = ET.parse(f)
+              for pkg in tree.findall('.//package'):
+                  asm = pkg.get('name', '')
+                  if not asm.startswith('SigilBuild'):
+                      continue
+                  for cls in pkg.findall('.//class'):
+                      fname = cls.get('filename', '')
+                      for line in cls.findall('lines/line'):
+                          ln = int(line.get('number', '0'))
+                          hits = int(line.get('hits', '0'))
+                          key = (asm, fname, ln)
+                          if hits > union_hits[key]:
+                              union_hits[key] = hits
+                          asm_keys[asm].add((fname, ln))
+          if not asm_keys:
+              print("::error::no SigilBuild.* packages found in coverage reports")
+              sys.exit(1)
+          print(f"{'assembly':<40} {'covered':>8} {'valid':>8} {'rate':>8}")
+          total_c = total_v = 0
+          for asm, keys in sorted(asm_keys.items()):
+              valid = len(keys)
+              covered = sum(1 for (f, ln) in keys if union_hits[(asm, f, ln)] > 0)
+              total_c += covered
+              total_v += valid
+              print(f"{asm:<40} {covered:>8} {valid:>8} {covered/valid if valid else 0:>8.2%}")
+          rate = total_c / total_v
+          print(f"\nproject-wide union coverage: {total_c}/{total_v} = {rate:.2%}")
+          if rate < THRESHOLD:
+              print(f"::error::coverage {rate:.2%} is below the {THRESHOLD:.0%} threshold")
+              sys.exit(1)
+          PY
+
       - name: upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-${{ matrix.os }}
+          name: test-results
           path: '**/TestResults/**/*.trx'
 
   aot-publish:
@@ -99,6 +160,19 @@ jobs:
           & ./publish/win-x64/sigil.exe validate gen.yaml
           if ($LASTEXITCODE -ne 0) { throw "validate-of-generated failed" }
 
+      - name: aot smoke - validate examples
+        shell: pwsh
+        run: |
+          $required = @('minimal', 'msix-local-sign', 'azure-trusted-signing', 'full')
+          $missing = $required | Where-Object { -not (Test-Path "examples/$_/sigil.yaml") }
+          if ($missing.Count -gt 0) { throw "missing example manifests: $($missing -join ', ')" }
+          $examples = Get-ChildItem -Path examples -Filter sigil.yaml -Recurse
+          foreach ($example in $examples) {
+            Write-Host "validating $($example.FullName)"
+            & ./publish/win-x64/sigil.exe validate $example.FullName
+            if ($LASTEXITCODE -ne 0) { throw "validate failed for $($example.FullName)" }
+          }
+
       - name: aot publish — installer host
         run: dotnet publish src/SigilBuild.Installer.Host -c Release -r win-x64 -p:PublishAot=true -p:SigilAotPublish=true -o publish/installer
 
@@ -115,6 +189,24 @@ jobs:
         with:
           name: installer-win-x64
           path: publish/installer/installer.exe
+          if-no-files-found: error
+
+      - name: aot publish — installer host (arm64)
+        run: dotnet publish src/SigilBuild.Installer.Host -c Release -r win-arm64 -p:PublishAot=true -p:SigilAotPublish=true -o publish/installer-arm64
+
+      - name: smoke — installer.exe (arm64) exists and within 40 MB
+        shell: pwsh
+        run: |
+          if (-not (Test-Path publish/installer-arm64/installer.exe)) { throw "installer.exe (arm64) missing" }
+          $sizeMb = [math]::Round((Get-Item publish/installer-arm64/installer.exe).Length / 1MB, 2)
+          Write-Host "installer.exe (arm64) size: $sizeMb MB"
+          if ($sizeMb -gt 40) { throw "installer.exe (arm64) is $sizeMb MB, exceeds 40 MB budget" }
+
+      - name: upload installer artifact (arm64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-win-arm64
+          path: publish/installer-arm64/installer.exe
           if-no-files-found: error
 
       - name: upload binary

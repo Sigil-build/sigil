@@ -14,4 +14,5 @@ paths = [
 description = "Schema doc examples"
 paths = [
   '''^schemas/sigil-schema\.json$''',
+  '''^docs/rfcs/.*\.md$''',
 ]

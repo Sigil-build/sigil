@@ -9,6 +9,14 @@ namespace SigilBuild.Installer.Host;
 
 public partial class App : Application
 {
+    private InstallerViewModel? _vm;
+
+    /// <summary>
+    /// The outcome chosen by the user during this session.
+    /// Read by <see cref="Program.Main"/> after the Avalonia lifetime exits.
+    /// </summary>
+    public int OutcomeExitCode => (int)(_vm?.OutcomeCode ?? InstallerOutcomeCode.Completed);
+
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
     public override void OnFrameworkInitializationCompleted()
@@ -25,9 +33,10 @@ public partial class App : Application
                 tokens = new BrandTokens();
             }
             BrandPalette.Apply(this, tokens);
+            _vm = new InstallerViewModel(tokens);
             desktop.MainWindow = new InstallerWindow
             {
-                DataContext = new InstallerViewModel(tokens),
+                DataContext = _vm,
             };
         }
         base.OnFrameworkInitializationCompleted();

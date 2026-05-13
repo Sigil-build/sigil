@@ -7,6 +7,7 @@ using Xunit;
 
 namespace SigilBuild.Cli.Tests.Commands;
 
+[Collection("CliCommands")]
 public class ValidateCommandTests
 {
     [Fact]

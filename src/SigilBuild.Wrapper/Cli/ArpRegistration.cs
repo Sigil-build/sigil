@@ -19,6 +19,7 @@ using Microsoft.Win32;
 /// task — Task 19 only covers the headline x64 case.
 /// </remarks>
 [SupportedOSPlatform("windows")]
+[System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage(Justification = "Writes/removes HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall entries; exercised only via Windows installer integration tests.")]
 internal static class ArpRegistration
 {
     private const string UninstallKeyRoot =

@@ -7,6 +7,7 @@ namespace SigilBuild.Packaging.Msix;
 
 public sealed record WackResult(int ExitCode, string ReportPath);
 
+[System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage(Justification = "Wraps the Windows App Cert Kit (appcert.exe); exercised only in Windows integration tests.")]
 public sealed class WackRunner
 {
     private readonly string _exePath;

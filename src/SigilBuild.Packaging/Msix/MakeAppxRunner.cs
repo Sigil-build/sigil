@@ -8,6 +8,7 @@ namespace SigilBuild.Packaging.Msix;
 
 public sealed record MakeAppxResult(int ExitCode, string StdOut, string StdErr);
 
+[System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage(Justification = "Wraps MakeAppx.exe from the Windows SDK; exercised only in Windows integration tests.")]
 public sealed class MakeAppxRunner
 {
     private readonly string _exePath;

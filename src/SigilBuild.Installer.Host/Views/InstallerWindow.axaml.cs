@@ -2,6 +2,7 @@ using System;
 using System.ComponentModel;
 using System.Threading.Tasks;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using SigilBuild.Installer.Host.ViewModels;
@@ -146,5 +147,18 @@ public partial class InstallerWindow : Window
         var dialog = new CancelConfirmDialog();
         var result = await dialog.ShowDialog<bool?>(this);
         return result is true;
+    }
+
+    /// <summary>
+    /// Drag the chromeless window when the user presses the sidebar. The
+    /// installer window is borderless (no OS title bar), so without an explicit
+    /// drag hook the user cannot reposition it.
+    /// </summary>
+    private void OnDragHandlePointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+        {
+            BeginMoveDrag(e);
+        }
     }
 }

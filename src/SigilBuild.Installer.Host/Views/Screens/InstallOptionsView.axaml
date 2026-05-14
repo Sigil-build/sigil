@@ -26,6 +26,12 @@
                       SelectedValue="{Binding CurrentValue, Mode=TwoWay}"
                       HorizontalAlignment="Stretch"
                       IsVisible="{Binding IsDynamicEnum}" />
+            <!-- Bool: CheckBox bound to BoolValue (derived view of CurrentValue
+                 as a bool). The Label TextBlock above doubles as the field
+                 caption so we keep the checkbox content empty. -->
+            <CheckBox IsChecked="{Binding BoolValue, Mode=TwoWay}"
+                      Content="Enable"
+                      IsVisible="{Binding IsBool}" />
             <TextBox Text="{Binding CurrentValue, Mode=TwoWay}"
                      IsVisible="{Binding IsTextual}" />
           </StackPanel>

@@ -717,11 +717,36 @@ public sealed class ParameterFieldVm : INotifyPropertyChanged
     public bool IsDynamicEnum => Source is not null;
 
     /// <summary>
-    /// True when neither a static enum nor a dynamic source is in play —
-    /// drives TextBox visibility (string / path / int / secret / bool typed
-    /// in by hand).
+    /// True when the manifest declared <c>type: bool</c> — drives CheckBox
+    /// visibility. Bool defaults arrive as the strings "True"/"False" from
+    /// <see cref="InstallTimeParameter.DefaultAsString"/>; <see cref="BoolValue"/>
+    /// is the two-way bound property the CheckBox binds to.
     /// </summary>
-    public bool IsTextual => !IsStaticEnum && !IsDynamicEnum;
+    public bool IsBool =>
+        string.Equals(Type, "bool", StringComparison.OrdinalIgnoreCase) && !IsStaticEnum && !IsDynamicEnum;
+
+    /// <summary>
+    /// True when none of {static enum, dynamic enum, bool} — drives TextBox
+    /// visibility (string / path / int / secret typed in by hand).
+    /// </summary>
+    public bool IsTextual => !IsStaticEnum && !IsDynamicEnum && !IsBool;
+
+    /// <summary>
+    /// Boolean projection of <see cref="CurrentValue"/> for CheckBox.IsChecked
+    /// two-way binding. Parses "True"/"False"/"true"/"false" case-insensitively;
+    /// anything else maps to false. Writes back the canonical "True"/"False"
+    /// form so the install-launcher's <c>/Name=Value</c> argv stays consistent
+    /// with the manifest's bool defaults.
+    /// </summary>
+    public bool BoolValue
+    {
+        get => bool.TryParse(CurrentValue, out var b) && b;
+        set
+        {
+            var s = value ? "True" : "False";
+            if (CurrentValue != s) CurrentValue = s;
+        }
+    }
 
     /// <summary>
     /// Legacy alias preserved for tests / callers that predated the
@@ -742,6 +767,11 @@ public sealed class ParameterFieldVm : INotifyPropertyChanged
             {
                 _current = value;
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CurrentValue)));
+                // BoolValue is a derived view of CurrentValue; notify so the
+                // CheckBox.IsChecked binding refreshes when CurrentValue is
+                // mutated through any path (write-back, programmatic set,
+                // initial seed).
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(BoolValue)));
             }
         }
     }

@@ -226,6 +226,7 @@ public class WrapperResourceWriterTests
 internal static partial class ResourceReader
 {
     private static readonly IntPtr RtRcData = (IntPtr)10;
+    private static readonly IntPtr RtGroupIcon = (IntPtr)14;
     private const uint LoadLibraryAsDataFile = 0x00000002;
 
     public static byte[] Read(string filePath, string resourceName)
@@ -254,6 +255,34 @@ internal static partial class ResourceReader
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "LoadResource failed");
             }
 
+            var ptr = LockResource(hData);
+            var managed = new byte[size];
+            Marshal.Copy(ptr, managed, 0, (int)size);
+            return managed;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(namePtr);
+            FreeLibrary(hModule);
+        }
+    }
+
+    public static byte[] ReadIconGroup(string filePath, string resourceName)
+    {
+        var hModule = LoadLibraryExW(filePath, IntPtr.Zero, LoadLibraryAsDataFile);
+        if (hModule == IntPtr.Zero)
+            throw new Win32Exception(Marshal.GetLastWin32Error(),
+                $"LoadLibraryEx failed for '{filePath}'");
+
+        var namePtr = Marshal.StringToHGlobalUni(resourceName);
+        try
+        {
+            var hRes = FindResourceW(hModule, namePtr, RtGroupIcon);
+            if (hRes == IntPtr.Zero)
+                throw new Win32Exception(Marshal.GetLastWin32Error(),
+                    $"FindResource failed for RT_GROUP_ICON '{resourceName}'");
+            var size = SizeofResource(hModule, hRes);
+            var hData = LoadResource(hModule, hRes);
             var ptr = LockResource(hData);
             var managed = new byte[size];
             Marshal.Copy(ptr, managed, 0, (int)size);

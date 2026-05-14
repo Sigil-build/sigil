@@ -31,7 +31,7 @@ internal sealed record SerializableWrapperBlob
     public SerializableInstallStep[] PreInstall   { get; init; } = Array.Empty<SerializableInstallStep>();
     public SerializableInstallStep[] PostInstall  { get; init; } = Array.Empty<SerializableInstallStep>();
     public SerializableInstallStep[] UpdateSteps  { get; init; } = Array.Empty<SerializableInstallStep>();
-    public SerializableInstallStep[] Uninstall { get; init; } = Array.Empty<SerializableInstallStep>();
+    public SerializableInstallStep[] Uninstall    { get; init; } = Array.Empty<SerializableInstallStep>();
 
     public static WrapperBlob ToWrapperBlob(SerializableWrapperBlob s)
     {

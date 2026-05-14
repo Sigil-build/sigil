@@ -18,7 +18,8 @@ public sealed record ParameterDefinition(
     string? Pattern,
     int? Min,
     int? Max,
-    ParameterSource? Source = null);
+    ParameterSource? Source = null,
+    string? Screen = null);
 
 /// <summary>
 /// Supported parameter scalar types. Mirrors the schema enum exactly:

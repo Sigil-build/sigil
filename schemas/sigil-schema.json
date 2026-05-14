@@ -26,6 +26,10 @@
           "pattern": { "type": "string" },
           "min": { "type": "integer" },
           "max": { "type": "integer" },
+          "screen": {
+            "type": "string",
+            "description": "Optional wizard page label. Parameters that share a screen value are grouped onto the same Install Options screen in the wrapper installer. Parameters without a screen value land on a default 'Install Options' page after all named screens."
+          },
           "source": {
             "type": "object",
             "description": "Dynamic options source. The wizard fetches `url` at install time, parses JSON, and populates a ComboBox with the items at `items_path` keyed by `value_property` / labelled by `label_property`.",
@@ -334,6 +338,10 @@
           "pattern": { "type": "string" },
           "min": { "type": "integer" },
           "max": { "type": "integer" },
+          "screen": {
+            "type": "string",
+            "description": "Optional wizard page label. Parameters that share a screen value are grouped onto the same Install Options screen in the wrapper installer. Parameters without a screen value land on a default 'Install Options' page after all named screens."
+          },
           "source": {
             "type": "object",
             "description": "Dynamic options source. The wizard fetches `url` at install time, parses JSON, and populates a ComboBox with the items at `items_path` keyed by `value_property` / labelled by `label_property`.",

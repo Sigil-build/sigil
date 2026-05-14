@@ -42,6 +42,13 @@ public sealed class InstallTimeParameter
     [JsonPropertyName("source")]
     public InstallTimeParameterSource? Source { get; init; }
 
+    /// <summary>
+    /// Optional wizard page label. Parameters sharing a screen value land on
+    /// the same Install Options page in the wrapper installer wizard.
+    /// </summary>
+    [JsonPropertyName("screen")]
+    public string? Screen { get; init; }
+
     /// <summary>Default as JSON — could be a string, bool, or int per the manifest schema.</summary>
     [JsonPropertyName("default")]
     public JsonElement Default { get; init; }

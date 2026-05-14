@@ -188,6 +188,7 @@ public static class ManifestParser
             var pattern = GetScalar(value, "pattern");
             var min = GetNullableInt(value, "min");
             var max = GetNullableInt(value, "max");
+            var screen = GetScalar(value, "screen");
             var defaultValue = ReadDefault(value, type);
 
             var sourceMap = GetMapping(value, "source");
@@ -224,7 +225,8 @@ public static class ManifestParser
                 Pattern: pattern,
                 Min: min,
                 Max: max,
-                Source: source);
+                Source: source,
+                Screen: screen);
         }
         return dict;
     }

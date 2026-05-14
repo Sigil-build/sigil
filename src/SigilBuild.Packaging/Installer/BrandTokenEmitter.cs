@@ -123,6 +123,10 @@ public static class BrandTokenEmitter
                         writer.WriteString("labelProperty", param.Source.LabelProperty);
                         writer.WriteEndObject();
                     }
+                    if (!string.IsNullOrEmpty(param.Screen))
+                    {
+                        writer.WriteString("screen", param.Screen);
+                    }
                     WriteDefault(writer, param.Default);
                     writer.WriteEndObject();
                 }

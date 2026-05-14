@@ -25,7 +25,19 @@
           "description": { "type": "string" },
           "pattern": { "type": "string" },
           "min": { "type": "integer" },
-          "max": { "type": "integer" }
+          "max": { "type": "integer" },
+          "source": {
+            "type": "object",
+            "description": "Dynamic options source. The wizard fetches `url` at install time, parses JSON, and populates a ComboBox with the items at `items_path` keyed by `value_property` / labelled by `label_property`.",
+            "required": ["url", "items_path", "value_property", "label_property"],
+            "additionalProperties": false,
+            "properties": {
+              "url":            { "type": "string" },
+              "items_path":     { "type": "string" },
+              "value_property": { "type": "string" },
+              "label_property": { "type": "string" }
+            }
+          }
         }
       }
     },
@@ -321,7 +333,19 @@
           "description": { "type": "string" },
           "pattern": { "type": "string" },
           "min": { "type": "integer" },
-          "max": { "type": "integer" }
+          "max": { "type": "integer" },
+          "source": {
+            "type": "object",
+            "description": "Dynamic options source. The wizard fetches `url` at install time, parses JSON, and populates a ComboBox with the items at `items_path` keyed by `value_property` / labelled by `label_property`.",
+            "required": ["url", "items_path", "value_property", "label_property"],
+            "additionalProperties": false,
+            "properties": {
+              "url":            { "type": "string" },
+              "items_path":     { "type": "string" },
+              "value_property": { "type": "string" },
+              "label_property": { "type": "string" }
+            }
+          }
         }
       }
     },

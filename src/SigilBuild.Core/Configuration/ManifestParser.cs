@@ -190,6 +190,30 @@ public static class ManifestParser
             var max = GetNullableInt(value, "max");
             var defaultValue = ReadDefault(value, type);
 
+            var sourceMap = GetMapping(value, "source");
+            ParameterSource? source = null;
+            if (sourceMap is not null)
+            {
+                var paramLoc = new SourceLocation(fileName, (int)keyNode.Start.Line, (int)keyNode.Start.Column);
+                var url     = GetScalar(sourceMap, "url");
+                var itemsP  = GetScalar(sourceMap, "items_path");
+                var valueP  = GetScalar(sourceMap, "value_property");
+                var labelP  = GetScalar(sourceMap, "label_property");
+                if (url is null || itemsP is null || valueP is null || labelP is null)
+                {
+                    diagnostics.Add(new Diagnostic(
+                        DiagnosticSeverity.Error,
+                        DiagnosticCodes.ParameterSourceInvalid,
+                        $"parameter '{name}' has a `source:` block missing required field(s)",
+                        paramLoc,
+                        "https://docs.sigil.build/diagnostics/SIG0234"));
+                }
+                else
+                {
+                    source = new ParameterSource(url, itemsP, valueP, labelP);
+                }
+            }
+
             dict[name] = new ParameterDefinition(
                 Name: name,
                 Type: type,
@@ -199,7 +223,8 @@ public static class ManifestParser
                 Description: description,
                 Pattern: pattern,
                 Min: min,
-                Max: max);
+                Max: max,
+                Source: source);
         }
         return dict;
     }

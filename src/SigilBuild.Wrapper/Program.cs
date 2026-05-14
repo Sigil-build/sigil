@@ -220,7 +220,7 @@ internal static class Program
     /// <summary>
     /// Drive the auto-derived uninstall flow:
     /// <list type="number">
-    ///   <item>Run any <c>pre_uninstall</c> steps declared in the manifest —
+    ///   <item>Run any <c>uninstall</c> steps declared in the manifest —
     ///         services, scheduled tasks, custom scripts the install journal
     ///         doesn't cover get torn down here, BEFORE the journal replays.</item>
     ///   <item>Load <c>%ProgramData%\Sigil\&lt;AppId&gt;\uninstall.json</c>,
@@ -231,32 +231,32 @@ internal static class Program
     /// </summary>
     private static async Task<int> RunUninstallAsync(WrapperBlob blob)
     {
-        // pre_uninstall runs in the SAME context as install_steps would, so
+        // uninstall runs in the SAME context as install_steps would, so
         // ${parameters.*} and ${app.*} resolve identically. Failures by
         // default abort the uninstall; on_failure: continue marks a step as
         // best-effort (typical for "stop service that may not exist" patterns).
-        if (blob.PreUninstall.Count > 0)
+        if (blob.Uninstall.Count > 0)
         {
-            WrapperLog.Info($"pre_uninstall: running {blob.PreUninstall.Count} step(s) before journal replay");
+            WrapperLog.Info($"uninstall: running {blob.Uninstall.Count} step(s) before journal replay");
             var ctx = StepContext.From(blob, new ParsedCommandLine { Mode = WrapperMode.Uninstall });
             var preResult = await new InstallEngine().RunAsync(
                 preInstall: Array.Empty<InstallStep>(),
-                installSteps: blob.PreUninstall,
+                installSteps: blob.Uninstall,
                 postInstall: Array.Empty<InstallStep>(),
                 ctx: ctx).ConfigureAwait(false);
             if (!preResult.Success)
             {
-                WrapperLog.Error($"pre_uninstall failed: {preResult.Error}");
+                WrapperLog.Error($"uninstall failed: {preResult.Error}");
                 if (preResult.Error is not null)
                 {
                     Console.Error.WriteLine(preResult.Error);
                 }
                 // Continue with journal replay anyway — the user wants uninstall
-                // to make progress; pre_uninstall failure is logged but not fatal.
+                // to make progress; uninstall failure is logged but not fatal.
             }
             else
             {
-                WrapperLog.Info("pre_uninstall complete");
+                WrapperLog.Info("uninstall complete");
             }
         }
 

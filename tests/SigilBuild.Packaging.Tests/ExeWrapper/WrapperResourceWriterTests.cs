@@ -135,7 +135,7 @@ public class WrapperResourceWriterTests
             PreInstall: Array.Empty<InstallStep>(),
             PostInstall: Array.Empty<InstallStep>(),
             UpdateSteps: Array.Empty<InstallStep>(),
-            PreUninstall: Array.Empty<InstallStep>());
+            Uninstall: Array.Empty<InstallStep>());
 
         var deserialized = DeserializeBlob(SerializeBlob(blob));
 
@@ -175,7 +175,7 @@ public class WrapperResourceWriterTests
             PreInstall: Array.Empty<InstallStep>(),
             PostInstall: Array.Empty<InstallStep>(),
             UpdateSteps: Array.Empty<InstallStep>(),
-            PreUninstall: Array.Empty<InstallStep>());
+            Uninstall: Array.Empty<InstallStep>());
 
         var deserialized = DeserializeBlob(SerializeBlob(blob));
 

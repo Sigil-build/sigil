@@ -31,7 +31,7 @@ internal sealed record SerializableWrapperBlob
     public SerializableInstallStep[] PreInstall   { get; init; } = Array.Empty<SerializableInstallStep>();
     public SerializableInstallStep[] PostInstall  { get; init; } = Array.Empty<SerializableInstallStep>();
     public SerializableInstallStep[] UpdateSteps  { get; init; } = Array.Empty<SerializableInstallStep>();
-    public SerializableInstallStep[] PreUninstall { get; init; } = Array.Empty<SerializableInstallStep>();
+    public SerializableInstallStep[] Uninstall { get; init; } = Array.Empty<SerializableInstallStep>();
 
     public static WrapperBlob ToWrapperBlob(SerializableWrapperBlob s)
     {
@@ -50,7 +50,7 @@ internal sealed record SerializableWrapperBlob
             PreInstall:   ConvertSteps(s.PreInstall),
             PostInstall:  ConvertSteps(s.PostInstall),
             UpdateSteps:  ConvertSteps(s.UpdateSteps),
-            PreUninstall: ConvertSteps(s.PreUninstall));
+            Uninstall:    ConvertSteps(s.Uninstall));
     }
 
     public static SerializableWrapperBlob FromWrapperBlob(WrapperBlob blob)
@@ -69,7 +69,7 @@ internal sealed record SerializableWrapperBlob
             PreInstall   = SerializeSteps(blob.PreInstall),
             PostInstall  = SerializeSteps(blob.PostInstall),
             UpdateSteps  = SerializeSteps(blob.UpdateSteps),
-            PreUninstall = SerializeSteps(blob.PreUninstall),
+            Uninstall    = SerializeSteps(blob.Uninstall),
         };
     }
 

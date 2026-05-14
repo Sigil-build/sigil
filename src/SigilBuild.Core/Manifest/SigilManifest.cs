@@ -16,8 +16,8 @@ public sealed record SigilManifest(
     IReadOnlyList<InstallStep>? InstallSteps = null,
     IReadOnlyList<InstallStep>? PreInstall = null,
     IReadOnlyList<InstallStep>? PostInstall = null,
-    // pre_uninstall: steps that run when the wrapper is invoked with /Uninstall,
+    // uninstall: steps that run when the wrapper is invoked with /Uninstall,
     // BEFORE the rollback journal replays. Lets the manifest tear down anything
     // that wasn't journalled (services + scheduled tasks + custom PS scripts)
     // via the same run_program / file_copy / registry_* surface install_steps use.
-    IReadOnlyList<InstallStep>? PreUninstall = null);
+    IReadOnlyList<InstallStep>? Uninstall = null);

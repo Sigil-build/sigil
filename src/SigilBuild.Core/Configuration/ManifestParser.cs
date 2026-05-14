@@ -64,7 +64,7 @@ public static class ManifestParser
             InstallSteps: ParseInstallSteps(GetSequenceOfMappings(root, "install_steps"), diagnostics, file),
             PreInstall: ParseInstallSteps(GetSequenceOfMappings(root, "pre_install"), diagnostics, file),
             PostInstall: ParseInstallSteps(GetSequenceOfMappings(root, "post_install"), diagnostics, file),
-            PreUninstall: ParseInstallSteps(GetSequenceOfMappings(root, "pre_uninstall"), diagnostics, file));
+            Uninstall: ParseInstallSteps(GetSequenceOfMappings(root, "uninstall"), diagnostics, file));
     }
 
     private static AppSection MapApp(YamlMappingNode node) => new(

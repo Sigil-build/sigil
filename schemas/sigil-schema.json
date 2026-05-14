@@ -391,7 +391,7 @@
         }
       }
     },
-    "pre_uninstall": {
+    "uninstall": {
       "type": "array",
       "description": "Steps executed at the start of `setup.exe /Uninstall`, BEFORE the rollback journal replays. Lets the manifest tear down services / scheduled tasks / external scripts that the install journal doesn't cover.",
       "items": {

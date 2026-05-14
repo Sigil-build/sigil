@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
+using SigilBuild.Packaging;
 using SigilBuild.Packaging.ExeWrapper;
 using Xunit;
 
@@ -31,6 +32,43 @@ public class IconResourceWriterTests
         finally
         {
             try { File.Delete(tmp); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public async Task ExeWrapperPackager_StampsIconOnProducedSetupExe_WhenWrapperRuntimeStaged()
+    {
+        string stubExe;
+        try { stubExe = WrapperRuntimeLocator.Locate(); }
+        catch (FileNotFoundException) { return; /* soft-skip — AOT runtime not staged */ }
+
+        var fixtureDir = Path.Combine(AppContext.BaseDirectory, "Fixtures", "minimal-payload");
+        if (!Directory.Exists(fixtureDir)) return; // soft-skip — fixture not staged
+
+        var loadResult = await SigilBuild.Core.Configuration.ManifestLoader.LoadAsync(
+            Path.Combine(fixtureDir, "sigil.yaml"),
+            new SigilBuild.Core.Configuration.ProcessEnvironmentReader());
+        loadResult.Manifest.Should().NotBeNull();
+
+        var outputDir = Path.Combine(Path.GetTempPath(), $"sigil-icon-pack-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(outputDir);
+        try
+        {
+            var packager = new ExeWrapperPackager();
+            var options = new PackOptions(
+                SourceDirectory: Path.Combine(fixtureDir, "payload"),
+                OutputDirectory: outputDir,
+                Format: SigilBuild.Core.Manifest.PackageFormat.Exe,
+                Architecture: SigilBuild.Core.Manifest.TargetArchitecture.X64);
+            var result = await packager.PackAsync(loadResult.Manifest!, options, CancellationToken.None);
+            result.Artifact.Should().NotBeNull();
+
+            var iconGroup = ResourceReader.ReadIconGroup(result.Artifact!.Path, "MAINICON");
+            iconGroup.Length.Should().BeGreaterThan(6, "the bundled default icon should be stamped automatically");
+        }
+        finally
+        {
+            try { Directory.Delete(outputDir, recursive: true); } catch { /* best-effort */ }
         }
     }
 }

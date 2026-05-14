@@ -55,6 +55,40 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
                 tokens.AppName);
         }
 
+        // Build the per-parameter VMs that drive the InstallOptionsView's
+        // ItemsControl. Each ParameterFieldVm carries the static metadata
+        // (name, label, type, allowed values for enums) plus the current
+        // user-edited value; CurrentValue changes flow back into
+        // _parameterValues so the install subprocess launcher reads the
+        // user's edits, not the defaults.
+        var fields = new List<ParameterFieldVm>(InstallTimeParameters.Count);
+        foreach (var p in InstallTimeParameters)
+        {
+            _parameterValues.TryGetValue(p.Name, out var current);
+            var field = new ParameterFieldVm
+            {
+                Name = p.Name,
+                Label = string.IsNullOrEmpty(p.Description) ? p.Name : p.Description!,
+                Type = p.Type,
+                Values = p.Values,
+                CurrentValue = current ?? p.DefaultAsString,
+            };
+            fields.Add(field);
+        }
+        foreach (var f in fields)
+        {
+            var capture = f;
+            capture.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(ParameterFieldVm.CurrentValue))
+                {
+                    _parameterValues[capture.Name] = capture.CurrentValue;
+                    if (capture.Name == "install_dir") InstallPath = capture.CurrentValue;
+                }
+            };
+        }
+        ParameterFields = fields;
+
         LogoImage = TryLoadLogo(tokens.LogoFile);
     }
 
@@ -68,6 +102,16 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     /// wrapper's <c>/Name=value</c> CLI form.
     /// </summary>
     public IReadOnlyList<InstallTimeParameter> InstallTimeParameters { get; }
+
+    /// <summary>
+    /// Per-parameter view-model entries the InstallOptionsView's ItemsControl
+    /// binds to. One <see cref="ParameterFieldVm"/> per install-time parameter,
+    /// in declaration order. Mutations to each entry's
+    /// <see cref="ParameterFieldVm.CurrentValue"/> flow back into
+    /// <see cref="ParameterValues"/>; for <c>install_dir</c> they also mirror
+    /// into <see cref="InstallPath"/>.
+    /// </summary>
+    public IReadOnlyList<ParameterFieldVm> ParameterFields { get; } = Array.Empty<ParameterFieldVm>();
 
     private readonly Dictionary<string, string> _parameterValues;
 
@@ -340,4 +384,49 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
 
     private void OnPropertyChanged([CallerMemberName] string? name = null)
         => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name ?? ""));
+}
+
+/// <summary>
+/// Per-parameter view-model entry rendered by the Install Options screen's
+/// ItemsControl. The view template chooses ComboBox vs TextBox based on
+/// <see cref="Type"/>; binding writes flow back into the parent
+/// <see cref="InstallerViewModel"/>'s parameter-value dictionary via the
+/// <see cref="PropertyChanged"/> subscription wired in the constructor.
+/// </summary>
+public sealed class ParameterFieldVm : INotifyPropertyChanged
+{
+    /// <summary>Canonical parameter name from sigil.yaml.</summary>
+    public string Name { get; init; } = "";
+
+    /// <summary>Human-readable label (description text, falls back to <see cref="Name"/>).</summary>
+    public string Label { get; init; } = "";
+
+    /// <summary>Scalar type: <c>string</c>, <c>path</c>, <c>bool</c>, <c>int</c>, <c>enum</c>, <c>secret</c>.</summary>
+    public string Type { get; init; } = "string";
+
+    /// <summary>Allowed values when <see cref="Type"/> is <c>enum</c>; null otherwise.</summary>
+    public IReadOnlyList<string>? Values { get; init; }
+
+    /// <summary>True when <see cref="Type"/> is <c>enum</c> — drives ComboBox visibility in the view.</summary>
+    public bool IsEnum => string.Equals(Type, "enum", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>True for every non-enum type — drives TextBox visibility in the view.</summary>
+    public bool IsTextual => !IsEnum;
+
+    private string _current = "";
+    /// <summary>The currently bound value (default at construction, mutated by ComboBox/TextBox edits).</summary>
+    public string CurrentValue
+    {
+        get => _current;
+        set
+        {
+            if (_current != value)
+            {
+                _current = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CurrentValue)));
+            }
+        }
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
 }

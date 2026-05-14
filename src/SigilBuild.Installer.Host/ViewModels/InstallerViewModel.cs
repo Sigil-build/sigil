@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using SigilBuild.Installer.Host.Branding;
+using SigilBuild.Installer.Host.Services;
 
 namespace SigilBuild.Installer.Host.ViewModels;
 
@@ -71,6 +72,7 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
                 Label = string.IsNullOrEmpty(p.Description) ? p.Name : p.Description!,
                 Type = p.Type,
                 Values = p.Values,
+                Source = p.Source,
                 CurrentValue = current ?? p.DefaultAsString,
             };
             fields.Add(field);
@@ -407,11 +409,60 @@ public sealed class ParameterFieldVm : INotifyPropertyChanged
     /// <summary>Allowed values when <see cref="Type"/> is <c>enum</c>; null otherwise.</summary>
     public IReadOnlyList<string>? Values { get; init; }
 
-    /// <summary>True when <see cref="Type"/> is <c>enum</c> — drives ComboBox visibility in the view.</summary>
-    public bool IsEnum => string.Equals(Type, "enum", StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// When the manifest declares a <c>source</c> block on this parameter, the
+    /// wizard fetches the dropdown options at install time and stuffs them into
+    /// <see cref="DynamicOptions"/>. Null means "static" — the field renders as
+    /// a TextBox or, if <see cref="Type"/> is <c>enum</c>, a ComboBox bound to
+    /// <see cref="Values"/>.
+    /// </summary>
+    public InstallTimeParameterSource? Source { get; init; }
 
-    /// <summary>True for every non-enum type — drives TextBox visibility in the view.</summary>
-    public bool IsTextual => !IsEnum;
+    private IReadOnlyList<HttpOption> _dynamicOptions = Array.Empty<HttpOption>();
+    /// <summary>
+    /// Options fetched from <see cref="Source"/> at attach time. Empty until the
+    /// HTTPS fetch completes (or forever if it fails — the field still renders
+    /// but the dropdown is empty so the user knows something is off).
+    /// </summary>
+    public IReadOnlyList<HttpOption> DynamicOptions
+    {
+        get => _dynamicOptions;
+        set
+        {
+            _dynamicOptions = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DynamicOptions)));
+        }
+    }
+
+    /// <summary>
+    /// True when the manifest declared <c>type: enum</c> with a static
+    /// <c>values:</c> list and no <c>source:</c> block — drives the static
+    /// ComboBox's visibility in the view.
+    /// </summary>
+    public bool IsStaticEnum =>
+        string.Equals(Type, "enum", StringComparison.OrdinalIgnoreCase) && Source is null && Values is not null;
+
+    /// <summary>
+    /// True when the manifest declared a <c>source:</c> block (dynamic options
+    /// fetched over HTTPS at install time) — drives the dynamic ComboBox's
+    /// visibility.
+    /// </summary>
+    public bool IsDynamicEnum => Source is not null;
+
+    /// <summary>
+    /// True when neither a static enum nor a dynamic source is in play —
+    /// drives TextBox visibility (string / path / int / secret / bool typed
+    /// in by hand).
+    /// </summary>
+    public bool IsTextual => !IsStaticEnum && !IsDynamicEnum;
+
+    /// <summary>
+    /// Legacy alias preserved for tests / callers that predated the
+    /// static-vs-dynamic split. Equivalent to <see cref="IsStaticEnum"/>
+    /// (a parameter with a <c>source</c> is no longer considered "enum"
+    /// for view-binding purposes — it gets its own dynamic ComboBox).
+    /// </summary>
+    public bool IsEnum => IsStaticEnum;
 
     private string _current = "";
     /// <summary>The currently bound value (default at construction, mutated by ComboBox/TextBox edits).</summary>

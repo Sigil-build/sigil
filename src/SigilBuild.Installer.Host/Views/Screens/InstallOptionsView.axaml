@@ -12,10 +12,20 @@
         <DataTemplate DataType="vm:ParameterFieldVm">
           <StackPanel Spacing="4" Margin="0,0,0,8">
             <TextBlock Text="{Binding Label}" FontWeight="SemiBold" />
+            <!-- Static enum: ComboBox bound to manifest-declared `values:` list -->
             <ComboBox ItemsSource="{Binding Values}"
                       SelectedItem="{Binding CurrentValue, Mode=TwoWay}"
                       HorizontalAlignment="Stretch"
-                      IsVisible="{Binding IsEnum}" />
+                      IsVisible="{Binding IsStaticEnum}" />
+            <!-- Dynamic enum: ComboBox bound to options fetched at attach time from `source:`.
+                 SelectedValueBinding pulls .Value out of each HttpOption so the bound CurrentValue
+                 ends up being the canonical id (not a record reference). -->
+            <ComboBox ItemsSource="{Binding DynamicOptions}"
+                      DisplayMemberBinding="{Binding Label}"
+                      SelectedValueBinding="{Binding Value}"
+                      SelectedValue="{Binding CurrentValue, Mode=TwoWay}"
+                      HorizontalAlignment="Stretch"
+                      IsVisible="{Binding IsDynamicEnum}" />
             <TextBox Text="{Binding CurrentValue, Mode=TwoWay}"
                      IsVisible="{Binding IsTextual}" />
           </StackPanel>

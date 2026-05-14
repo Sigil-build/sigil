@@ -1,0 +1,28 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:SigilBuild.Installer.Host.ViewModels"
+             x:DataType="vm:InstallerViewModel"
+             x:Class="SigilBuild.Installer.Host.Views.Screens.InstallDirView">
+  <StackPanel Spacing="16">
+    <TextBlock FontSize="20" FontWeight="SemiBold" Text="Choose Install Location" />
+    <TextBlock Text="Select the folder where the application will be installed."
+               Foreground="#4B5563" TextWrapping="Wrap" />
+
+    <StackPanel Spacing="4">
+      <TextBlock Text="Destination Folder" FontWeight="SemiBold" />
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBox Grid.Column="0" Text="{Binding InstallPath, Mode=TwoWay}" />
+        <Button Grid.Column="1" Content="Browse..." Margin="8,0,0,0" Click="OnBrowse" />
+      </Grid>
+    </StackPanel>
+
+    <!-- NSIS-style disk-space readout. Recomputes from InstallPath whenever
+         the user types or browses to a different folder. -->
+    <Border Background="#F3F4F6" CornerRadius="6" Padding="12">
+      <StackPanel Spacing="2">
+        <TextBlock Text="{Binding InstallDirDriveLabel}" FontWeight="SemiBold" />
+        <TextBlock Text="{Binding InstallDirSpaceLabel}" Foreground="#4B5563" />
+      </StackPanel>
+    </Border>
+  </StackPanel>
+</UserControl>

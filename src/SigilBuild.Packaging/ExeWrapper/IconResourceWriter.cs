@@ -49,6 +49,7 @@ internal static partial class IconResourceWriter
             throw new Win32Exception(Marshal.GetLastWin32Error(),
                 $"BeginUpdateResource failed for '{exePath}'");
 
+        var committed = false;
         try
         {
             for (var i = 0; i < images.Length; i++)
@@ -63,11 +64,17 @@ internal static partial class IconResourceWriter
             if (!EndUpdateResourceW(hUpdate, fDiscard: false))
                 throw new Win32Exception(Marshal.GetLastWin32Error(),
                     $"EndUpdateResource (commit) failed for '{exePath}'");
+            committed = true;
         }
-        catch
+        finally
         {
-            _ = EndUpdateResourceW(hUpdate, fDiscard: true);
-            throw;
+            // EndUpdateResource is called at most once per hUpdate: either the
+            // commit above ran (and freed the handle) or we discard here on
+            // any path that did not reach `committed = true`.
+            if (!committed)
+            {
+                _ = EndUpdateResourceW(hUpdate, fDiscard: true);
+            }
         }
     }
 

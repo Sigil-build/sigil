@@ -35,7 +35,7 @@ public class WrapperResourceWriterTests
         {
             var blob = Encoding.UTF8.GetBytes("hello-blob");
             var payload = new byte[] { 1, 2, 3 };
-            await WrapperResourceWriter.WriteAsync(tmp, blob, payload, CancellationToken.None);
+            await WrapperResourceWriter.WriteAsync(tmp, blob, payload, installerHostBundle: null, CancellationToken.None);
 
             // Read the resource back via raw Win32 APIs without launching the
             // wrapper exe (which would also exercise Half B).
@@ -44,6 +44,43 @@ public class WrapperResourceWriterTests
 
             var roundtrippedPayload = ResourceReader.Read(tmp, "SIGIL_PAYLOAD_V1");
             roundtrippedPayload.Should().Equal(payload);
+        }
+        finally
+        {
+            try { File.Delete(tmp); } catch (IOException) { }
+        }
+    }
+
+    /// <summary>
+    /// Three-resource round-trip: when <c>installerHostBundle</c> is supplied,
+    /// the writer must embed it under <c>SIGIL_INSTALLER_HOST_V1</c> alongside
+    /// the existing BLOB + PAYLOAD resources, and the wrapper-side reader
+    /// (which lives in <c>WrapperBlob.LoadInstallerHostBundleBytes</c>) must
+    /// see exactly the same bytes back. Soft-skips when the AOT runtime isn't
+    /// staged (same gate as the existing 2-resource test, just non-blocking).
+    /// </summary>
+    [Fact]
+    public async Task Roundtrip_three_resources_includes_installer_host_bundle()
+    {
+        string stubExe;
+        try { stubExe = WrapperRuntimeLocator.Locate(); }
+        catch (FileNotFoundException) { return; /* soft-skip — runtime not staged */ }
+
+        var tmp = Path.Combine(Path.GetTempPath(), $"sigil-rw3-{Guid.NewGuid():N}.exe");
+        File.Copy(stubExe, tmp, overwrite: true);
+        try
+        {
+            var blob = Encoding.UTF8.GetBytes("hello-blob");
+            var payload = new byte[] { 1, 2, 3 };
+            // Synthetic bundle bytes — the writer doesn't care that this isn't
+            // a valid zip; it's a black-box round-trip.
+            var hostBundle = Encoding.UTF8.GetBytes("PK\x03\x04synthetic-bundle");
+
+            await WrapperResourceWriter.WriteAsync(tmp, blob, payload, hostBundle, CancellationToken.None);
+
+            ResourceReader.Read(tmp, "SIGIL_BLOB_V1").Should().Equal(blob);
+            ResourceReader.Read(tmp, "SIGIL_PAYLOAD_V1").Should().Equal(payload);
+            ResourceReader.Read(tmp, "SIGIL_INSTALLER_HOST_V1").Should().Equal(hostBundle);
         }
         finally
         {
@@ -70,6 +107,7 @@ public class WrapperResourceWriterTests
     {
         var blob = new WrapperBlob(
             AppId: "com.example.app",
+            App: AppMetadata.Empty with { Id = "com.example.app", Name = "Example", Version = "1.0.0", Publisher = "ExampleCo" },
             Parameters: new[]
             {
                 new ParameterDefinition(
@@ -96,7 +134,8 @@ public class WrapperResourceWriterTests
             InstallSteps: Array.Empty<InstallStep>(),
             PreInstall: Array.Empty<InstallStep>(),
             PostInstall: Array.Empty<InstallStep>(),
-            UpdateSteps: Array.Empty<InstallStep>());
+            UpdateSteps: Array.Empty<InstallStep>(),
+            PreUninstall: Array.Empty<InstallStep>());
 
         var deserialized = DeserializeBlob(SerializeBlob(blob));
 
@@ -116,6 +155,7 @@ public class WrapperResourceWriterTests
     {
         var blob = new WrapperBlob(
             AppId: "com.example.app",
+            App: AppMetadata.Empty with { Id = "com.example.app", Name = "Example", Version = "1.0.0", Publisher = "ExampleCo" },
             Parameters: Array.Empty<ParameterDefinition>(),
             InstallSteps: new InstallStep[]
             {
@@ -134,7 +174,8 @@ public class WrapperResourceWriterTests
             },
             PreInstall: Array.Empty<InstallStep>(),
             PostInstall: Array.Empty<InstallStep>(),
-            UpdateSteps: Array.Empty<InstallStep>());
+            UpdateSteps: Array.Empty<InstallStep>(),
+            PreUninstall: Array.Empty<InstallStep>());
 
         var deserialized = DeserializeBlob(SerializeBlob(blob));
 

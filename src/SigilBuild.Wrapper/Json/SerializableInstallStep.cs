@@ -90,6 +90,15 @@ internal sealed record SerializableInstallStep
     public string? Cwd { get; init; }
     public int[]? ExpectedExitCodes { get; init; }
     public int? TimeoutSeconds { get; init; }
+
+    // service_install
+    public string? ServiceName { get; init; }
+    public string? BinaryPath { get; init; }
+    public string? DisplayName { get; init; }
+    public string? ServiceDescription { get; init; }
+    public string? StartType { get; init; }
+    public string? ServiceAccount { get; init; }
+    public bool? StartAfterInstall { get; init; }
 }
 
 /// <summary>
@@ -192,6 +201,18 @@ internal static class SerializableInstallStepConverter
                 s.Cwd,
                 s.ExpectedExitCodes,
                 s.TimeoutSeconds,
+                s.When,
+                onFailure),
+
+            "service_install" => new InstallStep.ServiceInstall(
+                s.Id,
+                s.ServiceName ?? throw MissingField("service_install", "name", s.Id),
+                s.BinaryPath  ?? throw MissingField("service_install", "binary_path", s.Id),
+                s.DisplayName ?? s.ServiceName ?? "",
+                s.ServiceDescription,
+                s.StartType ?? "auto",
+                s.ServiceAccount ?? "LocalSystem",
+                s.StartAfterInstall ?? true,
                 s.When,
                 onFailure),
 
@@ -325,6 +346,21 @@ internal static class SerializableInstallStepConverter
                 Cwd = x.Cwd,
                 ExpectedExitCodes = ToArray(x.ExpectedExitCodes),
                 TimeoutSeconds = x.TimeoutSeconds,
+            },
+
+            InstallStep.ServiceInstall x => new SerializableInstallStep
+            {
+                Id = x.Id,
+                Type = "service_install",
+                When = x.When,
+                OnFailure = onFailure,
+                ServiceName = x.Name,
+                BinaryPath = x.BinaryPath,
+                DisplayName = x.DisplayName,
+                ServiceDescription = x.Description,
+                StartType = x.StartType,
+                ServiceAccount = x.ServiceAccount,
+                StartAfterInstall = x.StartAfterInstall,
             },
 
             _ => throw new InvalidOperationException(

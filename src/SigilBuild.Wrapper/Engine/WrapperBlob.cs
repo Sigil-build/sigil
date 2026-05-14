@@ -15,11 +15,13 @@ namespace SigilBuild.Wrapper.Engine;
 /// </summary>
 internal sealed partial record WrapperBlob(
     string AppId,
+    AppMetadata App,
     IReadOnlyList<ParameterDefinition> Parameters,
     IReadOnlyList<InstallStep> InstallSteps,
     IReadOnlyList<InstallStep> PreInstall,
     IReadOnlyList<InstallStep> PostInstall,
-    IReadOnlyList<InstallStep> UpdateSteps)
+    IReadOnlyList<InstallStep> UpdateSteps,
+    IReadOnlyList<InstallStep> PreUninstall)
 {
     /// <summary>
     /// Empty sentinel blob: well-known <c>AppId</c> placeholder and zero-length
@@ -30,11 +32,13 @@ internal sealed partial record WrapperBlob(
     /// </summary>
     public static WrapperBlob Empty { get; } = new(
         AppId: "<unset>",
+        App: AppMetadata.Empty,
         Parameters: Array.Empty<ParameterDefinition>(),
         InstallSteps: Array.Empty<InstallStep>(),
         PreInstall: Array.Empty<InstallStep>(),
         PostInstall: Array.Empty<InstallStep>(),
-        UpdateSteps: Array.Empty<InstallStep>());
+        UpdateSteps: Array.Empty<InstallStep>(),
+        PreUninstall: Array.Empty<InstallStep>());
 
     /// <summary>
     /// Read the blob from the running executable's embedded Win32 resource.
@@ -77,8 +81,22 @@ internal sealed partial record WrapperBlob(
         return TryReadResource(PayloadResourceName) ?? Array.Empty<byte>();
     }
 
+    /// <summary>
+    /// Read the embedded installer-host bundle bytes
+    /// (<c>SIGIL_INSTALLER_HOST_V1</c>) from the running executable. Returns
+    /// <c>null</c> when the resource isn't embedded — manifests without an
+    /// <c>installer:</c> block produce a headless-only setup.exe. The wrapper
+    /// runtime treats null as "no wizard available" and falls through to
+    /// running install_steps directly.
+    /// </summary>
+    public static byte[]? LoadInstallerHostBundleBytes()
+    {
+        return TryReadResource(InstallerHostResourceName);
+    }
+
     private const string BlobResourceName = "SIGIL_BLOB_V1";
     private const string PayloadResourceName = "SIGIL_PAYLOAD_V1";
+    private const string InstallerHostResourceName = "SIGIL_INSTALLER_HOST_V1";
 
     // RT_RCDATA — application-defined raw data resource (winuser.h).
     private static readonly IntPtr RtRcData = (IntPtr)10;

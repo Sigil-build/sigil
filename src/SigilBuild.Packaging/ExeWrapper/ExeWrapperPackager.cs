@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using SigilBuild.Core.Diagnostics;
 using SigilBuild.Core.Manifest;
 using SigilBuild.Packaging.Common;
+using SigilBuild.Packaging.Installer;
 using SigilBuild.Wrapper.Engine;
 using SigilBuild.Wrapper.Json;
 
@@ -78,8 +79,16 @@ public sealed class ExeWrapperPackager : IPackager
         // payload:// path resolution) lands with Tasks 15+.
         var payloadBytes = BuildPayloadBytes(options.SourceDirectory, ct);
 
-        // Embed both resources via the Win32 update-resource flow.
-        await WrapperResourceWriter.WriteAsync(outputPath, blobBytes, payloadBytes, ct)
+        // Build the SIGIL_INSTALLER_HOST_V1 wire payload when the manifest
+        // declares an `installer:` block AND the AOT-published installer.exe
+        // is staged next to the SDK. When it's missing, fall through to the
+        // headless path — the wrapper runs install_steps without a wizard.
+        // This mirrors the policy MsixPackager.Bundle uses for MSIX.
+        var (installerHostBundle, installerHostDiagnostic) =
+            TryBuildInstallerHostBundle(manifest);
+
+        // Embed all resources via the Win32 update-resource flow.
+        await WrapperResourceWriter.WriteAsync(outputPath, blobBytes, payloadBytes, installerHostBundle, ct)
             .ConfigureAwait(false);
 
         // Compute sha256 + size *after* the resource embed so the artifact
@@ -88,7 +97,66 @@ public sealed class ExeWrapperPackager : IPackager
         var size = new FileInfo(outputPath).Length;
 
         var artifact = new PackedArtifact(outputPath, sha256, size);
-        return new PackResult(artifact, Array.Empty<Diagnostic>());
+        var diagnostics = installerHostDiagnostic is null
+            ? Array.Empty<Diagnostic>()
+            : new[] { installerHostDiagnostic };
+        return new PackResult(artifact, diagnostics);
+    }
+
+    /// <summary>
+    /// Try to build the <c>SIGIL_INSTALLER_HOST_V1</c> bundle. Returns
+    /// <c>(null, null)</c> when the manifest has no <c>installer:</c> block;
+    /// <c>(null, SIG0121-warning)</c> when the block is present but the
+    /// AOT-published installer.exe is not staged (caller continues with a
+    /// headless setup.exe); <c>(bundleBytes, null)</c> on success.
+    /// </summary>
+    private static (byte[]? Bundle, Diagnostic? Diagnostic) TryBuildInstallerHostBundle(SigilManifest manifest)
+    {
+        if (manifest.Installer is null)
+        {
+            return (null, null);
+        }
+
+        var hostExePath = InstallerHostLocator.TryLocate();
+        if (hostExePath is null)
+        {
+            return (null, new Diagnostic(DiagnosticSeverity.Warning, "SIG0121",
+                "manifest declares an installer: block but the AOT-published installer.exe was not found. " +
+                "Setup.exe is built without a wizard — install_steps will run headlessly. " +
+                "Stage installer.exe under runtimes/win-x64/ next to the SDK to enable the wizard.",
+                SourceLocation.Unknown,
+                "https://docs.sigil.build/diagnostics/SIG0121"));
+        }
+
+        // Resolve the brand logo path declared in the manifest (relative to
+        // the manifest file's directory) and bundle the file under a
+        // wizard-friendly name. When the manifest declares no logo (or the
+        // file doesn't exist on the build machine), pass null and the wizard
+        // falls back to the default no-logo state.
+        string? brandLogoAbsolutePath = null;
+        string? bundledLogoName = null;
+        var brandLogo = manifest.Installer?.Brand?.Logo;
+        if (!string.IsNullOrEmpty(brandLogo))
+        {
+            var manifestDir = Path.GetDirectoryName(manifest.Location.File);
+            var candidate = Path.IsPathRooted(brandLogo) || string.IsNullOrEmpty(manifestDir)
+                ? brandLogo
+                : Path.GetFullPath(Path.Combine(manifestDir, brandLogo));
+            if (File.Exists(candidate))
+            {
+                brandLogoAbsolutePath = candidate;
+                bundledLogoName = InstallerHostBundle.BrandLogoEntryPrefix + Path.GetExtension(candidate);
+            }
+        }
+
+        // BrandTokenEmitter is the shared brand-token serializer used by the
+        // MSIX path too — see SigilBuild.Packaging.Installer.BrandTokenEmitter.
+        // Warnings (e.g. WCAG-AA contrast failures) are accepted at pack time;
+        // a future task can surface them through diagnostics.
+        var tokens = BrandTokenEmitter.Emit(manifest, allowLowContrast: true, bundledLogoFileName: bundledLogoName);
+        var installTimeParams = BrandTokenEmitter.EmitInstallTimeParameters(manifest);
+        var bundle = InstallerHostBundle.Build(hostExePath, tokens, installTimeParams, brandLogoAbsolutePath);
+        return (bundle, null);
     }
 
     private static byte[] BuildBlobBytes(SigilManifest manifest)
@@ -99,13 +167,21 @@ public sealed class ExeWrapperPackager : IPackager
 
         var inMemory = new WrapperBlob(
             AppId: manifest.App.Id,
+            App: new AppMetadata(
+                Id: manifest.App.Id,
+                Name: manifest.App.Name,
+                Version: manifest.App.Version,
+                Publisher: manifest.App.Publisher,
+                Description: manifest.App.Description,
+                Homepage: manifest.App.Homepage),
             Parameters: parameters,
             InstallSteps: manifest.InstallSteps ?? Array.Empty<InstallStep>(),
             PreInstall: manifest.PreInstall ?? Array.Empty<InstallStep>(),
             PostInstall: manifest.PostInstall ?? Array.Empty<InstallStep>(),
             // Update-step block doesn't yet exist on SigilManifest (Task 19+);
             // emit an empty list for forward compatibility.
-            UpdateSteps: Array.Empty<InstallStep>());
+            UpdateSteps: Array.Empty<InstallStep>(),
+            PreUninstall: manifest.PreUninstall ?? Array.Empty<InstallStep>());
 
         var serializable = SerializableWrapperBlob.FromWrapperBlob(inMemory);
         var json = System.Text.Json.JsonSerializer.Serialize(

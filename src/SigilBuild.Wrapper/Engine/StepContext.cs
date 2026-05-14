@@ -59,6 +59,17 @@ public sealed class StepContext
             }
         }
 
+        // App metadata — sourced from the manifest's `app:` block via
+        // WrapperBlob.App. Without these, ${app.version} / ${app.publisher}
+        // etc. in registry_write values land as literal placeholder text in
+        // the registry, which the user cannot tell from a real failure.
+        dict["app.id"] = blob.App.Id;
+        dict["app.name"] = blob.App.Name;
+        dict["app.version"] = blob.App.Version;
+        dict["app.publisher"] = blob.App.Publisher;
+        dict["app.description"] = blob.App.Description ?? string.Empty;
+        dict["app.homepage"] = blob.App.Homepage ?? string.Empty;
+
         // System context (used by the expression evaluator's `system.*` namespace).
         dict["system.os"] = System.Environment.OSVersion.Version.ToString();
         dict["system.arch"] = System.Runtime.InteropServices.RuntimeInformation

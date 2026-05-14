@@ -60,6 +60,16 @@ internal sealed class FileCopyStep : IStep
     private static (string RootDir, string Pattern, bool Recurse) SplitGlob(string path)
     {
         var normalized = path.Replace('\\', '/');
+
+        // Bare "**" → recurse-everything from the current working directory.
+        // Without this branch, "**" would fall through to the no-slash case
+        // below and become a literal filename pattern (matches zero real
+        // files, since "**" can't appear in a Windows filename).
+        if (normalized == "**")
+        {
+            return (Directory.GetCurrentDirectory(), "*", true);
+        }
+
         if (normalized.EndsWith("/**", System.StringComparison.Ordinal))
         {
             return (normalized[..^3], "*", true);

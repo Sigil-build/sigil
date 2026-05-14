@@ -337,6 +337,46 @@ public abstract record RollbackRecord
             }
         }
     }
+
+    /// <summary>
+    /// Stops + deletes a Windows service created by <c>service_install</c>.
+    /// Recorded BEFORE the create so an interrupted install can still unwind.
+    /// On uninstall this runs as part of the journal replay. sc.exe absence /
+    /// service-not-found is silently tolerated — the goal is "no service after
+    /// rollback," not "exact symmetric command execution."
+    /// </summary>
+    public sealed record RemoveService(string ServiceName) : RollbackRecord
+    {
+        public override async System.Threading.Tasks.Task UndoAsync(System.Threading.CancellationToken ct)
+        {
+            await RunScAsync(new[] { "stop", ServiceName }, ct).ConfigureAwait(false);
+            await RunScAsync(new[] { "delete", ServiceName }, ct).ConfigureAwait(false);
+        }
+
+        private static async System.Threading.Tasks.Task RunScAsync(string[] args, System.Threading.CancellationToken ct)
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("sc.exe")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            foreach (var a in args) psi.ArgumentList.Add(a);
+            try
+            {
+                using var proc = System.Diagnostics.Process.Start(psi);
+                if (proc is null) return;
+                await proc.WaitForExitAsync(ct).ConfigureAwait(false);
+                // sc.exe exit 1060 = service does not exist; benign on rollback.
+            }
+#pragma warning disable CA1031 // Best-effort uninstall — sc.exe missing or admin denied is acceptable.
+            catch
+            {
+            }
+#pragma warning restore CA1031
+        }
+    }
 }
 
 /// <summary>

@@ -26,30 +26,33 @@ internal sealed class RegistryDeleteValueStep : IStep
 
     public Task<StepResult> RunAsync(StepContext ctx, RollbackJournal journal, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(ctx);
         if (!OperatingSystem.IsWindows())
         {
             return Task.FromResult(StepResult.Failed("registry steps require Windows"));
         }
 
+        var resolvedKey = ctx.Resolve(_spec.Key);
+        var resolvedName = ctx.Resolve(_spec.Name);
         var hive = RegistryHelper.ParseHive(_spec.Hive);
         var view = RegistryHelper.ParseView(_spec.View);
-        var snap = RegistryHelper.Snapshot(hive, _spec.Key, _spec.Name, view);
+        var snap = RegistryHelper.Snapshot(hive, resolvedKey, resolvedName, view);
 
         // Record rollback BEFORE mutation.
         journal.Append(new RollbackRecord.RestoreRegistryValue(
             Hive: _spec.Hive,
-            Key: _spec.Key,
-            Name: _spec.Name,
+            Key: resolvedKey,
+            Name: resolvedName,
             View: _spec.View,
             PriorTypeStr: snap.PreviouslyAbsent ? null : RegistryHelper.ValueKindToString(snap.Kind),
             PriorValue: snap.Value,
             PreviouslyAbsent: snap.PreviouslyAbsent));
 
         using var baseKey = RegistryKey.OpenBaseKey(hive, view);
-        using var sub = baseKey.OpenSubKey(_spec.Key, writable: true);
+        using var sub = baseKey.OpenSubKey(resolvedKey, writable: true);
         if (sub is not null)
         {
-            sub.DeleteValue(_spec.Name, throwOnMissingValue: false);
+            sub.DeleteValue(resolvedName, throwOnMissingValue: false);
         }
         return Task.FromResult(StepResult.Ok());
     }

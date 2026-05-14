@@ -15,6 +15,15 @@ internal sealed record SerializableWrapperBlob
 {
     public string AppId { get; init; } = "<unset>";
 
+    // App metadata for install-time template substitution
+    // (${app.name}, ${app.version}, etc.). Default values keep older blobs
+    // (built before this field existed) deserializable.
+    public string AppName { get; init; } = "<unset>";
+    public string AppVersion { get; init; } = "0.0.0";
+    public string AppPublisher { get; init; } = "<unset>";
+    public string? AppDescription { get; init; }
+    public string? AppHomepage { get; init; }
+
     public SerializableParameterDefinition[] Parameters { get; init; }
         = Array.Empty<SerializableParameterDefinition>();
 
@@ -22,17 +31,26 @@ internal sealed record SerializableWrapperBlob
     public SerializableInstallStep[] PreInstall   { get; init; } = Array.Empty<SerializableInstallStep>();
     public SerializableInstallStep[] PostInstall  { get; init; } = Array.Empty<SerializableInstallStep>();
     public SerializableInstallStep[] UpdateSteps  { get; init; } = Array.Empty<SerializableInstallStep>();
+    public SerializableInstallStep[] PreUninstall { get; init; } = Array.Empty<SerializableInstallStep>();
 
     public static WrapperBlob ToWrapperBlob(SerializableWrapperBlob s)
     {
         ArgumentNullException.ThrowIfNull(s);
         return new WrapperBlob(
             AppId: s.AppId,
+            App: new AppMetadata(
+                Id: s.AppId,
+                Name: s.AppName,
+                Version: s.AppVersion,
+                Publisher: s.AppPublisher,
+                Description: s.AppDescription,
+                Homepage: s.AppHomepage),
             Parameters: ConvertParameters(s.Parameters),
             InstallSteps: ConvertSteps(s.InstallSteps),
             PreInstall:   ConvertSteps(s.PreInstall),
             PostInstall:  ConvertSteps(s.PostInstall),
-            UpdateSteps:  ConvertSteps(s.UpdateSteps));
+            UpdateSteps:  ConvertSteps(s.UpdateSteps),
+            PreUninstall: ConvertSteps(s.PreUninstall));
     }
 
     public static SerializableWrapperBlob FromWrapperBlob(WrapperBlob blob)
@@ -41,11 +59,17 @@ internal sealed record SerializableWrapperBlob
         return new SerializableWrapperBlob
         {
             AppId = blob.AppId,
+            AppName = blob.App.Name,
+            AppVersion = blob.App.Version,
+            AppPublisher = blob.App.Publisher,
+            AppDescription = blob.App.Description,
+            AppHomepage = blob.App.Homepage,
             Parameters = SerializeParameters(blob.Parameters),
             InstallSteps = SerializeSteps(blob.InstallSteps),
             PreInstall   = SerializeSteps(blob.PreInstall),
             PostInstall  = SerializeSteps(blob.PostInstall),
             UpdateSteps  = SerializeSteps(blob.UpdateSteps),
+            PreUninstall = SerializeSteps(blob.PreUninstall),
         };
     }
 

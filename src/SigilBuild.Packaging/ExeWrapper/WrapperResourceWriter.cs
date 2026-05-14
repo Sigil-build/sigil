@@ -23,6 +23,14 @@ namespace SigilBuild.Packaging.ExeWrapper;
 ///     manifest's <c>SourceDirectory</c> for now; richer payload-extraction
 ///     story lands with Tasks 15+).
 ///   </item>
+///   <item>
+///     <c>SIGIL_INSTALLER_HOST_V1</c> (optional) — a zip archive containing
+///     <c>installer.exe</c> + <c>BrandTokens.g.json</c>. Present only when the
+///     manifest declares an <c>installer:</c> block. The wrapper runtime
+///     extracts it at install time and launches the wizard before running
+///     <c>install_steps</c>. Pass <c>null</c> to <see cref="WriteAsync"/> to
+///     skip embedding (headless-only setup.exe — current default).
+///   </item>
 /// </list>
 /// Both resources are read at install time by the wrapper runtime via
 /// <see cref="SigilBuild.Wrapper.Engine.WrapperBlob.LoadFromSelf"/>. Because
@@ -45,19 +53,22 @@ internal static partial class WrapperResourceWriter
 
     private const string BlobResourceName = "SIGIL_BLOB_V1";
     private const string PayloadResourceName = "SIGIL_PAYLOAD_V1";
+    private const string InstallerHostResourceName = "SIGIL_INSTALLER_HOST_V1";
 
-    public static Task WriteAsync(string exePath, byte[] blob, byte[] payload, CancellationToken ct)
+    public static Task WriteAsync(string exePath, byte[] blob, byte[] payload, byte[]? installerHostBundle, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(exePath);
         ArgumentNullException.ThrowIfNull(blob);
         ArgumentNullException.ThrowIfNull(payload);
+        // installerHostBundle is intentionally nullable — manifests without an
+        // `installer:` block produce a headless-only setup.exe.
         ct.ThrowIfCancellationRequested();
 
-        WriteCore(exePath, blob, payload);
+        WriteCore(exePath, blob, payload, installerHostBundle);
         return Task.CompletedTask;
     }
 
-    private static void WriteCore(string exePath, byte[] blob, byte[] payload)
+    private static void WriteCore(string exePath, byte[] blob, byte[] payload, byte[]? installerHostBundle)
     {
         // BeginUpdateResource(deleteExistingResources: false) keeps the AOT
         // binary's pre-existing resources (manifest, version info, icon)
@@ -72,6 +83,7 @@ internal static partial class WrapperResourceWriter
 
         var blobNamePtr = IntPtr.Zero;
         var payloadNamePtr = IntPtr.Zero;
+        var hostNamePtr = IntPtr.Zero;
         var committed = false;
         try
         {
@@ -80,6 +92,12 @@ internal static partial class WrapperResourceWriter
 
             UpdateOne(hUpdate, blobNamePtr, blob, BlobResourceName);
             UpdateOne(hUpdate, payloadNamePtr, payload, PayloadResourceName);
+
+            if (installerHostBundle is not null)
+            {
+                hostNamePtr = Marshal.StringToHGlobalUni(InstallerHostResourceName);
+                UpdateOne(hUpdate, hostNamePtr, installerHostBundle, InstallerHostResourceName);
+            }
 
             // Commit — fDiscard: false writes the changes to disk.
             if (!EndUpdateResourceW(hUpdate, fDiscard: false))
@@ -94,6 +112,7 @@ internal static partial class WrapperResourceWriter
         {
             if (blobNamePtr != IntPtr.Zero) Marshal.FreeHGlobal(blobNamePtr);
             if (payloadNamePtr != IntPtr.Zero) Marshal.FreeHGlobal(payloadNamePtr);
+            if (hostNamePtr != IntPtr.Zero) Marshal.FreeHGlobal(hostNamePtr);
 
             // If we threw before commit, discard the in-memory update so the
             // exe on disk is unchanged. Ignore the bool result — we are

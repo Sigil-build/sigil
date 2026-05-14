@@ -63,7 +63,8 @@ public static class ManifestParser
             Parameters: ParseParameters(GetMapping(root, "parameters"), diagnostics, file),
             InstallSteps: ParseInstallSteps(GetSequenceOfMappings(root, "install_steps"), diagnostics, file),
             PreInstall: ParseInstallSteps(GetSequenceOfMappings(root, "pre_install"), diagnostics, file),
-            PostInstall: ParseInstallSteps(GetSequenceOfMappings(root, "post_install"), diagnostics, file));
+            PostInstall: ParseInstallSteps(GetSequenceOfMappings(root, "post_install"), diagnostics, file),
+            PreUninstall: ParseInstallSteps(GetSequenceOfMappings(root, "pre_uninstall"), diagnostics, file));
     }
 
     private static AppSection MapApp(YamlMappingNode node) => new(
@@ -271,8 +272,37 @@ public static class ManifestParser
             "shortcut_create"       => BuildShortcutCreate(node, id!, when, onFailure, diagnostics, loc),
             "env_set"               => BuildEnvSet(node, id!, when, onFailure, diagnostics, loc),
             "run_program"           => BuildRunProgram(node, id!, when, onFailure, diagnostics, loc),
+            "service_install"       => BuildServiceInstall(node, id!, when, onFailure, diagnostics, loc),
             _ => ReportUnknownStepType(id!, typeStr!, loc, diagnostics),
         };
+    }
+
+    private static readonly string[] ServiceInstallFields =
+    {
+        "id", "type", "when", "on_failure",
+        "name", "binary_path", "display_name", "description",
+        "start_type", "service_account", "start_after_install",
+    };
+
+    private static InstallStep.ServiceInstall? BuildServiceInstall(
+        YamlMappingNode node, string id, string? when, OnFailure onFailure,
+        List<Diagnostic> diagnostics, SourceLocation loc)
+    {
+        var name = GetScalar(node, "name");
+        var binaryPath = GetScalar(node, "binary_path");
+        if (name is null)        { ReportMissingField(id, "service_install", "name",        loc, diagnostics); return null; }
+        if (binaryPath is null)  { ReportMissingField(id, "service_install", "binary_path", loc, diagnostics); return null; }
+
+        var displayName       = GetScalar(node, "display_name") ?? name;
+        var description       = GetScalar(node, "description");
+        var startType         = GetScalar(node, "start_type") ?? "auto";
+        var serviceAccount    = GetScalar(node, "service_account") ?? "LocalSystem";
+        var startAfterInstall = GetBool(node, "start_after_install", defaultValue: true);
+
+        ReportUnknownStepFields(node, id, "service_install", ServiceInstallFields, loc, diagnostics);
+        return new InstallStep.ServiceInstall(
+            id, name, binaryPath, displayName, description,
+            startType, serviceAccount, startAfterInstall, when, onFailure);
     }
 
     private static InstallStep? ReportUnknownStepType(

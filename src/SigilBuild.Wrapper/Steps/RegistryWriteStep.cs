@@ -30,38 +30,49 @@ internal sealed class RegistryWriteStep : IStep
 
     public Task<StepResult> RunAsync(StepContext ctx, RollbackJournal journal, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(ctx);
         if (!OperatingSystem.IsWindows())
         {
             return Task.FromResult(StepResult.Failed("registry steps require Windows"));
         }
 
+        // Resolve ${parameters.*} / ${app.*} / ${env.*} placeholders. Before
+        // this, the literal template text landed in the registry (e.g.
+        // InstallDir = "${parameters.install_dir}", InstalledBy = "Sigil
+        // ${app.version}") — a silent data-corruption bug because the engine
+        // reported the step as successful even though the value was useless.
+        var resolvedKey = ctx.Resolve(_spec.Key);
+        var resolvedName = ctx.Resolve(_spec.Name);
+        var resolvedValue = _spec.Value is string s ? ctx.Resolve(s) : _spec.Value;
+
         var hive = RegistryHelper.ParseHive(_spec.Hive);
         var view = RegistryHelper.ParseView(_spec.View);
         var kind = RegistryHelper.ParseValueKind(_spec.Type);
 
-        var snap = RegistryHelper.Snapshot(hive, _spec.Key, _spec.Name, view);
+        var snap = RegistryHelper.Snapshot(hive, resolvedKey, resolvedName, view);
 
         // Record rollback BEFORE mutation so a crash mid-write still leaves
-        // the journal in a state that restores correctly.
+        // the journal in a state that restores correctly. The journal stores
+        // the RESOLVED key/name so uninstall doesn't need ctx to re-resolve.
         journal.Append(new RollbackRecord.RestoreRegistryValue(
             Hive: _spec.Hive,
-            Key: _spec.Key,
-            Name: _spec.Name,
+            Key: resolvedKey,
+            Name: resolvedName,
             View: _spec.View,
             PriorTypeStr: snap.PreviouslyAbsent ? null : RegistryHelper.ValueKindToString(snap.Kind),
             PriorValue: snap.Value,
             PreviouslyAbsent: snap.PreviouslyAbsent));
 
         using var baseKey = RegistryKey.OpenBaseKey(hive, view);
-        using var sub = baseKey.CreateSubKey(_spec.Key, writable: true);
+        using var sub = baseKey.CreateSubKey(resolvedKey, writable: true);
         if (sub is null)
         {
             return Task.FromResult(StepResult.Failed(
-                $"could not open or create key {_spec.Hive}\\{_spec.Key}"));
+                $"could not open or create key {_spec.Hive}\\{resolvedKey}"));
         }
 
-        var coerced = CoerceValue(_spec.Value, kind);
-        sub.SetValue(_spec.Name, coerced, kind);
+        var coerced = CoerceValue(resolvedValue, kind);
+        sub.SetValue(resolvedName, coerced, kind);
         return Task.FromResult(StepResult.Ok());
     }
 

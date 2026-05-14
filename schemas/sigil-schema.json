@@ -41,7 +41,7 @@
           "enum": [
             "file_copy", "directory_create", "file_delete", "directory_delete",
             "registry_write", "registry_delete_value", "registry_delete_key",
-            "shortcut_create", "env_set", "run_program"
+            "shortcut_create", "env_set", "run_program", "service_install"
           ]
         },
         "when": { "type": "string" },
@@ -61,7 +61,7 @@
             "enum": [
               "file_copy", "directory_create", "file_delete", "directory_delete",
               "registry_write", "registry_delete_value", "registry_delete_key",
-              "shortcut_create", "env_set", "run_program"
+              "shortcut_create", "env_set", "run_program", "service_install"
             ]
           },
           "when": { "type": "string" },
@@ -335,7 +335,7 @@
             "enum": [
               "file_copy", "directory_create", "file_delete", "directory_delete",
               "registry_write", "registry_delete_value", "registry_delete_key",
-              "shortcut_create", "env_set", "run_program"
+              "shortcut_create", "env_set", "run_program", "service_install"
             ]
           },
           "when": { "type": "string" },
@@ -357,7 +357,7 @@
             "enum": [
               "file_copy", "directory_create", "file_delete", "directory_delete",
               "registry_write", "registry_delete_value", "registry_delete_key",
-              "shortcut_create", "env_set", "run_program"
+              "shortcut_create", "env_set", "run_program", "service_install"
             ]
           },
           "when": { "type": "string" },
@@ -379,7 +379,29 @@
             "enum": [
               "file_copy", "directory_create", "file_delete", "directory_delete",
               "registry_write", "registry_delete_value", "registry_delete_key",
-              "shortcut_create", "env_set", "run_program"
+              "shortcut_create", "env_set", "run_program", "service_install"
+            ]
+          },
+          "when": { "type": "string" },
+          "on_failure": { "type": "string", "enum": ["rollback", "continue", "fail"] }
+        }
+      }
+    },
+    "pre_uninstall": {
+      "type": "array",
+      "description": "Steps executed at the start of `setup.exe /Uninstall`, BEFORE the rollback journal replays. Lets the manifest tear down services / scheduled tasks / external scripts that the install journal doesn't cover.",
+      "items": {
+        "type": "object",
+        "required": ["id", "type"],
+        "additionalProperties": true,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "type": {
+            "type": "string",
+            "enum": [
+              "file_copy", "directory_create", "file_delete", "directory_delete",
+              "registry_write", "registry_delete_value", "registry_delete_key",
+              "shortcut_create", "env_set", "run_program", "service_install"
             ]
           },
           "when": { "type": "string" },

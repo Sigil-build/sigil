@@ -25,12 +25,33 @@ public partial class InstallOptionsView : UserControl
     {
         base.OnAttachedToVisualTree(e);
         if (DataContext is not InstallerViewModel vm) return;
-        foreach (var f in vm.ParameterFields)
+
+        // Only fetch for fields visible on THIS screen (CurrentGroupFields),
+        // not every install-time parameter. The wizard now paginates parameters
+        // across multiple ParameterGroup screens, so re-attaching to a page
+        // without a dynamic-source field shouldn't fire any GET.
+        foreach (var f in vm.CurrentGroupFields)
         {
             if (f.Source is null) continue;
+
+            // Skip if we already loaded options — InstallOptionsView is rebuilt
+            // every time the user navigates Next/Back so DynamicOptions on the
+            // VM survives across rebuilds and a re-attach should not refetch.
+            if (f.DynamicOptions.Count > 0) continue;
+
+            var (url, allResolved) = SubstituteTemplate(f.Source.Url, vm.ParameterValues);
+            if (!allResolved)
+            {
+                // Dependency on a parameter the user hasn't filled in yet (e.g.
+                // domain_name needed by the application_id endpoint but the
+                // user hasn't visited Server Settings). Defer the fetch until
+                // they reach the page that owns this field with the values set.
+                InstallerLog.Info($"dynamic options fetch deferred for '{f.Name}' — url has unresolved/empty parameter references: {url}");
+                continue;
+            }
+
             try
             {
-                var url = SubstituteTemplate(f.Source.Url, vm.ParameterValues);
                 var options = await HttpOptionsLoader.LoadAsync(
                     url, f.Source.ItemsPath, f.Source.LabelProperty, f.Source.ValueProperty,
                     CancellationToken.None);
@@ -53,12 +74,16 @@ public partial class InstallOptionsView : UserControl
     /// <summary>
     /// Minimal <c>${parameters.foo}</c> substitution for URL templates. Only
     /// the <c>parameters.</c> namespace is supported (matches the Core
-    /// substitution surface for install-time parameters). Unknown tokens are
-    /// dropped — better an empty segment than a literal <c>${…}</c> in the URL.
+    /// substitution surface for install-time parameters).
+    /// Returns the substituted URL plus a flag that's false when any
+    /// <c>${parameters.X}</c> token referenced a missing or empty value — the
+    /// caller skips the fetch in that case to avoid hitting bogus hosts like
+    /// <c>https://sales./api/...</c> while the dependency is still unset.
     /// </summary>
-    private static string SubstituteTemplate(string template, IReadOnlyDictionary<string, string> values)
+    private static (string Url, bool AllResolved) SubstituteTemplate(string template, IReadOnlyDictionary<string, string> values)
     {
         var sb = new StringBuilder(template.Length);
+        var allResolved = true;
         int i = 0;
         while (i < template.Length)
         {
@@ -69,9 +94,14 @@ public partial class InstallOptionsView : UserControl
                 var path = template[(i + 2)..end];
                 const string prefix = "parameters.";
                 if (path.StartsWith(prefix, StringComparison.Ordinal) &&
-                    values.TryGetValue(path[prefix.Length..], out var v))
+                    values.TryGetValue(path[prefix.Length..], out var v) &&
+                    !string.IsNullOrEmpty(v))
                 {
                     sb.Append(v);
+                }
+                else
+                {
+                    allResolved = false;
                 }
                 i = end + 1;
             }
@@ -81,6 +111,6 @@ public partial class InstallOptionsView : UserControl
                 i++;
             }
         }
-        return sb.ToString();
+        return (sb.ToString(), allResolved);
     }
 }

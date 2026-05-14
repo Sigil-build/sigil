@@ -67,11 +67,28 @@ public static class HttpOptionsLoader
         var list = new List<HttpOption>();
         foreach (var item in arr.EnumerateArray())
         {
-            var label = item.TryGetProperty(labelProperty, out var l) ? l.GetString() ?? "" : "";
-            var value = item.TryGetProperty(valueProperty, out var v) ? v.GetString() ?? "" : "";
+            var label = item.TryGetProperty(labelProperty, out var l) ? JsonValueToString(l) : "";
+            var value = item.TryGetProperty(valueProperty, out var v) ? JsonValueToString(v) : "";
             if (!string.IsNullOrEmpty(value))
                 list.Add(new HttpOption(label, value));
         }
         return list;
     }
+
+    /// <summary>
+    /// Stringify any JSON scalar (string/number/bool) so the dropdown can use
+    /// integer ids, GUID strings, or true/false flags interchangeably. The
+    /// previous implementation called <c>GetString()</c> unconditionally and
+    /// crashed with <c>InvalidOperationException</c> when the configured
+    /// <c>value_property</c> pointed at a numeric column.
+    /// </summary>
+    private static string JsonValueToString(JsonElement el) => el.ValueKind switch
+    {
+        JsonValueKind.String => el.GetString() ?? "",
+        JsonValueKind.Number => el.GetRawText(),
+        JsonValueKind.True => "true",
+        JsonValueKind.False => "false",
+        JsonValueKind.Null or JsonValueKind.Undefined => "",
+        _ => el.GetRawText(),
+    };
 }

@@ -146,14 +146,16 @@ public static class ManifestParser
     {
         if (node is null) return null;
         var brand = GetMapping(node, "brand");
-        return new InstallerSection(brand is null ? null : new InstallerBrand(
+        var brandSection = brand is null ? null : new InstallerBrand(
             Logo: GetScalar(brand, "logo"),
             Hero: GetScalar(brand, "hero"),
             PrimaryColor: GetScalar(brand, "primaryColor"),
             AccentColor: GetScalar(brand, "accentColor"),
             GradientStart: GetScalar(brand, "gradientStart"),
             GradientMid: GetScalar(brand, "gradientMid"),
-            GradientEnd: GetScalar(brand, "gradientEnd")));
+            GradientEnd: GetScalar(brand, "gradientEnd"));
+        var icon = GetScalar(node, "icon");
+        return new InstallerSection(brandSection, icon);
     }
 
     private static Dictionary<string, ParameterDefinition>? ParseParameters(

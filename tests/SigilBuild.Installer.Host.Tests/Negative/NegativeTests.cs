@@ -87,6 +87,7 @@ public class NegativeTests
             new BuildSection("./out", null, null, true),
             null, null, null, null,
             Installer: primaryColor is null ? null : new InstallerSection(
-                new InstallerBrand(null, null, primaryColor, "#3B82F6", null, null, null)),
+                new InstallerBrand(null, null, primaryColor, "#3B82F6", null, null, null),
+                null),
             Location: SourceLocation.Unknown);
 }

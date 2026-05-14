@@ -91,6 +91,15 @@ public sealed class ExeWrapperPackager : IPackager
         await WrapperResourceWriter.WriteAsync(outputPath, blobBytes, payloadBytes, installerHostBundle, ct)
             .ConfigureAwait(false);
 
+        // Stamp the icon AFTER WrapperResourceWriter has finished its
+        // BeginUpdateResource / EndUpdateResource cycle. Concurrent updates on
+        // the same PE file are not safe.
+        var iconBytes = ResolveIconBytes(manifest);
+        if (iconBytes is not null)
+        {
+            await IconResourceWriter.WriteAsync(outputPath, iconBytes, ct).ConfigureAwait(false);
+        }
+
         // Compute sha256 + size *after* the resource embed so the artifact
         // descriptor reflects the final on-disk shape.
         var sha256 = ManifestHasher.Sha256(outputPath);
@@ -101,6 +110,36 @@ public sealed class ExeWrapperPackager : IPackager
             ? Array.Empty<Diagnostic>()
             : new[] { installerHostDiagnostic };
         return new PackResult(artifact, diagnostics);
+    }
+
+    /// <summary>
+    /// Resolve the bytes of the installer icon to stamp into the produced
+    /// setup.exe. Precedence:
+    ///   1. <c>installer.icon</c> in the manifest, resolved relative to the
+    ///      manifest file's directory.
+    ///   2. The bundled default icon (embedded as
+    ///      <c>SigilBuild.Packaging.DefaultInstallerIcon.ico</c>).
+    /// Returns the icon bytes, or <c>null</c> when neither path is readable
+    /// (callers skip the icon-stamp step and leave the wrapper's stock icon).
+    /// </summary>
+    private static byte[]? ResolveIconBytes(SigilManifest manifest)
+    {
+        var userIcon = manifest.Installer?.Icon;
+        if (!string.IsNullOrEmpty(userIcon))
+        {
+            var manifestDir = Path.GetDirectoryName(manifest.Location.File);
+            var candidate = Path.IsPathRooted(userIcon) || string.IsNullOrEmpty(manifestDir)
+                ? userIcon
+                : Path.GetFullPath(Path.Combine(manifestDir, userIcon));
+            if (File.Exists(candidate)) return File.ReadAllBytes(candidate);
+        }
+
+        var asm = typeof(ExeWrapperPackager).Assembly;
+        using var s = asm.GetManifestResourceStream("SigilBuild.Packaging.DefaultInstallerIcon.ico");
+        if (s is null) return null;
+        using var ms = new MemoryStream();
+        s.CopyTo(ms);
+        return ms.ToArray();
     }
 
     /// <summary>

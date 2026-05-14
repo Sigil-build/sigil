@@ -87,9 +87,33 @@ public sealed class ExeWrapperPackager : IPackager
         var (installerHostBundle, installerHostDiagnostic) =
             TryBuildInstallerHostBundle(manifest);
 
+        // When the manifest declares an uninstall: block, generate a lightweight
+        // uninstaller.exe stamped with those steps and embed it in setup.exe as
+        // SIGIL_UNINSTALLER_V1. The wrapper drops the resource to install_dir on
+        // successful install + writes the ARP UninstallString.
+        byte[]? uninstallerExeBytes = null;
+        string? uninstallerTempPath = null;
+        if (manifest.Uninstall is { Count: > 0 } uninstallSteps)
+        {
+            var app = new AppMetadata(
+                Id: manifest.App.Id, Name: manifest.App.Name, Version: manifest.App.Version,
+                Publisher: manifest.App.Publisher, Description: manifest.App.Description,
+                Homepage: manifest.App.Homepage);
+            uninstallerTempPath = await UninstallerExeBuilder.BuildAsync(
+                stubPath, manifest.App.Id, app, uninstallSteps, ct).ConfigureAwait(false);
+            uninstallerExeBytes = await File.ReadAllBytesAsync(uninstallerTempPath, ct).ConfigureAwait(false);
+        }
+
         // Embed all resources via the Win32 update-resource flow.
-        await WrapperResourceWriter.WriteAsync(outputPath, blobBytes, payloadBytes, installerHostBundle, uninstallerExe: null, ct)
+        await WrapperResourceWriter.WriteAsync(
+            outputPath, blobBytes, payloadBytes, installerHostBundle, uninstallerExeBytes, ct)
             .ConfigureAwait(false);
+
+        // Clean up the temp uninstaller file — its bytes are now embedded.
+        if (uninstallerTempPath is not null)
+        {
+            try { File.Delete(uninstallerTempPath); } catch { /* best-effort */ }
+        }
 
         // Stamp the icon AFTER WrapperResourceWriter has finished its
         // BeginUpdateResource / EndUpdateResource cycle. Concurrent updates on

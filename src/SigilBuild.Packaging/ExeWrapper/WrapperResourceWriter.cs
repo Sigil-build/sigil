@@ -31,6 +31,14 @@ namespace SigilBuild.Packaging.ExeWrapper;
 ///     <c>install_steps</c>. Pass <c>null</c> to <see cref="WriteAsync"/> to
 ///     skip embedding (headless-only setup.exe — current default).
 ///   </item>
+///   <item>
+///     <c>SIGIL_UNINSTALLER_V1</c> (optional) — the bytes of a standalone
+///     <c>uninstaller.exe</c> built by <c>UninstallerExeBuilder</c>. Present
+///     only when the manifest declares an <c>uninstall:</c> block. The
+///     wrapper runtime materialises this beside the installed app so the
+///     wrapper itself never has to evaluate its uninstall steps. Pass
+///     <c>null</c> to skip embedding (no uninstaller).
+///   </item>
 /// </list>
 /// Both resources are read at install time by the wrapper runtime via
 /// <see cref="SigilBuild.Wrapper.Engine.WrapperBlob.LoadFromSelf"/>. Because
@@ -54,21 +62,30 @@ internal static partial class WrapperResourceWriter
     private const string BlobResourceName = "SIGIL_BLOB_V1";
     private const string PayloadResourceName = "SIGIL_PAYLOAD_V1";
     private const string InstallerHostResourceName = "SIGIL_INSTALLER_HOST_V1";
+    private const string UninstallerResourceName = "SIGIL_UNINSTALLER_V1";
 
-    public static Task WriteAsync(string exePath, byte[] blob, byte[] payload, byte[]? installerHostBundle, CancellationToken ct)
+    public static Task WriteAsync(
+        string exePath,
+        byte[] blob,
+        byte[] payload,
+        byte[]? installerHostBundle,
+        byte[]? uninstallerExe,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(exePath);
         ArgumentNullException.ThrowIfNull(blob);
         ArgumentNullException.ThrowIfNull(payload);
-        // installerHostBundle is intentionally nullable — manifests without an
-        // `installer:` block produce a headless-only setup.exe.
+        // installerHostBundle and uninstallerExe are intentionally nullable —
+        // manifests without an `installer:` block produce a headless-only
+        // setup.exe, and manifests without an `uninstall:` block produce a
+        // setup.exe with no embedded uninstaller.
         ct.ThrowIfCancellationRequested();
 
-        WriteCore(exePath, blob, payload, installerHostBundle);
+        WriteCore(exePath, blob, payload, installerHostBundle, uninstallerExe);
         return Task.CompletedTask;
     }
 
-    private static void WriteCore(string exePath, byte[] blob, byte[] payload, byte[]? installerHostBundle)
+    private static void WriteCore(string exePath, byte[] blob, byte[] payload, byte[]? installerHostBundle, byte[]? uninstallerExe)
     {
         // BeginUpdateResource(deleteExistingResources: false) keeps the AOT
         // binary's pre-existing resources (manifest, version info, icon)
@@ -84,19 +101,32 @@ internal static partial class WrapperResourceWriter
         var blobNamePtr = IntPtr.Zero;
         var payloadNamePtr = IntPtr.Zero;
         var hostNamePtr = IntPtr.Zero;
+        var uninstNamePtr = IntPtr.Zero;
         var committed = false;
         try
         {
             blobNamePtr = Marshal.StringToHGlobalUni(BlobResourceName);
-            payloadNamePtr = Marshal.StringToHGlobalUni(PayloadResourceName);
-
             UpdateOne(hUpdate, blobNamePtr, blob, BlobResourceName);
-            UpdateOne(hUpdate, payloadNamePtr, payload, PayloadResourceName);
 
-            if (installerHostBundle is not null)
+            // UpdateResource with cbData=0 means "delete the named resource". A
+            // freshly-copied wrapper has no SIGIL_PAYLOAD_V1 yet, so the delete
+            // returns failure. Skip the call entirely when there is no payload.
+            if (payload.Length > 0)
+            {
+                payloadNamePtr = Marshal.StringToHGlobalUni(PayloadResourceName);
+                UpdateOne(hUpdate, payloadNamePtr, payload, PayloadResourceName);
+            }
+
+            if (installerHostBundle is not null && installerHostBundle.Length > 0)
             {
                 hostNamePtr = Marshal.StringToHGlobalUni(InstallerHostResourceName);
                 UpdateOne(hUpdate, hostNamePtr, installerHostBundle, InstallerHostResourceName);
+            }
+
+            if (uninstallerExe is not null && uninstallerExe.Length > 0)
+            {
+                uninstNamePtr = Marshal.StringToHGlobalUni(UninstallerResourceName);
+                UpdateOne(hUpdate, uninstNamePtr, uninstallerExe, UninstallerResourceName);
             }
 
             // Commit — fDiscard: false writes the changes to disk.
@@ -113,6 +143,7 @@ internal static partial class WrapperResourceWriter
             if (blobNamePtr != IntPtr.Zero) Marshal.FreeHGlobal(blobNamePtr);
             if (payloadNamePtr != IntPtr.Zero) Marshal.FreeHGlobal(payloadNamePtr);
             if (hostNamePtr != IntPtr.Zero) Marshal.FreeHGlobal(hostNamePtr);
+            if (uninstNamePtr != IntPtr.Zero) Marshal.FreeHGlobal(uninstNamePtr);
 
             // If we threw before commit, discard the in-memory update so the
             // exe on disk is unchanged. Ignore the bool result — we are

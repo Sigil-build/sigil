@@ -88,7 +88,7 @@ public sealed class ExeWrapperPackager : IPackager
             TryBuildInstallerHostBundle(manifest);
 
         // Embed all resources via the Win32 update-resource flow.
-        await WrapperResourceWriter.WriteAsync(outputPath, blobBytes, payloadBytes, installerHostBundle, ct)
+        await WrapperResourceWriter.WriteAsync(outputPath, blobBytes, payloadBytes, installerHostBundle, uninstallerExe: null, ct)
             .ConfigureAwait(false);
 
         // Stamp the icon AFTER WrapperResourceWriter has finished its

@@ -35,7 +35,7 @@ public class WrapperResourceWriterTests
         {
             var blob = Encoding.UTF8.GetBytes("hello-blob");
             var payload = new byte[] { 1, 2, 3 };
-            await WrapperResourceWriter.WriteAsync(tmp, blob, payload, installerHostBundle: null, CancellationToken.None);
+            await WrapperResourceWriter.WriteAsync(tmp, blob, payload, installerHostBundle: null, uninstallerExe: null, CancellationToken.None);
 
             // Read the resource back via raw Win32 APIs without launching the
             // wrapper exe (which would also exercise Half B).
@@ -76,7 +76,7 @@ public class WrapperResourceWriterTests
             // a valid zip; it's a black-box round-trip.
             var hostBundle = Encoding.UTF8.GetBytes("PK\x03\x04synthetic-bundle");
 
-            await WrapperResourceWriter.WriteAsync(tmp, blob, payload, hostBundle, CancellationToken.None);
+            await WrapperResourceWriter.WriteAsync(tmp, blob, payload, hostBundle, uninstallerExe: null, CancellationToken.None);
 
             ResourceReader.Read(tmp, "SIGIL_BLOB_V1").Should().Equal(blob);
             ResourceReader.Read(tmp, "SIGIL_PAYLOAD_V1").Should().Equal(payload);

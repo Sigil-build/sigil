@@ -96,9 +96,21 @@ internal sealed partial record WrapperBlob(
         return TryReadResource(InstallerHostResourceName);
     }
 
+    /// <summary>
+    /// Read the embedded uninstaller.exe bytes (<c>SIGIL_UNINSTALLER_V1</c>)
+    /// from the running executable. Returns <c>null</c> when no uninstaller is
+    /// embedded — manifests without an <c>uninstall:</c> block, or the
+    /// uninstaller.exe itself (it doesn't embed a copy of itself).
+    /// </summary>
+    public static byte[]? LoadUninstallerExeBytes()
+    {
+        return TryReadResource(UninstallerResourceName);
+    }
+
     private const string BlobResourceName = "SIGIL_BLOB_V1";
     private const string PayloadResourceName = "SIGIL_PAYLOAD_V1";
     private const string InstallerHostResourceName = "SIGIL_INSTALLER_HOST_V1";
+    private const string UninstallerResourceName = "SIGIL_UNINSTALLER_V1";
 
     // RT_RCDATA — application-defined raw data resource (winuser.h).
     private static readonly IntPtr RtRcData = (IntPtr)10;

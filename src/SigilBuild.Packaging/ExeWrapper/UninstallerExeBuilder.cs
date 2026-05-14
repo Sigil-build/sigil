@@ -50,15 +50,15 @@ internal static class UninstallerExeBuilder
         var json = JsonSerializer.Serialize(
             serializable, WrapperBlobJsonContext.Default.SerializableWrapperBlob);
         var blobBytes = Encoding.UTF8.GetBytes(json);
-        // SIGIL_PAYLOAD_V1 must be present (Win32 UpdateResource rejects
-        // zero-length data — it interprets that as "delete the resource", and
-        // the freshly-copied wrapper has no payload resource yet to delete).
-        // Uninstall flow never extracts the payload, so a single sentinel byte
-        // is sufficient.
-        var payloadBytes = new byte[] { 0 };
+        // Uninstall flow never extracts the payload, so we hand an empty array
+        // to the writer. WrapperResourceWriter.WriteAsync skips the
+        // SIGIL_PAYLOAD_V1 UpdateResource call when payload.Length == 0
+        // (UpdateResource with cbData=0 means "delete the resource", and the
+        // freshly-copied wrapper has none to delete — the call would fail).
+        var payloadBytes = Array.Empty<byte>();
 
         await WrapperResourceWriter.WriteAsync(
-            outputPath, blobBytes, payloadBytes, installerHostBundle: null, ct)
+            outputPath, blobBytes, payloadBytes, installerHostBundle: null, uninstallerExe: null, ct)
             .ConfigureAwait(false);
 
         return outputPath;

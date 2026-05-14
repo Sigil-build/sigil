@@ -166,6 +166,24 @@ internal static class Program
                     UninstallString: ArpRegistration.BuildUninstallString(
                         Environment.ProcessPath ?? "."),
                     EstimatedSizeBytes: 0));
+
+                // Drop the embedded uninstaller.exe into install_dir (when the
+                // manifest had an uninstall: block) so users can run
+                // uninstaller.exe directly from Explorer, and Control Panel's
+                // Add/Remove Programs has a working UninstallString pointing
+                // at it. Runs AFTER ArpRegistration.Register so the
+                // sibling-uninstaller path overrides Register's default
+                // "setup.exe /S /Uninstall" UninstallString value rather than
+                // being clobbered by it.
+                if (ctx.TryGet("parameters.install_dir", out var dirObj)
+                    && dirObj is string dirStr && !string.IsNullOrEmpty(dirStr))
+                {
+                    UninstallerDeployer.TryDeploy(dirStr, blob.AppId);
+                }
+                else
+                {
+                    WrapperLog.Info("post-install: no parameters.install_dir in context — skipping uninstaller deploy");
+                }
             }
             return 0;
         }

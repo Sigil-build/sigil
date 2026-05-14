@@ -24,8 +24,12 @@ together by a single declarative YAML manifest.
                                               Update SDK on user device
 ```
 
-Pack today ships a working ZIP path; MSIX, signing, publishing, and the
-delta-update SDK arrive across the MVP timeline.
+Pack today ships working ZIP, MSIX, and **EXE-wrapper** paths. The
+EXE-wrapper produces a single self-extracting `setup.exe` with a branded
+Windows wizard, NSIS-style screen-grouped parameters, a dedicated install
+location screen with disk-space readout, and an auto-generated
+`uninstaller.exe` plus Add/Remove Programs entry. Signing, publishing, and
+the delta-update SDK arrive across the rest of the MVP timeline.
 
 ## Locked-in technical decisions
 

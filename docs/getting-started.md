@@ -117,7 +117,63 @@ sigil pack sigil.yaml --out ./dist
 
 Output goes under `./dist/<app-id>-<version>/`.
 
-## 6. Next steps
+## 6. Build the branded wizard (EXE-wrapper format)
+
+`sigil pack` with `package.format: exe` produces a single self-extracting
+`setup.exe` that opens a branded Windows wizard on double-click. The wizard
+flow is built dynamically from your `parameters:` block — there's no per-page
+XAML to write.
+
+Extend the minimal manifest with the wizard knobs you'll most often touch:
+
+```yaml
+installer:
+  icon: ./brand/installer.ico   # optional; the bundled default ships otherwise
+  brand:
+    logo: ./brand/logo.svg
+    colors:
+      primary: "#1F6FEB"
+      accent:  "#7C3AED"
+
+parameters:
+  install_dir:
+    type: path
+    install_time: true
+    default: "C:\\Program Files\\Hello Sigil"
+    description: "Install location"
+    # No screen: field — install_dir always renders on the dedicated
+    # Install Location page (with disk-space readout).
+
+  server_url:
+    type: string
+    install_time: true
+    description: "Server URL"
+    screen: "Server Settings"     # Groups onto a 'Server Settings' page.
+
+  enable_telemetry:
+    type: bool
+    install_time: true
+    default: false
+    description: "Send anonymous usage telemetry"
+    screen: "Privacy"             # Renders as a CheckBox on a 'Privacy' page.
+
+uninstall:
+  - id: stop-service
+    type: run_program
+    program: sc.exe
+    args: ["stop", "HelloSigilService"]
+    wait: true
+    on_failure: continue
+```
+
+The wizard flow is now:
+**Welcome → License → Install Location (with disk-space card) → Server Settings → Privacy → Installing → Finish**.
+
+Per-parameter widget choice is automatic: `type: enum` with a `values:` list renders a ComboBox; `type: enum` with a `source: { url, items_path, value_property, label_property }` block renders a ComboBox populated by an HTTPS fetch at page-attach; `type: bool` renders a CheckBox; everything else renders a TextBox. See the [manifest reference](manifest-reference.md) for every field.
+
+When the manifest declares an `uninstall:` block, the packager produces a sibling `uninstaller.exe` inside `setup.exe` and the wrapper drops it to `<install_dir>\uninstaller.exe` on install success — plus a Control Panel "Add/Remove Programs" entry pointing at it.
+
+## 7. Next steps
 
 - Browse the [CLI reference](cli-reference.md) for every subcommand and option.
 - Browse the [manifest reference](manifest-reference.md) for every key in

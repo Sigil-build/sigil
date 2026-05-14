@@ -10,14 +10,15 @@ public sealed class ScreenSelector : IDataTemplate
 
     public Control? Build(object? data)
     {
-        return ((InstallerViewModel?)data)?.CurrentStep switch
+        return ((InstallerViewModel?)data)?.CurrentStepDef switch
         {
-            InstallerStep.Welcome => new WelcomeView(),
-            InstallerStep.License => new LicenseView(),
-            InstallerStep.InstallOptions => new InstallOptionsView(),
-            InstallerStep.Installing => new InstallingView(),
-            InstallerStep.Finish => new FinishView(),
-            InstallerStep.Custom => new CustomView(),
+            InstallerStepDef.Welcome => new WelcomeView(),
+            InstallerStepDef.License => new LicenseView(),
+            InstallerStepDef.InstallDir => new InstallDirView(),
+            InstallerStepDef.ParameterGroup => new InstallOptionsView(),
+            InstallerStepDef.Installing => new InstallingView(),
+            InstallerStepDef.Finish => new FinishView(),
+            InstallerStepDef.Custom => new CustomView(),
             _ => new TextBlock { Text = "(no view)" },
         };
     }

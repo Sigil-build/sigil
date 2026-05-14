@@ -77,9 +77,14 @@ public partial class InstallerWindow : Window
 
     private void OnVmPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(InstallerViewModel.CurrentStep) && sender is InstallerViewModel vm)
+        // CurrentStepIndex is the canonical source of truth — CurrentStepDef
+        // and the legacy CurrentStep enum both follow from it. We listen for
+        // index changes (not the enum) so rebuilds fire correctly when we
+        // page across multiple consecutive ParameterGroup steps that all map
+        // back to the same InstallerStep.InstallOptions enum value.
+        if (e.PropertyName == nameof(InstallerViewModel.CurrentStepIndex) && sender is InstallerViewModel vm)
         {
-            InstallerLog.Info($"InstallerWindow: CurrentStep changed to {vm.CurrentStep} — rebuilding screen");
+            InstallerLog.Info($"InstallerWindow: CurrentStepIndex changed to {vm.CurrentStepIndex} ({vm.CurrentStepDef.Id}) — rebuilding screen");
             RebuildScreen(vm);
         }
     }
@@ -91,14 +96,19 @@ public partial class InstallerWindow : Window
             InstallerLog.Error("InstallerWindow.RebuildScreen: ScreenHost ContentControl was not found in XAML");
             return;
         }
-        Control screen = vm.CurrentStep switch
+        // Dispatch on the discriminated step-def directly rather than the
+        // legacy enum: the enum collapses InstallDir + ParameterGroup into a
+        // single InstallOptions value, but they need distinct views (a
+        // disk-space readout vs the parameter ItemsControl).
+        Control screen = vm.CurrentStepDef switch
         {
-            InstallerStep.Welcome => new WelcomeView(),
-            InstallerStep.License => new LicenseView(),
-            InstallerStep.InstallOptions => new InstallOptionsView(),
-            InstallerStep.Installing => new InstallingView(),
-            InstallerStep.Finish => new FinishView(),
-            InstallerStep.Custom => new CustomView(),
+            InstallerStepDef.Welcome => new WelcomeView(),
+            InstallerStepDef.License => new LicenseView(),
+            InstallerStepDef.InstallDir => new InstallDirView(),
+            InstallerStepDef.ParameterGroup => new InstallOptionsView(),
+            InstallerStepDef.Installing => new InstallingView(),
+            InstallerStepDef.Finish => new FinishView(),
+            InstallerStepDef.Custom => new CustomView(),
             _ => new TextBlock { Text = "(no view)" },
         };
         // Force the child to inherit the VM's DataContext explicitly. Without

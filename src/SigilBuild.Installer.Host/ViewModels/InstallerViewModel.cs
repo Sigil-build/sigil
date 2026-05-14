@@ -13,6 +13,14 @@ using SigilBuild.Installer.Host.Services;
 
 namespace SigilBuild.Installer.Host.ViewModels;
 
+/// <summary>
+/// Coarse wizard step enum. Retained as the legacy public surface; the
+/// underlying step machine is now a list of <see cref="InstallerStepDef"/>
+/// entries so the InstallOptions surface can fan out across an arbitrary
+/// number of NSIS-style themed pages plus a dedicated Install Directory page.
+/// Setting <see cref="InstallerViewModel.CurrentStep"/> to an enum value maps
+/// onto the first list entry of that kind.
+/// </summary>
 public enum InstallerStep { Welcome, License, InstallOptions, Installing, Finish, Custom }
 
 /// <summary>Windows MSI-convention exit codes surfaced by the installer process.</summary>
@@ -23,9 +31,33 @@ public enum InstallerOutcomeCode
     Failed       = 1603,
 }
 
+/// <summary>
+/// Discriminated union of installer wizard steps. The step machine is a flat
+/// <see cref="IReadOnlyList{T}"/> of these; the wizard renders one screen per
+/// entry in order. Welcome / License / Installing / Finish are singletons;
+/// <see cref="InstallDir"/> appears only when the manifest declared an
+/// install-time <c>install_dir</c> parameter; <see cref="ParameterGroup"/>
+/// repeats once per distinct <c>screen:</c> value declared on install-time
+/// parameters (plus one synthetic "Install Options" group at the end for
+/// parameters that omitted the field).
+/// </summary>
+public abstract record InstallerStepDef(string Id, string Title)
+{
+    public sealed record Welcome() : InstallerStepDef("welcome", "Welcome");
+    public sealed record License() : InstallerStepDef("license", "License");
+    public sealed record InstallDir() : InstallerStepDef("install_dir", "Choose Install Location");
+    public sealed record ParameterGroup(string ScreenName, IReadOnlyList<ParameterFieldVm> Fields)
+        : InstallerStepDef($"group:{ScreenName}", ScreenName);
+    public sealed record Installing() : InstallerStepDef("installing", "Installing");
+    public sealed record Finish() : InstallerStepDef("finish", "Finish");
+    public sealed record Custom() : InstallerStepDef("custom", "Custom");
+}
+
 public sealed class InstallerViewModel : INotifyPropertyChanged
 {
-    private InstallerStep _step = InstallerStep.Welcome;
+    private const string DefaultParameterGroupName = "Install Options";
+
+    private int _currentStepIndex;
     private string _installPath;
     private CancellationTokenSource? _engineCts;
 
@@ -40,10 +72,10 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
         InstallTimeParameters = installTimeParameters ?? Array.Empty<InstallTimeParameter>();
         _parameterValues = SeedDefaults(InstallTimeParameters);
 
-        // install_dir is special: it's the value the InstallOptionsView's
-        // TextBox binds to. Preselect the user's manifest default if it
-        // declared an install-time parameter named "install_dir"; otherwise
-        // fall back to the conventional Program Files\AppName.
+        // install_dir is special: it's the value the InstallDirView's TextBox
+        // binds to. Preselect the user's manifest default if it declared an
+        // install-time parameter named "install_dir"; otherwise fall back to
+        // the conventional Program Files\AppName.
         if (_parameterValues.TryGetValue("install_dir", out var installDirDefault) &&
             !string.IsNullOrWhiteSpace(installDirDefault))
         {
@@ -73,6 +105,7 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
                 Type = p.Type,
                 Values = p.Values,
                 Source = p.Source,
+                Screen = p.Screen,
                 CurrentValue = current ?? p.DefaultAsString,
             };
             fields.Add(field);
@@ -91,7 +124,84 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
         }
         ParameterFields = fields;
 
+        Steps = BuildSteps(InstallTimeParameters, fields);
+
         LogoImage = TryLoadLogo(tokens.LogoFile);
+    }
+
+    /// <summary>
+    /// Builds the ordered step list from the manifest's install-time
+    /// parameters. Always includes Welcome / License / Installing / Finish.
+    /// Inserts an InstallDir page when an <c>install_dir</c> parameter was
+    /// declared. Inserts one ParameterGroup per unique <c>screen:</c> value,
+    /// in first-appearance order. Parameters without a <c>screen:</c> value
+    /// land in a trailing synthetic "Install Options" group. The
+    /// <c>install_dir</c> parameter is excluded from every group — it lives
+    /// exclusively on the InstallDir page.
+    /// </summary>
+    private static List<InstallerStepDef> BuildSteps(
+        IReadOnlyList<InstallTimeParameter> parameters,
+        IReadOnlyList<ParameterFieldVm> fields)
+    {
+        var steps = new List<InstallerStepDef>(8)
+        {
+            new InstallerStepDef.Welcome(),
+            new InstallerStepDef.License(),
+        };
+
+        var hasInstallDir = parameters.Any(p =>
+            string.Equals(p.Name, "install_dir", StringComparison.OrdinalIgnoreCase));
+        if (hasInstallDir)
+            steps.Add(new InstallerStepDef.InstallDir());
+
+        // Group parameter fields by manifest-declared screen value. The
+        // install_dir parameter never appears in any group (it gets its own
+        // page above). Parameters without a screen value go into a trailing
+        // synthetic "Install Options" group so single-page installers keep
+        // their NSIS-equivalent look-and-feel.
+        var grouped = new Dictionary<string, List<ParameterFieldVm>>(StringComparer.Ordinal);
+        var orderedKeys = new List<string>();
+        var defaultGroup = new List<ParameterFieldVm>();
+        foreach (var f in fields)
+        {
+            if (string.Equals(f.Name, "install_dir", StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (string.IsNullOrEmpty(f.Screen))
+            {
+                defaultGroup.Add(f);
+                continue;
+            }
+            if (!grouped.TryGetValue(f.Screen, out var bucket))
+            {
+                bucket = new List<ParameterFieldVm>();
+                grouped[f.Screen] = bucket;
+                orderedKeys.Add(f.Screen);
+            }
+            bucket.Add(f);
+        }
+
+        foreach (var key in orderedKeys)
+        {
+            steps.Add(new InstallerStepDef.ParameterGroup(key, grouped[key]));
+        }
+        if (defaultGroup.Count > 0)
+        {
+            steps.Add(new InstallerStepDef.ParameterGroup(DefaultParameterGroupName, defaultGroup));
+        }
+
+        // If neither install_dir nor any parameters at all are declared, keep
+        // the Install Options page visible so the wizard still has a screen
+        // between License and Installing — the page just renders empty fields.
+        if (!hasInstallDir && grouped.Count == 0 && defaultGroup.Count == 0)
+        {
+            steps.Add(new InstallerStepDef.ParameterGroup(
+                DefaultParameterGroupName,
+                Array.Empty<ParameterFieldVm>()));
+        }
+
+        steps.Add(new InstallerStepDef.Installing());
+        steps.Add(new InstallerStepDef.Finish());
+        return steps;
     }
 
     public BrandTokens Brand { get; }
@@ -106,14 +216,43 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     public IReadOnlyList<InstallTimeParameter> InstallTimeParameters { get; }
 
     /// <summary>
-    /// Per-parameter view-model entries the InstallOptionsView's ItemsControl
-    /// binds to. One <see cref="ParameterFieldVm"/> per install-time parameter,
-    /// in declaration order. Mutations to each entry's
-    /// <see cref="ParameterFieldVm.CurrentValue"/> flow back into
-    /// <see cref="ParameterValues"/>; for <c>install_dir</c> they also mirror
-    /// into <see cref="InstallPath"/>.
+    /// Flat list of every install-time parameter as a per-field view-model.
+    /// The Install Options page binds to the slice for the current
+    /// <see cref="InstallerStepDef.ParameterGroup"/>; this flat list survives
+    /// so existing wiring (HTTPS option fetch, install-subprocess launcher)
+    /// can iterate every parameter regardless of which page hosts it.
     /// </summary>
     public IReadOnlyList<ParameterFieldVm> ParameterFields { get; } = Array.Empty<ParameterFieldVm>();
+
+    /// <summary>
+    /// Ordered list of wizard step definitions. Always begins with Welcome
+    /// + License and ends with Installing + Finish; InstallDir / one or more
+    /// ParameterGroup entries sit in between depending on the manifest.
+    /// </summary>
+    public IReadOnlyList<InstallerStepDef> Steps { get; }
+
+    /// <summary>Zero-based index into <see cref="Steps"/>.</summary>
+    public int CurrentStepIndex
+    {
+        get => _currentStepIndex;
+        private set
+        {
+            if (_currentStepIndex == value) return;
+            _currentStepIndex = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(CurrentStepDef));
+            OnPropertyChanged(nameof(CurrentStep));
+            OnPropertyChanged(nameof(CanGoBack));
+            OnPropertyChanged(nameof(CanGoNext));
+            OnPropertyChanged(nameof(CanCancel));
+            OnPropertyChanged(nameof(CancelButtonText));
+            OnPropertyChanged(nameof(CurrentGroupFields));
+            OnPropertyChanged(nameof(CurrentGroupTitle));
+        }
+    }
+
+    /// <summary>Current step definition; one entry from <see cref="Steps"/>.</summary>
+    public InstallerStepDef CurrentStepDef => Steps[_currentStepIndex];
 
     private readonly Dictionary<string, string> _parameterValues;
 
@@ -236,14 +375,54 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
 
     public InstallerOutcomeCode OutcomeCode { get; private set; } = InstallerOutcomeCode.Completed;
 
+    /// <summary>
+    /// Legacy coarse-grained step accessor for tests and back-compat callers.
+    /// Setting this jumps to the FIRST step of the matching kind:
+    /// <c>InstallOptions</c> picks the InstallDir page if one exists,
+    /// otherwise the first ParameterGroup.
+    /// </summary>
     public InstallerStep CurrentStep
     {
-        get => _step;
-        set { if (_step != value) { _step = value; OnPropertyChanged(); OnPropertyChanged(nameof(CanGoBack)); OnPropertyChanged(nameof(CanGoNext)); OnPropertyChanged(nameof(CanCancel)); OnPropertyChanged(nameof(CancelButtonText)); } }
+        get => MapToEnum(CurrentStepDef);
+        set
+        {
+            var targetIndex = FindFirstIndexFor(value);
+            if (targetIndex >= 0)
+                CurrentStepIndex = targetIndex;
+        }
     }
 
-    public bool CanGoBack => _step is not InstallerStep.Welcome and not InstallerStep.Installing and not InstallerStep.Finish;
-    public bool CanGoNext => _step is not InstallerStep.Installing and not InstallerStep.Finish;
+    private static InstallerStep MapToEnum(InstallerStepDef def) => def switch
+    {
+        InstallerStepDef.Welcome => InstallerStep.Welcome,
+        InstallerStepDef.License => InstallerStep.License,
+        InstallerStepDef.InstallDir => InstallerStep.InstallOptions,
+        InstallerStepDef.ParameterGroup => InstallerStep.InstallOptions,
+        InstallerStepDef.Installing => InstallerStep.Installing,
+        InstallerStepDef.Finish => InstallerStep.Finish,
+        InstallerStepDef.Custom => InstallerStep.Custom,
+        _ => InstallerStep.Welcome,
+    };
+
+    private int FindFirstIndexFor(InstallerStep step)
+    {
+        for (var i = 0; i < Steps.Count; i++)
+        {
+            if (MapToEnum(Steps[i]) == step)
+                return i;
+        }
+        return -1;
+    }
+
+    public bool CanGoBack =>
+        CurrentStepIndex > 0
+        && CurrentStepDef is not InstallerStepDef.Installing
+        && CurrentStepDef is not InstallerStepDef.Finish;
+
+    public bool CanGoNext =>
+        CurrentStepIndex < Steps.Count - 1
+        && CurrentStepDef is not InstallerStepDef.Installing
+        && CurrentStepDef is not InstallerStepDef.Finish;
 
     /// <summary>
     /// Cancel/Close button enable state.
@@ -253,14 +432,30 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     /// the same button text changes to "Close" (see <see cref="CancelButtonText"/>)
     /// and the click handler closes with <see cref="InstallerOutcomeCode.Completed"/>.
     /// </summary>
-    public bool CanCancel => _step is not InstallerStep.Installing;
+    public bool CanCancel => CurrentStepDef is not InstallerStepDef.Installing;
 
     /// <summary>
     /// Dynamic label for the bottom-row button. "Close" on the Finish screen
     /// (install is done — clicking closes the wizard with Completed exit code),
     /// "Cancel" everywhere else (user is abandoning; closes with UserCancelled).
     /// </summary>
-    public string CancelButtonText => _step == InstallerStep.Finish ? "Close" : "Cancel";
+    public string CancelButtonText => CurrentStepDef is InstallerStepDef.Finish ? "Close" : "Cancel";
+
+    /// <summary>
+    /// Fields displayed on the current parameter-group page. Empty for any
+    /// non-ParameterGroup step.
+    /// </summary>
+    public IReadOnlyList<ParameterFieldVm> CurrentGroupFields =>
+        CurrentStepDef is InstallerStepDef.ParameterGroup group
+            ? group.Fields
+            : Array.Empty<ParameterFieldVm>();
+
+    /// <summary>
+    /// Title text displayed at the top of the current step. Used by the
+    /// Install Options view to show the manifest-declared screen name (e.g.
+    /// "Server Settings", "Kiosk Settings") instead of a static heading.
+    /// </summary>
+    public string CurrentGroupTitle => CurrentStepDef.Title;
 
     public string LicenseText { get; set; } = "MIT License (placeholder — replace with the app's actual EULA).";
 
@@ -302,8 +497,63 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
                 // subprocess launcher reads the user's edit, not the default.
                 _parameterValues["install_dir"] = value;
                 OnPropertyChanged();
+                OnPropertyChanged(nameof(InstallDirDriveLabel));
+                OnPropertyChanged(nameof(InstallDirSpaceLabel));
             }
         }
+    }
+
+    /// <summary>
+    /// Drive name + filesystem label for the disk the chosen install path
+    /// lives on. Recomputed whenever <see cref="InstallPath"/> changes; falls
+    /// back to a friendly placeholder when the path is invalid or the drive
+    /// can't be queried (network drives, removable media not present, ...).
+    /// </summary>
+    public string InstallDirDriveLabel =>
+        TryGetDriveInfo() is { } d
+            ? $"Drive: {d.Name.TrimEnd('\\')}  ({d.DriveFormat})"
+            : "Drive: (unavailable)";
+
+    /// <summary>
+    /// Human-readable free / total space readout for the destination drive
+    /// (e.g. "Free space: 152.31 GB  /  Total: 931.51 GB"). NSIS-style
+    /// disk-space indicator on the Install Directory page.
+    /// </summary>
+    public string InstallDirSpaceLabel =>
+        TryGetDriveInfo() is { IsReady: true } d
+            ? $"Free space: {FormatBytes(d.AvailableFreeSpace)}  /  Total: {FormatBytes(d.TotalSize)}"
+            : "Free space: (drive not ready)";
+
+    private DriveInfo? TryGetDriveInfo()
+    {
+        try
+        {
+            var root = Path.GetPathRoot(_installPath);
+            if (string.IsNullOrEmpty(root)) return null;
+            return new DriveInfo(root);
+        }
+#pragma warning disable CA1031 // disk-info readout must never crash the wizard
+        catch
+        {
+            return null;
+        }
+#pragma warning restore CA1031
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        const double KB = 1024d;
+        const double MB = KB * 1024d;
+        const double GB = MB * 1024d;
+        const double TB = GB * 1024d;
+        return bytes switch
+        {
+            >= (long)TB => $"{bytes / TB:F2} TB",
+            >= (long)GB => $"{bytes / GB:F2} GB",
+            >= (long)MB => $"{bytes / MB:F2} MB",
+            >= (long)KB => $"{bytes / KB:F2} KB",
+            _ => $"{bytes} B",
+        };
     }
 
     private double _installProgress;
@@ -320,22 +570,31 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
         set { _installCurrentItem = value; OnPropertyChanged(); }
     }
 
-    public void Next() => CurrentStep = _step switch
+    /// <summary>
+    /// Advances one step forward. Honours the License-acceptance gate: when
+    /// the current step is License and the user hasn't ticked the agreement,
+    /// the call is a no-op so the Next button feels disabled even though it
+    /// stays clickable.
+    /// </summary>
+    public void Next()
     {
-        InstallerStep.Welcome => InstallerStep.License,
-        InstallerStep.License => LicenseAccepted ? InstallerStep.InstallOptions : _step,
-        InstallerStep.InstallOptions => InstallerStep.Installing,
-        InstallerStep.Installing => InstallerStep.Finish,
-        _ => _step,
-    };
+        if (CurrentStepDef is InstallerStepDef.License && !LicenseAccepted)
+            return;
+        if (CurrentStepIndex < Steps.Count - 1)
+            CurrentStepIndex = CurrentStepIndex + 1;
+    }
 
-    public void Back() => CurrentStep = _step switch
+    /// <summary>
+    /// Walks one step back. Locked on Installing (can't rewind a running
+    /// install) and Finish (no behind to go to).
+    /// </summary>
+    public void Back()
     {
-        InstallerStep.License => InstallerStep.Welcome,
-        InstallerStep.InstallOptions => InstallerStep.License,
-        InstallerStep.Installing => _step,
-        _ => _step,
-    };
+        if (CurrentStepDef is InstallerStepDef.Installing || CurrentStepDef is InstallerStepDef.Finish)
+            return;
+        if (CurrentStepIndex > 0)
+            CurrentStepIndex = CurrentStepIndex - 1;
+    }
 
     /// <summary>
     /// Registers the <see cref="CancellationTokenSource"/> owned by the install operation so
@@ -359,13 +618,13 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
         // completed successfully, the user is just dismissing the wizard.
         // Surface that as Completed (exit 0), not UserCancelled (1602), so the
         // wrapper doesn't treat it as a cancel and skip its post-actions.
-        if (_step == InstallerStep.Finish)
+        if (CurrentStepDef is InstallerStepDef.Finish)
         {
             OutcomeCode = InstallerOutcomeCode.Completed;
             return true;
         }
 
-        if (_step == InstallerStep.Installing && _engineCts is not null)
+        if (CurrentStepDef is InstallerStepDef.Installing && _engineCts is not null)
         {
             // Confirm with the user before interrupting a running install.
             if (confirmAsync is not null)
@@ -417,6 +676,14 @@ public sealed class ParameterFieldVm : INotifyPropertyChanged
     /// <see cref="Values"/>.
     /// </summary>
     public InstallTimeParameterSource? Source { get; init; }
+
+    /// <summary>
+    /// Manifest-declared <c>screen:</c> value for this parameter. Drives the
+    /// wizard's multi-page grouping — fields with the same screen value land
+    /// on the same Install Options page. Null/empty means "Install Options"
+    /// (the synthetic default group).
+    /// </summary>
+    public string? Screen { get; init; }
 
     private IReadOnlyList<HttpOption> _dynamicOptions = Array.Empty<HttpOption>();
     /// <summary>

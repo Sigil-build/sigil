@@ -30,10 +30,18 @@ internal static class Program
         try
         {
             var blob = WrapperBlob.LoadFromSelf();
-            WrapperLog.Info($"blob loaded: appId={blob.AppId}, params={blob.Parameters.Count}, pre={blob.PreInstall.Count}, install={blob.InstallSteps.Count}, post={blob.PostInstall.Count}, update={blob.UpdateSteps.Count}");
+            WrapperLog.Info($"blob loaded: appId={blob.AppId}, params={blob.Parameters.Count}, pre={blob.PreInstall.Count}, install={blob.InstallSteps.Count}, post={blob.PostInstall.Count}, update={blob.UpdateSteps.Count}, uninstall={blob.Uninstall.Count}, isUninstaller={blob.IsUninstaller}");
 
             var parsed = CommandLineParser.Parse(args, blob.Parameters);
-            WrapperLog.Info($"argv parsed: mode={parsed.Mode}, silent={parsed.Silent}, params={parsed.Values.Count}");
+            // A blob stamped with IsUninstaller=true ALWAYS behaves like /Uninstall —
+            // the user double-clicks uninstaller.exe and gets the uninstall flow even
+            // without flags. CLI overrides (e.g. /S) still apply on top.
+            if (blob.IsUninstaller && parsed.Mode == WrapperMode.Install)
+            {
+                parsed = parsed with { Mode = WrapperMode.Uninstall };
+                WrapperLog.Info("blob.IsUninstaller=true — coercing mode to Uninstall");
+            }
+            WrapperLog.Info($"argv parsed (post-coerce): mode={parsed.Mode}, silent={parsed.Silent}, params={parsed.Values.Count}");
 
             // Uninstall is a separate engine — it loads the persisted
             // RollbackJournal and replays it instead of running the

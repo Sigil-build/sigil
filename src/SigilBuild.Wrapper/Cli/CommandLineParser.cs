@@ -41,7 +41,7 @@ public enum WrapperMode
 /// mode, the silent-mode toggle, and the resolved parameter override values
 /// keyed by their canonical schema-defined name.
 /// </summary>
-public sealed class ParsedCommandLine
+public sealed record ParsedCommandLine
 {
     /// <summary>Operating mode requested by the user.</summary>
     public WrapperMode Mode { get; init; } = WrapperMode.Install;

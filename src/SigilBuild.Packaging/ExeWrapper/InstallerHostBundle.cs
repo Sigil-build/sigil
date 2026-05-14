@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Threading;
 
 namespace SigilBuild.Packaging.ExeWrapper;
 
@@ -57,6 +58,14 @@ internal static class InstallerHostBundle
     public const string BrandLogoEntryPrefix = "brand-logo";
 
     /// <summary>
+    /// File name used inside the bundle zip for the wizard window icon. The
+    /// wizard's <c>InstallerWindow</c> ctor loads this next to its own exe at
+    /// startup and assigns it to <c>Window.Icon</c> so the taskbar + Alt+Tab
+    /// thumbnail show the installer icon instead of the stock .exe glyph.
+    /// </summary>
+    public const string InstallerIconEntryName = "installer-icon.ico";
+
+    /// <summary>
     /// Builds the zip blob bytes from a freshly-AOT-published installer.exe,
     /// every native sidecar DLL next to it (libSkiaSharp, libHarfBuzzSharp,
     /// av_libglesv2, …), a serialised <c>BrandTokens.g.json</c> body, an
@@ -68,7 +77,18 @@ internal static class InstallerHostBundle
     /// logo file (resolved by the caller from the manifest's
     /// <c>installer.brand.logo</c> relative path). Pass <c>null</c> when the
     /// manifest didn't declare a logo.</param>
-    public static byte[] Build(string installerExePath, string brandTokensJson, string installTimeParametersJson, string? brandLogoSourcePath)
+    /// <param name="iconBytes">Raw .ico bytes — the same icon stamped onto the
+    /// outer setup.exe at the end of pack. When non-null, the bundled wizard
+    /// exe is PE-stamped with this icon (so Task Manager / Explorer show the
+    /// branded icon for the running wizard process) AND the bytes are added
+    /// to the zip as <see cref="InstallerIconEntryName"/> so the wizard can
+    /// load them at runtime to set <c>Window.Icon</c>.</param>
+    public static byte[] Build(
+        string installerExePath,
+        string brandTokensJson,
+        string installTimeParametersJson,
+        string? brandLogoSourcePath,
+        byte[]? iconBytes)
     {
         ArgumentNullException.ThrowIfNull(installerExePath);
         ArgumentNullException.ThrowIfNull(brandTokensJson);
@@ -80,45 +100,83 @@ internal static class InstallerHostBundle
             ?? throw new InvalidOperationException(
                 $"could not derive directory from installerExePath '{installerExePath}'");
 
-        using var ms = new MemoryStream();
-        using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
+        // When an icon is supplied, copy installer.exe to a temp file and stamp
+        // its RT_ICON / RT_GROUP_ICON resources before zipping. The stamped exe
+        // is what ends up inside SIGIL_INSTALLER_HOST_V1 → extracted at install
+        // time → run as the wizard process. Stamping the source-of-truth means
+        // Windows' shell/task-manager/Alt+Tab show the branded icon for the
+        // running process even before the Avalonia Window.Icon binding fires.
+        string wizardExePath = installerExePath;
+        string? stampedTempPath = null;
+        if (iconBytes is not null && iconBytes.Length > 0)
         {
-            // 1980-01-01 — deterministic mtime, same convention as
-            // ExeWrapperPackager.BuildPayloadBytes so identical inputs produce
-            // identical setup.exe byte streams across runs.
-            var deterministicMtime = new DateTimeOffset(1980, 1, 1, 0, 0, 0, TimeSpan.Zero);
+            stampedTempPath = Path.Combine(Path.GetTempPath(),
+                $"sigil-wizard-icon-{Guid.NewGuid():N}.exe");
+            File.Copy(installerExePath, stampedTempPath, overwrite: true);
+            IconResourceWriter.WriteAsync(stampedTempPath, iconBytes, CancellationToken.None)
+                .GetAwaiter().GetResult();
+            wizardExePath = stampedTempPath;
+        }
 
-            // 1) The wizard exe under its renamed-to-dodge-UAC entry name.
-            AddFile(zip, installerExePath, WizardEntryName, deterministicMtime);
-
-            // 2) Brand tokens — read at startup by the wizard's BrandTokens.LoadOrDefault.
-            AddText(zip, "BrandTokens.g.json", brandTokensJson, deterministicMtime);
-
-            // 3) Install-time parameter contract — read by the wizard to
-            //    populate Install Options with the user's manifest defaults.
-            AddText(zip, "InstallTimeParameters.g.json", installTimeParametersJson, deterministicMtime);
-
-            // 4) User-supplied brand logo (when present). Bundling under a
-            //    known name keeps the wizard's lookup deterministic: it reads
-            //    BrandTokens.LogoFile and Path.Combines with its own dir. The
-            //    extension is preserved so the wizard's loader can choose
-            //    between Avalonia Bitmap (raster) and Svg.Skia (vector).
-            if (brandLogoSourcePath is not null && File.Exists(brandLogoSourcePath))
+        try
+        {
+            using var ms = new MemoryStream();
+            using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
             {
-                var ext = Path.GetExtension(brandLogoSourcePath);
-                var bundledName = BrandLogoEntryPrefix + ext;
-                AddFile(zip, brandLogoSourcePath, bundledName, deterministicMtime);
+                // 1980-01-01 — deterministic mtime, same convention as
+                // ExeWrapperPackager.BuildPayloadBytes so identical inputs produce
+                // identical setup.exe byte streams across runs.
+                var deterministicMtime = new DateTimeOffset(1980, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+                // 1) The (icon-stamped, when iconBytes was supplied) wizard exe
+                //    under its renamed-to-dodge-UAC entry name.
+                AddFile(zip, wizardExePath, WizardEntryName, deterministicMtime);
+
+                // 2) Brand tokens — read at startup by the wizard's BrandTokens.LoadOrDefault.
+                AddText(zip, "BrandTokens.g.json", brandTokensJson, deterministicMtime);
+
+                // 3) Install-time parameter contract — read by the wizard to
+                //    populate Install Options with the user's manifest defaults.
+                AddText(zip, "InstallTimeParameters.g.json", installTimeParametersJson, deterministicMtime);
+
+                // 4) User-supplied brand logo (when present). Bundling under a
+                //    known name keeps the wizard's lookup deterministic: it reads
+                //    BrandTokens.LogoFile and Path.Combines with its own dir. The
+                //    extension is preserved so the wizard's loader can choose
+                //    between Avalonia Bitmap (raster) and Svg.Skia (vector).
+                if (brandLogoSourcePath is not null && File.Exists(brandLogoSourcePath))
+                {
+                    var ext = Path.GetExtension(brandLogoSourcePath);
+                    var bundledName = BrandLogoEntryPrefix + ext;
+                    AddFile(zip, brandLogoSourcePath, bundledName, deterministicMtime);
+                }
+
+                // 5) Installer icon bytes (when supplied) — the wizard loads
+                //    these and sets Window.Icon so the taskbar / Alt+Tab show
+                //    the branded icon for the running wizard window. Bundling
+                //    keeps the runtime lookup deterministic.
+                if (iconBytes is not null && iconBytes.Length > 0)
+                {
+                    AddBytes(zip, InstallerIconEntryName, iconBytes, deterministicMtime);
+                }
+
+                // 6) Every native sidecar DLL next to installer.exe. Walks the
+                //    publish directory in deterministic (sorted) order so the
+                //    output bundle is byte-stable across runs.
+                foreach (var dll in Directory.EnumerateFiles(hostDir, "*.dll").OrderBy(p => p, StringComparer.Ordinal))
+                {
+                    AddFile(zip, dll, Path.GetFileName(dll), deterministicMtime);
+                }
             }
-
-            // 5) Every native sidecar DLL next to installer.exe. Walks the
-            //    publish directory in deterministic (sorted) order so the
-            //    output bundle is byte-stable across runs.
-            foreach (var dll in Directory.EnumerateFiles(hostDir, "*.dll").OrderBy(p => p, StringComparer.Ordinal))
+            return ms.ToArray();
+        }
+        finally
+        {
+            if (stampedTempPath is not null)
             {
-                AddFile(zip, dll, Path.GetFileName(dll), deterministicMtime);
+                try { File.Delete(stampedTempPath); } catch { /* best-effort */ }
             }
         }
-        return ms.ToArray();
     }
 
     private static void AddText(ZipArchive zip, string entryName, string content, DateTimeOffset mtime)
@@ -137,5 +195,13 @@ internal static class InstallerHostBundle
         using var dst = entry.Open();
         using var src = File.OpenRead(sourcePath);
         src.CopyTo(dst);
+    }
+
+    private static void AddBytes(ZipArchive zip, string entryName, byte[] bytes, DateTimeOffset mtime)
+    {
+        var entry = zip.CreateEntry(entryName, CompressionLevel.Optimal);
+        entry.LastWriteTime = mtime;
+        using var dst = entry.Open();
+        dst.Write(bytes, 0, bytes.Length);
     }
 }

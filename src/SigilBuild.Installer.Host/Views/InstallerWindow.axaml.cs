@@ -20,6 +20,37 @@ public partial class InstallerWindow : Window
         AvaloniaXamlLoader.Load(this);
         _screenHost = this.FindControl<ContentControl>("ScreenHost");
         DataContextChanged += OnDataContextChanged;
+        TryLoadWindowIcon();
+    }
+
+    /// <summary>
+    /// Load <c>installer-icon.ico</c> from the wizard's extract directory and
+    /// assign it to <see cref="Window.Icon"/>. The InstallerHostBundle packager
+    /// stamps the bundled exe's PE icon AND drops the .ico bytes next to it as
+    /// <c>installer-icon.ico</c>; the latter is what Avalonia's Window.Icon
+    /// needs because PE-stamped icons don't propagate to the title bar / Alt+Tab
+    /// thumbnail at runtime without an explicit assignment.
+    /// </summary>
+    private void TryLoadWindowIcon()
+    {
+        try
+        {
+            var baseDir = System.IO.Path.GetDirectoryName(Environment.ProcessPath ?? "")
+                ?? Environment.CurrentDirectory;
+            var iconPath = System.IO.Path.Combine(baseDir, "installer-icon.ico");
+            if (!System.IO.File.Exists(iconPath))
+            {
+                InstallerLog.Info($"InstallerWindow: no installer-icon.ico at '{iconPath}' — using stock window icon");
+                return;
+            }
+            using var stream = System.IO.File.OpenRead(iconPath);
+            Icon = new WindowIcon(stream);
+            InstallerLog.Info($"InstallerWindow: loaded Window.Icon from '{iconPath}'");
+        }
+        catch (Exception ex)
+        {
+            InstallerLog.Error("InstallerWindow: failed to load installer-icon.ico", ex);
+        }
     }
 
     /// <summary>

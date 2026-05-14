@@ -79,13 +79,20 @@ public sealed class ExeWrapperPackager : IPackager
         // payload:// path resolution) lands with Tasks 15+.
         var payloadBytes = BuildPayloadBytes(options.SourceDirectory, ct);
 
+        // Resolve the installer icon ONCE up front. Same bytes flow to two
+        // places: (a) the InstallerHostBundle, which stamps the bundled
+        // wizard exe + ships installer-icon.ico for Window.Icon at runtime;
+        // (b) the final IconResourceWriter.WriteAsync call that stamps the
+        // outer setup.exe's Explorer/Shell icon.
+        var iconBytes = ResolveIconBytes(manifest);
+
         // Build the SIGIL_INSTALLER_HOST_V1 wire payload when the manifest
         // declares an `installer:` block AND the AOT-published installer.exe
         // is staged next to the SDK. When it's missing, fall through to the
         // headless path — the wrapper runs install_steps without a wizard.
         // This mirrors the policy MsixPackager.Bundle uses for MSIX.
         var (installerHostBundle, installerHostDiagnostic) =
-            TryBuildInstallerHostBundle(manifest);
+            TryBuildInstallerHostBundle(manifest, iconBytes);
 
         // When the manifest declares an uninstall: block, generate a lightweight
         // uninstaller.exe stamped with those steps and embed it in setup.exe as
@@ -117,8 +124,8 @@ public sealed class ExeWrapperPackager : IPackager
 
         // Stamp the icon AFTER WrapperResourceWriter has finished its
         // BeginUpdateResource / EndUpdateResource cycle. Concurrent updates on
-        // the same PE file are not safe.
-        var iconBytes = ResolveIconBytes(manifest);
+        // the same PE file are not safe. Same bytes as the wizard-bundle stamp
+        // so setup.exe and the wizard window share one branded icon.
         if (iconBytes is not null)
         {
             await IconResourceWriter.WriteAsync(outputPath, iconBytes, ct).ConfigureAwait(false);
@@ -173,7 +180,7 @@ public sealed class ExeWrapperPackager : IPackager
     /// AOT-published installer.exe is not staged (caller continues with a
     /// headless setup.exe); <c>(bundleBytes, null)</c> on success.
     /// </summary>
-    private static (byte[]? Bundle, Diagnostic? Diagnostic) TryBuildInstallerHostBundle(SigilManifest manifest)
+    private static (byte[]? Bundle, Diagnostic? Diagnostic) TryBuildInstallerHostBundle(SigilManifest manifest, byte[]? iconBytes)
     {
         if (manifest.Installer is null)
         {
@@ -218,7 +225,7 @@ public sealed class ExeWrapperPackager : IPackager
         // a future task can surface them through diagnostics.
         var tokens = BrandTokenEmitter.Emit(manifest, allowLowContrast: true, bundledLogoFileName: bundledLogoName);
         var installTimeParams = BrandTokenEmitter.EmitInstallTimeParameters(manifest);
-        var bundle = InstallerHostBundle.Build(hostExePath, tokens, installTimeParams, brandLogoAbsolutePath);
+        var bundle = InstallerHostBundle.Build(hostExePath, tokens, installTimeParams, brandLogoAbsolutePath, iconBytes);
         return (bundle, null);
     }
 

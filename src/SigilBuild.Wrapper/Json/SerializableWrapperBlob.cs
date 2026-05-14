@@ -33,6 +33,16 @@ internal sealed record SerializableWrapperBlob
     public SerializableInstallStep[] UpdateSteps  { get; init; } = Array.Empty<SerializableInstallStep>();
     public SerializableInstallStep[] Uninstall    { get; init; } = Array.Empty<SerializableInstallStep>();
 
+    /// <summary>
+    /// When <c>true</c>, the wrapper runtime coerces its mode to
+    /// <c>Uninstall</c> on entry — used by the dedicated <c>uninstaller.exe</c>
+    /// emitted alongside <c>setup.exe</c> so end-users double-clicking it land
+    /// in the uninstall flow without needing to pass <c>/Uninstall</c>.
+    /// Default <c>false</c> keeps blobs built before this field existed
+    /// behaving as installer-mode.
+    /// </summary>
+    public bool IsUninstaller { get; init; }
+
     public static WrapperBlob ToWrapperBlob(SerializableWrapperBlob s)
     {
         ArgumentNullException.ThrowIfNull(s);
@@ -50,7 +60,8 @@ internal sealed record SerializableWrapperBlob
             PreInstall:   ConvertSteps(s.PreInstall),
             PostInstall:  ConvertSteps(s.PostInstall),
             UpdateSteps:  ConvertSteps(s.UpdateSteps),
-            Uninstall:    ConvertSteps(s.Uninstall));
+            Uninstall:    ConvertSteps(s.Uninstall),
+            IsUninstaller: s.IsUninstaller);
     }
 
     public static SerializableWrapperBlob FromWrapperBlob(WrapperBlob blob)
@@ -70,6 +81,7 @@ internal sealed record SerializableWrapperBlob
             PostInstall  = SerializeSteps(blob.PostInstall),
             UpdateSteps  = SerializeSteps(blob.UpdateSteps),
             Uninstall    = SerializeSteps(blob.Uninstall),
+            IsUninstaller = blob.IsUninstaller,
         };
     }
 

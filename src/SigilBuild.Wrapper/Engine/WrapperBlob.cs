@@ -21,7 +21,8 @@ internal sealed partial record WrapperBlob(
     IReadOnlyList<InstallStep> PreInstall,
     IReadOnlyList<InstallStep> PostInstall,
     IReadOnlyList<InstallStep> UpdateSteps,
-    IReadOnlyList<InstallStep> Uninstall)
+    IReadOnlyList<InstallStep> Uninstall,
+    bool IsUninstaller)
 {
     /// <summary>
     /// Empty sentinel blob: well-known <c>AppId</c> placeholder and zero-length
@@ -38,7 +39,8 @@ internal sealed partial record WrapperBlob(
         PreInstall: Array.Empty<InstallStep>(),
         PostInstall: Array.Empty<InstallStep>(),
         UpdateSteps: Array.Empty<InstallStep>(),
-        Uninstall: Array.Empty<InstallStep>());
+        Uninstall: Array.Empty<InstallStep>(),
+        IsUninstaller: false);
 
     /// <summary>
     /// Read the blob from the running executable's embedded Win32 resource.

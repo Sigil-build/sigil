@@ -220,7 +220,10 @@ public sealed class ExeWrapperPackager : IPackager
             // Update-step block doesn't yet exist on SigilManifest (Task 19+);
             // emit an empty list for forward compatibility.
             UpdateSteps: Array.Empty<InstallStep>(),
-            Uninstall: manifest.Uninstall ?? Array.Empty<InstallStep>());
+            Uninstall: manifest.Uninstall ?? Array.Empty<InstallStep>(),
+            // setup.exe blob — the dedicated uninstaller.exe stamps its own
+            // blob with IsUninstaller: true (Task 5.3).
+            IsUninstaller: false);
 
         var serializable = SerializableWrapperBlob.FromWrapperBlob(inMemory);
         var json = System.Text.Json.JsonSerializer.Serialize(

@@ -71,4 +71,16 @@ public class IconResourceWriterTests
             try { Directory.Delete(outputDir, recursive: true); } catch { /* best-effort */ }
         }
     }
+
+    [Fact]
+    public void Kiosk_Setup_HasEmbeddedUninstaller()
+    {
+        var setup = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..",
+            "tests", "kiosk", "dist", "Embed.Infinity.Kiosk-1.0.0-x64-Setup.exe"));
+        if (!File.Exists(setup)) return; // soft-skip
+        var bytes = ResourceReader.Read(setup, "SIGIL_UNINSTALLER_V1");
+        bytes.Length.Should().BeGreaterThan(1_000_000,
+            "the embedded uninstaller is a ~3.7 MB stamped wrapper copy");
+    }
 }

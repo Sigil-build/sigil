@@ -34,6 +34,14 @@ public sealed class InstallTimeParameter
     [JsonPropertyName("values")]
     public IReadOnlyList<string>? Values { get; init; }
 
+    /// <summary>
+    /// Optional dynamic options source. When present, the wizard fetches the
+    /// URL at install time, parses the JSON, and populates the parameter's
+    /// ComboBox from the returned items.
+    /// </summary>
+    [JsonPropertyName("source")]
+    public InstallTimeParameterSource? Source { get; init; }
+
     /// <summary>Default as JSON — could be a string, bool, or int per the manifest schema.</summary>
     [JsonPropertyName("default")]
     public JsonElement Default { get; init; }
@@ -48,6 +56,20 @@ public sealed class InstallTimeParameter
             JsonValueKind.Undefined or JsonValueKind.Null => "",
             _ => Default.ToString(),
         };
+}
+
+/// <summary>
+/// Dynamic options source wire DTO. Mirrors <c>ParameterSource</c> in Core —
+/// the wizard fetches <see cref="Url"/> at install time, parses the JSON, and
+/// populates a ComboBox with the items at <see cref="ItemsPath"/> keyed by
+/// <see cref="ValueProperty"/> / labelled by <see cref="LabelProperty"/>.
+/// </summary>
+public sealed class InstallTimeParameterSource
+{
+    [JsonPropertyName("url")]            public string Url { get; init; } = "";
+    [JsonPropertyName("itemsPath")]      public string ItemsPath { get; init; } = "";
+    [JsonPropertyName("valueProperty")]  public string ValueProperty { get; init; } = "";
+    [JsonPropertyName("labelProperty")]  public string LabelProperty { get; init; } = "";
 }
 
 /// <summary>
@@ -75,4 +97,5 @@ public static class InstallTimeParameterLoader
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(InstallTimeParameter[]))]
+[JsonSerializable(typeof(InstallTimeParameterSource))]
 internal sealed partial class InstallTimeParameterJsonContext : JsonSerializerContext { }

@@ -113,6 +113,16 @@ public static class BrandTokenEmitter
                         foreach (var v in param.EnumValues) writer.WriteStringValue(v);
                         writer.WriteEndArray();
                     }
+                    if (param.Source is not null)
+                    {
+                        writer.WritePropertyName("source");
+                        writer.WriteStartObject();
+                        writer.WriteString("url", param.Source.Url);
+                        writer.WriteString("itemsPath", param.Source.ItemsPath);
+                        writer.WriteString("valueProperty", param.Source.ValueProperty);
+                        writer.WriteString("labelProperty", param.Source.LabelProperty);
+                        writer.WriteEndObject();
+                    }
                     WriteDefault(writer, param.Default);
                     writer.WriteEndObject();
                 }

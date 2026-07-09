@@ -34,8 +34,37 @@ public class ExeWrapperPackagerTests
         return File.Exists(staged) ? staged : null;
     }
 
+    /// <summary>
+    /// Reconciled overhead gate (T17). ADR-008 originally hard-capped the wrapper
+    /// overhead at 5 MB, on the assumption the stamped runtime was a thin AOT
+    /// console host. T18 changed that assumption: the Setup.exe now bundles the
+    /// full Native-AOT wizard host (<c>SigilBuild.Installer.Host.exe</c>, ~19 MB)
+    /// PLUS its Skia/ANGLE/HarfBuzz native runtime (~19 MB raw), embedded as the
+    /// <c>SIGIL_RUNTIME_V1</c> resource, so a real stamped exe is ~28 MB over the
+    /// payload — the 5 MB flat cap is no longer meaningful.
+    /// <para>
+    /// Rather than re-pin a single fragile magic number, the assertion is split
+    /// (ADR-008 option b) into the two independent components:
+    /// </para>
+    /// <list type="number">
+    ///   <item><description><b>Bundled AOT runtime</b> — the host exe + its raw
+    ///   native deps. This is the legitimately-large part; it is gated separately
+    ///   by the host size gate (T3, ~40 MB footprint) inside
+    ///   <c>scripts/publish-installer-runtime.ps1</c>, so this test only measures
+    ///   it (as the compressed <c>SIGIL_RUNTIME_V1</c> archive can never exceed
+    ///   the raw bytes, the staged host + raw natives are a safe UPPER bound).</description></item>
+    ///   <item><description><b>Wrapper-code / packaging overhead</b> — everything
+    ///   the packager ADDS on top of that bundled runtime: the stamped
+    ///   <c>SIGIL_BLOB_V1</c> JSON, the compressed-payload framing, and PE
+    ///   resource-table alignment. THIS is what ADR-008's 5 MB cap governs, and it
+    ///   is still enforced here.</description></item>
+    /// </list>
+    /// Runtime-gated: skips gracefully when the AOT host is not staged (so a plain
+    /// <c>dotnet test</c> stays fast), and PASSES once the runtime is staged via
+    /// <c>scripts/publish-installer-runtime.ps1</c>.
+    /// </summary>
     [Fact]
-    public async Task PackAsync_emits_exe_under_5mb_overhead_on_top_of_payload()
+    public async Task PackAsync_wrapper_code_overhead_under_5mb_on_top_of_bundled_runtime()
     {
         var wrapperPath = LocateStagedRuntime();
         if (wrapperPath is null)
@@ -44,7 +73,7 @@ public class ExeWrapperPackagerTests
             // Stage it with scripts/publish-installer-runtime.ps1 -DestinationRoot
             // <this test project's output dir> to exercise this path locally.
             Console.WriteLine(
-                "SKIP: PackAsync_emits_exe_under_5mb_overhead_on_top_of_payload — " +
+                "SKIP: PackAsync_wrapper_code_overhead_under_5mb_on_top_of_bundled_runtime — " +
                 "runtimes/win-x64/SigilBuild.Installer.Host.exe not staged (non-Windows " +
                 "or AOT runtime not published). Run scripts/publish-installer-runtime.ps1.");
             return;
@@ -59,23 +88,50 @@ public class ExeWrapperPackagerTests
             new ProcessEnvironmentReader());
         loadResult.Manifest.Should().NotBeNull();
 
-        var packager = new ExeWrapperPackager();
-        var options = new PackOptions(
-            SourceDirectory: Path.Combine(fixtureDir, "payload"),
-            OutputDirectory: outputDir,
-            Format: PackageFormat.Exe,
-            Architecture: TargetArchitecture.X64);
+        try
+        {
+            var packager = new ExeWrapperPackager();
+            var options = new PackOptions(
+                SourceDirectory: Path.Combine(fixtureDir, "payload"),
+                OutputDirectory: outputDir,
+                Format: PackageFormat.Exe,
+                Architecture: TargetArchitecture.X64);
 
-        var result = await packager.PackAsync(loadResult.Manifest!, options, CancellationToken.None);
+            var result = await packager.PackAsync(loadResult.Manifest!, options, CancellationToken.None);
 
-        result.Artifact.Should().NotBeNull();
-        File.Exists(result.Artifact!.Path).Should().BeTrue();
+            result.Artifact.Should().NotBeNull();
+            File.Exists(result.Artifact!.Path).Should().BeTrue();
 
-        var payloadSize = new DirectoryInfo(Path.Combine(fixtureDir, "payload"))
-            .EnumerateFiles("*", SearchOption.AllDirectories).Sum(f => f.Length);
-        var overheadBytes = result.Artifact.SizeBytes - payloadSize;
-        overheadBytes.Should().BeLessThan(5L * 1024 * 1024,
-            "wrapper-runtime overhead is hard-capped at 5 MB per ADR-008");
+            var payloadSize = new DirectoryInfo(Path.Combine(fixtureDir, "payload"))
+                .EnumerateFiles("*", SearchOption.AllDirectories).Sum(f => f.Length);
+            var overheadBytes = result.Artifact.SizeBytes - payloadSize;
+
+            // Component 1 — the bundled AOT runtime the packager stamps in: the host
+            // exe itself (the Setup.exe is a copy of it) plus its raw native-dep
+            // libraries (staged under runtimes/win-x64/native/, embedded compressed as
+            // SIGIL_RUNTIME_V1). Raw bytes are a safe UPPER bound on the embedded,
+            // compressed archive — so subtracting them can only OVER-state the leftover
+            // wrapper-code overhead, never hide a regression.
+            var hostExeSize = new FileInfo(wrapperPath).Length;
+            var nativeDir = Path.Combine(Path.GetDirectoryName(wrapperPath)!, "native");
+            var nativeDepsSize = Directory.Exists(nativeDir)
+                ? new DirectoryInfo(nativeDir).EnumerateFiles("*", SearchOption.AllDirectories).Sum(f => f.Length)
+                : 0L;
+            var bundledRuntimeBytes = hostExeSize + nativeDepsSize;
+
+            // Component 2 — the wrapper's own packaging overhead is everything on top
+            // of that bundled runtime. ADR-008's 5 MB cap now governs THIS number.
+            const long AdrWrapperCodeCapBytes = 5L * 1024 * 1024;
+            overheadBytes.Should().BeLessThan(bundledRuntimeBytes + AdrWrapperCodeCapBytes,
+                "the wrapper's own packaging overhead (stamped SIGIL_BLOB_V1 + compressed-payload " +
+                "framing + PE resource-table alignment) stays under ADR-008's 5 MB cap; the bundled " +
+                "Native-AOT host + its native runtime (T18) sit on top and are governed by the host " +
+                "size gate (T3, ~40 MB), not this cap");
+        }
+        finally
+        {
+            try { Directory.Delete(outputDir, recursive: true); } catch (IOException) { }
+        }
     }
 
     /// <summary>

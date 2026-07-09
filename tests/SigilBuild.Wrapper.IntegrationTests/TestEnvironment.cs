@@ -20,10 +20,13 @@ internal static class TestEnvironment
         System.Environment.GetEnvironmentVariable("SIGIL_VM_TESTS") == "1";
 
     /// <summary>
-    /// True when the AOT-published wrapper runtime is staged next to the test
-    /// assembly. Until the SDK build pipeline copies <c>SigilBuild.Wrapper.exe</c>
-    /// into <c>runtimes/win-x64/</c>, <see cref="ExeWrapperPackager"/> cannot
-    /// produce a setup exe and the integration tests soft-skip.
+    /// True when the AOT-published installer-host runtime is staged next to the
+    /// test assembly under <c>runtimes/win-x64/SigilBuild.Installer.Host.exe</c>
+    /// (the exact name + layout <c>WrapperRuntimeLocator.Locate</c> resolves at
+    /// pack time). Until <c>scripts/publish-installer-runtime.ps1</c> stages it,
+    /// <c>ExeWrapperPackager</c> cannot produce a setup exe and the integration
+    /// tests soft-skip. (The legacy <c>SigilBuild.Wrapper.exe</c> name predates the
+    /// T3 rename to the Avalonia host; it is accepted as a fallback for continuity.)
     /// </summary>
     public static bool IsRuntimeAvailable
     {
@@ -31,10 +34,12 @@ internal static class TestEnvironment
         {
             try
             {
-                var sdkRoot = System.AppContext.BaseDirectory;
-                var candidate = System.IO.Path.Combine(
-                    sdkRoot, "runtimes", "win-x64", "SigilBuild.Wrapper.exe");
-                return System.IO.File.Exists(candidate);
+                var runtimeDir = System.IO.Path.Combine(
+                    System.AppContext.BaseDirectory, "runtimes", "win-x64");
+                return System.IO.File.Exists(
+                           System.IO.Path.Combine(runtimeDir, "SigilBuild.Installer.Host.exe"))
+                    || System.IO.File.Exists(
+                           System.IO.Path.Combine(runtimeDir, "SigilBuild.Wrapper.exe"));
             }
             catch
             {

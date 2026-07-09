@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using SigilBuild.Core.Manifest;
 
@@ -23,6 +24,14 @@ internal static class WrapperRuntimeLocator
 {
     /// <summary>The file name of the stamped runtime staged under each RID folder.</summary>
     internal const string RuntimeFileName = "SigilBuild.Installer.Host.exe";
+
+    /// <summary>
+    /// Sub-folder under <c>runtimes/&lt;rid&gt;/</c> that holds the AOT publish's
+    /// sibling native dependencies (Skia/ANGLE/HarfBuzz) — staged by
+    /// <c>scripts/publish-installer-runtime.ps1</c> (T18) so the packager can embed
+    /// them in the stamped Setup.exe as <c>SIGIL_RUNTIME_V1</c>.
+    /// </summary>
+    internal const string NativeDepsFolderName = "native";
 
     /// <summary>
     /// Maps a <see cref="TargetArchitecture"/> to its .NET runtime identifier
@@ -56,5 +65,32 @@ internal static class WrapperRuntimeLocator
                 candidate);
         }
         return candidate;
+    }
+
+    /// <summary>
+    /// Enumerates the staged native-dependency DLLs for <paramref name="architecture"/>
+    /// (the Skia/ANGLE/HarfBuzz libraries the AOT host loads at runtime), resolved
+    /// under <c>runtimes/&lt;rid&gt;/native/</c> relative to
+    /// <paramref name="baseDirectory"/>. Returns the DLL paths sorted (ordinal) for
+    /// deterministic packaging, or an <b>empty</b> list when the native folder is
+    /// absent — a dev/staging layout without staged natives still packs (the
+    /// resulting Setup.exe simply carries no <c>SIGIL_RUNTIME_V1</c> resource and,
+    /// as before T18, cannot launch the GUI standalone). Distinct from
+    /// <see cref="Locate"/>, which resolves the single host exe.
+    /// </summary>
+    public static IReadOnlyList<string> LocateNativeDeps(
+        TargetArchitecture architecture, string? baseDirectory = null)
+    {
+        var root = baseDirectory ?? AppContext.BaseDirectory;
+        var rid = RidFor(architecture);
+        var nativeDir = Path.Combine(root, "runtimes", rid, NativeDepsFolderName);
+        if (!Directory.Exists(nativeDir))
+        {
+            return Array.Empty<string>();
+        }
+
+        var files = Directory.GetFiles(nativeDir, "*.dll", SearchOption.TopDirectoryOnly);
+        Array.Sort(files, StringComparer.Ordinal);
+        return files;
     }
 }

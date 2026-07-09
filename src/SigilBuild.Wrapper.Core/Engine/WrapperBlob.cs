@@ -78,6 +78,18 @@ internal sealed partial record WrapperBlob(
     }
 
     /// <summary>
+    /// Read the embedded native-dependency archive (<c>SIGIL_RUNTIME_V1</c>, T18)
+    /// from the running exe. Returns <c>null</c> when the resource is absent — an
+    /// un-stamped dev run whose Skia/ANGLE/HarfBuzz DLLs already sit beside the exe
+    /// — so <see cref="NativeRuntimeBootstrap.EnsureNativeDependenciesLoadable"/>
+    /// can no-op. The GUI bootstrap is the only caller.
+    /// </summary>
+    internal static byte[]? LoadRuntimeBytes()
+    {
+        return TryReadResource(NativeRuntimeBootstrap.RuntimeResourceName);
+    }
+
+    /// <summary>
     /// Read only the brand data (derived light/dark token maps, base64 logo/hero,
     /// ARP display fields) from the embedded <c>SIGIL_BLOB_V1</c> resource (T7).
     /// Returns <c>null</c> for an un-stamped runtime so the wizard falls back to

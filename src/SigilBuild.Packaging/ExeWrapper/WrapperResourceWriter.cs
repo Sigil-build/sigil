@@ -23,6 +23,12 @@ namespace SigilBuild.Packaging.ExeWrapper;
 ///     manifest's <c>SourceDirectory</c> for now; richer payload-extraction
 ///     story lands with Tasks 15+).
 ///   </item>
+///   <item>
+///     <c>SIGIL_RUNTIME_V1</c> — (T18) the host's native dependencies
+///     (Skia/ANGLE/HarfBuzz) as a deterministic zip, embedded only when native
+///     deps were staged, so a standalone stamped <c>Setup.exe</c> can extract
+///     and load them before the GUI wizard starts.
+///   </item>
 /// </list>
 /// Both resources are read at install time by the wrapper runtime via
 /// <see cref="SigilBuild.Wrapper.Engine.WrapperBlob.LoadFromSelf"/>. Because
@@ -46,18 +52,24 @@ internal static partial class WrapperResourceWriter
     private const string BlobResourceName = "SIGIL_BLOB_V1";
     private const string PayloadResourceName = "SIGIL_PAYLOAD_V1";
 
-    public static Task WriteAsync(string exePath, byte[] blob, byte[] payload, CancellationToken ct)
+    // T18: the host's native dependencies (Skia/ANGLE/HarfBuzz) archived so a
+    // standalone stamped Setup.exe can extract + load them before the GUI starts.
+    private const string RuntimeResourceName = "SIGIL_RUNTIME_V1";
+
+    public static Task WriteAsync(
+        string exePath, byte[] blob, byte[] payload, byte[] runtime, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(exePath);
         ArgumentNullException.ThrowIfNull(blob);
         ArgumentNullException.ThrowIfNull(payload);
+        ArgumentNullException.ThrowIfNull(runtime);
         ct.ThrowIfCancellationRequested();
 
-        WriteCore(exePath, blob, payload);
+        WriteCore(exePath, blob, payload, runtime);
         return Task.CompletedTask;
     }
 
-    private static void WriteCore(string exePath, byte[] blob, byte[] payload)
+    private static void WriteCore(string exePath, byte[] blob, byte[] payload, byte[] runtime)
     {
         // BeginUpdateResource(deleteExistingResources: false) keeps the AOT
         // binary's pre-existing resources (manifest, version info, icon)
@@ -72,6 +84,7 @@ internal static partial class WrapperResourceWriter
 
         var blobNamePtr = IntPtr.Zero;
         var payloadNamePtr = IntPtr.Zero;
+        var runtimeNamePtr = IntPtr.Zero;
         var committed = false;
         try
         {
@@ -80,6 +93,15 @@ internal static partial class WrapperResourceWriter
 
             UpdateOne(hUpdate, blobNamePtr, blob, BlobResourceName);
             UpdateOne(hUpdate, payloadNamePtr, payload, PayloadResourceName);
+
+            // T18: only stamp the native-runtime resource when there is one to
+            // stamp. An empty archive (no native deps staged) leaves SIGIL_RUNTIME_V1
+            // absent, so the host bootstrap correctly no-ops as an un-stamped run.
+            if (runtime.Length > 0)
+            {
+                runtimeNamePtr = Marshal.StringToHGlobalUni(RuntimeResourceName);
+                UpdateOne(hUpdate, runtimeNamePtr, runtime, RuntimeResourceName);
+            }
 
             // Commit — fDiscard: false writes the changes to disk.
             if (!EndUpdateResourceW(hUpdate, fDiscard: false))
@@ -94,6 +116,7 @@ internal static partial class WrapperResourceWriter
         {
             if (blobNamePtr != IntPtr.Zero) Marshal.FreeHGlobal(blobNamePtr);
             if (payloadNamePtr != IntPtr.Zero) Marshal.FreeHGlobal(payloadNamePtr);
+            if (runtimeNamePtr != IntPtr.Zero) Marshal.FreeHGlobal(runtimeNamePtr);
 
             // If we threw before commit, discard the in-memory update so the
             // exe on disk is unchanged. Ignore the bool result — we are

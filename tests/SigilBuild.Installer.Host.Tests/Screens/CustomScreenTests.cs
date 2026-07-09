@@ -75,11 +75,11 @@ public class CustomScreenTests
     private static InstallerViewModel NavigateToConfigure()
     {
         var (screens, parameters) = BuildConfigure();
+        // No license loaded → License screen absent (T14). Decision-4 flow:
+        // Welcome → Location (destination) → configure (custom).
         var vm = new InstallerViewModel(new BrandTokens { AppName = "Acme Studio" });
         vm.LoadScreens(screens, parameters);
-        vm.LicenseAccepted = true;
-        vm.Next(); // Welcome → License
-        vm.Next(); // License → Location
+        vm.Next(); // Welcome → Location
         vm.Next(); // Location → configure (custom)
         return vm;
     }

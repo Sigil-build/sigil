@@ -22,4 +22,10 @@ public static class DiagnosticCodes
     public const string UnknownScreenParameterRef = "SIG0240";
     public const string InvalidScreenWhenExpression = "SIG0241";
     public const string InvalidScreenTitleToken = "SIG0242";
+
+    // SIG025x — installer.license: block (T14, License screen backing)
+    // Emitted at pack time when the referenced license file is
+    // missing/unreadable/empty. Non-fatal: the pack succeeds and the License
+    // screen is simply omitted.
+    public const string LicenseFileUnreadable = "SIG0250";
 }

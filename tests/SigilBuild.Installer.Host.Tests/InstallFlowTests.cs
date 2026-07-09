@@ -21,11 +21,11 @@ public sealed class InstallFlowTests
     private static InstallerViewModel ArrangeAtInstalling(
         Func<IProgress<StepProgress>, CancellationToken, Task<InstallOutcome>> runner)
     {
+        // No license loaded → the License screen is absent (T14). Decision-4 flow
+        // for a default VM: Welcome → InstallOptions (destination) → Installing.
         var vm = new InstallerViewModel(new BrandTokens());
         vm.ConfigureInstallRunner(runner);
-        vm.LicenseAccepted = true;
-        vm.Next(); // Welcome → License
-        vm.Next(); // License → InstallOptions
+        vm.Next(); // Welcome → InstallOptions
         vm.Next(); // InstallOptions → Installing (fires the engine)
         return vm;
     }

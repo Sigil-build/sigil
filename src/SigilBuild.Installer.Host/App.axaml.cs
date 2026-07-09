@@ -42,6 +42,13 @@ public partial class App : Application
                 // forms and generates the rail from them.
                 _vm.LoadScreens(InstallerScreensLoader.LoadFromSelf(), session.Parameters);
 
+                // T14: load the embedded license text (from the blob). When present
+                // the License screen + its rail entry appear (after destination, per
+                // decision 4) and gate Next on acceptance; when absent they are
+                // omitted. The /silent path never reaches here, so silent installs
+                // imply acceptance.
+                _vm.LoadLicense(InstallerLicenseLoader.LoadFromSelf());
+
                 // Bind the wizard-collected parameter values into param.* for the
                 // engine at install time (read lazily at call time).
                 _vm.ConfigureInstallRunner((progress, ct) =>

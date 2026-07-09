@@ -45,11 +45,22 @@ public class NegativeTests
 
     // ── InstallerViewModel navigation guard tests ────────────────────────────
 
+    // T14: the License screen is present only once license text is loaded, and
+    // sits after the destination (Location) screen per decision 4.
+    private static InstallerViewModel NavigateToLicense()
+    {
+        var vm = new InstallerViewModel(new BrandTokens());
+        vm.LoadLicense("Example EULA text.");
+        vm.Next(); // Welcome → InstallOptions (destination)
+        vm.Next(); // InstallOptions → License
+        vm.CurrentStep.Should().Be(InstallerStep.License);
+        return vm;
+    }
+
     [Fact]
     public void InstallerViewModel_LicenseNotAccepted_BlocksNextFromLicense()
     {
-        var vm = new InstallerViewModel(new BrandTokens());
-        vm.CurrentStep = InstallerStep.License;
+        var vm = NavigateToLicense();
         vm.LicenseAccepted = false;
 
         vm.Next();
@@ -60,13 +71,12 @@ public class NegativeTests
     [Fact]
     public void InstallerViewModel_LicenseAccepted_AllowsNextFromLicense()
     {
-        var vm = new InstallerViewModel(new BrandTokens());
-        vm.CurrentStep = InstallerStep.License;
+        var vm = NavigateToLicense();
         vm.LicenseAccepted = true;
 
         vm.Next();
 
-        vm.CurrentStep.Should().Be(InstallerStep.InstallOptions);
+        vm.CurrentStep.Should().Be(InstallerStep.Installing);
     }
 
     // ── BrandTokens default test ─────────────────────────────────────────────

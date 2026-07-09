@@ -45,6 +45,11 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     private IReadOnlyList<CustomScreenViewModel> _customScreens = Array.Empty<CustomScreenViewModel>();
     private IReadOnlyList<ParameterDefinition> _parameters = Array.Empty<ParameterDefinition>();
 
+    // T14: the License screen (and its rail entry) appear IFF the blob carries
+    // license text. Absent by default so an un-stamped/dev host and a manifest
+    // with no `installer.license` skip the screen entirely.
+    private bool _hasLicense;
+
     public InstallerViewModel(BrandTokens tokens)
     {
         Brand = tokens;
@@ -97,6 +102,24 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
         }
 
         _customScreens = built;
+        RebuildFlow();
+    }
+
+    /// <summary>
+    /// Load the embedded license text (T14). Called by the host once it has read
+    /// it from the blob (<c>InstallerLicenseLoader.LoadFromSelf()</c>). When the
+    /// text is present the License screen + its rail entry appear (after the
+    /// destination screen, per decision 4); when null/blank they are absent.
+    /// Only the interactive wizard consults this — the headless <c>/silent</c>
+    /// path never shows the License screen, so silent installs imply acceptance.
+    /// </summary>
+    public void LoadLicense(string? licenseText)
+    {
+        _hasLicense = !string.IsNullOrWhiteSpace(licenseText);
+        if (_hasLicense)
+        {
+            LicenseText = licenseText!;
+        }
         RebuildFlow();
     }
 
@@ -170,7 +193,12 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     /// <summary>False only on the Finish screen — install is already done, nothing to cancel.</summary>
     public bool CanCancel => _step is not InstallerStep.Finish;
 
-    public string LicenseText { get; set; } = "MIT License (placeholder — replace with the app's actual EULA).";
+    /// <summary>
+    /// The embedded license text shown on the License screen (T14). Empty until
+    /// <see cref="LoadLicense"/> supplies the blob's text; an empty value means no
+    /// license is embedded and the License screen is absent from the flow.
+    /// </summary>
+    public string LicenseText { get; set; } = string.Empty;
 
     private bool _licenseAccepted;
     public bool LicenseAccepted
@@ -282,17 +310,23 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     private sealed record FlowNode(InstallerStep Step, CustomScreenViewModel? Screen);
 
     /// <summary>
-    /// Rebuild the linear flow: welcome → license → options → [declared screens] →
-    /// installing. Declared screens are inserted before Installing; When-gating is
-    /// applied at navigation time, not here, so a screen can become visible after an
-    /// earlier field is set.
+    /// Rebuild the linear flow, per locked-design decision 4:
+    /// welcome → destination → license? → [declared screens] → installing.
+    /// The <see cref="InstallerStep.InstallOptions"/> node is the destination /
+    /// "Install location" screen; the License screen (T14) is inserted after it,
+    /// and only when <see cref="_hasLicense"/> is set. Declared screens follow.
+    /// When-gating of declared screens is applied at navigation time, not here, so
+    /// a screen can become visible after an earlier field is set.
     /// </summary>
     private void RebuildFlow()
     {
         _flow.Clear();
         _flow.Add(new FlowNode(InstallerStep.Welcome, null));
-        _flow.Add(new FlowNode(InstallerStep.License, null));
         _flow.Add(new FlowNode(InstallerStep.InstallOptions, null));
+        if (_hasLicense)
+        {
+            _flow.Add(new FlowNode(InstallerStep.License, null));
+        }
         foreach (var screen in _customScreens)
         {
             _flow.Add(new FlowNode(InstallerStep.Custom, screen));

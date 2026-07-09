@@ -15,8 +15,8 @@ namespace SigilBuild.Packaging.ExeWrapper;
 
 /// <summary>
 /// Packs an application as a single self-extracting <c>.exe</c> wrapper —
-/// the AOT-published <c>SigilBuild.Wrapper</c> runtime, stamped with a step
-/// blob and the payload archive as Win32 resources (see ADR-008).
+/// the Native-AOT-published <c>SigilBuild.Installer.Host</c> runtime, stamped
+/// with a step blob and the payload archive as Win32 resources (see ADR-008).
 /// </summary>
 /// <remarks>
 /// Task 14 implementation: the packager copies the stub runtime to
@@ -34,8 +34,10 @@ public sealed class ExeWrapperPackager : IPackager
         ArgumentNullException.ThrowIfNull(manifest);
         ArgumentNullException.ThrowIfNull(options);
 
-        // Locate the AOT-published wrapper runtime.
-        var stubPath = WrapperRuntimeLocator.Locate();
+        // Locate the AOT-published host runtime for the target architecture.
+        // A manifest declaring architectures: [x64, arm64] produces one Setup.exe
+        // per architecture, each stamped from the matching per-RID runtime.
+        var stubPath = WrapperRuntimeLocator.Locate(options.Architecture);
 
         // Output filename mirrors the Zip/Msix convention: id-version-arch tag.
         // Sanitize the user-controlled App.Name segment against path-traversal /

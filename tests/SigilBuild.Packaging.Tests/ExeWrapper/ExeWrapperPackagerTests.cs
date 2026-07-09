@@ -1,5 +1,4 @@
 using System;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -14,124 +13,40 @@ namespace SigilBuild.Packaging.Tests.ExeWrapper;
 
 public class ExeWrapperPackagerTests
 {
-    // Cached wrapper path so the expensive AOT publish only runs once per test session.
-    private static string? _cachedWrapperPath;
-    private static readonly object _wrapperLock = new();
-
     /// <summary>
-    /// Ensures the AOT-published wrapper exists in the expected location.
-    /// On Windows: publishes it on-demand if absent (first run takes ~60 s).
-    /// On non-Windows: returns null to trigger a graceful skip.
-    /// The result is cached so subsequent tests in the same session are instant.
+    /// Resolves the Native-AOT host runtime staged for this test session. The
+    /// runtime is expected to be pre-staged under
+    /// <c>runtimes/win-x64/SigilBuild.Installer.Host.exe</c> (next to the test
+    /// assembly) by <c>scripts/publish-installer-runtime.ps1</c>. This test
+    /// deliberately does NOT trigger an on-demand AOT publish — that keeps the
+    /// normal <c>dotnet test</c> fast and free of the slow AOT link — so it skips
+    /// gracefully when the runtime has not been staged.
     /// </summary>
-    private static string? EnsureWrapper()
+    private static string? LocateStagedRuntime()
     {
-        lock (_wrapperLock)
+        if (!OperatingSystem.IsWindows())
         {
-            if (_cachedWrapperPath is not null)
-            {
-                return _cachedWrapperPath;
-            }
-
-            if (!OperatingSystem.IsWindows())
-            {
-                return null;
-            }
-
-            var wrapperDest = Path.Combine(AppContext.BaseDirectory, "runtimes", "win-x64", "SigilBuild.Wrapper.exe");
-            if (File.Exists(wrapperDest))
-            {
-                _cachedWrapperPath = wrapperDest;
-                return _cachedWrapperPath;
-            }
-
-            // Walk up from AppContext.BaseDirectory to find the solution root (contains Sigil.sln).
-            var dir = AppContext.BaseDirectory;
-            string? slnRoot = null;
-            for (var i = 0; i < 8; i++)
-            {
-                if (File.Exists(Path.Combine(dir, "Sigil.sln")))
-                {
-                    slnRoot = dir;
-                    break;
-                }
-                var parent = Directory.GetParent(dir);
-                if (parent is null) break;
-                dir = parent.FullName;
-            }
-
-            if (slnRoot is null)
-            {
-                return null; // Cannot locate the wrapper project — skip.
-            }
-
-            var wrapperProject = Path.Combine(slnRoot, "src", "SigilBuild.Wrapper");
-            var publishOut = Path.Combine(Path.GetTempPath(), $"sigil-wrapper-pub-{Guid.NewGuid():N}");
-
-            using var proc = new Process();
-            var psi = new ProcessStartInfo
-            {
-                FileName = "dotnet",
-                Arguments = $"publish \"{wrapperProject}\" -c Release -r win-x64 -p:PublishAot=true -o \"{publishOut}\"",
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true,
-            };
-
-            // Ensure vswhere.exe is resolvable so the NativeAOT linker target can
-            // locate the MSVC linker. The VS Installer ships vswhere alongside its
-            // own directory, not in the system PATH.
-            var vsInstallerDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
-                "Microsoft Visual Studio", "Installer");
-            if (Directory.Exists(vsInstallerDir))
-            {
-                var current = (psi.Environment.TryGetValue("PATH", out var p) ? p : null)
-                    ?? Environment.GetEnvironmentVariable("PATH")
-                    ?? string.Empty;
-                if (!current.Contains(vsInstallerDir, StringComparison.OrdinalIgnoreCase))
-                {
-                    psi.Environment["PATH"] = vsInstallerDir + Path.PathSeparator + current;
-                }
-            }
-
-            proc.StartInfo = psi;
-            proc.Start();
-            proc.WaitForExit(TimeSpan.FromMinutes(5));
-
-            if (proc.ExitCode != 0)
-            {
-                // Publish failed — skip the test rather than fail; infra issues
-                // should not block the rest of the suite.
-                return null;
-            }
-
-            var published = Path.Combine(publishOut, "SigilBuild.Wrapper.exe");
-            if (!File.Exists(published))
-            {
-                return null;
-            }
-
-            Directory.CreateDirectory(Path.GetDirectoryName(wrapperDest)!);
-            File.Copy(published, wrapperDest, overwrite: true);
-
-            _cachedWrapperPath = wrapperDest;
-            return _cachedWrapperPath;
+            return null;
         }
+
+        var staged = Path.Combine(
+            AppContext.BaseDirectory, "runtimes", "win-x64", "SigilBuild.Installer.Host.exe");
+        return File.Exists(staged) ? staged : null;
     }
 
     [Fact]
     public async Task PackAsync_emits_exe_under_5mb_overhead_on_top_of_payload()
     {
-        var wrapperPath = EnsureWrapper();
+        var wrapperPath = LocateStagedRuntime();
         if (wrapperPath is null)
         {
-            // AOT wrapper not available on this platform/environment — skip gracefully.
+            // AOT host runtime not staged for this session — skip gracefully.
+            // Stage it with scripts/publish-installer-runtime.ps1 -DestinationRoot
+            // <this test project's output dir> to exercise this path locally.
             Console.WriteLine(
                 "SKIP: PackAsync_emits_exe_under_5mb_overhead_on_top_of_payload — " +
-                "SigilBuild.Wrapper.exe not available (non-Windows or publish failed). " +
-                "On Windows, re-run once to trigger on-demand AOT publish.");
+                "runtimes/win-x64/SigilBuild.Installer.Host.exe not staged (non-Windows " +
+                "or AOT runtime not published). Run scripts/publish-installer-runtime.ps1.");
             return;
         }
 

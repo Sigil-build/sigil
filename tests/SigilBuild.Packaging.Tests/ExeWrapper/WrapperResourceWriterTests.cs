@@ -25,10 +25,10 @@ namespace SigilBuild.Packaging.Tests.ExeWrapper;
 /// </summary>
 public class WrapperResourceWriterTests
 {
-    [Fact(Skip = "Requires the AOT-published Wrapper.exe in runtimes/win-x64/. Tracked as a build-pipeline follow-up to Task 14.")]
+    [Fact(Skip = "Requires the AOT-published SigilBuild.Installer.Host.exe in runtimes/win-x64/ (stage via scripts/publish-installer-runtime.ps1). Un-skipped in T17.")]
     public async Task Roundtrip_blob_via_resource_apis()
     {
-        var stubExe = WrapperRuntimeLocator.Locate();
+        var stubExe = WrapperRuntimeLocator.Locate(TargetArchitecture.X64);
         var tmp = Path.Combine(Path.GetTempPath(), $"sigil-rw-{Guid.NewGuid():N}.exe");
         File.Copy(stubExe, tmp, overwrite: true);
         try

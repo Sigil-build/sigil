@@ -69,14 +69,18 @@ public class NegativeTests
         vm.CurrentStep.Should().Be(InstallerStep.InstallOptions);
     }
 
-    // ── BrandTokens fallback test ────────────────────────────────────────────
+    // ── BrandTokens default test ─────────────────────────────────────────────
+    // The BrandTokens.g.json sidecar was removed in T7; brand data now travels
+    // inside the WrapperBlob. An un-stamped/dev host falls back to defaults.
 
     [Fact]
-    public void BrandTokens_MissingFile_FallsBackToDefaults()
+    public void BrandTokens_Default_UsesNeutralDefaults()
     {
-        var tokens = BrandTokens.LoadOrDefault("nonexistent_brand_tokens_xyz.json");
+        var tokens = new BrandTokens();
         tokens.AppName.Should().Be("Application");
         tokens.PrimaryColor.Should().Be("#1F2937");
+        tokens.LightTokens.Should().BeEmpty();
+        tokens.DarkTokens.Should().BeEmpty();
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────
@@ -87,6 +91,6 @@ public class NegativeTests
             new BuildSection("./out", null, null, true),
             null, null, null, null,
             Installer: primaryColor is null ? null : new InstallerSection(
-                new InstallerBrand(null, null, primaryColor, "#3B82F6", null, null, null)),
+                new InstallerBrand(null, null, primaryColor, "#3B82F6")),
             Location: SourceLocation.Unknown);
 }

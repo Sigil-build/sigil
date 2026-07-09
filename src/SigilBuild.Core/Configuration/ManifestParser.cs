@@ -148,10 +148,7 @@ public static class ManifestParser
             Logo: GetScalar(brand, "logo"),
             Hero: GetScalar(brand, "hero"),
             PrimaryColor: GetScalar(brand, "primaryColor"),
-            AccentColor: GetScalar(brand, "accentColor"),
-            GradientStart: GetScalar(brand, "gradientStart"),
-            GradientMid: GetScalar(brand, "gradientMid"),
-            GradientEnd: GetScalar(brand, "gradientEnd")));
+            AccentColor: GetScalar(brand, "accentColor")));
     }
 
     private static Dictionary<string, ParameterDefinition>? ParseParameters(

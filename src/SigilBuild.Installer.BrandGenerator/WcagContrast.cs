@@ -15,6 +15,14 @@ public static class WcagContrast
     public static bool PassesAaAgainstWhite(string fgHex) =>
         Ratio(fgHex, "#FFFFFF") >= 4.5;
 
+    /// <summary>
+    /// WCAG-AA (4.5:1) contrast check for arbitrary foreground/background pairs.
+    /// Used to validate the derived rail-muted text against the rail background
+    /// (T7), in addition to the primary-vs-white check above.
+    /// </summary>
+    public static bool PassesAa(string fgHex, string bgHex) =>
+        Ratio(fgHex, bgHex) >= 4.5;
+
     private static double RelativeLuminance(string hex)
     {
         var (r, g, b) = ParseRgb(hex);

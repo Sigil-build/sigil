@@ -1,9 +1,11 @@
+using System.Collections.Generic;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using SigilBuild.Installer.Host.Branding;
 using SigilBuild.Installer.Host.ViewModels;
 using SigilBuild.Installer.Host.Views;
+using SigilBuild.Wrapper.Engine;
 
 namespace SigilBuild.Installer.Host;
 
@@ -23,15 +25,9 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            BrandTokens tokens;
-            try
-            {
-                tokens = BrandTokens.LoadOrDefault("BrandTokens.g.json");
-            }
-            catch (System.Text.Json.JsonException)
-            {
-                tokens = new BrandTokens();
-            }
+            // Brand data travels inside the WrapperBlob (decision 11): derived
+            // light/dark palette + base64 logo/hero, no BrandTokens.g.json sidecar.
+            var tokens = LoadBrandTokens();
             BrandPalette.Apply(this, tokens);
             _vm = new InstallerViewModel(tokens);
 
@@ -50,5 +46,32 @@ public partial class App : Application
             };
         }
         base.OnFrameworkInitializationCompleted();
+    }
+
+    /// <summary>
+    /// Build <see cref="BrandTokens"/> from the blob embedded in the stamped exe.
+    /// Falls back to defaults for an un-stamped dev/preview run.
+    /// </summary>
+    private static BrandTokens LoadBrandTokens()
+    {
+        var brand = InstallerBrandLoader.LoadFromSelf();
+        if (brand is null)
+            return new BrandTokens();
+
+        var light = brand.Light ?? new Dictionary<string, string>();
+        var dark = brand.Dark ?? new Dictionary<string, string>();
+
+        return new BrandTokens
+        {
+            AppName = brand.DisplayName ?? "Application",
+            Publisher = brand.Publisher ?? "Publisher",
+            AppVersion = brand.Version ?? "1.0.0",
+            PrimaryColor = light.TryGetValue("railBg", out var railBg) ? railBg : "#1F2937",
+            AccentColor = light.TryGetValue("accent", out var accent) ? accent : "#3B82F6",
+            LightTokens = light,
+            DarkTokens = dark,
+            LogoBase64 = brand.LogoBase64,
+            HeroBase64 = brand.HeroBase64,
+        };
     }
 }

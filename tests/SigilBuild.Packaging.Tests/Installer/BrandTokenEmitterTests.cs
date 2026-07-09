@@ -30,7 +30,7 @@ public class BrandTokenEmitterTests
         var manifest = new SigilManifest("v1.0",
             new AppSection("com.example.App", "Example", "1.0.0", "Example Inc.", null, null),
             new BuildSection("./out", null, null, true), null, null, null, null,
-            Installer: new InstallerSection(new InstallerBrand(null, null, "#FFEE00", "#3B82F6", null, null, null)),
+            Installer: new InstallerSection(new InstallerBrand(null, null, "#FFEE00", "#3B82F6")),
             Location: SourceLocation.Unknown);
 
         var result = BrandTokenEmitter.EmitWithDiagnostics(manifest);
@@ -44,7 +44,7 @@ public class BrandTokenEmitterTests
         var manifest = new SigilManifest("v1.0",
             new AppSection("com.example.App", "Example", "1.0.0", "Example Inc.", null, null),
             new BuildSection("./out", null, null, true), null, null, null, null,
-            Installer: new InstallerSection(new InstallerBrand(null, null, "#FFEE00", "#3B82F6", null, null, null)),
+            Installer: new InstallerSection(new InstallerBrand(null, null, "#FFEE00", "#3B82F6")),
             Location: SourceLocation.Unknown);
 
         var act = () => BrandTokenEmitter.Emit(manifest, allowLowContrast: false);

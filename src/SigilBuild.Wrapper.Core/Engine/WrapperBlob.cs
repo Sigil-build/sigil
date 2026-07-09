@@ -77,6 +77,35 @@ internal sealed partial record WrapperBlob(
         return TryReadResource(PayloadResourceName) ?? Array.Empty<byte>();
     }
 
+    /// <summary>
+    /// Read only the brand data (derived light/dark token maps, base64 logo/hero,
+    /// ARP display fields) from the embedded <c>SIGIL_BLOB_V1</c> resource (T7).
+    /// Returns <c>null</c> for an un-stamped runtime so the wizard falls back to
+    /// its literal default palette. Kept separate from <see cref="LoadFromSelf"/>
+    /// because the in-memory <see cref="WrapperBlob"/> record intentionally does
+    /// not carry brand fields — they are a host-rendering concern, delivered via
+    /// <see cref="SerializableWrapperBlob"/>.
+    /// </summary>
+    internal static InstallerBrandData? LoadBrandFromSelf()
+    {
+        var bytes = TryReadResource(BlobResourceName);
+        if (bytes is null) return null;
+
+        var json = System.Text.Encoding.UTF8.GetString(bytes);
+        var s = System.Text.Json.JsonSerializer.Deserialize(
+            json, WrapperBlobJsonContext.Default.SerializableWrapperBlob);
+        if (s is null) return null;
+
+        return new InstallerBrandData(
+            Light: s.BrandTokensLight,
+            Dark: s.BrandTokensDark,
+            LogoBase64: s.LogoBase64,
+            HeroBase64: s.HeroBase64,
+            DisplayName: s.DisplayName,
+            Publisher: s.Publisher,
+            Version: s.Version);
+    }
+
     private const string BlobResourceName = "SIGIL_BLOB_V1";
     private const string PayloadResourceName = "SIGIL_PAYLOAD_V1";
 
@@ -156,4 +185,33 @@ internal sealed partial record WrapperBlob(
     [LibraryImport("kernel32.dll", EntryPoint = "SizeofResource",
         SetLastError = true)]
     private static partial uint SizeofResource(IntPtr hModule, IntPtr hResInfo);
+}
+
+/// <summary>
+/// Brand data extracted from the embedded blob for the wizard to render (T7):
+/// the derived light/dark token maps, base64 logo/hero, and the ARP display
+/// fields. Delivered inside the blob (decision 11) — no sidecar file. Public so
+/// the Avalonia host (whose assembly name doesn't match the engine's
+/// <c>InternalsVisibleTo</c>) can consume it via <see cref="InstallerBrandLoader"/>.
+/// </summary>
+public sealed record InstallerBrandData(
+    IReadOnlyDictionary<string, string>? Light,
+    IReadOnlyDictionary<string, string>? Dark,
+    string? LogoBase64,
+    string? HeroBase64,
+    string? DisplayName,
+    string? Publisher,
+    string? Version);
+
+/// <summary>
+/// Public entry point for the host to read brand data from the stamped exe's
+/// embedded blob without depending on the engine's internal types.
+/// </summary>
+public static class InstallerBrandLoader
+{
+    /// <summary>
+    /// Read the brand data (derived palette + assets) from the running exe's
+    /// <c>SIGIL_BLOB_V1</c> resource, or <c>null</c> for an un-stamped runtime.
+    /// </summary>
+    public static InstallerBrandData? LoadFromSelf() => WrapperBlob.LoadBrandFromSelf();
 }

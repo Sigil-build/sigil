@@ -49,17 +49,19 @@ public static partial class Program
             return Elevation.RelaunchElevatedAndWait(args);
         }
 
-        // Headless whenever /silent or /verysilent is present, or a
-        // non-interactive mode (uninstall / the unsupported update) is requested.
-        // Interactive uninstall is Task T15; for now uninstall is headless-only.
-        if (session.Silent || session.Mode != WrapperMode.Install)
+        // Headless whenever /silent or /verysilent is present (this includes the
+        // ARP UninstallString's `/S /Uninstall`), or the unsupported /Update mode is
+        // requested. An interactive uninstall (uninstall.exe double-clicked, no /S,
+        // T15) is NOT silent, so it falls through to the branded GUI below.
+        if (session.Silent || session.Mode == WrapperMode.Update)
         {
             AttachParentConsole();
             return session.RunHeadlessAsync(Console.Out, Console.Error).GetAwaiter().GetResult();
         }
 
-        // Interactive install: launch the branded Avalonia wizard, which drives
-        // the same InstallSession engine on its Installing screen.
+        // Interactive GUI: the install wizard, or the T15 uninstall confirm flow —
+        // App picks the window from session.Mode. Both drive the same InstallSession
+        // engine.
         HostRuntime.Session = session;
 
         // T18: make a standalone stamped Setup.exe self-contained. Native AOT
@@ -68,8 +70,9 @@ public static partial class Program
         // resource. Extract them to a per-user cache and add that directory to the
         // native DLL search path BEFORE the Avalonia AppBuilder is created, so the
         // first Skia/Avalonia native load resolves. GUI path ONLY — the headless
-        // /silent, /verysilent and uninstall paths returned above and never touch
-        // Skia, so they skip this. On an un-stamped dev run (no resource) this is a
+        // /silent, /verysilent and /S-uninstall paths returned above and never touch
+        // Skia, so they skip this (the interactive uninstall window, which does reach
+        // here, needs it). On an un-stamped dev run (no resource) this is a
         // no-op: the native DLLs already sit beside the exe. Idempotent across
         // re-runs (content-keyed cache dir + completion marker).
         if (OperatingSystem.IsWindows())

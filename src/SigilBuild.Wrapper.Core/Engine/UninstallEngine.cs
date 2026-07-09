@@ -32,7 +32,10 @@ public sealed class UninstallEngine
         "CA1822:Mark members as static",
         Justification = "Public engine surface is intentionally instance-based, mirroring InstallEngine.")]
     public async Task<EngineResult> RunAsync(
-        string appId, InstallScope preferredScope = InstallScope.User, CancellationToken ct = default)
+        string appId,
+        InstallScope preferredScope = InstallScope.User,
+        IProgress<StepProgress>? progress = null,
+        CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(appId);
 
@@ -44,7 +47,7 @@ public sealed class UninstallEngine
                 $"no uninstall state found for '{appId}' (expected at {UninstallStateStore.PathFor(appId, preferredScope)})");
         }
 
-        await loaded.Journal.UndoAsync(ct).ConfigureAwait(false);
+        await loaded.Journal.UndoAsync(ct, progress).ConfigureAwait(false);
 
         // Remove the ARP entry we wrote on install, from the recorded scope's hive.
         // Best-effort: if the user already cleaned it manually, keep going.

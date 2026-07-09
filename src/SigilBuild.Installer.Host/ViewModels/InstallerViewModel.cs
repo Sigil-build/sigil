@@ -58,8 +58,14 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     public InstallerViewModel(BrandTokens tokens)
     {
         Brand = tokens;
+        // Fallback default (T13): the per-user scope root — %LocalAppData%\Programs\
+        // <App> — matching the auto→user default (decision 9). The host overrides
+        // this via ConfigureDestination with the session's scope-aware resolution
+        // (honoring /D= + the manifest install_dir). Kept user-writable so the
+        // Destination gate passes without elevation.
         _installPath = System.IO.Path.Combine(
-            System.Environment.GetFolderPath(System.Environment.SpecialFolder.ProgramFiles),
+            System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData),
+            "Programs",
             tokens.AppName);
         RebuildFlow();
     }
@@ -266,7 +272,209 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     public string InstallPath
     {
         get => _installPath;
-        set { if (_installPath != value) { _installPath = value; OnPropertyChanged(); } }
+        set
+        {
+            if (_installPath != value)
+            {
+                _installPath = value;
+                OnPropertyChanged();
+                // Re-validate live so a corrected path clears the inline error and
+                // re-enables Next without needing a second click.
+                if (_step == InstallerStep.InstallOptions)
+                {
+                    ValidateDestination();
+                }
+            }
+        }
+    }
+
+    // --- Destination screen (T13): scope toggle + inline path validation ---
+
+    private Func<bool, string>? _defaultPathResolver;
+    private bool _scopeSelectable;
+
+    /// <summary>
+    /// Whether the Destination screen shows the user/machine scope radios (T12
+    /// <c>scope: auto</c>). A manifest that fixes the scope hides them.
+    /// </summary>
+    public bool ScopeSelectable
+    {
+        get => _scopeSelectable;
+        private set { if (_scopeSelectable != value) { _scopeSelectable = value; OnPropertyChanged(); } }
+    }
+
+    private bool _isMachineScope;
+
+    /// <summary>
+    /// The "All users of this computer" scope radio. Selecting it swaps the
+    /// pre-filled install path to the machine scope root (Program Files), per the
+    /// design brief. Bound two-way; paired with <see cref="IsUserScope"/>.
+    /// </summary>
+    public bool IsMachineScope
+    {
+        get => _isMachineScope;
+        set
+        {
+            if (_isMachineScope != value)
+            {
+                _isMachineScope = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsUserScope));
+                // Toggling scope recomputes a clean default path for the new scope.
+                if (_defaultPathResolver is not null)
+                {
+                    InstallPath = _defaultPathResolver(_isMachineScope);
+                }
+            }
+        }
+    }
+
+    /// <summary>The "Just for me" scope radio — the inverse of <see cref="IsMachineScope"/>.</summary>
+    public bool IsUserScope
+    {
+        get => !_isMachineScope;
+        set { if (value) { IsMachineScope = false; } }
+    }
+
+    private string? _installPathError;
+
+    /// <summary>
+    /// The inline validation error shown under the path input on the Destination
+    /// screen, or null when the path is valid. A non-null value blocks Next.
+    /// </summary>
+    public string? InstallPathError
+    {
+        get => _installPathError;
+        private set
+        {
+            if (_installPathError != value)
+            {
+                _installPathError = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(HasInstallPathError));
+            }
+        }
+    }
+
+    /// <summary>True when <see cref="InstallPathError"/> is set (drives the error text visibility).</summary>
+    public bool HasInstallPathError => !string.IsNullOrEmpty(_installPathError);
+
+    /// <summary>
+    /// Wire the Destination screen (T13): whether the scope radios show, a resolver
+    /// that maps a scope selection (<c>isMachine</c>) to its default install path,
+    /// and the initial pre-filled path. Called by the host from the session; unit
+    /// tests may call it directly or drive <see cref="InstallPath"/> alone.
+    /// </summary>
+    public void ConfigureDestination(bool scopeSelectable, Func<bool, string> defaultPathResolver, string initialPath)
+    {
+        System.ArgumentNullException.ThrowIfNull(defaultPathResolver);
+        _defaultPathResolver = defaultPathResolver;
+        ScopeSelectable = scopeSelectable;
+        InstallPath = initialPath;
+        InstallPathError = null;
+    }
+
+    /// <summary>
+    /// Validate the chosen install location before advancing (T13): non-blank,
+    /// absolute, not an existing file, and writable — or elevatable when a machine
+    /// scope is selected. Sets <see cref="InstallPathError"/> (inline, blocks Next)
+    /// and returns false on failure; clears it and returns true on success.
+    /// </summary>
+    public bool ValidateDestination()
+    {
+        var path = _installPath?.Trim() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            InstallPathError = "Enter an install location.";
+            return false;
+        }
+        if (!System.IO.Path.IsPathFullyQualified(path))
+        {
+            InstallPathError = "Enter an absolute path (for example C:\\Program Files\\App).";
+            return false;
+        }
+        if (System.IO.File.Exists(path))
+        {
+            InstallPathError = "That location is a file. Choose a folder.";
+            return false;
+        }
+        if (!IsWritableOrElevatable(path))
+        {
+            InstallPathError = "You don't have permission to install there. Choose another folder.";
+            return false;
+        }
+
+        InstallPathError = null;
+        return true;
+    }
+
+    /// <summary>
+    /// True when the target — or its nearest existing ancestor — is writable, or a
+    /// machine-scope install is selected (elevation will grant the write). A target
+    /// whose drive/parent chain does not exist at all is rejected.
+    /// </summary>
+    private bool IsWritableOrElevatable(string path)
+    {
+        var nearest = NearestExistingAncestor(path);
+        if (nearest is null)
+        {
+            return false; // the drive / parent folder does not exist.
+        }
+        // A machine install elevates, so Program Files being unwritable unelevated
+        // is fine — the elevated child performs the write.
+        if (_isMachineScope)
+        {
+            return true;
+        }
+        return CanWriteInto(nearest);
+    }
+
+    private static string? NearestExistingAncestor(string path)
+    {
+        var current = path;
+        while (!string.IsNullOrEmpty(current))
+        {
+            if (System.IO.Directory.Exists(current))
+            {
+                return current;
+            }
+            var parent = System.IO.Path.GetDirectoryName(current);
+            if (string.Equals(parent, current, StringComparison.Ordinal))
+            {
+                break;
+            }
+            current = parent;
+        }
+        return null;
+    }
+
+    private static bool CanWriteInto(string directory)
+    {
+        var probe = System.IO.Path.Combine(directory, ".sigil-write-probe-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using (System.IO.File.Create(probe)) { }
+            System.IO.File.Delete(probe);
+            return true;
+        }
+        // Only a genuine permission denial blocks the install. Any other transient
+        // IO quirk is given the benefit of the doubt (the engine rolls back if the
+        // write later fails) so validation never flakes on an otherwise-valid path.
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (System.Security.SecurityException)
+        {
+            return false;
+        }
+#pragma warning disable CA1031 // Unexpected IO conditions must not falsely block a valid path.
+        catch (Exception)
+        {
+            return true;
+        }
+#pragma warning restore CA1031
     }
 
     private double _installProgress;
@@ -301,6 +509,13 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
 
     public void Next()
     {
+        // Destination gate (T13): a blank / relative / file / unwritable path shows
+        // an inline error and blocks advancing off the destination screen.
+        if (_flow[_flowIndex].Step == InstallerStep.InstallOptions && !ValidateDestination())
+        {
+            return;
+        }
+
         // License gate: stay put until "I accept" is checked.
         if (_flow[_flowIndex].Step == InstallerStep.License && !LicenseAccepted)
         {

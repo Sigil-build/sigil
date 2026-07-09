@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using SigilBuild.Core.Manifest;
 using SigilBuild.Installer.Host.Branding;
 using SigilBuild.Installer.Host.ViewModels;
 using SigilBuild.Installer.Host.Views;
@@ -54,12 +55,26 @@ public partial class App : Application
                 // imply acceptance.
                 _vm.LoadLicense(InstallerLicenseLoader.LoadFromSelf());
 
+                // T13: seed the Destination screen from the session — the scope-aware
+                // default install dir (honoring /D= + the manifest install_dir), and
+                // whether the user/machine scope toggle shows (manifest `scope: auto`).
+                // Toggling scope recomputes the default path for the picked scope.
+                _vm.ConfigureDestination(
+                    session.ScopeIsSelectable,
+                    isMachine => session.ResolveDefaultInstallDir(
+                        isMachine ? InstallScope.Machine : InstallScope.User),
+                    session.ResolveDefaultInstallDir());
+
                 // Bind the wizard-collected parameter values into param.* and the
                 // option checkbox states into option.* for the engine at install
-                // time (read lazily at call time).
+                // time (read lazily at call time). The collected destination path
+                // (T13) becomes the effective install dir → {install_dir}.
                 _vm.ConfigureInstallRunner((progress, ct) =>
-                    session.RunInstallAsync(
-                        _vm.CollectedParameterValues, _vm.CollectedOptionValues, progress, ct));
+                {
+                    session.CollectedInstallDir = _vm.InstallPath;
+                    return session.RunInstallAsync(
+                        _vm.CollectedParameterValues, _vm.CollectedOptionValues, progress, ct);
+                });
             }
 
             desktop.MainWindow = new InstallerWindow

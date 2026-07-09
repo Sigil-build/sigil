@@ -125,7 +125,13 @@ public sealed class ExeWrapperPackager : IPackager
             // requested from a non-elevated process.
             Scope: manifest.Installer?.Scope ?? InstallScope.Auto,
             // T8: the enabled option components the runtime + wizard consume.
-            Options: optionComponents);
+            Options: optionComponents,
+            // T13: carry App.Name (the default install-dir base + {app.name} token)
+            // and the optional install_dir override template into the blob so the
+            // runtime resolves the effective install dir (default / manifest / /D=)
+            // and the {install_dir} token in step paths + expressions.
+            AppName: manifest.App.Name,
+            InstallDir: manifest.Installer?.InstallDir);
 
         // T7: derive the full light/dark palette at pack time and carry it, plus
         // the base64 logo/hero bytes, inside the blob so the stamped exe renders

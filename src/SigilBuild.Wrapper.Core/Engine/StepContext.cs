@@ -15,19 +15,37 @@ public sealed class StepContext
     private readonly System.Collections.Generic.IReadOnlyDictionary<string, object?> _values;
     private readonly System.Collections.Generic.IReadOnlyList<string> _secretValues;
     private readonly Expressions.Evaluator _evaluator = new();
+    private readonly string? _appName;
+    private readonly string _appId;
 
     public StepContext(
         System.Collections.Generic.IReadOnlyDictionary<string, object?> values,
         string? payloadRoot = null,
         System.Collections.Generic.IReadOnlyList<string>? secretValues = null,
-        InstallScope scope = InstallScope.User)
+        InstallScope scope = InstallScope.User,
+        string? installDir = null,
+        string? appName = null,
+        string? appId = null)
     {
         System.ArgumentNullException.ThrowIfNull(values);
         _values = values;
         _secretValues = secretValues ?? System.Array.Empty<string>();
         PayloadRoot = payloadRoot;
         Layout = ScopeLayout.For(scope);
+        InstallDir = installDir;
+        _appName = appName;
+        _appId = appId ?? "<unset>";
     }
+
+    /// <summary>
+    /// The resolved effective install directory for this run (T13): the
+    /// destination that the <c>{install_dir}</c> token expands to in step paths and
+    /// expressions. Computed by <see cref="InstallDirResolver"/> from the scope,
+    /// the manifest override, and the <c>/D=</c> / wizard overrides. <c>null</c> for
+    /// a context built without one (e.g. <see cref="Empty"/> and the step unit
+    /// tests), in which case a literal <c>{install_dir}</c> is left unsubstituted.
+    /// </summary>
+    public string? InstallDir { get; }
 
     public static StepContext Empty { get; } =
         new StepContext(new System.Collections.Generic.Dictionary<string, object?>());
@@ -108,12 +126,26 @@ public sealed class StepContext
         string? payloadRoot = null,
         System.Collections.Generic.IReadOnlyDictionary<string, string>? collected = null,
         InstallScope scope = InstallScope.User,
-        System.Collections.Generic.IReadOnlyDictionary<string, bool>? collectedOptions = null)
+        System.Collections.Generic.IReadOnlyDictionary<string, bool>? collectedOptions = null,
+        string? collectedInstallDir = null)
     {
         System.ArgumentNullException.ThrowIfNull(blob);
         System.ArgumentNullException.ThrowIfNull(parsed);
 
         var layout = ScopeLayout.For(scope);
+
+        // T13: resolve the effective install dir once, up front, so the
+        // {install_dir} token expands to a concrete directory in every step path
+        // and expression. Precedence: wizard-collected → /D= → manifest override →
+        // default (<scope root>\<App.Name>).
+        var installDir = InstallDirResolver.Resolve(
+            scope: layout.Scope,
+            appName: blob.AppName,
+            appId: blob.AppId,
+            manifestInstallDir: blob.InstallDir,
+            cliOverride: parsed.InstallDir,
+            collected: collectedInstallDir);
+
         var dict = new System.Collections.Generic.Dictionary<string, object?>(System.StringComparer.Ordinal);
         var secrets = new System.Collections.Generic.List<string>();
 
@@ -162,6 +194,13 @@ public sealed class StepContext
         dict["scope"] = layout.Name;
         dict["scope.root"] = layout.InstallRoot;
 
+        // T13: expose the resolved install dir + scope root as dotted identifiers
+        // too, mirroring the `{install_dir}` / `{scope_root}` brace tokens the step
+        // paths + `when` expressions use (SubstituteBraceTokens handles the brace
+        // form). A `when: "install_dir == '...'"` reads the dotted form here.
+        dict["install_dir"] = installDir;
+        dict["scope_root"] = layout.InstallRoot;
+
         // Option context (T8): expose each ENABLED built-in component as
         // `option.<name>` so the auto-generated, option-gated steps evaluate AND a
         // hand-written step can gate on `option.*`. Resolution precedence mirrors
@@ -194,7 +233,7 @@ public sealed class StepContext
             }
         }
 
-        return new StepContext(dict, payloadRoot, secrets, layout.Scope);
+        return new StepContext(dict, payloadRoot, secrets, layout.Scope, installDir, blob.AppName, blob.AppId);
     }
 
     /// <summary>
@@ -260,7 +299,38 @@ public sealed class StepContext
                 i++;
             }
         }
-        return sb.ToString();
+        return SubstituteBraceTokens(sb.ToString());
+    }
+
+    /// <summary>
+    /// Substitute the single-brace runtime tokens — <c>{install_dir}</c>,
+    /// <c>{scope_root}</c>, <c>{app.name}</c>, <c>{app.id}</c> — that step paths and
+    /// <c>when</c> expressions use (distinct from the <c>${...}</c> parameter
+    /// templates handled by <see cref="Resolve"/>). This is what turns a step
+    /// <c>to: "{install_dir}/app.txt"</c> into a real directory rather than a
+    /// literal <c>{install_dir}</c> folder (T13). An unknown brace token is left
+    /// untouched; <c>{install_dir}</c> is left literal only when this context was
+    /// built without a resolved install dir (e.g. the step unit tests).
+    /// </summary>
+    private string SubstituteBraceTokens(string text)
+    {
+        if (string.IsNullOrEmpty(text) || text.IndexOf('{', System.StringComparison.Ordinal) < 0)
+        {
+            return text;
+        }
+
+        var result = text;
+        if (InstallDir is not null)
+        {
+            result = result.Replace("{install_dir}", InstallDir, System.StringComparison.Ordinal);
+        }
+        result = result.Replace("{scope_root}", Layout.InstallRoot, System.StringComparison.Ordinal);
+        if (!string.IsNullOrEmpty(_appName))
+        {
+            result = result.Replace("{app.name}", _appName, System.StringComparison.Ordinal);
+        }
+        result = result.Replace("{app.id}", _appId, System.StringComparison.Ordinal);
+        return result;
     }
 
     /// <summary>
@@ -317,5 +387,6 @@ public sealed class StepContext
         return full;
     }
 
-    public bool Evaluate(string expression) => _evaluator.EvaluateBool(expression, _values);
+    public bool Evaluate(string expression) =>
+        _evaluator.EvaluateBool(SubstituteBraceTokens(expression), _values);
 }

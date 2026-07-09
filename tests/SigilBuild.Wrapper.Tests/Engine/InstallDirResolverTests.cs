@@ -1,0 +1,96 @@
+using System.IO;
+using FluentAssertions;
+using SigilBuild.Core.Manifest;
+using SigilBuild.Wrapper.Engine;
+using Xunit;
+
+namespace SigilBuild.Wrapper.Tests.Engine;
+
+/// <summary>
+/// Pins the <c>{install_dir}</c> default + override precedence and the
+/// <c>{scope_root}</c> / <c>{app.*}</c> token resolution (T13).
+/// </summary>
+public sealed class InstallDirResolverTests
+{
+    private static string UserRoot => ScopeLayout.For(InstallScope.User).InstallRoot;
+    private static string MachineRoot => ScopeLayout.For(InstallScope.Machine).InstallRoot;
+
+    [Fact]
+    public void Default_is_scope_root_joined_with_app_name()
+    {
+        var resolved = InstallDirResolver.Resolve(
+            InstallScope.User, appName: "Acme Studio", appId: "com.acme.Studio",
+            manifestInstallDir: null, cliOverride: null);
+
+        resolved.Should().Be(Path.Combine(UserRoot, "Acme Studio"));
+    }
+
+    [Fact]
+    public void Default_reflects_scope_root_for_machine()
+    {
+        var resolved = InstallDirResolver.Resolve(
+            InstallScope.Machine, appName: "Acme Studio", appId: "com.acme.Studio",
+            manifestInstallDir: null, cliOverride: null);
+
+        resolved.Should().Be(Path.Combine(MachineRoot, "Acme Studio"));
+    }
+
+    [Fact]
+    public void Manifest_override_resolves_scope_root_token()
+    {
+        // The reference manifest form: install_dir: "{scope_root}/Acme Studio".
+        var resolved = InstallDirResolver.Resolve(
+            InstallScope.User, appName: "Acme Studio", appId: "com.acme.Studio",
+            manifestInstallDir: "{scope_root}/Acme Studio", cliOverride: null);
+
+        resolved.Should().Be(Path.Combine(UserRoot, "Acme Studio"));
+    }
+
+    [Fact]
+    public void Manifest_override_resolves_app_name_and_id_tokens()
+    {
+        var byName = InstallDirResolver.Resolve(
+            InstallScope.Machine, appName: "Acme Studio", appId: "com.acme.Studio",
+            manifestInstallDir: "{scope_root}/{app.name}", cliOverride: null);
+        byName.Should().Be(Path.Combine(MachineRoot, "Acme Studio"));
+
+        var byId = InstallDirResolver.Resolve(
+            InstallScope.Machine, appName: "Acme Studio", appId: "com.acme.Studio",
+            manifestInstallDir: "{scope_root}/{app.id}", cliOverride: null);
+        byId.Should().Be(Path.Combine(MachineRoot, "com.acme.Studio"));
+    }
+
+    [Fact]
+    public void D_override_wins_over_manifest_and_default()
+    {
+        var target = Path.Combine("C:", "Tools", "Acme");
+        var resolved = InstallDirResolver.Resolve(
+            InstallScope.User, appName: "Acme Studio", appId: "com.acme.Studio",
+            manifestInstallDir: "{scope_root}/Acme Studio", cliOverride: target);
+
+        resolved.Should().Be(Path.GetFullPath(target));
+    }
+
+    [Fact]
+    public void Collected_wizard_path_wins_over_cli_override()
+    {
+        var cli = Path.Combine("C:", "FromCli");
+        var wizard = Path.Combine("C:", "FromWizard");
+
+        var resolved = InstallDirResolver.Resolve(
+            InstallScope.User, appName: "Acme", appId: "id",
+            manifestInstallDir: null, cliOverride: cli, collected: wizard);
+
+        resolved.Should().Be(Path.GetFullPath(wizard));
+    }
+
+    [Fact]
+    public void Blank_app_name_falls_back_to_app_id()
+    {
+        var resolved = InstallDirResolver.Resolve(
+            InstallScope.User, appName: "  ", appId: "com.acme.Studio",
+            manifestInstallDir: null, cliOverride: null);
+
+        resolved.Should().Be(Path.Combine(UserRoot, "com.acme.Studio"));
+    }
+}

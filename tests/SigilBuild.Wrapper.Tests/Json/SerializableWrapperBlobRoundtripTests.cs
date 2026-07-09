@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using SigilBuild.Core.Manifest;
+using SigilBuild.Wrapper.Engine;
 using SigilBuild.Wrapper.Json;
 
 namespace SigilBuild.Wrapper.Tests.Json;
@@ -44,6 +45,35 @@ public class SerializableWrapperBlobRoundtripTests
         back.HeroBase64.Should().BeNull();
         back.LicenseText.Should().BeNull();
         back.Screens.Should().BeEmpty();
+        back.AppName.Should().BeNull();
+        back.InstallDir.Should().BeNull();
+    }
+
+    [Fact]
+    public void App_name_and_install_dir_override_roundtrip()
+    {
+        // T13: the {install_dir} template + App.Name travel in the blob and survive
+        // the WrapperBlob <-> SerializableWrapperBlob conversion both ways.
+        var blob = new WrapperBlob(
+            AppId: "com.acme.Studio",
+            Parameters: System.Array.Empty<ParameterDefinition>(),
+            InstallSteps: System.Array.Empty<InstallStep>(),
+            PreInstall: System.Array.Empty<InstallStep>(),
+            PostInstall: System.Array.Empty<InstallStep>(),
+            UpdateSteps: System.Array.Empty<InstallStep>(),
+            Scope: InstallScope.Auto,
+            Options: null,
+            AppName: "Acme Studio",
+            InstallDir: "{scope_root}/Acme Studio");
+
+        var back = RoundTrip(SerializableWrapperBlob.FromWrapperBlob(blob));
+
+        back.AppName.Should().Be("Acme Studio");
+        back.InstallDir.Should().Be("{scope_root}/Acme Studio");
+
+        var reconstructed = SerializableWrapperBlob.ToWrapperBlob(back);
+        reconstructed.AppName.Should().Be("Acme Studio");
+        reconstructed.InstallDir.Should().Be("{scope_root}/Acme Studio");
     }
 
     [Fact]

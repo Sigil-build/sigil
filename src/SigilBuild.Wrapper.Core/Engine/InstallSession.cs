@@ -185,6 +185,41 @@ public sealed class InstallSession
     // to their manifest defaults, subject to any CLI `/P<name>` override).
     private IReadOnlyDictionary<string, bool>? _collectedOptions;
 
+    /// <summary>
+    /// The wizard-collected destination path (T13), set by the host's Destination
+    /// screen before the single install run. It takes precedence over <c>/D=</c>
+    /// and the manifest <c>install_dir</c> when the effective install dir is
+    /// resolved, so the <c>{install_dir}</c> token expands to what the user chose.
+    /// Null on the console/silent path — <c>/D=</c> (or the default) then wins.
+    /// </summary>
+    public string? CollectedInstallDir { get; set; }
+
+    /// <summary>
+    /// Resolve the install directory the wizard's Destination screen should
+    /// pre-fill (T13) for <paramref name="scope"/> (the current scope toggle
+    /// selection, or <see cref="ResolvedScope"/> when the toggle is hidden). Honors
+    /// a <c>/D=</c> override and the manifest <c>install_dir</c>, resolving their
+    /// <c>{scope_root}</c> / <c>{app.*}</c> tokens; falls back to
+    /// <c>&lt;scope root&gt;\&lt;App.Name&gt;</c>. Does NOT consider a previously
+    /// collected path, so re-toggling scope recomputes a clean default.
+    /// </summary>
+    public string ResolveDefaultInstallDir(InstallScope? scope = null) =>
+        InstallDirResolver.Resolve(
+            scope: scope ?? _scope,
+            appName: _blob.AppName,
+            appId: _blob.AppId,
+            manifestInstallDir: _blob.InstallDir,
+            cliOverride: _parsed.InstallDir,
+            collected: null);
+
+    /// <summary>
+    /// True when the effective scope is <see cref="InstallScope.Auto"/>-derived and
+    /// the manifest did not fix it — i.e. the wizard should show the user/machine
+    /// scope toggle on the Destination screen (T12/T13). A manifest that fixes
+    /// <c>scope: user</c> or <c>scope: machine</c> hides the toggle.
+    /// </summary>
+    public bool ScopeIsSelectable => _blob.Scope == InstallScope.Auto;
+
     public Task<InstallOutcome> RunInstallAsync(IProgress<StepProgress>? progress, CancellationToken ct = default)
         => RunInstallCoreAsync(WrapperBlob.LoadPayloadBytes(), progress, ct);
 
@@ -259,7 +294,8 @@ public sealed class InstallSession
                 payloadRoot = payload.Root;
             }
 
-            var ctx = StepContext.From(_blob, _parsed, payloadRoot, _collectedValues, _scope, _collectedOptions);
+            var ctx = StepContext.From(
+                _blob, _parsed, payloadRoot, _collectedValues, _scope, _collectedOptions, CollectedInstallDir);
             var result = await new InstallEngine().RunAsync(
                 preInstall: _blob.PreInstall,
                 installSteps: _blob.InstallSteps,

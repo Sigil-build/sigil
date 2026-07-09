@@ -26,7 +26,14 @@ internal sealed partial record WrapperBlob(
     // `/P<Name>=value` override supplies otherwise) so the auto-generated,
     // option-gated steps — and any hand-written `when: option.*` — evaluate.
     // Null/empty for an un-stamped runtime or a manifest declaring no options.
-    IReadOnlyList<InstallerOptionComponent>? Options = null)
+    IReadOnlyList<InstallerOptionComponent>? Options = null,
+    // T13: the manifest's App.Name and optional install-dir override. AppName is
+    // the default install-dir base's <App.Name> segment and backs the {app.name}
+    // token; InstallDir is the verbatim `installer.install_dir` template (may
+    // reference {scope_root} / {app.*}), null when the manifest omits it so the
+    // default `<scope root>\<App.Name>` applies. Both feed InstallDirResolver.
+    string? AppName = null,
+    string? InstallDir = null)
 {
     /// <summary>
     /// Empty sentinel blob: well-known <c>AppId</c> placeholder and zero-length

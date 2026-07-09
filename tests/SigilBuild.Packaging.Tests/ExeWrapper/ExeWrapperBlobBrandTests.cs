@@ -95,6 +95,26 @@ public class ExeWrapperBlobBrandTests
     }
 
     [Fact]
+    public void BuildBlobBytes_EmbedsAppNameAndInstallDirOverride()
+    {
+        // T13: App.Name (default install-dir base + {app.name}) and the optional
+        // install_dir override template travel in the blob so the runtime resolves
+        // the effective install dir.
+        var manifest = new SigilManifest("v1.0",
+            new AppSection("com.acme.Studio", "Acme Studio", "3.2.0", "Acme, Inc.", null, null),
+            new BuildSection("./out", null, null, true),
+            null, null, null, null,
+            Installer: new InstallerSection(null, InstallDir: "{scope_root}/Acme Studio"),
+            Location: SourceLocation.Unknown);
+
+        var blob = ExeWrapperPackager.BuildBlobBytes(manifest, string.Empty);
+        var s = Deserialize(blob);
+
+        s.AppName.Should().Be("Acme Studio");
+        s.InstallDir.Should().Be("{scope_root}/Acme Studio");
+    }
+
+    [Fact]
     public void BuildBlobBytes_NoBrand_StillDerivesDefaultPaletteWithoutAssets()
     {
         var manifest = new SigilManifest("v1.0",

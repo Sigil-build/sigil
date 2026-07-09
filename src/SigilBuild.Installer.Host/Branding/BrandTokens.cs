@@ -33,4 +33,17 @@ public sealed class BrandTokens
 
     /// <summary>Base64-encoded brand hero bytes carried in the blob, if any.</summary>
     public string? HeroBase64 { get; init; }
+
+    /// <summary>
+    /// The verified-signature-gated trust line (T11 / decision 7), e.g.
+    /// <c>"Signed by Acme, Inc."</c>. Non-null ONLY when the manifest declared a
+    /// <c>sign</c> block AND the running exe's Authenticode signature verified;
+    /// <c>null</c> for an unsigned, un-stamped, or tampered/re-stamped artifact —
+    /// the wizard then shows no trust line (the neutral publisher name still
+    /// renders separately). <see cref="HasTrustLine"/> drives its visibility.
+    /// </summary>
+    public string? TrustLine { get; init; }
+
+    /// <summary>True when a verified trust line should render.</summary>
+    public bool HasTrustLine => !string.IsNullOrEmpty(TrustLine);
 }

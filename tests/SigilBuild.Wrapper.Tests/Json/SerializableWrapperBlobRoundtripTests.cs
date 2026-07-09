@@ -47,6 +47,7 @@ public class SerializableWrapperBlobRoundtripTests
         back.Screens.Should().BeEmpty();
         back.AppName.Should().BeNull();
         back.InstallDir.Should().BeNull();
+        back.SignDeclared.Should().BeFalse();
     }
 
     [Fact]
@@ -74,6 +75,13 @@ public class SerializableWrapperBlobRoundtripTests
         var reconstructed = SerializableWrapperBlob.ToWrapperBlob(back);
         reconstructed.AppName.Should().Be("Acme Studio");
         reconstructed.InstallDir.Should().Be("{scope_root}/Acme Studio");
+    }
+
+    [Fact]
+    public void SignDeclared_roundtrips()
+    {
+        RoundTrip(new SerializableWrapperBlob { SignDeclared = true }).SignDeclared.Should().BeTrue();
+        RoundTrip(new SerializableWrapperBlob { SignDeclared = false }).SignDeclared.Should().BeFalse();
     }
 
     [Fact]

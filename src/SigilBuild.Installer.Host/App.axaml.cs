@@ -129,6 +129,14 @@ public partial class App : Application
             DarkTokens = dark,
             LogoBase64 = brand.LogoBase64,
             HeroBase64 = brand.HeroBase64,
+            // T11 / decision 7: the "Signed by {publisher}" trust line renders ONLY
+            // when the manifest declared a `sign` block (SignDeclared, from the blob)
+            // AND this exe's own Authenticode signature verifies via WinVerifyTrust.
+            // InstallerTrustLoader short-circuits the P/Invoke when SignDeclared is
+            // false, so an unsigned/un-stamped host does no trust work and shows no
+            // line; a signed-then-tampered/re-stamped exe fails verification and also
+            // shows no line. The neutral publisher name renders separately regardless.
+            TrustLine = InstallerTrustLoader.ResolveFromSelf(),
         };
     }
 }

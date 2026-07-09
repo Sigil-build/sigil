@@ -24,7 +24,9 @@ public static class PackCommand
             "only on a Windows pack host — it stamps the payload into the installer runtime " +
             "via the Win32 resource-update APIs (BeginUpdateResourceW), which have no " +
             "cross-platform equivalent. On non-Windows hosts 'sigil pack' emits a clear " +
-            "diagnostic and skips the exe format (other formats still pack).");
+            "diagnostic and skips the exe format (other formats still pack). Pipeline order: " +
+            "'sigil pack' MUST run BEFORE 'sigil sign' — stamping resources invalidates any " +
+            "prior Authenticode signature, so sign the finished Setup.exe last.");
         cmd.AddArgument(pathArg);
         cmd.AddOption(outOpt);
         cmd.SetHandler(async (InvocationContext ctx) =>

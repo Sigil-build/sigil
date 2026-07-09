@@ -22,7 +22,14 @@ public static class SignCommand
         var pathArg = new Argument<string>("path", () => "sigil.yaml", "Path to manifest");
         var artifactOpt = new Option<string>("--artifact", "Artifact file to sign") { IsRequired = true };
 
-        var cmd = new Command("sign", "Sign an artifact per the manifest's sign provider");
+        var cmd = new Command(
+            "sign",
+            "Sign an artifact per the manifest's sign provider. IMPORTANT: run 'sigil " +
+            "sign' AFTER 'sigil pack' — pack stamps the payload/brand/blob into the " +
+            "installer via the Win32 resource-update APIs, and any resource edit " +
+            "invalidates a prior Authenticode signature. Signing must therefore be the " +
+            "LAST step (pack → sign); the installer's verified 'Signed by {publisher}' " +
+            "trust line only appears when the finished Setup.exe verifies at install time.");
         cmd.AddArgument(pathArg);
         cmd.AddOption(artifactOpt);
         cmd.SetHandler(async (InvocationContext ctx) =>

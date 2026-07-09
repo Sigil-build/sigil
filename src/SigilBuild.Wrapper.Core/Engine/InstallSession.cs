@@ -55,6 +55,19 @@ public sealed class InstallSession
         return new InstallSession(blob, parsed);
     }
 
+    /// <summary>
+    /// Build a session directly from an in-memory blob + parsed command line,
+    /// bypassing <see cref="WrapperBlob.LoadFromSelf"/>. Test-only seam: lets a
+    /// test drive the real install lifecycle (payload extraction → engine →
+    /// temp cleanup) with a synthesised blob instead of a stamped exe.
+    /// </summary>
+    internal static InstallSession ForTesting(WrapperBlob blob, ParsedCommandLine parsed)
+    {
+        ArgumentNullException.ThrowIfNull(blob);
+        ArgumentNullException.ThrowIfNull(parsed);
+        return new InstallSession(blob, parsed);
+    }
+
     /// <summary>The requested operating mode (install / update / uninstall).</summary>
     public WrapperMode Mode => _parsed.Mode;
 
@@ -129,24 +142,66 @@ public sealed class InstallSession
     /// cancellation propagates as <see cref="OperationCanceledException"/> after
     /// the engine has rolled back.
     /// </summary>
-    public async Task<InstallOutcome> RunInstallAsync(IProgress<StepProgress>? progress, CancellationToken ct = default)
+    public Task<InstallOutcome> RunInstallAsync(IProgress<StepProgress>? progress, CancellationToken ct = default)
+        => RunInstallCoreAsync(WrapperBlob.LoadPayloadBytes(), progress, ct);
+
+    /// <summary>
+    /// Core install lifecycle shared by every entry path: extract the embedded
+    /// payload into a fresh temp dir, run the pre → install → post pipeline with
+    /// the payload root threaded into the <see cref="StepContext"/> (so
+    /// <c>payload://</c> sources resolve), and — on success — persist the journal
+    /// and register ARP. The temp dir is removed in the <c>finally</c>,
+    /// guaranteeing no <c>%TEMP%</c> leak on success, step failure,
+    /// cancellation, or rollback.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="payloadBytes"/> is passed in (rather than read here) so a
+    /// test can exercise the full lifecycle — including cleanup — without a
+    /// stamped exe; the public <see cref="RunInstallAsync"/> supplies the real
+    /// <see cref="WrapperBlob.LoadPayloadBytes"/> result. An empty array (the
+    /// un-stamped runtime) skips extraction and leaves the payload root
+    /// <c>null</c>.
+    /// </remarks>
+    internal async Task<InstallOutcome> RunInstallCoreAsync(
+        byte[] payloadBytes,
+        IProgress<StepProgress>? progress,
+        CancellationToken ct = default)
     {
-        var ctx = StepContext.From(_blob, _parsed);
-        var result = await new InstallEngine().RunAsync(
-            preInstall: _blob.PreInstall,
-            installSteps: _blob.InstallSteps,
-            postInstall: _blob.PostInstall,
-            ctx: ctx,
-            ct: ct,
-            progress: progress).ConfigureAwait(false);
+        ArgumentNullException.ThrowIfNull(payloadBytes);
 
-        if (!result.Success)
+        PayloadExtraction? payload = null;
+        try
         {
-            return new InstallOutcome(false, result.Error);
-        }
+            string? payloadRoot = null;
+            if (payloadBytes.Length > 0)
+            {
+                payload = PayloadExtraction.Extract(payloadBytes, _blob.AppId);
+                payloadRoot = payload.Root;
+            }
 
-        PersistCompletion(result.Journal);
-        return new InstallOutcome(true, null);
+            var ctx = StepContext.From(_blob, _parsed, payloadRoot);
+            var result = await new InstallEngine().RunAsync(
+                preInstall: _blob.PreInstall,
+                installSteps: _blob.InstallSteps,
+                postInstall: _blob.PostInstall,
+                ctx: ctx,
+                ct: ct,
+                progress: progress).ConfigureAwait(false);
+
+            if (!result.Success)
+            {
+                return new InstallOutcome(false, result.Error);
+            }
+
+            PersistCompletion(result.Journal);
+            return new InstallOutcome(true, null);
+        }
+        finally
+        {
+            // Runs on success, step-failure return, and the OperationCanceledException
+            // rethrow — so the extracted payload temp dir never leaks.
+            payload?.Dispose();
+        }
     }
 
     /// <summary>

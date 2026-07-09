@@ -37,7 +37,8 @@ internal sealed class RunProgramStep : IStep
     {
         ArgumentNullException.ThrowIfNull(ctx);
 
-        var program = ctx.Resolve(_spec.Program);
+        // Program / working dir may reference the extracted payload (payload://).
+        var program = ctx.ResolvePath(_spec.Program);
         var psi = new ProcessStartInfo
         {
             FileName = program,
@@ -45,7 +46,7 @@ internal sealed class RunProgramStep : IStep
             CreateNoWindow = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
-            WorkingDirectory = _spec.Cwd is null ? string.Empty : ctx.Resolve(_spec.Cwd),
+            WorkingDirectory = _spec.Cwd is null ? string.Empty : ctx.ResolvePath(_spec.Cwd),
         };
         if (_spec.Args is not null)
         {

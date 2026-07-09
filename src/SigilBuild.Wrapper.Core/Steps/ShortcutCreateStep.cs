@@ -51,10 +51,11 @@ internal sealed class ShortcutCreateStep : IStep
 
         ShellLink.Save(
             lnkPath: lnkPath,
-            target: ctx.Resolve(_spec.Target),
+            // Target / working dir / icon may reference the extracted payload.
+            target: ctx.ResolvePath(_spec.Target),
             arguments: argString is null ? null : ctx.Resolve(argString),
-            workingDirectory: _spec.WorkingDir is null ? null : ctx.Resolve(_spec.WorkingDir),
-            iconLocation: _spec.Icon is null ? null : ctx.Resolve(_spec.Icon),
+            workingDirectory: _spec.WorkingDir is null ? null : ctx.ResolvePath(_spec.WorkingDir),
+            iconLocation: _spec.Icon is null ? null : ctx.ResolvePath(_spec.Icon),
             description: _spec.Description);
 
         return Task.FromResult(StepResult.Ok());

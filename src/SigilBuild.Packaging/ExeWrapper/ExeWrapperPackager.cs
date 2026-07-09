@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using SigilBuild.Core.Diagnostics;
@@ -70,8 +71,15 @@ public sealed class ExeWrapperPackager : IPackager
         // payload:// path resolution) lands with Tasks 15+.
         var payloadBytes = BuildPayloadBytes(options.SourceDirectory, ct);
 
-        // Embed both resources via the Win32 update-resource flow.
-        await WrapperResourceWriter.WriteAsync(outputPath, blobBytes, payloadBytes, ct)
+        // T18: archive the host's staged native dependencies (Skia/ANGLE/HarfBuzz)
+        // so the stamped Setup.exe is self-contained and can launch the GUI wizard
+        // standalone. Empty when no natives are staged (SIGIL_RUNTIME_V1 is then
+        // simply not written — the pre-T18 exe-only behaviour, still /silent-capable).
+        var nativeDepPaths = WrapperRuntimeLocator.LocateNativeDeps(options.Architecture);
+        var runtimeBytes = BuildRuntimeBytes(nativeDepPaths, ct);
+
+        // Embed the resources via the Win32 update-resource flow.
+        await WrapperResourceWriter.WriteAsync(outputPath, blobBytes, payloadBytes, runtimeBytes, ct)
             .ConfigureAwait(false);
 
         // Compute sha256 + size *after* the resource embed so the artifact
@@ -253,6 +261,46 @@ public sealed class ExeWrapperPackager : IPackager
                 entry.LastWriteTime = DeterministicMtime;
                 using var entryStream = entry.Open();
                 using var fs = File.OpenRead(file);
+                fs.CopyTo(entryStream);
+            }
+        }
+        return ms.ToArray();
+    }
+
+    /// <summary>
+    /// Archive the staged native-dependency DLLs (T18) into the deterministic zip
+    /// container carried by <c>SIGIL_RUNTIME_V1</c>. Entries are flat file names
+    /// (the runtime bootstrap loads every DLL from one search directory), sorted
+    /// ordinal, with a pinned mtime — so the archive, and therefore the stamped
+    /// Setup.exe, is byte-identical across builds. Returns an empty array when no
+    /// native deps are supplied; the writer then omits the resource entirely.
+    /// </summary>
+    internal static byte[] BuildRuntimeBytes(IReadOnlyList<string> nativeDependencyPaths, CancellationToken ct)
+    {
+        if (nativeDependencyPaths is null || nativeDependencyPaths.Count == 0)
+        {
+            return Array.Empty<byte>();
+        }
+
+        // Store by (deduplicated) file name, sorted for determinism regardless of
+        // the caller's enumeration order.
+        var ordered = nativeDependencyPaths
+            .Select(p => (Name: Path.GetFileName(p), Path: p))
+            .GroupBy(e => e.Name, StringComparer.Ordinal)
+            .Select(g => g.First())
+            .OrderBy(e => e.Name, StringComparer.Ordinal)
+            .ToArray();
+
+        using var ms = new MemoryStream();
+        using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach (var (name, path) in ordered)
+            {
+                ct.ThrowIfCancellationRequested();
+                var entry = zip.CreateEntry(name, CompressionLevel.Optimal);
+                entry.LastWriteTime = DeterministicMtime;
+                using var entryStream = entry.Open();
+                using var fs = File.OpenRead(path);
                 fs.CopyTo(entryStream);
             }
         }

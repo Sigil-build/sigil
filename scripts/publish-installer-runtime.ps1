@@ -151,6 +151,24 @@ foreach ($rid in $Rids) {
     $destExe = Join-Path $destDir $runtimeFileName
     Copy-Item -Path $producedExe -Destination $destExe -Force
 
+    # T18: the AOT publish emits the host's native dependencies (Skia/ANGLE/
+    # HarfBuzz — ~18 MB) as loose *.dll BESIDE installer.exe. Stage them under
+    # runtimes/<rid>/native/ so ExeWrapperPackager can archive them into the
+    # stamped Setup.exe's SIGIL_RUNTIME_V1 resource, making the wizard installer
+    # self-contained (WrapperRuntimeLocator.LocateNativeDeps resolves this folder).
+    # Managed IL is baked into the AOT exe, so the loose DLLs are all native.
+    $nativeDir = Join-Path $destDir 'native'
+    New-Item -ItemType Directory -Force -Path $nativeDir | Out-Null
+    $nativeDlls = Get-ChildItem -Path $publishOut -Filter '*.dll' -File
+    foreach ($dll in $nativeDlls) {
+        Copy-Item -Path $dll.FullName -Destination (Join-Path $nativeDir $dll.Name) -Force
+    }
+    $nativeCount = @($nativeDlls).Count
+    $nativeMb = if ($nativeCount -gt 0) {
+        [math]::Round((($nativeDlls | Measure-Object -Property Length -Sum).Sum) / 1MB, 2)
+    } else { 0 }
+    Write-Host "    staged $nativeCount native dep dll(s) ($nativeMb MB) into $nativeDir"
+
     $exeMb = [math]::Round((Get-Item $destExe).Length / 1MB, 2)
     # The shippable host footprint = the AOT exe plus the native libraries it
     # loads at runtime (Skia/ANGLE/HarfBuzz), excluding debug PDBs. This total is

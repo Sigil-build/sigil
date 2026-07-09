@@ -35,7 +35,8 @@ public class WrapperResourceWriterTests
         {
             var blob = Encoding.UTF8.GetBytes("hello-blob");
             var payload = new byte[] { 1, 2, 3 };
-            await WrapperResourceWriter.WriteAsync(tmp, blob, payload, CancellationToken.None);
+            var runtime = new byte[] { 4, 5, 6, 7 };
+            await WrapperResourceWriter.WriteAsync(tmp, blob, payload, runtime, CancellationToken.None);
 
             // Read the resource back via raw Win32 APIs without launching the
             // wrapper exe (which would also exercise Half B).
@@ -44,6 +45,9 @@ public class WrapperResourceWriterTests
 
             var roundtrippedPayload = ResourceReader.Read(tmp, "SIGIL_PAYLOAD_V1");
             roundtrippedPayload.Should().Equal(payload);
+
+            var roundtrippedRuntime = ResourceReader.Read(tmp, "SIGIL_RUNTIME_V1");
+            roundtrippedRuntime.Should().Equal(runtime);
         }
         finally
         {

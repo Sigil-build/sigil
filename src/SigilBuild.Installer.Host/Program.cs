@@ -46,6 +46,21 @@ public static partial class Program
         // the same InstallSession engine on its Installing screen.
         HostRuntime.Session = session;
 
+        // T18: make a standalone stamped Setup.exe self-contained. Native AOT
+        // publishes the host's Skia/ANGLE/HarfBuzz native DLLs BESIDE the exe; a
+        // stamped Setup.exe instead carries them inside its SIGIL_RUNTIME_V1
+        // resource. Extract them to a per-user cache and add that directory to the
+        // native DLL search path BEFORE the Avalonia AppBuilder is created, so the
+        // first Skia/Avalonia native load resolves. GUI path ONLY — the headless
+        // /silent, /verysilent and uninstall paths returned above and never touch
+        // Skia, so they skip this. On an un-stamped dev run (no resource) this is a
+        // no-op: the native DLLs already sit beside the exe. Idempotent across
+        // re-runs (content-keyed cache dir + completion marker).
+        if (OperatingSystem.IsWindows())
+        {
+            NativeRuntimeBootstrap.EnsureNativeDependenciesLoadable();
+        }
+
         var builder = BuildAvaloniaApp();
         // StartWithClassicDesktopLifetime returns 0 on normal exit; we override
         // with the wizard's outcome so the OS receives 1 on step failure and 2

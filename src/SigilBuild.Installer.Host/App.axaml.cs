@@ -5,6 +5,7 @@ using Avalonia.Markup.Xaml;
 using SigilBuild.Installer.Host.Branding;
 using SigilBuild.Installer.Host.ViewModels;
 using SigilBuild.Installer.Host.Views;
+using SigilBuild.Wrapper.Cli;
 using SigilBuild.Wrapper.Engine;
 
 namespace SigilBuild.Installer.Host;
@@ -12,12 +13,15 @@ namespace SigilBuild.Installer.Host;
 public partial class App : Application
 {
     private InstallerViewModel? _vm;
+    private UninstallViewModel? _uninstallVm;
 
     /// <summary>
-    /// The outcome chosen by the user during this session.
-    /// Read by <see cref="Program.Main"/> after the Avalonia lifetime exits.
+    /// The outcome chosen by the user during this session (install OR the T15
+    /// interactive uninstall). Read by <see cref="Program.Main"/> after the Avalonia
+    /// lifetime exits.
     /// </summary>
-    public int OutcomeExitCode => (int)(_vm?.OutcomeCode ?? InstallerOutcomeCode.Completed);
+    public int OutcomeExitCode =>
+        (int)(_vm?.OutcomeCode ?? _uninstallVm?.OutcomeCode ?? InstallerOutcomeCode.Completed);
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
@@ -29,12 +33,28 @@ public partial class App : Application
             // light/dark palette + base64 logo/hero, no BrandTokens.g.json sidecar.
             var tokens = LoadBrandTokens();
             BrandPalette.Apply(this, tokens);
+
+            var session = HostRuntime.Session;
+
+            // T15: an interactive uninstall (uninstall.exe double-clicked, no /S)
+            // gets its own minimal branded confirm → progress → done window, driving
+            // the real UninstallEngine. Kept entirely separate from the install
+            // wizard's flow/rail.
+            if (session is not null && session.Mode == WrapperMode.Uninstall)
+            {
+                _uninstallVm = new UninstallViewModel(tokens);
+                _uninstallVm.ConfigureRunner((progress, ct) =>
+                    session.RunUninstallInteractiveAsync(progress, ct));
+                desktop.MainWindow = new UninstallWindow { DataContext = _uninstallVm };
+                base.OnFrameworkInitializationCompleted();
+                return;
+            }
+
             _vm = new InstallerViewModel(tokens);
 
             // Wire the wizard's Installing screen to the real step engine via the
             // shared InstallSession that Program built from argv. Left unwired in
             // dev/preview runs where no session was staged.
-            var session = HostRuntime.Session;
             if (session is not null)
             {
                 // T9: load the declared custom screens (from the blob) + parameter

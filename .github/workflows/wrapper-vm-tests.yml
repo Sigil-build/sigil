@@ -80,3 +80,33 @@ jobs:
               --logger "trx;LogFileName=wrapper-vm-tests-$scope.trx" `
               -- SigilVmTests.Scope=$scope
           }
+
+      # T15 — uninstall survivability: uninstall must still work after the user
+      # deletes the downloaded setup exe. Install writes {install_dir}\uninstall.exe
+      # (a journaled final step) and points ARP's UninstallString at THAT copy with
+      # the scope flag (never at the download's Environment.ProcessPath). This job
+      # step asserts the survivability contract end-to-end in the VM:
+      #   1. Pack a fixture Setup.exe, run it /silent (per-user scope).
+      #   2. Assert {install_dir}\uninstall.exe exists and the ARP UninstallString
+      #      references it (contains "uninstall.exe" + "/S /Uninstall"), NOT the
+      #      original setup exe path.
+      #   3. DELETE the original downloaded Setup.exe.
+      #   4. Invoke the ARP UninstallString (the copied uninstall.exe /S /Uninstall
+      #      /currentuser) and assert it reverses everything — files, registry, PATH,
+      #      shortcuts — and that uninstall.exe is gone OR scheduled for reboot
+      #      deletion (MoveFileEx MOVEFILE_DELAY_UNTIL_REBOOT), since a running image
+      #      cannot delete itself in place.
+      #   5. Double-clicking uninstall.exe with NO /S self-detects uninstall mode
+      #      (filename == uninstall.exe) and shows the interactive confirm flow; the
+      #      headed smoke covers that path.
+      # This is the deleted-original assertion the unit tests (InstallSurvivability /
+      # SelfDelete) cannot make without real elevation + a real reboot; it defers to
+      # the VM here.
+      - name: T15 deleted-original uninstall survivability
+        shell: pwsh
+        env:
+          SIGIL_VM_UNINSTALL_SURVIVE: "1"
+        run: |
+          dotnet test tests/SigilBuild.Wrapper.IntegrationTests/SigilBuild.Wrapper.IntegrationTests.csproj `
+            --filter "Category=UninstallSurvivability" `
+            --logger "trx;LogFileName=wrapper-vm-tests-uninstall-survive.trx"

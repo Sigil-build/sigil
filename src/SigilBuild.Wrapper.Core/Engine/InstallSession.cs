@@ -33,12 +33,42 @@ public sealed class InstallSession
     private readonly WrapperBlob _blob;
     private readonly ParsedCommandLine _parsed;
     private readonly InstallScope _scope;
+    private readonly WrapperMode _mode;
 
     private InstallSession(WrapperBlob blob, ParsedCommandLine parsed, InstallScope scope)
     {
         _blob = blob;
         _parsed = parsed;
         _scope = scope;
+        _mode = ResolveEffectiveMode(parsed.Mode);
+    }
+
+    /// <summary>
+    /// Resolve the effective operating mode. The survivable <c>uninstall.exe</c>
+    /// (T15) is a byte-for-byte copy of the setup exe, so double-clicking it — with
+    /// no <c>/Uninstall</c> flag — must still uninstall. When no explicit mode flag
+    /// was parsed and the running image is named <c>uninstall.exe</c>, imply
+    /// <see cref="WrapperMode.Uninstall"/>. The ARP <c>UninstallString</c> path
+    /// (<c>/S /Uninstall</c>) already parses to Uninstall and is unaffected.
+    /// </summary>
+    private static WrapperMode ResolveEffectiveMode(WrapperMode parsedMode)
+    {
+        if (parsedMode != WrapperMode.Install)
+        {
+            return parsedMode;
+        }
+
+        var exe = Environment.ProcessPath;
+        if (!string.IsNullOrEmpty(exe) &&
+            string.Equals(
+                Path.GetFileName(exe),
+                InstallSurvivability.UninstallerFileName,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return WrapperMode.Uninstall;
+        }
+
+        return parsedMode;
     }
 
     /// <summary>
@@ -76,8 +106,13 @@ public sealed class InstallSession
         return new InstallSession(blob, parsed, scope);
     }
 
-    /// <summary>The requested operating mode (install / update / uninstall).</summary>
-    public WrapperMode Mode => _parsed.Mode;
+    /// <summary>
+    /// The effective operating mode (install / update / uninstall). Normally the
+    /// parsed CLI mode; upgraded to <see cref="WrapperMode.Uninstall"/> when the
+    /// running image is the copied <c>uninstall.exe</c> even without an explicit
+    /// <c>/Uninstall</c> flag (T15 self-detection).
+    /// </summary>
+    public WrapperMode Mode => _mode;
 
     /// <summary>True when <c>/silent</c>, <c>/S</c>, or <c>/verysilent</c> was supplied.</summary>
     public bool Silent => _parsed.Silent;
@@ -130,7 +165,7 @@ public sealed class InstallSession
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(error);
 
-        switch (_parsed.Mode)
+        switch (_mode)
         {
             case WrapperMode.Update:
                 // Update is not implemented in this track. Say so explicitly and
@@ -294,9 +329,11 @@ public sealed class InstallSession
     /// The DisplayName/Version/Publisher/size values are the acknowledged
     /// placeholders (Task T10 threads the real <c>manifest.App.*</c> fields and
     /// the packed size through the blob). The ARP hive, state-store location, and
-    /// uninstall-string scope flag all follow the resolved scope (T12). No-ops for
-    /// an un-stamped runtime (the dev/smoke <see cref="WrapperBlob.Empty"/>) and
-    /// off Windows.
+    /// uninstall-string scope flag all follow the resolved scope (T12). The
+    /// <c>UninstallString</c> points at the copied <c>uninstall.exe</c> (T15), never
+    /// at <see cref="Environment.ProcessPath"/> — so uninstall survives deletion of
+    /// the downloaded setup exe. No-ops for an un-stamped runtime (the dev/smoke
+    /// <see cref="WrapperBlob.Empty"/>) and off Windows.
     /// </remarks>
     private void PersistCompletion(
         RollbackJournal journal,
@@ -311,22 +348,34 @@ public sealed class InstallSession
             return;
         }
 
+        // T15 final install step: copy the running installer into the install dir
+        // as uninstall.exe and journal its removal (so the persisted journal — and a
+        // rollback — reverse it). ARP's UninstallString then targets this copy.
+        var uninstallerPath =
+            InstallSurvivability.InstallUninstaller(journal, _scope, _blob.AppId)
+            ?? Environment.ProcessPath
+            ?? ".";
+
         // Redact any secret value from the persisted uninstall state (decision 6).
-        // The scope is recorded so uninstall runs in the same scope (T12).
+        // The scope is recorded so uninstall runs in the same scope (T12). Saved
+        // AFTER the uninstaller-copy step is journaled so the RemoveUninstaller
+        // record is part of the persisted, replay-on-uninstall journal.
         UninstallStateStore.Save(_blob.AppId, journal, _scope, secretValues);
         ArpRegistration.Register(new ArpRegistration.Entry(
             AppId: _blob.AppId,
             DisplayName: _blob.AppId,
             DisplayVersion: "1.0.0",
             Publisher: "Unknown",
-            UninstallString: ArpRegistration.BuildUninstallString(Environment.ProcessPath ?? ".", _scope),
+            UninstallString: ArpRegistration.BuildUninstallString(uninstallerPath, _scope),
             EstimatedSizeBytes: 0),
             _scope);
     }
 
     private async Task<int> RunUninstallAsync(TextWriter error, CancellationToken ct)
     {
-        var result = await new UninstallEngine().RunAsync(_blob.AppId, _scope, ct).ConfigureAwait(false);
+        var result = await new UninstallEngine()
+            .RunAsync(_blob.AppId, _scope, progress: null, ct)
+            .ConfigureAwait(false);
         if (!result.Success)
         {
             if (result.Error is not null)
@@ -336,6 +385,25 @@ public sealed class InstallSession
             return 1;
         }
         return 0;
+    }
+
+    /// <summary>
+    /// GUI entry point for the interactive uninstall flow (T15): drive
+    /// <see cref="UninstallEngine"/> for this session's app, forwarding
+    /// <paramref name="progress"/> so the wizard's uninstall progress screen can
+    /// grow its reversal log (<c>unlink</c> / <c>path -</c> / <c>reg -</c> /
+    /// <c>delete</c>). Returns an <see cref="InstallOutcome"/> so the uninstall
+    /// view-model shares the same success/failure shape as the install flow. The
+    /// headless <c>/S /Uninstall</c> path continues to use
+    /// <see cref="RunHeadlessAsync"/>.
+    /// </summary>
+    public async Task<InstallOutcome> RunUninstallInteractiveAsync(
+        IProgress<StepProgress>? progress, CancellationToken ct = default)
+    {
+        var result = await new UninstallEngine()
+            .RunAsync(_blob.AppId, _scope, progress, ct)
+            .ConfigureAwait(false);
+        return new InstallOutcome(result.Success, result.Error);
     }
 
     /// <summary>

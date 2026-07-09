@@ -26,7 +26,7 @@ internal sealed record SerializableRollbackRecord
 {
     /// <summary>Discriminator: <c>restore_file</c>, <c>remove_directory</c>,
     /// <c>restore_registry_value</c>, <c>restore_registry_key</c>,
-    /// <c>delete_shortcut</c>, <c>restore_env</c>.</summary>
+    /// <c>delete_shortcut</c>, <c>restore_env</c>, <c>remove_uninstaller</c>.</summary>
     public string Type { get; init; } = string.Empty;
 
     // RestoreFile / RemoveDirectory / DeleteShortcut all use Path.
@@ -98,6 +98,12 @@ internal static class SerializableRollbackRecordExtensions
                 Path = r.Path,
             },
 
+            RollbackRecord.RemoveUninstaller r => new SerializableRollbackRecord
+            {
+                Type = "remove_uninstaller",
+                Path = r.Path,
+            },
+
             RollbackRecord.RestoreRegistryValue r => new SerializableRollbackRecord
             {
                 Type = "restore_registry_value",
@@ -150,6 +156,9 @@ internal static class SerializableRollbackRecordExtensions
 
             "delete_shortcut" => new RollbackRecord.DeleteShortcut(
                 s.Path ?? throw MissingField("delete_shortcut", "path")),
+
+            "remove_uninstaller" => new RollbackRecord.RemoveUninstaller(
+                s.Path ?? throw MissingField("remove_uninstaller", "path")),
 
             "restore_registry_value" => new RollbackRecord.RestoreRegistryValue(
                 s.Hive ?? throw MissingField("restore_registry_value", "hive"),

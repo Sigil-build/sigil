@@ -23,15 +23,20 @@ public sealed class RollbackJournal
         _records.Add(record);
     }
 
-    public async System.Threading.Tasks.Task UndoAsync(System.Threading.CancellationToken ct)
+    public async System.Threading.Tasks.Task UndoAsync(
+        System.Threading.CancellationToken ct,
+        System.IProgress<StepProgress>? progress = null)
     {
         // Walk in reverse. Undo failures should not cascade — log and continue.
+        var total = _records.Count;
+        var completed = 0;
         for (var i = _records.Count - 1; i >= 0; i--)
         {
             ct.ThrowIfCancellationRequested();
+            var record = _records[i];
             try
             {
-                await _records[i].UndoAsync(ct).ConfigureAwait(false);
+                await record.UndoAsync(ct).ConfigureAwait(false);
             }
 #pragma warning disable CA1031 // Best-effort undo: individual failures must not cascade.
             catch
@@ -39,8 +44,32 @@ public sealed class RollbackJournal
                 // Best-effort; swallow individual undo failures.
             }
 #pragma warning restore CA1031
+            completed++;
+            progress?.Report(new StepProgress(completed, total, DescribeUndo(record), IsError: false));
         }
     }
+
+    /// <summary>
+    /// A short, prototype-style reversal line for the interactive uninstall log
+    /// (spec T15 / design brief: <c>unlink</c>, <c>path -</c>, <c>reg -</c>,
+    /// <c>delete</c>). Derived from the record's declared fields only — no resolved
+    /// parameter values, so a secret can never leak into the uninstall log.
+    /// </summary>
+    private static string DescribeUndo(RollbackRecord record) => record switch
+    {
+        RollbackRecord.RestoreFile r => $"delete {r.Path}",
+        RollbackRecord.RemoveDirectory r => $"rmdir {r.Path}",
+        RollbackRecord.DeleteShortcut r => $"unlink {r.Path}",
+        RollbackRecord.RestoreRegistryValue r => $"reg - {r.Key}\\{r.Name}",
+        RollbackRecord.RestoreRegistryKey r => $"reg - {r.Key}",
+        RollbackRecord.RestoreEnv r => r.Name.Equals("PATH", System.StringComparison.OrdinalIgnoreCase)
+            ? "path -"
+            : $"env - {r.Name}",
+        RollbackRecord.RestoreDeletedFile r => $"restore {r.OriginalPath}",
+        RollbackRecord.RestoreDeletedDirectory r => $"restore {r.OriginalPath}",
+        RollbackRecord.RemoveUninstaller r => $"delete {r.Path}",
+        _ => "revert",
+    };
 }
 
 public abstract record RollbackRecord
@@ -335,6 +364,23 @@ public abstract record RollbackRecord
                 System.IO.Directory.CreateDirectory(destSub);
                 CopyDirectoryRecursive(dir, destSub);
             }
+        }
+    }
+
+    /// <summary>
+    /// Removes the survivable <c>uninstall.exe</c> copied into the install dir as
+    /// the final install step (spec T15). Undo is delegated to
+    /// <see cref="SelfDelete"/>, which tolerates the case where <see cref="Path"/>
+    /// is the <em>running</em> uninstaller image: it cannot delete its own live
+    /// image, so it schedules reboot-time deletion instead. Journal replay never
+    /// aborts on this entry — the delete is best-effort and never throws.
+    /// </summary>
+    public sealed record RemoveUninstaller(string Path) : RollbackRecord
+    {
+        public override System.Threading.Tasks.Task UndoAsync(System.Threading.CancellationToken ct)
+        {
+            SelfDelete.Remove(Path);
+            return System.Threading.Tasks.Task.CompletedTask;
         }
     }
 }

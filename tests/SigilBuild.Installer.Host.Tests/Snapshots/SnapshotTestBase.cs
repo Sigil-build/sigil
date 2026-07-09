@@ -54,9 +54,6 @@ public abstract class SnapshotTestBase
         Publisher = "Verdant Inc.",
         PrimaryColor = "#16A34A",
         AccentColor = "#15803D",
-        GradientStart = "#022C22",
-        GradientMid = "#064E3B",
-        GradientEnd = "#16A34A",
     };
 
     protected static BrandTokens LumenComposeBrand => new()
@@ -65,9 +62,6 @@ public abstract class SnapshotTestBase
         Publisher = "Lumen Inc.",
         PrimaryColor = "#DB2777",
         AccentColor = "#BE185D",
-        GradientStart = "#1F0729",
-        GradientMid = "#4A044E",
-        GradientEnd = "#DB2777",
     };
 
     // ── Core assertion ────────────────────────────────────────────────────

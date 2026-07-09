@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using SigilBuild.Core.Diagnostics;
 using SigilBuild.Core.Manifest;
 using SigilBuild.Packaging.Common;
+using SigilBuild.Packaging.Installer;
 using SigilBuild.Wrapper.Engine;
 using SigilBuild.Wrapper.Json;
 
@@ -55,7 +56,7 @@ public sealed class ExeWrapperPackager : IPackager
         // Build the SIGIL_BLOB_V1 wire payload: serialize a
         // SerializableWrapperBlob via the source-generated context shared
         // with the wrapper runtime.
-        var blobBytes = BuildBlobBytes(manifest);
+        var blobBytes = BuildBlobBytes(manifest, options.SourceDirectory);
 
         // Build the SIGIL_PAYLOAD_V1 wire payload: a zip archive of the
         // source directory. Richer payload-extraction (zstd, splitting,
@@ -75,7 +76,7 @@ public sealed class ExeWrapperPackager : IPackager
         return new PackResult(artifact, Array.Empty<Diagnostic>());
     }
 
-    private static byte[] BuildBlobBytes(SigilManifest manifest)
+    internal static byte[] BuildBlobBytes(SigilManifest manifest, string sourceDirectory)
     {
         var parameters = manifest.Parameters is null
             ? Array.Empty<ParameterDefinition>()
@@ -91,10 +92,44 @@ public sealed class ExeWrapperPackager : IPackager
             // emit an empty list for forward compatibility.
             UpdateSteps: Array.Empty<InstallStep>());
 
-        var serializable = SerializableWrapperBlob.FromWrapperBlob(inMemory);
+        // T7: derive the full light/dark palette at pack time and carry it, plus
+        // the base64 logo/hero bytes, inside the blob so the stamped exe renders
+        // branded with no loose files beside it (decision 11).
+        var palette = BrandTokenEmitter.Derive(manifest);
+        var brand = manifest.Installer?.Brand;
+
+        var serializable = SerializableWrapperBlob.FromWrapperBlob(inMemory) with
+        {
+            BrandTokensLight = new Dictionary<string, string>(palette.Light),
+            BrandTokensDark = new Dictionary<string, string>(palette.Dark),
+            LogoBase64 = ReadImageBase64(brand?.Logo, sourceDirectory),
+            HeroBase64 = ReadImageBase64(brand?.Hero, sourceDirectory),
+        };
+
         var json = System.Text.Json.JsonSerializer.Serialize(
             serializable, WrapperBlobJsonContext.Default.SerializableWrapperBlob);
         return System.Text.Encoding.UTF8.GetBytes(json);
+    }
+
+    /// <summary>
+    /// Reads a manifest brand image (logo/hero) as base64, resolving a relative
+    /// path against the pack source directory. Returns <c>null</c> when the path
+    /// is unset or the file is missing — brand assets are optional and their
+    /// absence must not fail the pack.
+    /// </summary>
+    private static string? ReadImageBase64(string? path, string sourceDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return null;
+
+        var resolved = Path.IsPathRooted(path)
+            ? path
+            : Path.GetFullPath(Path.Combine(sourceDirectory ?? string.Empty, path));
+
+        if (!File.Exists(resolved))
+            return null;
+
+        return Convert.ToBase64String(File.ReadAllBytes(resolved));
     }
 
     private static ParameterDefinition[] ParametersToList(

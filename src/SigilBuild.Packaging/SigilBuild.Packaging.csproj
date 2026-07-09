@@ -12,13 +12,18 @@
                       ReferenceOutputAssembly="true" />
     <!-- The packager builds the SIGIL_BLOB_V1 JSON at pack time via the same
          internal DTOs + source-generated SerializerContext the wrapper runtime
-         uses to read it back (single source of truth for the wire schema).
-         Those types live in SigilBuild.Wrapper.Core after the Task T1 engine
-         split. PrivateAssets="all" keeps the engine assembly from flowing
-         through to Packaging consumers. -->
+         uses to read it back (single source of truth for the wire schema), and
+         calls SigilBuild.Wrapper.Codec.PayloadCodec (ZstdSharp-backed) to build
+         the SIGIL_PAYLOAD_V2 container. Those types live in
+         SigilBuild.Wrapper.Core after the Task T1 engine split.
+         T4 NOTE: this reference must flow its runtime assets — including the
+         transitive ZstdSharp.Port assembly — to Packaging consumers (the CLI),
+         or `sigil pack` with the exe format throws FileNotFoundException for
+         ZstdSharp at PayloadCodec.Encode. A prior PrivateAssets="all" stripped
+         exactly that transitive package (while the engine DLL flowed anyway),
+         so it is removed. -->
     <ProjectReference Include="..\SigilBuild.Wrapper.Core\SigilBuild.Wrapper.Core.csproj"
-                      ReferenceOutputAssembly="true"
-                      PrivateAssets="all" />
+                      ReferenceOutputAssembly="true" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.FileSystemGlobbing" />

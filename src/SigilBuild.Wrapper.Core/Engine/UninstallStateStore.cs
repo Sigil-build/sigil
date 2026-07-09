@@ -44,7 +44,10 @@ internal static class UninstallStateStore
     /// Persist <paramref name="journal"/> as <c>uninstall.json</c> under the
     /// per-app state directory, creating the directory if needed.
     /// </summary>
-    public static void Save(string appId, RollbackJournal journal)
+    public static void Save(
+        string appId,
+        RollbackJournal journal,
+        System.Collections.Generic.IReadOnlyList<string>? secretValues = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(appId);
         ArgumentNullException.ThrowIfNull(journal);
@@ -68,7 +71,31 @@ internal static class UninstallStateStore
         var json = JsonSerializer.Serialize(
             serializable,
             WrapperBlobJsonContext.Default.SerializableRollbackJournal);
+
+        // Secret hygiene (decision 6): a Secret parameter value must never reach
+        // persisted uninstall state. The journal captures *prior* system state, so
+        // a freshly-written secret normally cannot land here — but redact any
+        // literal secret occurrence defensively before the file touches disk.
+        json = RedactSecrets(json, secretValues);
+
         File.WriteAllText(PathFor(appId), json);
+    }
+
+    private static string RedactSecrets(
+        string json, System.Collections.Generic.IReadOnlyList<string>? secretValues)
+    {
+        if (secretValues is null || secretValues.Count == 0)
+        {
+            return json;
+        }
+        foreach (var secret in secretValues)
+        {
+            if (!string.IsNullOrEmpty(secret))
+            {
+                json = json.Replace(secret, "***", StringComparison.Ordinal);
+            }
+        }
+        return json;
     }
 
     /// <summary>

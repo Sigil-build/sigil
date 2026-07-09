@@ -104,6 +104,10 @@ public sealed class ExeWrapperPackager : IPackager
             BrandTokensDark = new Dictionary<string, string>(palette.Dark),
             LogoBase64 = ReadImageBase64(brand?.Logo, sourceDirectory),
             HeroBase64 = ReadImageBase64(brand?.Hero, sourceDirectory),
+            // T9: carry the declared custom wizard screens into the blob so the
+            // stamped host can render them. Parameters are already populated by
+            // FromWrapperBlob; screens live only on the manifest's InstallerSection.
+            Screens = ScreensToArray(manifest.Installer?.Screens),
         };
 
         var json = System.Text.Json.JsonSerializer.Serialize(
@@ -130,6 +134,21 @@ public sealed class ExeWrapperPackager : IPackager
             return null;
 
         return Convert.ToBase64String(File.ReadAllBytes(resolved));
+    }
+
+    private static SigilBuild.Wrapper.Json.SerializableInstallerScreen[] ScreensToArray(
+        IReadOnlyList<InstallerScreen>? screens)
+    {
+        if (screens is null || screens.Count == 0)
+        {
+            return Array.Empty<SigilBuild.Wrapper.Json.SerializableInstallerScreen>();
+        }
+        var arr = new SigilBuild.Wrapper.Json.SerializableInstallerScreen[screens.Count];
+        for (var i = 0; i < screens.Count; i++)
+        {
+            arr[i] = SigilBuild.Wrapper.Json.SerializableInstallerScreen.FromInstallerScreen(screens[i]);
+        }
+        return arr;
     }
 
     private static ParameterDefinition[] ParametersToList(

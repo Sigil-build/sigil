@@ -17,4 +17,9 @@ public static class DiagnosticCodes
     public const string UnknownStepType = "SIG0230";
     public const string StepParameterMismatch = "SIG0231";
     public const string MissingRequiredStepField = "SIG0232";
+
+    // SIG024x — installer.screens: block (T9, declared custom screens)
+    public const string UnknownScreenParameterRef = "SIG0240";
+    public const string InvalidScreenWhenExpression = "SIG0241";
+    public const string InvalidScreenTitleToken = "SIG0242";
 }

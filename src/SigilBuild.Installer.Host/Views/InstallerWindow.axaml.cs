@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
@@ -8,9 +9,44 @@ namespace SigilBuild.Installer.Host.Views;
 
 public partial class InstallerWindow : Window
 {
+    private InstallerViewModel? _observed;
+
     public InstallerWindow()
     {
         AvaloniaXamlLoader.Load(this);
+        DataContextChanged += OnDataContextChanged;
+    }
+
+    // The ContentControl binds its Content to the (single, unchanging) view-model,
+    // so a CurrentStep change alone won't re-run the ScreenSelector template.
+    // Observe the VM and force the content host to rebuild on each step change.
+    private void OnDataContextChanged(object? sender, System.EventArgs e)
+    {
+        if (_observed is not null)
+        {
+            _observed.PropertyChanged -= OnVmPropertyChanged;
+        }
+        _observed = DataContext as InstallerViewModel;
+        if (_observed is not null)
+        {
+            _observed.PropertyChanged += OnVmPropertyChanged;
+        }
+    }
+
+    private void OnVmPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(InstallerViewModel.CurrentStep))
+        {
+            return;
+        }
+        var host = this.FindControl<ContentControl>("ScreenHost");
+        if (host is not null)
+        {
+            // Toggle Content so the ContentPresenter re-applies the ScreenSelector
+            // template for the new CurrentStep.
+            host.Content = null;
+            host.Content = DataContext;
+        }
     }
 
     private void OnNext(object? _, RoutedEventArgs __) => (DataContext as InstallerViewModel)?.Next();

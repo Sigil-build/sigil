@@ -37,7 +37,15 @@ public partial class App : Application
             var session = HostRuntime.Session;
             if (session is not null)
             {
-                _vm.ConfigureInstallRunner((progress, ct) => session.RunInstallAsync(progress, ct));
+                // T9: load the declared custom screens (from the blob) + parameter
+                // schema (from the session) so the wizard renders the Configure-style
+                // forms and generates the rail from them.
+                _vm.LoadScreens(InstallerScreensLoader.LoadFromSelf(), session.Parameters);
+
+                // Bind the wizard-collected parameter values into param.* for the
+                // engine at install time (read lazily at call time).
+                _vm.ConfigureInstallRunner((progress, ct) =>
+                    session.RunInstallAsync(_vm.CollectedParameterValues, progress, ct));
             }
 
             desktop.MainWindow = new InstallerWindow

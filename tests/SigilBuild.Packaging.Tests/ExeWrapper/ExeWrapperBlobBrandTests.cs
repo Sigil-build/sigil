@@ -60,6 +60,41 @@ public class ExeWrapperBlobBrandTests
     }
 
     [Fact]
+    public void BuildBlobBytes_EmbedsDeclaredScreensAndParameters()
+    {
+        var parameters = new System.Collections.Generic.Dictionary<string, ParameterDefinition>
+        {
+            ["channel"] = new("channel", ParameterType.Enum, "stable",
+                new[] { "stable", "beta" }, true, "Update channel", null, null, null),
+        };
+        var screens = new System.Collections.Generic.List<InstallerScreen>
+        {
+            new("configure", "Configure {app.name}", "sub", null,
+                new System.Collections.Generic.List<ScreenField> { new("channel", "radio") }),
+        };
+
+        var manifest = new SigilManifest("v1.0",
+            new AppSection("com.example.App", "Example", "1.0.0", "Example Inc.", null, null),
+            new BuildSection("./out", null, null, true),
+            null, null, null, null,
+            Installer: new InstallerSection(null, Screens: screens),
+            Location: SourceLocation.Unknown,
+            Parameters: parameters);
+
+        var blob = ExeWrapperPackager.BuildBlobBytes(manifest, string.Empty);
+        var s = Deserialize(blob);
+
+        s.Screens.Should().ContainSingle();
+        s.Screens[0].Id.Should().Be("configure");
+        s.Screens[0].Title.Should().Be("Configure {app.name}");
+        s.Screens[0].Fields.Should().ContainSingle();
+        s.Screens[0].Fields[0].Param.Should().Be("channel");
+        s.Screens[0].Fields[0].Widget.Should().Be("radio");
+
+        s.Parameters.Should().ContainSingle(p => p.Name == "channel");
+    }
+
+    [Fact]
     public void BuildBlobBytes_NoBrand_StillDerivesDefaultPaletteWithoutAssets()
     {
         var manifest = new SigilManifest("v1.0",

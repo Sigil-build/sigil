@@ -1,5 +1,6 @@
 namespace SigilBuild.Wrapper.Engine;
 
+using SigilBuild.Core.Manifest;
 using SigilBuild.Wrapper.Cli;
 
 /// <summary>
@@ -12,19 +13,55 @@ public sealed class StepContext
     private const string PayloadScheme = "payload://";
 
     private readonly System.Collections.Generic.IReadOnlyDictionary<string, object?> _values;
+    private readonly System.Collections.Generic.IReadOnlyList<string> _secretValues;
     private readonly Expressions.Evaluator _evaluator = new();
 
     public StepContext(
         System.Collections.Generic.IReadOnlyDictionary<string, object?> values,
-        string? payloadRoot = null)
+        string? payloadRoot = null,
+        System.Collections.Generic.IReadOnlyList<string>? secretValues = null)
     {
         System.ArgumentNullException.ThrowIfNull(values);
         _values = values;
+        _secretValues = secretValues ?? System.Array.Empty<string>();
         PayloadRoot = payloadRoot;
     }
 
     public static StepContext Empty { get; } =
         new StepContext(new System.Collections.Generic.Dictionary<string, object?>());
+
+    /// <summary>
+    /// The resolved string values of every <see cref="ParameterType.Secret"/>
+    /// parameter for this run (deduplicated, empty values excluded). Consumed by
+    /// the completion path (<c>UninstallStateStore</c>) and the engine's log
+    /// redaction so secrets never reach persisted state or log output
+    /// (decision 6).
+    /// </summary>
+    public System.Collections.Generic.IReadOnlyList<string> SecretValues => _secretValues;
+
+    /// <summary>
+    /// Replace every occurrence of a secret parameter value in
+    /// <paramref name="text"/> with <c>***</c>. Defense-in-depth for any log or
+    /// journal line that might interpolate a resolved secret; a no-op when the
+    /// run declares no secrets.
+    /// </summary>
+    public string Redact(string text)
+    {
+        if (string.IsNullOrEmpty(text) || _secretValues.Count == 0)
+        {
+            return text;
+        }
+
+        var result = text;
+        foreach (var secret in _secretValues)
+        {
+            if (!string.IsNullOrEmpty(secret))
+            {
+                result = result.Replace(secret, "***", System.StringComparison.Ordinal);
+            }
+        }
+        return result;
+    }
 
     /// <summary>
     /// Absolute path to the temp directory into which the embedded
@@ -50,28 +87,45 @@ public sealed class StepContext
     /// can never reach this method — <see cref="CommandLineParser.Parse"/>
     /// rejects them up-front.
     /// </remarks>
-    internal static StepContext From(WrapperBlob blob, ParsedCommandLine parsed, string? payloadRoot = null)
+    internal static StepContext From(
+        WrapperBlob blob,
+        ParsedCommandLine parsed,
+        string? payloadRoot = null,
+        System.Collections.Generic.IReadOnlyDictionary<string, string>? collected = null)
     {
         System.ArgumentNullException.ThrowIfNull(blob);
         System.ArgumentNullException.ThrowIfNull(parsed);
 
         var dict = new System.Collections.Generic.Dictionary<string, object?>(System.StringComparer.Ordinal);
+        var secrets = new System.Collections.Generic.List<string>();
 
-        // Materialise parameter values: CLI override → schema default → null.
+        // Materialise parameter values. Precedence: GUI-collected (wizard) →
+        // CLI /P override → schema default → null. Both the canonical
+        // `parameters.<name>` and the shorthand `param.<name>` namespaces are
+        // exposed so manifests can write either in a step `when` (the reference
+        // manifest uses `param.autostart`).
         foreach (var def in blob.Parameters)
         {
-            var key = "parameters." + def.Name;
-            if (parsed.Values.TryGetValue(def.Name, out var v))
+            object? value;
+            if (collected is not null && collected.TryGetValue(def.Name, out var g))
             {
-                dict[key] = v;
+                value = ConvertToTyped(g, def.Type);
             }
-            else if (def.Default is not null)
+            else if (parsed.Values.TryGetValue(def.Name, out var v))
             {
-                dict[key] = def.Default;
+                value = ConvertToTyped(v, def.Type);
             }
             else
             {
-                dict[key] = null;
+                value = def.Default;
+            }
+
+            dict["parameters." + def.Name] = value;
+            dict["param." + def.Name] = value;
+
+            if (def.Type == ParameterType.Secret && value is string sv && sv.Length > 0)
+            {
+                secrets.Add(sv);
             }
         }
 
@@ -83,7 +137,31 @@ public sealed class StepContext
         // Env context (only the well-known PATH for now; full env exposure is policy-deferred).
         dict["env.PATH"] = System.Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
 
-        return new StepContext(dict, payloadRoot);
+        return new StepContext(dict, payloadRoot, secrets);
+    }
+
+    /// <summary>
+    /// Convert a raw string value (from the wizard or a <c>/P</c> override) to the
+    /// CLR type the expression engine expects for the declared parameter type:
+    /// <c>bool</c> for <see cref="ParameterType.Bool"/>, <c>int</c> for
+    /// <see cref="ParameterType.Int"/>, otherwise the string unchanged. A value
+    /// that fails to parse falls through as the raw string so a later validation
+    /// pass surfaces it rather than throwing here.
+    /// </summary>
+    private static object? ConvertToTyped(string? raw, ParameterType type)
+    {
+        if (raw is null)
+        {
+            return null;
+        }
+        return type switch
+        {
+            ParameterType.Bool => bool.TryParse(raw, out var b) ? b : (object)raw,
+            ParameterType.Int => int.TryParse(raw, System.Globalization.CultureInfo.InvariantCulture, out var i)
+                ? i
+                : (object)raw,
+            _ => raw,
+        };
     }
 
     /// <summary>Substitute <c>${parameters.foo}</c> patterns in <paramref name="template"/>.</summary>

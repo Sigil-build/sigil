@@ -142,8 +142,29 @@ public sealed class InstallSession
     /// cancellation propagates as <see cref="OperationCanceledException"/> after
     /// the engine has rolled back.
     /// </summary>
+    // Wizard-collected parameter values (T9), bound into the engine context on the
+    // next RunInstall* call. Null on the console/silent path. Set once, before the
+    // single install run — the host is a single-install process.
+    private IReadOnlyDictionary<string, string>? _collectedValues;
+
     public Task<InstallOutcome> RunInstallAsync(IProgress<StepProgress>? progress, CancellationToken ct = default)
         => RunInstallCoreAsync(WrapperBlob.LoadPayloadBytes(), progress, ct);
+
+    /// <summary>
+    /// GUI entry point (T9): run the install pipeline binding the wizard-collected
+    /// parameter values into <c>param.*</c> / <c>parameters.*</c> for the engine,
+    /// so a step <c>when: "param.autostart == true"</c> observes what the user
+    /// picked on the custom screens. Values are keyed by canonical parameter name;
+    /// they take precedence over CLI <c>/P</c> overrides and schema defaults.
+    /// </summary>
+    public Task<InstallOutcome> RunInstallAsync(
+        IReadOnlyDictionary<string, string>? collectedValues,
+        IProgress<StepProgress>? progress,
+        CancellationToken ct = default)
+    {
+        _collectedValues = collectedValues;
+        return RunInstallCoreAsync(WrapperBlob.LoadPayloadBytes(), progress, ct);
+    }
 
     /// <summary>
     /// Core install lifecycle shared by every entry path: extract the embedded
@@ -179,7 +200,7 @@ public sealed class InstallSession
                 payloadRoot = payload.Root;
             }
 
-            var ctx = StepContext.From(_blob, _parsed, payloadRoot);
+            var ctx = StepContext.From(_blob, _parsed, payloadRoot, _collectedValues);
             var result = await new InstallEngine().RunAsync(
                 preInstall: _blob.PreInstall,
                 installSteps: _blob.InstallSteps,
@@ -193,7 +214,7 @@ public sealed class InstallSession
                 return new InstallOutcome(false, result.Error);
             }
 
-            PersistCompletion(result.Journal);
+            PersistCompletion(result.Journal, ctx.SecretValues);
             return new InstallOutcome(true, null);
         }
         finally
@@ -216,7 +237,9 @@ public sealed class InstallSession
     /// the packed size through the blob). No-ops for an un-stamped runtime (the
     /// dev/smoke <see cref="WrapperBlob.Empty"/>) and off Windows.
     /// </remarks>
-    private void PersistCompletion(RollbackJournal journal)
+    private void PersistCompletion(
+        RollbackJournal journal,
+        IReadOnlyList<string> secretValues)
     {
         if (ReferenceEquals(_blob, WrapperBlob.Empty))
         {
@@ -227,7 +250,8 @@ public sealed class InstallSession
             return;
         }
 
-        UninstallStateStore.Save(_blob.AppId, journal);
+        // Redact any secret value from the persisted uninstall state (decision 6).
+        UninstallStateStore.Save(_blob.AppId, journal, secretValues);
         ArpRegistration.Register(new ArpRegistration.Entry(
             AppId: _blob.AppId,
             DisplayName: _blob.AppId,

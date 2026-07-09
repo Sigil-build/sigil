@@ -23,6 +23,70 @@ public sealed class RollbackJournal
         _records.Add(record);
     }
 
+    /// <summary>
+    /// Delete the transient install-time <em>stash</em> artefacts once the install
+    /// has COMMITTED successfully. A <c>file_delete</c> / <c>directory_delete</c>
+    /// step copies its target to a <c>%TEMP%</c> stash (<c>sigil-fd-*</c> /
+    /// <c>sigil-dd-*</c>) so a mid-install rollback can restore the original; the
+    /// stash is normally reclaimed by <see cref="UndoAsync"/> on rollback. On the
+    /// SUCCESS path no rollback runs, so without this call the stash leaks into
+    /// <c>%TEMP%</c> forever (an empty <c>sigil-dd-*</c> directory for an
+    /// empty-directory delete, a stray <c>sigil-fd-*</c> file otherwise).
+    /// <para>
+    /// Discarding is safe: the two stash-bearing records
+    /// (<see cref="RollbackRecord.RestoreDeletedFile"/> /
+    /// <see cref="RollbackRecord.RestoreDeletedDirectory"/>) are NOT part of the
+    /// persisted <c>uninstall.json</c> schema (they have no
+    /// <c>SerializableRollbackRecord</c> mapping), so their <c>%TEMP%</c> stash was
+    /// never meant to outlive the install run. Best-effort and idempotent.
+    /// </para>
+    /// </summary>
+    public void DiscardTransientStashes()
+    {
+        foreach (var record in _records)
+        {
+            switch (record)
+            {
+                case RollbackRecord.RestoreDeletedFile f:
+                    TryDeleteFile(f.StashPath);
+                    break;
+                case RollbackRecord.RestoreDeletedDirectory d:
+                    TryDeleteDirectory(d.StashPath);
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+#pragma warning disable CA1031 // Best-effort temp cleanup; a leftover stash is harmless.
+        try
+        {
+            if (System.IO.File.Exists(path))
+            {
+                System.IO.File.Delete(path);
+            }
+        }
+        catch { /* best-effort */ }
+#pragma warning restore CA1031
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+#pragma warning disable CA1031 // Best-effort temp cleanup; a leftover stash is harmless.
+        try
+        {
+            if (System.IO.Directory.Exists(path))
+            {
+                System.IO.Directory.Delete(path, recursive: true);
+            }
+        }
+        catch { /* best-effort */ }
+#pragma warning restore CA1031
+    }
+
     public async System.Threading.Tasks.Task UndoAsync(
         System.Threading.CancellationToken ct,
         System.IProgress<StepProgress>? progress = null)

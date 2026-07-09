@@ -15,20 +15,35 @@ using Xunit;
 namespace SigilBuild.Packaging.Tests.ExeWrapper;
 
 /// <summary>
-/// Win32 round-trip tests for the SIGIL_BLOB_V1 / SIGIL_PAYLOAD_V2 embed
-/// path. The "embed" half (<see cref="WrapperResourceWriter.WriteAsync"/>)
-/// requires a real PE file to update — there is no in-memory equivalent of
-/// <c>BeginUpdateResource</c>. Tests therefore depend on the AOT-published
-/// wrapper runtime being copied into <c>runtimes/win-x64/</c>; that wiring
-/// is the responsibility of the build pipeline (see
-/// <see cref="WrapperRuntimeLocator"/>) and is tracked as a follow-up.
+/// Win32 round-trip tests for the SIGIL_BLOB_V1 / SIGIL_PAYLOAD_V2 /
+/// SIGIL_RUNTIME_V1 embed path. The "embed" half
+/// (<see cref="WrapperResourceWriter.WriteAsync"/>) requires a real PE file to
+/// update — there is no in-memory equivalent of <c>BeginUpdateResource</c>. The
+/// round-trip does NOT need the (slow-to-produce) AOT-published host: any valid
+/// PE carries a resource table, so — as T18's <c>NativeRuntimeBootstrapTests</c>
+/// established — the running test host exe is used as a stand-in PE. This keeps
+/// the test in the normal <c>dotnet test</c> loop (no AOT publish, no staged
+/// runtime) while still exercising the real Win32 writer + reader (T17: this
+/// fact is no longer skipped).
 /// </summary>
 public class WrapperResourceWriterTests
 {
-    [Fact(Skip = "Requires the AOT-published SigilBuild.Installer.Host.exe in runtimes/win-x64/ (stage via scripts/publish-installer-runtime.ps1). Un-skipped in T17.")]
+    [Fact]
     public async Task Roundtrip_blob_via_resource_apis()
     {
-        var stubExe = WrapperRuntimeLocator.Locate(TargetArchitecture.X64);
+        if (!OperatingSystem.IsWindows())
+        {
+            return; // BeginUpdateResourceW / FindResourceW are Win32-only APIs.
+        }
+
+        // Use the running test host exe as a stand-in PE (no AOT publish needed).
+        var stubExe = Environment.ProcessPath;
+        if (string.IsNullOrEmpty(stubExe) || !File.Exists(stubExe) ||
+            !stubExe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+        {
+            return; // No apphost PE available in this run — nothing to update.
+        }
+
         var tmp = Path.Combine(Path.GetTempPath(), $"sigil-rw-{Guid.NewGuid():N}.exe");
         File.Copy(stubExe, tmp, overwrite: true);
         try

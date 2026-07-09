@@ -374,6 +374,12 @@ public sealed class InstallSession
             }
 
             PersistCompletion(result.Journal, ctx.SecretValues, ctx.InstallDir);
+            // Install committed: a rollback can no longer be requested, so the
+            // transient file_delete / directory_delete stashes (%TEMP%\sigil-fd-* /
+            // sigil-dd-*) are dead weight. Reclaim them so a successful install
+            // never leaves %TEMP% residue (they are not part of the persisted
+            // uninstall journal, so discarding them changes no post-install state).
+            result.Journal.DiscardTransientStashes();
             return new InstallOutcome(true, null);
         }
         finally

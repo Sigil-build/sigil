@@ -34,6 +34,16 @@ public partial class App : Application
             }
             BrandPalette.Apply(this, tokens);
             _vm = new InstallerViewModel(tokens);
+
+            // Wire the wizard's Installing screen to the real step engine via the
+            // shared InstallSession that Program built from argv. Left unwired in
+            // dev/preview runs where no session was staged.
+            var session = HostRuntime.Session;
+            if (session is not null)
+            {
+                _vm.ConfigureInstallRunner((progress, ct) => session.RunInstallAsync(progress, ct));
+            }
+
             desktop.MainWindow = new InstallerWindow
             {
                 DataContext = _vm,

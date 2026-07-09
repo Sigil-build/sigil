@@ -32,22 +32,42 @@ public enum WrapperMode
     /// <summary>Run the manifest's <c>update_steps</c>; entered via <c>/Update</c> by the Update SDK.</summary>
     Update,
 
-    /// <summary>Run the auto-derived uninstall sequence (Task 19); entered via <c>/Uninstall</c>.</summary>
+    /// <summary>Run the auto-derived uninstall sequence; entered via <c>/Uninstall</c>.</summary>
     Uninstall,
 }
 
 /// <summary>
+/// Install-scope override requested on the command line. The concrete
+/// scope/elevation behaviour is Task T12 — T2 only parses and stores the flag.
+/// </summary>
+public enum ScopeOverride
+{
+    /// <summary>No <c>/allusers</c> or <c>/currentuser</c> flag was supplied.</summary>
+    None,
+
+    /// <summary><c>/allusers</c> — machine (per-machine) install requested.</summary>
+    AllUsers,
+
+    /// <summary><c>/currentuser</c> — per-user install requested.</summary>
+    CurrentUser,
+}
+
+/// <summary>
 /// Result of parsing the wrapper's install-time argv. Captures the operating
-/// mode, the silent-mode toggle, and the resolved parameter override values
-/// keyed by their canonical schema-defined name.
+/// mode, the silent-mode toggles, the resolved parameter override values
+/// keyed by their canonical schema-defined name, plus the parse-and-store-only
+/// install-dir / scope overrides.
 /// </summary>
 public sealed class ParsedCommandLine
 {
     /// <summary>Operating mode requested by the user.</summary>
     public WrapperMode Mode { get; init; } = WrapperMode.Install;
 
-    /// <summary>True if <c>/S</c> was present — suppresses interactive UI.</summary>
+    /// <summary>True if <c>/silent</c>, <c>/S</c>, or <c>/verysilent</c> was present — suppresses interactive UI.</summary>
     public bool Silent { get; init; }
+
+    /// <summary>True if <c>/verysilent</c> was present — implies <see cref="Silent"/> plus suppressed progress UI.</summary>
+    public bool VerySilent { get; init; }
 
     /// <summary>
     /// Parameter overrides: schema canonical name → value. Lookups are
@@ -56,6 +76,21 @@ public sealed class ParsedCommandLine
     /// </summary>
     public IReadOnlyDictionary<string, string> Values { get; init; } =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Built-in-option overrides (<c>desktop_shortcut</c>, <c>add_to_path</c>, …):
+    /// canonical option name → raw value. The option model itself lands in
+    /// Task T8; T2 parses and stores the values so <c>/Pdesktop_shortcut=false</c>
+    /// is accepted rather than rejected as an unknown token.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> Options { get; init; } =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Install-dir override from <c>/D=path</c>; <c>null</c> if not supplied. Stored only (Task T13).</summary>
+    public string? InstallDir { get; init; }
+
+    /// <summary>Scope override from <c>/allusers</c> / <c>/currentuser</c>. Stored only (Task T12).</summary>
+    public ScopeOverride Scope { get; init; } = ScopeOverride.None;
 
     /// <summary>Names (canonical casing) of the parameters whose schema type is <see cref="ParameterType.Secret"/>.</summary>
     public IReadOnlyList<string> SecretKeys { get; init; } = Array.Empty<string>();
@@ -70,25 +105,31 @@ public sealed class ParsedCommandLine
         var secretSet = new HashSet<string>(SecretKeys, StringComparer.OrdinalIgnoreCase);
         var sb = new StringBuilder();
 
-        if (Silent)
+        void Space()
         {
-            sb.Append("/S");
+            if (sb.Length > 0)
+            {
+                sb.Append(' ');
+            }
+        }
+
+        if (VerySilent)
+        {
+            sb.Append("/verysilent");
+        }
+        else if (Silent)
+        {
+            sb.Append("/silent");
         }
 
         switch (Mode)
         {
             case WrapperMode.Update:
-                if (sb.Length > 0)
-                {
-                    sb.Append(' ');
-                }
+                Space();
                 sb.Append("/Update");
                 break;
             case WrapperMode.Uninstall:
-                if (sb.Length > 0)
-                {
-                    sb.Append(' ');
-                }
+                Space();
                 sb.Append("/Uninstall");
                 break;
             case WrapperMode.Install:
@@ -96,17 +137,44 @@ public sealed class ParsedCommandLine
                 break;
         }
 
+        switch (Scope)
+        {
+            case ScopeOverride.AllUsers:
+                Space();
+                sb.Append("/allusers");
+                break;
+            case ScopeOverride.CurrentUser:
+                Space();
+                sb.Append("/currentuser");
+                break;
+            case ScopeOverride.None:
+            default:
+                break;
+        }
+
+        if (InstallDir is not null)
+        {
+            Space();
+            sb.Append("/D=");
+            sb.Append(InstallDir);
+        }
+
         foreach (var kv in Values)
         {
-            if (sb.Length > 0)
-            {
-                sb.Append(' ');
-            }
-
-            sb.Append('/');
+            Space();
+            sb.Append("/P");
             sb.Append(kv.Key);
             sb.Append('=');
             sb.Append(secretSet.Contains(kv.Key) ? "***" : kv.Value);
+        }
+
+        foreach (var kv in Options)
+        {
+            Space();
+            sb.Append("/P");
+            sb.Append(kv.Key);
+            sb.Append('=');
+            sb.Append(kv.Value);
         }
 
         return sb.ToString();
@@ -114,13 +182,18 @@ public sealed class ParsedCommandLine
 }
 
 /// <summary>
-/// Closed-grammar parser for the wrapper's install-time CLI.
-/// Recognized tokens (Windows installer convention):
+/// Closed-grammar parser for the wrapper's install-time CLI. This is the single
+/// parser shared by both entry points (the console <c>SigilBuild.Wrapper</c> and
+/// the Avalonia <c>SigilBuild.Installer.Host</c>). Recognized tokens (Windows
+/// installer convention):
 /// <list type="bullet">
-///   <item><description><c>/S</c> — silent mode.</description></item>
+///   <item><description><c>/silent</c> (alias <c>/S</c>) — headless install.</description></item>
+///   <item><description><c>/verysilent</c> — headless install with suppressed progress.</description></item>
 ///   <item><description><c>/Update</c> — run <c>update_steps</c> instead of <c>install_steps</c>.</description></item>
 ///   <item><description><c>/Uninstall</c> — run the auto-derived uninstall sequence.</description></item>
-///   <item><description><c>/&lt;Name&gt;=&lt;Value&gt;</c> — override a declared parameter.</description></item>
+///   <item><description><c>/allusers</c> / <c>/currentuser</c> — scope override (stored only; Task T12).</description></item>
+///   <item><description><c>/D=path</c> — install-dir override (stored only; Task T13).</description></item>
+///   <item><description><c>/P&lt;Name&gt;=&lt;Value&gt;</c> — override a declared parameter or a built-in option.</description></item>
 /// </list>
 /// Anything else is a <see cref="UsageException"/> — the parser is intentionally
 /// closed so silent typos never reach the step engine.
@@ -128,9 +201,25 @@ public sealed class ParsedCommandLine
 public static class CommandLineParser
 {
     /// <summary>
+    /// Built-in installer options (Task T8). T2 accepts and stores overrides for
+    /// them so <c>/Pdesktop_shortcut=false</c> parses rather than exit-64s; the
+    /// option model and generated steps land in T8.
+    /// </summary>
+    private static readonly HashSet<string> KnownOptions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "desktop_shortcut",
+        "start_menu",
+        "add_to_path",
+        "file_associations",
+    };
+
+    /// <summary>
     /// Parse <paramref name="args"/> against the parameter <paramref name="schema"/>.
     /// </summary>
-    /// <exception cref="UsageException">Unknown flag, undeclared parameter, or malformed token.</exception>
+    /// <exception cref="UsageException">
+    /// Unknown flag, undeclared parameter/option, malformed token, or — in silent
+    /// install mode — a required parameter (no default) left unset.
+    /// </exception>
     /// <exception cref="ArgumentException">The schema itself is malformed (duplicate names).</exception>
     public static ParsedCommandLine Parse(IReadOnlyList<string> args, IReadOnlyList<ParameterDefinition> schema)
     {
@@ -150,8 +239,12 @@ public static class CommandLineParser
         }
 
         var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var options = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var mode = WrapperMode.Install;
         var silent = false;
+        var verySilent = false;
+        var scope = ScopeOverride.None;
+        string? installDir = null;
 
         foreach (var rawArg in args)
         {
@@ -163,16 +256,23 @@ public static class CommandLineParser
             if (rawArg[0] != '/')
             {
                 throw new UsageException(
-                    $"unexpected positional argument '{rawArg}': only /S, /Update, /Uninstall, and /Name=Value are accepted");
+                    $"unexpected positional argument '{rawArg}': only /silent, /S, /verysilent, /Update, /Uninstall, /allusers, /currentuser, /D=path, and /PName=Value are accepted");
             }
 
             // Strip the leading '/'.
             var body = rawArg.Substring(1);
 
             // Bare flags first (case-insensitive, matches Windows installer convention).
-            if (string.Equals(body, "S", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(body, "silent", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(body, "S", StringComparison.OrdinalIgnoreCase))
             {
                 silent = true;
+                continue;
+            }
+            if (string.Equals(body, "verysilent", StringComparison.OrdinalIgnoreCase))
+            {
+                silent = true;
+                verySilent = true;
                 continue;
             }
             if (string.Equals(body, "Update", StringComparison.OrdinalIgnoreCase))
@@ -185,26 +285,40 @@ public static class CommandLineParser
                 mode = WrapperMode.Uninstall;
                 continue;
             }
-
-            // /Name=Value form.
-            var eq = body.IndexOf('=');
-            if (eq <= 0)
+            if (string.Equals(body, "allusers", StringComparison.OrdinalIgnoreCase))
             {
-                throw new UsageException(
-                    $"unrecognized flag '{rawArg}': expected /S, /Update, /Uninstall, or /Name=Value");
+                scope = ScopeOverride.AllUsers;
+                continue;
+            }
+            if (string.Equals(body, "currentuser", StringComparison.OrdinalIgnoreCase))
+            {
+                scope = ScopeOverride.CurrentUser;
+                continue;
             }
 
-            var inputName = body.Substring(0, eq);
-            var value = body.Substring(eq + 1);
-
-            if (!byName.TryGetValue(inputName, out var def))
+            // /D=path — install-dir override (parse + store only).
+            if (body.Length >= 2 &&
+                (body[0] == 'D' || body[0] == 'd') &&
+                body[1] == '=')
             {
-                throw new UsageException(
-                    $"parameter '{inputName}' is not declared in the manifest (offending token: '{rawArg}')");
+                var dir = body.Substring(2);
+                if (dir.Length == 0)
+                {
+                    throw new UsageException($"'/D=' requires a path (offending token: '{rawArg}')");
+                }
+                installDir = dir;
+                continue;
             }
 
-            // Last-wins for duplicates. Preserve schema-canonical casing as the dictionary key.
-            values[def.Name] = value;
+            // /PName=Value — declared parameter or built-in option override.
+            if (body.Length >= 1 && (body[0] == 'P' || body[0] == 'p'))
+            {
+                ParsePValue(rawArg, body.Substring(1), byName, values, options);
+                continue;
+            }
+
+            throw new UsageException(
+                $"unrecognized flag '{rawArg}': expected /silent, /S, /verysilent, /Update, /Uninstall, /allusers, /currentuser, /D=path, or /PName=Value");
         }
 
         var secretKeys = schema
@@ -212,12 +326,67 @@ public static class CommandLineParser
             .Select(p => p.Name)
             .ToArray();
 
+        // Silent install must be fully specified up-front: a required parameter
+        // (declared, install-time, no default) that was not supplied cannot be
+        // collected from the wizard, so fail loudly and name it. The interactive
+        // path skips this — the wizard collects the values (Task T9).
+        if (silent && mode == WrapperMode.Install)
+        {
+            var missing = schema
+                .Where(p => p.InstallTime && p.Default is null && !values.ContainsKey(p.Name))
+                .Select(p => p.Name)
+                .ToArray();
+            if (missing.Length > 0)
+            {
+                throw new UsageException(
+                    $"silent install is missing required parameter(s) with no default: {string.Join(", ", missing)} (supply via /P{missing[0]}=value)");
+            }
+        }
+
         return new ParsedCommandLine
         {
             Mode = mode,
             Silent = silent,
+            VerySilent = verySilent,
             Values = values,
+            Options = options,
+            InstallDir = installDir,
+            Scope = scope,
             SecretKeys = secretKeys,
         };
+    }
+
+    private static void ParsePValue(
+        string rawArg,
+        string nameEqValue,
+        Dictionary<string, ParameterDefinition> byName,
+        Dictionary<string, string> values,
+        Dictionary<string, string> options)
+    {
+        var eq = nameEqValue.IndexOf('=', StringComparison.Ordinal);
+        if (eq <= 0)
+        {
+            throw new UsageException(
+                $"malformed parameter token '{rawArg}': expected /PName=Value");
+        }
+
+        var inputName = nameEqValue.Substring(0, eq);
+        var value = nameEqValue.Substring(eq + 1);
+
+        if (byName.TryGetValue(inputName, out var def))
+        {
+            // Last-wins for duplicates. Preserve schema-canonical casing as the key.
+            values[def.Name] = value;
+            return;
+        }
+
+        if (KnownOptions.Contains(inputName))
+        {
+            options[inputName] = value;
+            return;
+        }
+
+        throw new UsageException(
+            $"'{inputName}' is neither a declared parameter nor a built-in option (offending token: '{rawArg}')");
     }
 }

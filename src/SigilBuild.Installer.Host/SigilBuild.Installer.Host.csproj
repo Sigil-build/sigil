@@ -5,6 +5,9 @@
     <AssemblyName>installer</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <!-- Required for the source-generated [LibraryImport] AttachConsole P/Invoke
+         used by the /silent headless path (Program.cs). -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
     <!-- AOT — Avalonia 12 makes this clean -->
     <PublishAot Condition="'$(SigilAotPublish)' == 'true'">true</PublishAot>
@@ -21,6 +24,11 @@
     <PackageReference Include="Avalonia.Desktop" />
     <PackageReference Include="Avalonia.Themes.Fluent" />
     <PackageReference Include="Svg.Skia" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- T2: the host is the stamped runtime. It drives the real step engine and
+         shares one CommandLineParser + InstallSession with the console wrapper. -->
+    <ProjectReference Include="..\SigilBuild.Wrapper.Core\SigilBuild.Wrapper.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
     <AvaloniaResource Include="Assets\**" />

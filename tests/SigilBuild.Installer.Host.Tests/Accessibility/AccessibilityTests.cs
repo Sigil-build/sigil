@@ -39,7 +39,8 @@ public class AccessibilityTests
         vm.CanGoBack.Should().BeFalse();
         vm.CanGoNext.Should().BeFalse();
 
-        // Simulate install completion (direct step advance, as InstallerEngine does)
+        // Simulate install completion (direct step advance; the real engine
+        // advances here via InstallSession.RunInstallAsync — see InstallFlowTests).
         vm.CurrentStep = InstallerStep.Finish;
         vm.CanGoBack.Should().BeFalse();
         vm.CanGoNext.Should().BeFalse();

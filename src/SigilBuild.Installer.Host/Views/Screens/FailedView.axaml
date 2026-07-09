@@ -2,13 +2,13 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:SigilBuild.Installer.Host.ViewModels"
              x:DataType="vm:InstallerViewModel"
-             x:Class="SigilBuild.Installer.Host.Views.Screens.InstallingView">
-  <StackPanel Spacing="16" VerticalAlignment="Center">
-    <TextBlock FontSize="20" FontWeight="SemiBold" Text="Installing…" />
-    <ProgressBar Maximum="1" Value="{Binding InstallProgress}" Foreground="{DynamicResource AccentBrush}" />
-    <TextBlock Text="{Binding InstallCurrentItem}" Foreground="#6B7280" />
+             x:Class="SigilBuild.Installer.Host.Views.Screens.FailedView">
+  <StackPanel Spacing="14" VerticalAlignment="Center">
+    <TextBlock FontSize="20" FontWeight="SemiBold" Text="Installation failed" />
+    <TextBlock Text="Setup could not complete. No changes were kept." Foreground="#4B5563" />
+    <TextBlock Text="{Binding ErrorMessage}" Foreground="#B42318" TextWrapping="Wrap" />
     <Border Background="#F9FAFB" BorderBrush="#E5E7EB" BorderThickness="1" CornerRadius="8"
-            Height="180" Padding="12,8">
+            Height="160" Padding="12,8">
       <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
         <ItemsControl ItemsSource="{Binding LogLines}">
           <ItemsControl.Styles>

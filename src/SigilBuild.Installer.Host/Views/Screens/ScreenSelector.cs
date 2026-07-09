@@ -15,6 +15,7 @@ public sealed class ScreenSelector : IDataTemplate
             InstallerStep.Welcome => new WelcomeView(),
             InstallerStep.License => new LicenseView(),
             InstallerStep.InstallOptions => new InstallOptionsView(),
+            InstallerStep.Options => new OptionsView(),
             InstallerStep.Installing => new InstallingView(),
             InstallerStep.Failed => new FailedView(),
             InstallerStep.Finish => new FinishView(),

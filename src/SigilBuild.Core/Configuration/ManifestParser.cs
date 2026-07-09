@@ -161,6 +161,11 @@ public static class ManifestParser
                 Hero: GetScalar(brand, "hero"),
                 PrimaryColor: GetScalar(brand, "primaryColor"),
                 AccentColor: GetScalar(brand, "accentColor")),
+            // T8: built-in configurable components (desktop_shortcut, start_menu,
+            // add_to_path, file_associations). Each is a shorthand true/false or an
+            // object { enabled, default, locked, ...component keys }. Pack time turns
+            // each ENABLED component into its gated install step(s).
+            Options: ParseOptions(GetMapping(node, "options")),
             Screens: screens,
             // T14: capture the license path string only. The actual file read +
             // embed happens at PACK time (ExeWrapperPackager.BuildBlobBytes), which
@@ -204,6 +209,86 @@ public static class ManifestParser
                     "https://docs.sigil.build/diagnostics/SIG0260"));
                 return InstallScope.Auto;
         }
+    }
+
+    /// <summary>
+    /// Parse the manifest's <c>installer.options</c> block (T8). Each of the four
+    /// built-in components (<c>desktop_shortcut</c>, <c>start_menu</c>,
+    /// <c>add_to_path</c>, <c>file_associations</c>) is either a shorthand boolean
+    /// or an object <c>{ enabled, default, locked, ...component keys }</c>. The
+    /// shorthand maps onto the M0 records: <c>true</c> →
+    /// <c>{ Enabled = true, Default = true }</c>; <c>false</c> →
+    /// <c>{ Enabled = false }</c>. An absent component stays <c>null</c> (its
+    /// built-in default: not declared, so nothing is generated). Returns
+    /// <c>null</c> when the block is absent or declares no component.
+    /// </summary>
+    private static InstallerOptions? ParseOptions(YamlMappingNode? node)
+    {
+        if (node is null) return null;
+
+        var desktop = ParseBoolOption(node, "desktop_shortcut");
+        var startMenu = ParseBoolOption(node, "start_menu");
+        var addToPath = ParseBoolOption(node, "add_to_path");
+        var fileAssoc = ParseFileAssociationOption(node, "file_associations");
+
+        if (desktop is null && startMenu is null && addToPath is null && fileAssoc is null)
+        {
+            return null;
+        }
+
+        return new InstallerOptions(desktop, startMenu, addToPath, fileAssoc);
+    }
+
+    /// <summary>
+    /// Parse a single boolean-shaped option component (<c>desktop_shortcut</c> /
+    /// <c>start_menu</c> / <c>add_to_path</c>): shorthand boolean or the
+    /// <c>{ enabled, default, locked }</c> object. Returns <c>null</c> when the key
+    /// is absent.
+    /// </summary>
+    private static InstallerOption? ParseBoolOption(YamlMappingNode parent, string key)
+    {
+        if (!parent.Children.TryGetValue(new YamlScalarNode(key), out var node))
+        {
+            return null;
+        }
+
+        return node switch
+        {
+            YamlScalarNode s when bool.TryParse(s.Value, out var b) =>
+                b ? new InstallerOption(Enabled: true, Default: true)
+                  : new InstallerOption(Enabled: false),
+            YamlMappingNode m => new InstallerOption(
+                Enabled: GetBool(m, "enabled", defaultValue: true),
+                Default: GetBool(m, "default", defaultValue: true),
+                Locked: GetBool(m, "locked", defaultValue: false)),
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// Parse the <c>file_associations</c> component: shorthand boolean or the
+    /// <c>{ enabled, default, locked, extensions: [".x"] }</c> object. Returns
+    /// <c>null</c> when the key is absent.
+    /// </summary>
+    private static FileAssociationOption? ParseFileAssociationOption(YamlMappingNode parent, string key)
+    {
+        if (!parent.Children.TryGetValue(new YamlScalarNode(key), out var node))
+        {
+            return null;
+        }
+
+        return node switch
+        {
+            YamlScalarNode s when bool.TryParse(s.Value, out var b) =>
+                b ? new FileAssociationOption(Enabled: true, Default: true)
+                  : new FileAssociationOption(Enabled: false),
+            YamlMappingNode m => new FileAssociationOption(
+                Enabled: GetBool(m, "enabled", defaultValue: true),
+                Default: GetBool(m, "default", defaultValue: true),
+                Locked: GetBool(m, "locked", defaultValue: false),
+                Extensions: GetSequence(m, "extensions")),
+            _ => null,
+        };
     }
 
     // Interpolation tokens permitted in a screen Title / Subtitle (T9). Kept in

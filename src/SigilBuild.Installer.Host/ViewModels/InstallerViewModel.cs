@@ -13,7 +13,7 @@ using SigilBuild.Wrapper.Expressions;
 
 namespace SigilBuild.Installer.Host.ViewModels;
 
-public enum InstallerStep { Welcome, License, InstallOptions, Installing, Finish, Failed, Custom }
+public enum InstallerStep { Welcome, License, InstallOptions, Options, Installing, Finish, Failed, Custom }
 
 /// <summary>
 /// Process exit code surfaced by the installer, per the unified T2 command-line
@@ -49,6 +49,11 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     // license text. Absent by default so an un-stamped/dev host and a manifest
     // with no `installer.license` skip the screen entirely.
     private bool _hasLicense;
+
+    // T8: the built-in Options screen (and its rail entry) appear IFF the blob
+    // carries at least one enabled option component. Absent by default so an
+    // un-stamped/dev host and a manifest with no `installer.options` skip it.
+    private bool _hasOptions;
 
     public InstallerViewModel(BrandTokens tokens)
     {
@@ -121,6 +126,50 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
             LicenseText = licenseText!;
         }
         RebuildFlow();
+    }
+
+    /// <summary>
+    /// The built-in option components rendered on the Options screen (T8), one
+    /// checkbox each. Populated by <see cref="LoadOptions"/> from the blob; empty
+    /// when the manifest declared no enabled option and the screen is absent.
+    /// </summary>
+    public ObservableCollection<OptionItemViewModel> OptionItems { get; } = new();
+
+    /// <summary>
+    /// Load the enabled built-in option components (T8). Called by the host once it
+    /// has read them from the blob (via <c>InstallSession.Options</c>). When ≥ 1
+    /// component is present the Options screen + its rail entry appear (after the
+    /// License screen, per decision 4); when none, they are omitted. Each checkbox
+    /// is seeded from the component's resolved default; <c>locked</c> components
+    /// render disabled (always applied). Only the interactive wizard consults this —
+    /// the headless <c>/silent</c> path resolves options to their manifest defaults.
+    /// </summary>
+    public void LoadOptions(IReadOnlyList<InstallerOptionComponent> options)
+    {
+        OptionItems.Clear();
+        foreach (var component in options ?? Array.Empty<InstallerOptionComponent>())
+        {
+            OptionItems.Add(new OptionItemViewModel(component));
+        }
+        _hasOptions = OptionItems.Count > 0;
+        RebuildFlow();
+    }
+
+    /// <summary>
+    /// The wizard-collected option checkbox states, keyed by canonical component
+    /// name — the exact map the engine binds into <c>option.*</c> for step gating.
+    /// </summary>
+    public IReadOnlyDictionary<string, bool> CollectedOptionValues
+    {
+        get
+        {
+            var dict = new Dictionary<string, bool>(StringComparer.Ordinal);
+            foreach (var item in OptionItems)
+            {
+                dict[item.Name] = item.IsChecked;
+            }
+            return dict;
+        }
     }
 
     /// <summary>
@@ -327,6 +376,12 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
         {
             _flow.Add(new FlowNode(InstallerStep.License, null));
         }
+        // T8: the built-in Options screen sits after license, before the declared
+        // screens (decision 4: welcome → destination → license? → options? → …).
+        if (_hasOptions)
+        {
+            _flow.Add(new FlowNode(InstallerStep.Options, null));
+        }
         foreach (var screen in _customScreens)
         {
             _flow.Add(new FlowNode(InstallerStep.Custom, screen));
@@ -373,6 +428,7 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
                 InstallerStep.Welcome => "Welcome",
                 InstallerStep.License => "License",
                 InstallerStep.InstallOptions => "Location",
+                InstallerStep.Options => "Options",
                 InstallerStep.Installing => "Install",
                 InstallerStep.Custom => node.Screen?.Id ?? "Configure",
                 _ => node.Step.ToString(),

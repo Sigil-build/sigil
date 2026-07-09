@@ -100,10 +100,20 @@ public sealed class ExeWrapperPackager : IPackager
             ? Array.Empty<ParameterDefinition>()
             : ParametersToList(manifest.Parameters);
 
+        // T8: for each ENABLED built-in option component, auto-generate its install
+        // step(s), each gated on `option.<component>`. A disabled component yields
+        // nothing. The generated steps run AFTER the manifest's own install_steps
+        // (shortcuts / PATH / associations follow the file copies), and the ENABLED
+        // component list is carried in the blob so the runtime can seed `option.*`
+        // and the host can render the Options screen.
+        var (optionSteps, optionComponents) =
+            OptionStepGenerator.Generate(manifest.Installer?.Options, manifest.App);
+        var installSteps = CombineSteps(manifest.InstallSteps, optionSteps);
+
         var inMemory = new WrapperBlob(
             AppId: manifest.App.Id,
             Parameters: parameters,
-            InstallSteps: manifest.InstallSteps ?? Array.Empty<InstallStep>(),
+            InstallSteps: installSteps,
             PreInstall: manifest.PreInstall ?? Array.Empty<InstallStep>(),
             PostInstall: manifest.PostInstall ?? Array.Empty<InstallStep>(),
             // Update-step block doesn't yet exist on SigilManifest (Task 19+);
@@ -113,7 +123,9 @@ public sealed class ExeWrapperPackager : IPackager
             // the blob so the runtime can resolve the effective scope (against the
             // /allusers /currentuser flags) and elevate when a machine install is
             // requested from a non-elevated process.
-            Scope: manifest.Installer?.Scope ?? InstallScope.Auto);
+            Scope: manifest.Installer?.Scope ?? InstallScope.Auto,
+            // T8: the enabled option components the runtime + wizard consume.
+            Options: optionComponents);
 
         // T7: derive the full light/dark palette at pack time and carry it, plus
         // the base64 logo/hero bytes, inside the blob so the stamped exe renders
@@ -219,6 +231,26 @@ public sealed class ExeWrapperPackager : IPackager
             message,
             SourceLocation.Unknown,
             "https://docs.sigil.build/diagnostics/SIG0250"));
+    }
+
+    /// <summary>
+    /// Append the pack-time-generated option steps (T8) after the manifest's own
+    /// <c>install_steps</c>, preserving order. Returns the manifest list unchanged
+    /// when no option steps were generated, and an empty list when both are empty.
+    /// </summary>
+    private static IReadOnlyList<InstallStep> CombineSteps(
+        IReadOnlyList<InstallStep>? manifestSteps, IReadOnlyList<InstallStep> generated)
+    {
+        var baseSteps = manifestSteps ?? Array.Empty<InstallStep>();
+        if (generated.Count == 0)
+        {
+            return baseSteps;
+        }
+
+        var combined = new List<InstallStep>(baseSteps.Count + generated.Count);
+        combined.AddRange(baseSteps);
+        combined.AddRange(generated);
+        return combined;
     }
 
     private static SigilBuild.Wrapper.Json.SerializableInstallerScreen[] ScreensToArray(

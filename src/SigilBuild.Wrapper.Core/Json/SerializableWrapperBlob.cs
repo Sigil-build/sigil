@@ -23,6 +23,38 @@ internal sealed record SerializableWrapperBlob
     public SerializableInstallStep[] PostInstall  { get; init; } = Array.Empty<SerializableInstallStep>();
     public SerializableInstallStep[] UpdateSteps  { get; init; } = Array.Empty<SerializableInstallStep>();
 
+    // --- Add/Remove Programs metadata (T10). Sourced from manifest.App.* +
+    //     the packed size; consumed by ArpRegistration at install time. ---
+    public string? DisplayName { get; init; }
+    public string? Version { get; init; }
+    public string? Publisher { get; init; }
+    public long? EstimatedSizeBytes { get; init; }
+
+    /// <summary>Resolved install scope (T12). Defaults to <see cref="InstallScope.Auto"/>.</summary>
+    public InstallScope Scope { get; init; } = InstallScope.Auto;
+
+    // --- Branding (T7). Derived at pack time (Avalonia cannot color-mix at
+    //     runtime), delivered inside the blob rather than a sidecar file. ---
+
+    /// <summary>Derived light-mode brand token map (token name → value).</summary>
+    public Dictionary<string, string>? BrandTokensLight { get; init; }
+
+    /// <summary>Derived dark-mode brand token map (token name → value).</summary>
+    public Dictionary<string, string>? BrandTokensDark { get; init; }
+
+    /// <summary>Base64-encoded brand logo image bytes, if any.</summary>
+    public string? LogoBase64 { get; init; }
+
+    /// <summary>Base64-encoded brand hero image bytes, if any.</summary>
+    public string? HeroBase64 { get; init; }
+
+    /// <summary>Embedded license text (plain text / RTF-as-text v1), if any (T14).</summary>
+    public string? LicenseText { get; init; }
+
+    /// <summary>Declared custom wizard screens (T9).</summary>
+    public SerializableInstallerScreen[] Screens { get; init; }
+        = Array.Empty<SerializableInstallerScreen>();
+
     public static WrapperBlob ToWrapperBlob(SerializableWrapperBlob s)
     {
         ArgumentNullException.ThrowIfNull(s);
@@ -188,5 +220,78 @@ internal sealed record SerializableParameterDefinition
         };
 
         return JsonDocument.Parse(json).RootElement.Clone();
+    }
+}
+
+/// <summary>
+/// Flat, AOT-friendly wire DTO for a declared custom wizard screen (T9).
+/// Mirrors <see cref="InstallerScreen"/> with an array of
+/// <see cref="SerializableScreenField"/> so the source-generated context can
+/// serialize it without reflection.
+/// </summary>
+internal sealed record SerializableInstallerScreen
+{
+    public string Id { get; init; } = string.Empty;
+    public string Title { get; init; } = string.Empty;
+    public string? Subtitle { get; init; }
+    public string? When { get; init; }
+    public SerializableScreenField[] Fields { get; init; } = Array.Empty<SerializableScreenField>();
+
+    public static InstallerScreen ToInstallerScreen(SerializableInstallerScreen s)
+    {
+        ArgumentNullException.ThrowIfNull(s);
+        var fields = new ScreenField[s.Fields.Length];
+        for (var i = 0; i < s.Fields.Length; i++)
+        {
+            fields[i] = SerializableScreenField.ToScreenField(s.Fields[i]);
+        }
+
+        return new InstallerScreen(
+            Id: s.Id,
+            Title: s.Title,
+            Subtitle: s.Subtitle,
+            When: s.When,
+            Fields: fields);
+    }
+
+    public static SerializableInstallerScreen FromInstallerScreen(InstallerScreen screen)
+    {
+        ArgumentNullException.ThrowIfNull(screen);
+        var fields = new SerializableScreenField[screen.Fields.Count];
+        for (var i = 0; i < screen.Fields.Count; i++)
+        {
+            fields[i] = SerializableScreenField.FromScreenField(screen.Fields[i]);
+        }
+
+        return new SerializableInstallerScreen
+        {
+            Id = screen.Id,
+            Title = screen.Title,
+            Subtitle = screen.Subtitle,
+            When = screen.When,
+            Fields = fields,
+        };
+    }
+}
+
+/// <summary>
+/// Flat wire DTO for a single <see cref="ScreenField"/> on a
+/// <see cref="SerializableInstallerScreen"/>.
+/// </summary>
+internal sealed record SerializableScreenField
+{
+    public string Param { get; init; } = string.Empty;
+    public string? Widget { get; init; }
+
+    public static ScreenField ToScreenField(SerializableScreenField s)
+    {
+        ArgumentNullException.ThrowIfNull(s);
+        return new ScreenField(s.Param, s.Widget);
+    }
+
+    public static SerializableScreenField FromScreenField(ScreenField field)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        return new SerializableScreenField { Param = field.Param, Widget = field.Widget };
     }
 }

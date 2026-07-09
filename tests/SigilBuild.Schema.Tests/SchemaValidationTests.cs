@@ -127,6 +127,18 @@ public class SchemaValidationTests
             string.Join("; ", errors.Select(e => e.ToString())));
     }
 
+    [Fact]
+    public async Task ReferenceInstallerManifest_IsValidAgainstSchema()
+    {
+        var schema = await LoadSchemaAsync();
+        var json = YamlToJson(await File.ReadAllTextAsync("Fixtures/valid/reference-installer-manifest.yaml"));
+        var errors = schema.Validate(json);
+
+        errors.Should().BeEmpty(
+            "the IMPLEMENTATION_SPEC section 3 reference manifest must satisfy the updated installer schema; got: {0}",
+            string.Join("; ", errors.Select(e => e.ToString())));
+    }
+
     public static IEnumerable<object[]> InvalidFixturePaths() =>
         Directory.EnumerateFiles("Fixtures/invalid", "*.yaml").Select(p => new object[] { p });
 

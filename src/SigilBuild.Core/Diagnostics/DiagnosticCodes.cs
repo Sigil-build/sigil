@@ -28,4 +28,9 @@ public static class DiagnosticCodes
     // missing/unreadable/empty. Non-fatal: the pack succeeds and the License
     // screen is simply omitted.
     public const string LicenseFileUnreadable = "SIG0250";
+
+    // SIG026x — installer.scope: block (T12, dual install scope)
+    // Emitted when installer.scope holds a value outside {user, machine, auto};
+    // the parser falls back to auto. Non-fatal (the schema enum is the hard gate).
+    public const string InvalidInstallerScope = "SIG0260";
 }

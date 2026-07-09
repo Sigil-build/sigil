@@ -19,7 +19,8 @@ internal sealed partial record WrapperBlob(
     IReadOnlyList<InstallStep> InstallSteps,
     IReadOnlyList<InstallStep> PreInstall,
     IReadOnlyList<InstallStep> PostInstall,
-    IReadOnlyList<InstallStep> UpdateSteps)
+    IReadOnlyList<InstallStep> UpdateSteps,
+    InstallScope Scope = InstallScope.Auto)
 {
     /// <summary>
     /// Empty sentinel blob: well-known <c>AppId</c> placeholder and zero-length

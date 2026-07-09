@@ -106,7 +106,12 @@ public sealed class ExeWrapperPackager : IPackager
             PostInstall: manifest.PostInstall ?? Array.Empty<InstallStep>(),
             // Update-step block doesn't yet exist on SigilManifest (Task 19+);
             // emit an empty list for forward compatibility.
-            UpdateSteps: Array.Empty<InstallStep>());
+            UpdateSteps: Array.Empty<InstallStep>(),
+            // T12: carry the manifest's install scope (user | machine | auto) into
+            // the blob so the runtime can resolve the effective scope (against the
+            // /allusers /currentuser flags) and elevate when a machine install is
+            // requested from a non-elevated process.
+            Scope: manifest.Installer?.Scope ?? InstallScope.Auto);
 
         // T7: derive the full light/dark palette at pack time and carry it, plus
         // the base64 logo/hero bytes, inside the blob so the stamped exe renders

@@ -166,7 +166,44 @@ public static class ManifestParser
             // embed happens at PACK time (ExeWrapperPackager.BuildBlobBytes), which
             // can resolve it against the pack source dir and emit a diagnostic if
             // the file is missing/unreadable/empty.
-            License: GetScalar(node, "license"));
+            License: GetScalar(node, "license"),
+            // T12: install scope (user | machine | auto, default auto). The schema
+            // enum is the hard gate; here we map the string leniently and emit a
+            // non-fatal diagnostic on an unrecognized value, falling back to auto.
+            Scope: ParseScope(node, diagnostics, fileName));
+    }
+
+    /// <summary>
+    /// Map the manifest's <c>installer.scope</c> scalar into
+    /// <see cref="InstallScope"/> (T12). Recognizes <c>user</c> / <c>machine</c> /
+    /// <c>auto</c> case-insensitively; an absent value defaults to
+    /// <see cref="InstallScope.Auto"/>; an out-of-enum value falls back to
+    /// <see cref="InstallScope.Auto"/> with a non-fatal
+    /// <see cref="DiagnosticCodes.InvalidInstallerScope"/> diagnostic.
+    /// </summary>
+    private static InstallScope ParseScope(
+        YamlMappingNode node, List<Diagnostic> diagnostics, string fileName)
+    {
+        var raw = GetScalar(node, "scope");
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return InstallScope.Auto;
+        }
+
+        switch (raw.Trim().ToLowerInvariant())
+        {
+            case "user": return InstallScope.User;
+            case "machine": return InstallScope.Machine;
+            case "auto": return InstallScope.Auto;
+            default:
+                diagnostics.Add(new Diagnostic(
+                    DiagnosticSeverity.Warning,
+                    DiagnosticCodes.InvalidInstallerScope,
+                    $"installer.scope '{raw}' is not one of user|machine|auto — defaulting to auto",
+                    new SourceLocation(fileName, (int)node.Start.Line, (int)node.Start.Column),
+                    "https://docs.sigil.build/diagnostics/SIG0260"));
+                return InstallScope.Auto;
+        }
     }
 
     // Interpolation tokens permitted in a screen Title / Subtitle (T9). Kept in

@@ -37,7 +37,7 @@ internal sealed class ShortcutCreateStep : IStep
         ArgumentNullException.ThrowIfNull(ctx);
         ArgumentNullException.ThrowIfNull(journal);
 
-        var locationDir = ResolveLocation(_spec.Location);
+        var locationDir = ResolveLocation(_spec.Location, ctx);
         Directory.CreateDirectory(locationDir);
         var lnkPath = Path.Combine(locationDir, _spec.Name + ".lnk");
 
@@ -63,15 +63,16 @@ internal sealed class ShortcutCreateStep : IStep
 
     /// <summary>
     /// Resolve the manifest's <c>location:</c> string into a real filesystem
-    /// directory. The two named anchors map onto the calling user's
-    /// per-profile shell folders; anything else is treated as an explicit
-    /// path so manifests can target arbitrary install dirs (e.g. a
-    /// per-machine "All Users" Start Menu via <c>${parameters.allusers}</c>).
+    /// directory. The two named anchors map onto the <em>scope-correct</em> shell
+    /// folders (T12): a per-machine install writes to the all-users (common)
+    /// Desktop / Start Menu, a per-user install to the calling user's per-profile
+    /// folders. Anything else is treated as an explicit path so manifests can
+    /// still target arbitrary install dirs.
     /// </summary>
-    private static string ResolveLocation(string location) => location switch
+    private static string ResolveLocation(string location, StepContext ctx) => location switch
     {
-        "start_menu" => Environment.GetFolderPath(Environment.SpecialFolder.StartMenu),
-        "desktop"    => Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+        "start_menu" => ctx.Layout.StartMenuFolder,
+        "desktop"    => ctx.Layout.DesktopFolder,
         _            => location,
     };
 }

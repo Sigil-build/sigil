@@ -56,3 +56,27 @@ jobs:
         with:
           name: wrapper-vm-test-results
           path: '**/TestResults/**/*.trx'
+
+      # T12 — dual install scope (user | machine) end-to-end. Runs the stamped
+      # Setup.exe /silent in BOTH scopes and asserts the scope-correct surfaces:
+      #   * /currentuser → HKCU ARP, %LocalAppData%\Programs root, user PATH,
+      #     per-user shortcuts, %LocalAppData% journal — and ZERO HKLM writes,
+      #     completing WITHOUT a UAC prompt (asInvoker manifest).
+      #   * /allusers   → HKLM ARP, %ProgramFiles% root, machine PATH, common
+      #     (all-users) shortcuts, %ProgramData% journal — self-elevates via the
+      #     ShellExecuteExW `runas` relaunch (the VM job runs elevated so the
+      #     child inherits the token). Uninstall must run in the SAME scope it was
+      #     installed with (the ARP UninstallString carries the scope flag).
+      # This is the real-elevation assertion the unit tests defer to the VM.
+      - name: T12 both-scopes install/uninstall matrix
+        shell: pwsh
+        env:
+          SIGIL_VM_SCOPE_MATRIX: "1"
+        run: |
+          foreach ($scope in @('currentuser', 'allusers')) {
+            Write-Host "== scope: /$scope =="
+            dotnet test tests/SigilBuild.Wrapper.IntegrationTests/SigilBuild.Wrapper.IntegrationTests.csproj `
+              --filter "Category=Scope" `
+              --logger "trx;LogFileName=wrapper-vm-tests-$scope.trx" `
+              -- SigilVmTests.Scope=$scope
+          }

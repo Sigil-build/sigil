@@ -45,15 +45,22 @@ internal sealed class EnvSetStep : IStep
         var name = _spec.Name;
         var resolvedValue = ctx.Resolve(_spec.Value);
 
+        // T12: a step scope of "auto" (the value auto-generated PATH steps use)
+        // defers to the resolved install scope — machine env for a per-machine
+        // install, user env for a per-user install. Explicit "user"/"machine"
+        // stays authoritative. The resolved scope is what lands in the rollback
+        // record so undo targets the same hive.
+        var envScope = ResolveEnvScope(_spec.Scope, ctx);
+
         // Snapshot prior value for rollback.
         string? prior;
         bool previouslyAbsent;
-        using (var key = OpenEnvKey(_spec.Scope, writable: false))
+        using (var key = OpenEnvKey(envScope, writable: false))
         {
             if (key is null)
             {
                 return Task.FromResult(StepResult.Failed(
-                    $"could not open env key for scope '{_spec.Scope}'"));
+                    $"could not open env key for scope '{envScope}'"));
             }
             var v = key.GetValue(name);
             previouslyAbsent = v is null;
@@ -62,16 +69,16 @@ internal sealed class EnvSetStep : IStep
 
         // Record rollback BEFORE mutation so a crash mid-write still leaves
         // the journal in a state that restores correctly.
-        journal.Append(new RollbackRecord.RestoreEnv(_spec.Scope, name, prior, previouslyAbsent));
+        journal.Append(new RollbackRecord.RestoreEnv(envScope, name, prior, previouslyAbsent));
 
         var newValue = ComputeNewValue(_spec.Action, prior, resolvedValue, _spec.Separator);
 
-        using (var key = OpenEnvKey(_spec.Scope, writable: true))
+        using (var key = OpenEnvKey(envScope, writable: true))
         {
             if (key is null)
             {
                 return Task.FromResult(StepResult.Failed(
-                    $"could not open env key for scope '{_spec.Scope}' (writable)"));
+                    $"could not open env key for scope '{envScope}' (writable)"));
             }
             key.SetValue(name, newValue, RegistryValueKind.String);
         }
@@ -90,6 +97,19 @@ internal sealed class EnvSetStep : IStep
         "append"  => string.IsNullOrEmpty(prior) ? value : prior + separator + value,
         "prepend" => string.IsNullOrEmpty(prior) ? value : value + separator + prior,
         _ => throw new ArgumentException($"unknown env_set action '{action}'"),
+    };
+
+    /// <summary>
+    /// Map the manifest step's <c>scope:</c> onto a concrete <c>user</c>/<c>machine</c>
+    /// env target. A literal <c>user</c>/<c>machine</c> is authoritative; <c>auto</c>
+    /// (or an empty value) defers to the resolved install scope (T12).
+    /// </summary>
+    internal static string ResolveEnvScope(string specScope, StepContext ctx) => specScope switch
+    {
+        "user" => "user",
+        "machine" => "machine",
+        "auto" or "" => ctx.Layout.EnvScope,
+        _ => specScope, // unknown value: let OpenEnvKey throw the clear error.
     };
 
     private static RegistryKey? OpenEnvKey(string scope, bool writable) => scope switch

@@ -76,14 +76,14 @@ public sealed class SecretHygieneTests
         var appId = "t9-secret-" + Guid.NewGuid().ToString("N");
         try
         {
-            UninstallStateStore.Save(appId, result.Journal, ctx.SecretValues);
-            var content = File.ReadAllText(UninstallStateStore.PathFor(appId));
+            UninstallStateStore.Save(appId, result.Journal, InstallScope.User, ctx.SecretValues);
+            var content = File.ReadAllText(UninstallStateStore.PathFor(appId, InstallScope.User));
             content.Should().NotContain(Secret, "the persisted journal must never contain a secret value");
             content.Should().Contain("***", "the secret occurrence in the journal must be redacted");
         }
         finally
         {
-            UninstallStateStore.Delete(appId);
+            UninstallStateStore.Delete(appId, InstallScope.User);
         }
     }
 

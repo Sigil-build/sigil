@@ -2,7 +2,6 @@ namespace SigilBuild.Wrapper.Engine;
 
 using System;
 using System.IO;
-using SigilBuild.Core.Manifest;
 
 /// <summary>
 /// The final install step that makes uninstall survive deletion of the downloaded
@@ -56,22 +55,24 @@ public static class InstallSurvivability
 
     /// <summary>
     /// Copy the running installer image (<see cref="Environment.ProcessPath"/>) into
-    /// the resolved install directory as <c>uninstall.exe</c> and journal its
-    /// removal. Returns the copied uninstaller path, or <c>null</c> when the running
-    /// image path is unavailable (nothing to copy).
+    /// <paramref name="installDir"/> as <c>uninstall.exe</c> and journal its removal.
+    /// Returns the copied uninstaller path, or <c>null</c> when the running image
+    /// path is unavailable (nothing to copy).
     /// </summary>
     /// <remarks>
-    /// T15 destination seam: the install root is T12's per-scope
-    /// <see cref="ScopeLayout.InstallRoot"/> plus <paramref name="appId"/>. T13 owns
-    /// <c>{install_dir}</c> resolution and will feed the resolved install directory
-    /// here once it lands; until then the ScopeLayout install root is the stable,
-    /// available base (per the spec T15 note). Only the AppId-scoped subdirectory is
-    /// used so two apps sharing a scope root never clobber each other's uninstaller.
+    /// T13 destination seam (now wired): <paramref name="installDir"/> is the SINGLE
+    /// resolved install directory that <see cref="InstallDirResolver"/> computed for
+    /// this run (honoring <c>/D=</c>, the manifest <c>install_dir</c>, the
+    /// wizard-collected path, else <c>&lt;scope root&gt;\&lt;App.Name&gt;</c>) and
+    /// that the install steps copied files into. The uninstaller lands in the exact
+    /// same directory, so ARP's <c>UninstallString</c> can never diverge from where
+    /// the files actually landed. The directory is created if a step did not already
+    /// (see <see cref="CopyUninstaller"/>).
     /// </remarks>
-    public static string? InstallUninstaller(RollbackJournal journal, InstallScope scope, string appId)
+    public static string? InstallUninstaller(RollbackJournal journal, string installDir)
     {
         ArgumentNullException.ThrowIfNull(journal);
-        ArgumentException.ThrowIfNullOrEmpty(appId);
+        ArgumentException.ThrowIfNullOrEmpty(installDir);
 
         var source = Environment.ProcessPath;
         if (string.IsNullOrEmpty(source))
@@ -79,9 +80,6 @@ public static class InstallSurvivability
             return null;
         }
 
-        // TODO(T13): replace with the resolved {install_dir} once T13 threads it
-        // through StepContext; the ScopeLayout root + AppId is the T15 stand-in.
-        var installDir = Path.Combine(ScopeLayout.For(scope).InstallRoot, appId);
         return CopyUninstaller(journal, source, installDir);
     }
 }

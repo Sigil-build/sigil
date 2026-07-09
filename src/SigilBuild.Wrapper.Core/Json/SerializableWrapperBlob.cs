@@ -55,6 +55,13 @@ internal sealed record SerializableWrapperBlob
     public SerializableInstallerScreen[] Screens { get; init; }
         = Array.Empty<SerializableInstallerScreen>();
 
+    /// <summary>
+    /// The ENABLED built-in option components (T8). Carried so the runtime can seed
+    /// <c>option.*</c> for step gating and the host can render one checkbox each.
+    /// </summary>
+    public SerializableOptionComponent[] Options { get; init; }
+        = Array.Empty<SerializableOptionComponent>();
+
     public static WrapperBlob ToWrapperBlob(SerializableWrapperBlob s)
     {
         ArgumentNullException.ThrowIfNull(s);
@@ -65,7 +72,8 @@ internal sealed record SerializableWrapperBlob
             PreInstall:   ConvertSteps(s.PreInstall),
             PostInstall:  ConvertSteps(s.PostInstall),
             UpdateSteps:  ConvertSteps(s.UpdateSteps),
-            Scope:        s.Scope);
+            Scope:        s.Scope,
+            Options:      ConvertOptions(s.Options));
     }
 
     public static SerializableWrapperBlob FromWrapperBlob(WrapperBlob blob)
@@ -80,7 +88,30 @@ internal sealed record SerializableWrapperBlob
             PostInstall  = SerializeSteps(blob.PostInstall),
             UpdateSteps  = SerializeSteps(blob.UpdateSteps),
             Scope        = blob.Scope,
+            Options      = SerializeOptions(blob.Options),
         };
+    }
+
+    private static InstallerOptionComponent[] ConvertOptions(SerializableOptionComponent[] flat)
+    {
+        if (flat.Length == 0) return Array.Empty<InstallerOptionComponent>();
+        var result = new InstallerOptionComponent[flat.Length];
+        for (var i = 0; i < flat.Length; i++)
+        {
+            result[i] = SerializableOptionComponent.ToComponent(flat[i]);
+        }
+        return result;
+    }
+
+    private static SerializableOptionComponent[] SerializeOptions(IReadOnlyList<InstallerOptionComponent>? options)
+    {
+        if (options is null || options.Count == 0) return Array.Empty<SerializableOptionComponent>();
+        var result = new SerializableOptionComponent[options.Count];
+        for (var i = 0; i < options.Count; i++)
+        {
+            result[i] = SerializableOptionComponent.FromComponent(options[i]);
+        }
+        return result;
     }
 
     private static InstallStep[] ConvertSteps(SerializableInstallStep[] flat)
@@ -295,5 +326,29 @@ internal sealed record SerializableScreenField
     {
         ArgumentNullException.ThrowIfNull(field);
         return new SerializableScreenField { Param = field.Param, Widget = field.Widget };
+    }
+}
+
+/// <summary>
+/// Flat, AOT-friendly wire DTO for a single ENABLED built-in option component
+/// (T8). Mirrors <see cref="InstallerOptionComponent"/> so the source-generated
+/// context can serialize it without reflection.
+/// </summary>
+internal sealed record SerializableOptionComponent
+{
+    public string Name { get; init; } = string.Empty;
+    public bool Default { get; init; }
+    public bool Locked { get; init; }
+
+    public static InstallerOptionComponent ToComponent(SerializableOptionComponent s)
+    {
+        ArgumentNullException.ThrowIfNull(s);
+        return new InstallerOptionComponent(s.Name, s.Default, s.Locked);
+    }
+
+    public static SerializableOptionComponent FromComponent(InstallerOptionComponent c)
+    {
+        ArgumentNullException.ThrowIfNull(c);
+        return new SerializableOptionComponent { Name = c.Name, Default = c.Default, Locked = c.Locked };
     }
 }

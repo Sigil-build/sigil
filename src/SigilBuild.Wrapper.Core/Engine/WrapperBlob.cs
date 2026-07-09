@@ -20,7 +20,13 @@ internal sealed partial record WrapperBlob(
     IReadOnlyList<InstallStep> PreInstall,
     IReadOnlyList<InstallStep> PostInstall,
     IReadOnlyList<InstallStep> UpdateSteps,
-    InstallScope Scope = InstallScope.Auto)
+    InstallScope Scope = InstallScope.Auto,
+    // T8: the ENABLED built-in option components. The engine seeds
+    // `option.<Name>` from these (default, unless a wizard checkbox or a
+    // `/P<Name>=value` override supplies otherwise) so the auto-generated,
+    // option-gated steps — and any hand-written `when: option.*` — evaluate.
+    // Null/empty for an un-stamped runtime or a manifest declaring no options.
+    IReadOnlyList<InstallerOptionComponent>? Options = null)
 {
     /// <summary>
     /// Empty sentinel blob: well-known <c>AppId</c> placeholder and zero-length

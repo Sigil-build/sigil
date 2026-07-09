@@ -42,6 +42,11 @@ public partial class App : Application
                 // forms and generates the rail from them.
                 _vm.LoadScreens(InstallerScreensLoader.LoadFromSelf(), session.Parameters);
 
+                // T8: load the enabled built-in option components (from the session's
+                // blob). When ≥ 1 is present the Options screen + its rail entry appear
+                // (after license, per decision 4); when none, they are omitted.
+                _vm.LoadOptions(session.Options);
+
                 // T14: load the embedded license text (from the blob). When present
                 // the License screen + its rail entry appear (after destination, per
                 // decision 4) and gate Next on acceptance; when absent they are
@@ -49,10 +54,12 @@ public partial class App : Application
                 // imply acceptance.
                 _vm.LoadLicense(InstallerLicenseLoader.LoadFromSelf());
 
-                // Bind the wizard-collected parameter values into param.* for the
-                // engine at install time (read lazily at call time).
+                // Bind the wizard-collected parameter values into param.* and the
+                // option checkbox states into option.* for the engine at install
+                // time (read lazily at call time).
                 _vm.ConfigureInstallRunner((progress, ct) =>
-                    session.RunInstallAsync(_vm.CollectedParameterValues, progress, ct));
+                    session.RunInstallAsync(
+                        _vm.CollectedParameterValues, _vm.CollectedOptionValues, progress, ct));
             }
 
             desktop.MainWindow = new InstallerWindow

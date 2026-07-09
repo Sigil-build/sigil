@@ -299,6 +299,66 @@ public sealed class CustomScreenViewModel
     }
 }
 
+/// <summary>
+/// View-model for one built-in option component checkbox on the Options screen
+/// (T8). Seeded from the component's resolved default; a <c>locked</c> component
+/// renders disabled (<see cref="IsEnabled"/> is false) and cannot be toggled —
+/// it is always applied at its default.
+/// </summary>
+public sealed class OptionItemViewModel : INotifyPropertyChanged
+{
+    public OptionItemViewModel(InstallerOptionComponent component)
+    {
+        ArgumentNullException.ThrowIfNull(component);
+        Name = component.Name;
+        IsLocked = component.Locked;
+        Label = LabelFor(component.Name);
+        _isChecked = component.Default;
+    }
+
+    /// <summary>The canonical component key (e.g. <c>desktop_shortcut</c>) — the key the engine binds into <c>option.*</c>.</summary>
+    public string Name { get; }
+
+    /// <summary>The human-readable checkbox caption.</summary>
+    public string Label { get; }
+
+    /// <summary>True for a <c>locked</c> component: rendered disabled, always applied at its default.</summary>
+    public bool IsLocked { get; }
+
+    /// <summary>Bindable enabled-state for the checkbox — a locked component is disabled.</summary>
+    public bool IsEnabled => !IsLocked;
+
+    private bool _isChecked;
+    public bool IsChecked
+    {
+        get => _isChecked;
+        set
+        {
+            // A locked component cannot be toggled by the user.
+            if (IsLocked || _isChecked == value)
+            {
+                return;
+            }
+            _isChecked = value;
+            OnPropertyChanged();
+        }
+    }
+
+    private static string LabelFor(string name) => name switch
+    {
+        "desktop_shortcut" => "Create a desktop shortcut",
+        "start_menu" => "Add a Start menu shortcut",
+        "add_to_path" => "Add to PATH",
+        "file_associations" => "Register file associations",
+        _ => name,
+    };
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    private void OnPropertyChanged([CallerMemberName] string? name = null)
+        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name ?? string.Empty));
+}
+
 /// <summary>A single entry in the wizard's rail step indicator.</summary>
 public sealed class RailStep
 {

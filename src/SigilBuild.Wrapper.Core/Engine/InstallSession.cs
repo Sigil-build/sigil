@@ -91,6 +91,14 @@ public sealed class InstallSession
     /// <summary>The declared install-time parameter schema (for the wizard's Configure screens, Task T9).</summary>
     public IReadOnlyList<ParameterDefinition> Parameters => _blob.Parameters;
 
+    /// <summary>
+    /// The ENABLED built-in option components (T8) the wizard renders on the
+    /// Options screen (one checkbox each; <c>locked</c> ones disabled). Empty when
+    /// the manifest declared no options — the host then omits the Options screen.
+    /// </summary>
+    public IReadOnlyList<InstallerOptionComponent> Options =>
+        _blob.Options ?? Array.Empty<InstallerOptionComponent>();
+
     /// <summary>The full parsed command line (overrides, install-dir, scope) for GUI defaults.</summary>
     public ParsedCommandLine CommandLine => _parsed;
 
@@ -172,6 +180,11 @@ public sealed class InstallSession
     // single install run — the host is a single-install process.
     private IReadOnlyDictionary<string, string>? _collectedValues;
 
+    // Wizard-collected option checkbox states (T8), bound into `option.*` on the
+    // next RunInstall* call. Null on the console/silent path (options then resolve
+    // to their manifest defaults, subject to any CLI `/P<name>` override).
+    private IReadOnlyDictionary<string, bool>? _collectedOptions;
+
     public Task<InstallOutcome> RunInstallAsync(IProgress<StepProgress>? progress, CancellationToken ct = default)
         => RunInstallCoreAsync(WrapperBlob.LoadPayloadBytes(), progress, ct);
 
@@ -188,6 +201,27 @@ public sealed class InstallSession
         CancellationToken ct = default)
     {
         _collectedValues = collectedValues;
+        return RunInstallCoreAsync(WrapperBlob.LoadPayloadBytes(), progress, ct);
+    }
+
+    /// <summary>
+    /// GUI entry point (T8 + T9): run the install pipeline binding both the
+    /// wizard-collected parameter values (<c>param.*</c> / <c>parameters.*</c>) and
+    /// the wizard-collected option checkbox states (<c>option.*</c>) into the engine
+    /// context, so an auto-generated step gated on <c>when: option.desktop_shortcut</c>
+    /// — or a hand-written step gated on an option — observes what the user picked on
+    /// the Options screen. Collected option values take precedence over CLI
+    /// <c>/P&lt;name&gt;</c> overrides and manifest defaults; a <c>locked</c> component
+    /// stays fixed at its default regardless.
+    /// </summary>
+    public Task<InstallOutcome> RunInstallAsync(
+        IReadOnlyDictionary<string, string>? collectedValues,
+        IReadOnlyDictionary<string, bool>? collectedOptions,
+        IProgress<StepProgress>? progress,
+        CancellationToken ct = default)
+    {
+        _collectedValues = collectedValues;
+        _collectedOptions = collectedOptions;
         return RunInstallCoreAsync(WrapperBlob.LoadPayloadBytes(), progress, ct);
     }
 
@@ -225,7 +259,7 @@ public sealed class InstallSession
                 payloadRoot = payload.Root;
             }
 
-            var ctx = StepContext.From(_blob, _parsed, payloadRoot, _collectedValues, _scope);
+            var ctx = StepContext.From(_blob, _parsed, payloadRoot, _collectedValues, _scope, _collectedOptions);
             var result = await new InstallEngine().RunAsync(
                 preInstall: _blob.PreInstall,
                 installSteps: _blob.InstallSteps,

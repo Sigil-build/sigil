@@ -107,7 +107,8 @@ public sealed class StepContext
         ParsedCommandLine parsed,
         string? payloadRoot = null,
         System.Collections.Generic.IReadOnlyDictionary<string, string>? collected = null,
-        InstallScope scope = InstallScope.User)
+        InstallScope scope = InstallScope.User,
+        System.Collections.Generic.IReadOnlyDictionary<string, bool>? collectedOptions = null)
     {
         System.ArgumentNullException.ThrowIfNull(blob);
         System.ArgumentNullException.ThrowIfNull(parsed);
@@ -160,6 +161,38 @@ public sealed class StepContext
         // T13). Both `scope` and `scope.root` mirror how T9 exposed `param.*`.
         dict["scope"] = layout.Name;
         dict["scope.root"] = layout.InstallRoot;
+
+        // Option context (T8): expose each ENABLED built-in component as
+        // `option.<name>` so the auto-generated, option-gated steps evaluate AND a
+        // hand-written step can gate on `option.*`. Resolution precedence mirrors
+        // parameters: a `locked` component is fixed at its default (the user can't
+        // change it); otherwise GUI-collected checkbox → CLI `/P<name>` override →
+        // component default. Mirrors how T9 seeded `param.*` and T12 seeded `scope`.
+        if (blob.Options is { } options)
+        {
+            foreach (var opt in options)
+            {
+                bool value;
+                if (opt.Locked)
+                {
+                    value = opt.Default;
+                }
+                else if (collectedOptions is not null && collectedOptions.TryGetValue(opt.Name, out var g))
+                {
+                    value = g;
+                }
+                else if (parsed.Options.TryGetValue(opt.Name, out var cli) && bool.TryParse(cli, out var cliB))
+                {
+                    value = cliB;
+                }
+                else
+                {
+                    value = opt.Default;
+                }
+
+                dict["option." + opt.Name] = value;
+            }
+        }
 
         return new StepContext(dict, payloadRoot, secrets, layout.Scope);
     }

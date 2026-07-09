@@ -1,6 +1,19 @@
 # Orchestration plan — exe-installer track (spec T1–T17)
 
-Status: active (2026-07-09). Execution companion to
+Status: **COMPLETE (2026-07-09)** — all waves G0–G5 executed on integration
+branch `feat/exe-installer-track` (subagent-per-lane worktrees, merged at each
+gate). T1–T18 + an install-dir-unify fix all merged; 527 tests green, 0 skipped;
+build warning-clean under Native AOT + `TreatWarningsAsErrors`. `pack --format
+exe` produces a working stamped `Setup.exe` verified end-to-end (silent install
+lands files, real ARP, dual scope, uninstall survives deleting the setup exe).
+Size gates: CLI 13.59 MB ≤ 15 MB; host 37.4 MB ≤ 40 MB (re-pinned from the
+spec's unattainable 25 MB per the AOT spike). Remaining: push branch → CI runs
+the both-scope VM matrix (`wrapper-vm-tests.yml`, the trusted install/uninstall
+verdict) → PR to `main`. Coverage note: CI hard-gates 65% union (75.6% actual);
+the spec's aspirational Core ≥80% / Signing ≥85% per-assembly bars are unmet
+(Core 63%, Signing 69%) — reported, not weakened.
+
+Execution companion to
 [`IMPLEMENTATION_SPEC.md`](IMPLEMENTATION_SPEC.md) — the spec defines *what*;
 this defines *who runs when*. Runner: **parallel Claude Code sessions in git
 worktrees** on a Windows dev machine, with CI (`wrapper-vm-tests.yml`) as the

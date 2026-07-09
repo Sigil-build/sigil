@@ -17,7 +17,9 @@ internal sealed class FileCopyStep : IStep
 
     public Task<StepResult> RunAsync(StepContext ctx, RollbackJournal journal, CancellationToken ct)
     {
-        var from = ctx.Resolve(_spec.From);
+        // Source may be a payload:// URI (rebased onto the extracted payload
+        // root); destination is always a real install-side path.
+        var from = ctx.ResolvePath(_spec.From);
         var to   = ctx.Resolve(_spec.To);
         Directory.CreateDirectory(to);
 

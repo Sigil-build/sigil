@@ -17,7 +17,7 @@ internal sealed class DirectoryCreateStep : IStep
 
     public Task<StepResult> RunAsync(StepContext ctx, RollbackJournal journal, CancellationToken ct)
     {
-        var path = ctx.Resolve(_spec.Path);
+        var path = ctx.ResolvePath(_spec.Path);
         if (!Directory.Exists(path))
         {
             // Record rollback for this newly-created directory only.

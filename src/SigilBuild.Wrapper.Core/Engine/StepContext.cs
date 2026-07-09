@@ -9,17 +9,33 @@ using SigilBuild.Wrapper.Cli;
 /// </summary>
 public sealed class StepContext
 {
+    private const string PayloadScheme = "payload://";
+
     private readonly System.Collections.Generic.IReadOnlyDictionary<string, object?> _values;
     private readonly Expressions.Evaluator _evaluator = new();
 
-    public StepContext(System.Collections.Generic.IReadOnlyDictionary<string, object?> values)
+    public StepContext(
+        System.Collections.Generic.IReadOnlyDictionary<string, object?> values,
+        string? payloadRoot = null)
     {
         System.ArgumentNullException.ThrowIfNull(values);
         _values = values;
+        PayloadRoot = payloadRoot;
     }
 
     public static StepContext Empty { get; } =
         new StepContext(new System.Collections.Generic.Dictionary<string, object?>());
+
+    /// <summary>
+    /// Absolute path to the temp directory into which the embedded
+    /// <c>SIGIL_PAYLOAD_V1</c> archive was extracted for this run, or
+    /// <c>null</c> when the running exe carries no payload (an un-stamped dev
+    /// runtime). Steps resolve <c>payload://relative/path</c> sources against
+    /// it via <see cref="ResolvePath"/>. The directory's lifetime is owned by
+    /// <see cref="InstallSession"/>, which deletes it once the run completes
+    /// (on success, failure, cancel, or rollback).
+    /// </summary>
+    public string? PayloadRoot { get; }
 
     /// <summary>
     /// Build a <see cref="StepContext"/> by materializing parameter overrides
@@ -34,7 +50,7 @@ public sealed class StepContext
     /// can never reach this method — <see cref="CommandLineParser.Parse"/>
     /// rejects them up-front.
     /// </remarks>
-    internal static StepContext From(WrapperBlob blob, ParsedCommandLine parsed)
+    internal static StepContext From(WrapperBlob blob, ParsedCommandLine parsed, string? payloadRoot = null)
     {
         System.ArgumentNullException.ThrowIfNull(blob);
         System.ArgumentNullException.ThrowIfNull(parsed);
@@ -67,7 +83,7 @@ public sealed class StepContext
         // Env context (only the well-known PATH for now; full env exposure is policy-deferred).
         dict["env.PATH"] = System.Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
 
-        return new StepContext(dict);
+        return new StepContext(dict, payloadRoot);
     }
 
     /// <summary>Substitute <c>${parameters.foo}</c> patterns in <paramref name="template"/>.</summary>
@@ -110,6 +126,60 @@ public sealed class StepContext
             }
         }
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Resolve a path-valued step field: first expand <c>${...}</c> templates
+    /// via <see cref="Resolve"/>, then — if the result begins with the
+    /// <c>payload://</c> scheme — rebase the remainder onto
+    /// <see cref="PayloadRoot"/> (the extracted embedded payload). Non-payload
+    /// paths pass through unchanged, so every path-taking step can call this
+    /// uniformly. A glob suffix (<c>payload://app/**</c>) survives the rebase
+    /// and is interpreted by the step as usual.
+    /// </summary>
+    /// <exception cref="System.FormatException">
+    /// A <c>payload://</c> path was used but no payload is available for this
+    /// run, or the relative part escapes the payload root (a path-traversal
+    /// attempt).
+    /// </exception>
+    public string ResolvePath(string template)
+    {
+        var resolved = Resolve(template);
+        if (!resolved.StartsWith(PayloadScheme, System.StringComparison.Ordinal))
+        {
+            return resolved;
+        }
+
+        if (PayloadRoot is null)
+        {
+            throw new System.FormatException(
+                string.Create(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    $"'payload://' source used but no payload was extracted for this run: '{template}'"));
+        }
+
+        var rel = resolved[PayloadScheme.Length..]
+            .Replace('/', System.IO.Path.DirectorySeparatorChar)
+            .Replace('\\', System.IO.Path.DirectorySeparatorChar)
+            .TrimStart(System.IO.Path.DirectorySeparatorChar);
+
+        var rootFull = System.IO.Path.GetFullPath(PayloadRoot);
+        var full = System.IO.Path.GetFullPath(System.IO.Path.Combine(rootFull, rel));
+
+        // Guard against '..' traversal escaping the extracted payload root.
+        var rootPrefix = rootFull.EndsWith(System.IO.Path.DirectorySeparatorChar)
+            ? rootFull
+            : rootFull + System.IO.Path.DirectorySeparatorChar;
+        if (!string.Equals(full, rootFull, System.StringComparison.OrdinalIgnoreCase) &&
+            !full.StartsWith(rootPrefix, System.StringComparison.OrdinalIgnoreCase))
+        {
+            throw new System.FormatException(
+                string.Create(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    $"'payload://' source escapes the payload root: '{template}'"));
+        }
+
+        return full;
     }
 
     public bool Evaluate(string expression) => _evaluator.EvaluateBool(expression, _values);

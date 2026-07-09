@@ -27,7 +27,7 @@ internal sealed class FileDeleteStep : IStep
 
     public Task<StepResult> RunAsync(StepContext ctx, RollbackJournal journal, CancellationToken ct)
     {
-        var path = ctx.Resolve(_spec.Path);
+        var path = ctx.ResolvePath(_spec.Path);
 
         if (!File.Exists(path))
         {

@@ -35,6 +35,12 @@
     <PackageVersion Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
     <!-- Packaging -->
     <PackageVersion Include="Microsoft.Extensions.FileSystemGlobbing" Version="9.0.0" />
+    <!-- zstd payload codec (T6). ZstdSharp.Port is a pure-managed C# port of zstd
+         (no native libzstd), so it publishes clean under Native AOT + trimming
+         with nothing to bundle beside the host exe. Shared by the packager
+         (encode) and the AOT installer host (decode), and reusable by the future
+         delta-update engine (spec section 5). Pinned for deterministic output. -->
+    <PackageVersion Include="ZstdSharp.Port" Version="0.8.8" />
     <!-- Logo resize — bumped to 3.119.4-preview.1.1 to satisfy Avalonia 12 transitive requirement -->
     <PackageVersion Include="SkiaSharp" Version="3.119.4-preview.1.1" />
     <PackageVersion Include="SkiaSharp.NativeAssets.Win32" Version="3.119.4-preview.1.1" />

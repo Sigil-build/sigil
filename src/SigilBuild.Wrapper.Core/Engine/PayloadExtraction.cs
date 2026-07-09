@@ -1,21 +1,22 @@
 using System;
 using System.IO;
-using System.IO.Compression;
 using System.Text;
+using SigilBuild.Wrapper.Codec;
 
 namespace SigilBuild.Wrapper.Engine;
 
 /// <summary>
 /// Owns the temporary directory into which the embedded
-/// <c>SIGIL_PAYLOAD_V1</c> archive is unpacked for the duration of a single
+/// <c>SIGIL_PAYLOAD_V2</c> archive is unpacked for the duration of a single
 /// install run. <see cref="StepContext.ResolvePath"/> resolves
 /// <c>payload://relative/path</c> sources against <see cref="Root"/>.
 /// </summary>
 /// <remarks>
-/// The container is the deterministic Deflate zip that
-/// <c>ExeWrapperPackager.BuildPayloadBytes</c> currently produces (the zstd
-/// switch is a later task). Extraction is guarded against zip-slip: an entry
-/// whose normalized path escapes <see cref="Root"/> aborts the whole extract.
+/// The container is the deterministic zstd container that
+/// <c>ExeWrapperPackager.BuildPayloadBytes</c> produces via the shared
+/// <see cref="PayloadCodec"/> (T6). Extraction is guarded against zip-slip: an
+/// entry whose normalized path escapes <see cref="Root"/> aborts the whole
+/// extract.
 /// <para>
 /// <see cref="Dispose"/> removes the directory, so no <c>%TEMP%</c> state
 /// leaks — the caller (<see cref="InstallSession"/>) disposes in a
@@ -44,25 +45,20 @@ internal sealed class PayloadExtraction : IDisposable
         var root = CreateUniqueTempDir(appId);
         try
         {
-            using var ms = new MemoryStream(archiveBytes, writable: false);
-            using var zip = new ZipArchive(ms, ZipArchiveMode.Read);
-            foreach (var entry in zip.Entries)
+            PayloadCodec.Decode(archiveBytes, (relativePath, content) =>
             {
-                // Skip directory entries (trailing '/', empty Name).
-                if (string.IsNullOrEmpty(entry.Name) ||
-                    entry.FullName.EndsWith('/') ||
-                    entry.FullName.EndsWith('\\'))
+                // Skip any directory-marker entry (trailing separator, empty leaf).
+                if (string.IsNullOrEmpty(relativePath) ||
+                    relativePath.EndsWith('/') ||
+                    relativePath.EndsWith('\\'))
                 {
-                    continue;
+                    return;
                 }
 
-                var dest = ResolveEntryPath(root, entry.FullName);
+                var dest = ResolveEntryPath(root, relativePath);
                 Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
-
-                using var entryStream = entry.Open();
-                using var fs = new FileStream(dest, FileMode.Create, FileAccess.Write, FileShare.None);
-                entryStream.CopyTo(fs);
-            }
+                File.WriteAllBytes(dest, content);
+            });
         }
         catch
         {

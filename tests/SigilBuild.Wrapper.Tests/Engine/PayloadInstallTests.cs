@@ -23,9 +23,9 @@ public sealed class PayloadInstallTests
     public async Task Install_copies_a_file_from_a_payload_source_then_cleans_temp()
     {
         using var dst = new TempDir();
-        var zip = PayloadExtractionTests.BuildZip(("app/app.exe", "PAYLOAD-BYTES"));
+        var container = PayloadExtractionTests.BuildPayload(("app/app.exe", "PAYLOAD-BYTES"));
 
-        var extraction = PayloadExtraction.Extract(zip, "com.acme.Studio");
+        var extraction = PayloadExtraction.Extract(container, "com.acme.Studio");
         var root = extraction.Root;
         try
         {
@@ -60,7 +60,7 @@ public sealed class PayloadInstallTests
         using var missing = new TempDir();
         var appId = "t5rollback" + Guid.NewGuid().ToString("N");
 
-        var zip = PayloadExtractionTests.BuildZip(("app/app.exe", "PAYLOAD-BYTES"));
+        var container = PayloadExtractionTests.BuildPayload(("app/app.exe", "PAYLOAD-BYTES"));
 
         var blob = new WrapperBlob(
             AppId: appId,
@@ -82,7 +82,7 @@ public sealed class PayloadInstallTests
         var parsed = CommandLineParser.Parse(new[] { "/silent" }, blob.Parameters);
         var session = InstallSession.ForTesting(blob, parsed);
 
-        var outcome = await session.RunInstallCoreAsync(zip, progress: null, CancellationToken.None);
+        var outcome = await session.RunInstallCoreAsync(container, progress: null, CancellationToken.None);
 
         outcome.Success.Should().BeFalse("the second step fails with on_failure: rollback");
 

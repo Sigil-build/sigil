@@ -15,7 +15,7 @@ using Xunit;
 namespace SigilBuild.Packaging.Tests.ExeWrapper;
 
 /// <summary>
-/// Win32 round-trip tests for the SIGIL_BLOB_V1 / SIGIL_PAYLOAD_V1 embed
+/// Win32 round-trip tests for the SIGIL_BLOB_V1 / SIGIL_PAYLOAD_V2 embed
 /// path. The "embed" half (<see cref="WrapperResourceWriter.WriteAsync"/>)
 /// requires a real PE file to update — there is no in-memory equivalent of
 /// <c>BeginUpdateResource</c>. Tests therefore depend on the AOT-published
@@ -43,7 +43,7 @@ public class WrapperResourceWriterTests
             var roundtrippedBlob = ResourceReader.Read(tmp, "SIGIL_BLOB_V1");
             roundtrippedBlob.Should().Equal(blob);
 
-            var roundtrippedPayload = ResourceReader.Read(tmp, "SIGIL_PAYLOAD_V1");
+            var roundtrippedPayload = ResourceReader.Read(tmp, "SIGIL_PAYLOAD_V2");
             roundtrippedPayload.Should().Equal(payload);
 
             var roundtrippedRuntime = ResourceReader.Read(tmp, "SIGIL_RUNTIME_V1");

@@ -373,7 +373,7 @@ public sealed class InstallSession
                 return new InstallOutcome(false, result.Error);
             }
 
-            PersistCompletion(result.Journal, ctx.SecretValues);
+            PersistCompletion(result.Journal, ctx.SecretValues, ctx.InstallDir);
             return new InstallOutcome(true, null);
         }
         finally
@@ -425,9 +425,20 @@ public sealed class InstallSession
     /// the downloaded setup exe. No-ops for an un-stamped runtime (the dev/smoke
     /// <see cref="WrapperBlob.Empty"/>) and off Windows.
     /// </remarks>
+    /// <param name="resolvedInstallDir">
+    /// The SINGLE install directory T13's <see cref="InstallDirResolver"/> computed
+    /// for this run (<see cref="StepContext.InstallDir"/>) — the exact directory the
+    /// steps installed into. <c>uninstall.exe</c> is copied here and the ARP
+    /// <c>UninstallString</c> targets it, so the uninstaller can never diverge from
+    /// where the files landed (honoring <c>/D=</c> / manifest / wizard / default).
+    /// <c>null</c> only for a context built without a resolved dir (the un-stamped
+    /// runtime, which already returned early above); it then falls back to the legacy
+    /// <c>&lt;scope root&gt;\&lt;AppId&gt;</c> so completion never crashes.
+    /// </param>
     private void PersistCompletion(
         RollbackJournal journal,
-        IReadOnlyList<string> secretValues)
+        IReadOnlyList<string> secretValues,
+        string? resolvedInstallDir)
     {
         if (ReferenceEquals(_blob, WrapperBlob.Empty))
         {
@@ -438,11 +449,20 @@ public sealed class InstallSession
             return;
         }
 
+        // Unify on the single resolved install dir (T13): uninstall.exe is copied
+        // into the SAME directory the steps installed to, so ARP's UninstallString
+        // never diverges from the files. Fall back to the legacy scope-root + AppId
+        // location only if the resolved dir is somehow absent (never on a real
+        // stamped install — Empty already returned early above).
+        var uninstallDir = string.IsNullOrEmpty(resolvedInstallDir)
+            ? Path.Combine(ScopeLayout.For(_scope).InstallRoot, _blob.AppId)
+            : resolvedInstallDir;
+
         // T15 final install step: copy the running installer into the install dir
         // as uninstall.exe and journal its removal (so the persisted journal — and a
         // rollback — reverse it). ARP's UninstallString then targets this copy.
         var uninstallerPath =
-            InstallSurvivability.InstallUninstaller(journal, _scope, _blob.AppId)
+            InstallSurvivability.InstallUninstaller(journal, uninstallDir)
             ?? Environment.ProcessPath
             ?? ".";
 

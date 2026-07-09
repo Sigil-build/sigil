@@ -106,6 +106,32 @@ public class SerializableWrapperBlobRoundtripTests
     }
 
     [Fact]
+    public void Arp_fields_roundtrip_through_the_in_memory_WrapperBlob()
+    {
+        // T10: the real ARP fields must survive WrapperBlob -> Serializable -> wire ->
+        // Serializable -> WrapperBlob so the runtime's PersistCompletion reads them.
+        var blob = new WrapperBlob(
+            AppId: "com.acme.Studio",
+            Parameters: System.Array.Empty<ParameterDefinition>(),
+            InstallSteps: System.Array.Empty<InstallStep>(),
+            PreInstall: System.Array.Empty<InstallStep>(),
+            PostInstall: System.Array.Empty<InstallStep>(),
+            UpdateSteps: System.Array.Empty<InstallStep>(),
+            DisplayName: "Acme Studio",
+            Publisher: "Acme, Inc.",
+            Version: "3.2.0",
+            EstimatedSizeBytes: 123_456_789L);
+
+        var reconstructed = SerializableWrapperBlob.ToWrapperBlob(
+            RoundTrip(SerializableWrapperBlob.FromWrapperBlob(blob)));
+
+        reconstructed.DisplayName.Should().Be("Acme Studio");
+        reconstructed.Publisher.Should().Be("Acme, Inc.");
+        reconstructed.Version.Should().Be("3.2.0");
+        reconstructed.EstimatedSizeBytes.Should().Be(123_456_789L);
+    }
+
+    [Fact]
     public void Brand_token_maps_and_assets_roundtrip()
     {
         var back = RoundTrip(new SerializableWrapperBlob

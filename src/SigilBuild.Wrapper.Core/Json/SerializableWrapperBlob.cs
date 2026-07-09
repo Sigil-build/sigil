@@ -102,7 +102,14 @@ internal sealed record SerializableWrapperBlob
             Scope:        s.Scope,
             Options:      ConvertOptions(s.Options),
             AppName:      s.AppName,
-            InstallDir:   s.InstallDir);
+            InstallDir:   s.InstallDir,
+            // T10: real ARP fields threaded into the in-memory blob so
+            // InstallSession.PersistCompletion registers the actual
+            // name/version/publisher/size instead of the placeholders.
+            DisplayName:        s.DisplayName,
+            Publisher:          s.Publisher,
+            Version:            s.Version,
+            EstimatedSizeBytes: s.EstimatedSizeBytes ?? 0);
     }
 
     public static SerializableWrapperBlob FromWrapperBlob(WrapperBlob blob)
@@ -120,6 +127,13 @@ internal sealed record SerializableWrapperBlob
             Options      = SerializeOptions(blob.Options),
             AppName      = blob.AppName,
             InstallDir   = blob.InstallDir,
+            // T10: carry the real ARP fields onto the wire DTO. A zero size is
+            // emitted as null so a blob with no computed footprint round-trips to
+            // the same "unset" state (matching the DisplayName/Version/Publisher nulls).
+            DisplayName        = blob.DisplayName,
+            Publisher          = blob.Publisher,
+            Version            = blob.Version,
+            EstimatedSizeBytes = blob.EstimatedSizeBytes == 0 ? null : blob.EstimatedSizeBytes,
         };
     }
 

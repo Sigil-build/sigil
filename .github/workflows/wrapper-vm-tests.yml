@@ -110,3 +110,44 @@ jobs:
           dotnet test tests/SigilBuild.Wrapper.IntegrationTests/SigilBuild.Wrapper.IntegrationTests.csproj `
             --filter "Category=UninstallSurvivability" `
             --logger "trx;LogFileName=wrapper-vm-tests-uninstall-survive.trx"
+
+      # T10 — real ARP registration fields. After a /silent install the Add/Remove
+      # Programs entry must show the REAL manifest.App.* values in the scope-correct
+      # hive, not the former AppId / "1.0.0" / "Unknown" / 0 placeholders. This is the
+      # real-registry assertion the unit tests (which run the packager + engine in
+      # isolation) defer to the VM:
+      #   1. Pack a fixture whose manifest sets a distinct App.Name / App.Version /
+      #      App.Publisher, run its Setup.exe /silent (per-user scope).
+      #   2. Read HKCU\...\Uninstall\<AppId> and assert DisplayName == App.Name,
+      #      DisplayVersion == App.Version, Publisher == App.Publisher, and
+      #      EstimatedSize (DWORD, KB) > 0 — i.e. the uncompressed payload footprint
+      #      threaded through the blob (ExeWrapperPackager.ComputeInstalledSizeBytes).
+      #   3. For a /allusers install, assert the same values land in HKLM instead.
+      - name: T10 real-ARP registration values
+        shell: pwsh
+        env:
+          SIGIL_VM_ARP_VALUES: "1"
+        run: |
+          dotnet test tests/SigilBuild.Wrapper.IntegrationTests/SigilBuild.Wrapper.IntegrationTests.csproj `
+            --filter "Category=ArpValues" `
+            --logger "trx;LogFileName=wrapper-vm-tests-arp-values.trx"
+
+      # T10 — re-install / upgrade idempotency. Running the SAME Setup.exe /silent
+      # twice must not duplicate PATH entries, shortcuts, or ARP rows: the runtime
+      # detects the prior install (recorded state / ARP) and replays its recorded
+      # uninstall before the fresh install re-lays each mutation exactly once
+      # (uninstall-then-install, per T10). The unit test asserts this against a
+      # dedicated env var + temp shortcut dir; the VM step asserts it against the
+      # real machine PATH and real per-user shortcut/Start Menu folders end-to-end:
+      #   1. Pack a fixture Setup.exe that adds a PATH entry + a desktop shortcut.
+      #   2. Run it /silent twice in a row (per-user scope).
+      #   3. Assert the user PATH contains {install_dir}\bin EXACTLY ONCE, exactly one
+      #      .lnk exists, and exactly one HKCU ARP row is present afterwards.
+      - name: T10 double-install idempotency
+        shell: pwsh
+        env:
+          SIGIL_VM_DOUBLE_INSTALL: "1"
+        run: |
+          dotnet test tests/SigilBuild.Wrapper.IntegrationTests/SigilBuild.Wrapper.IntegrationTests.csproj `
+            --filter "Category=DoubleInstall" `
+            --logger "trx;LogFileName=wrapper-vm-tests-double-install.trx"

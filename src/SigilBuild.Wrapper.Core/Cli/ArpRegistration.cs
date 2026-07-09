@@ -4,13 +4,15 @@ using System;
 using System.Globalization;
 using System.Runtime.Versioning;
 using Microsoft.Win32;
+using SigilBuild.Core.Manifest;
 
 /// <summary>
 /// Writes and removes the per-app entry under
-/// <c>HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall</c> so the
-/// installation surfaces in Windows' "Add or Remove Programs" UI. The
-/// wrapper exe is the same binary the OS calls back into for uninstall —
-/// see <see cref="BuildUninstallString"/>.
+/// <c>…\Microsoft\Windows\CurrentVersion\Uninstall</c> so the installation
+/// surfaces in Windows' "Add or Remove Programs" UI. The hive follows the
+/// install scope (T12): HKLM for a per-machine install, HKCU for a per-user
+/// install. The wrapper exe (the copied <c>uninstall.exe</c>) is the binary the
+/// OS calls back into for uninstall — see <see cref="BuildUninstallString"/>.
 /// </summary>
 /// <remarks>
 /// Writes target the 64-bit registry view by default (the .NET registry
@@ -19,11 +21,18 @@ using Microsoft.Win32;
 /// task — Task 19 only covers the headline x64 case.
 /// </remarks>
 [SupportedOSPlatform("windows")]
-[System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage(Justification = "Writes/removes HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall entries; exercised only via Windows installer integration tests.")]
+[System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage(Justification = "Writes/removes …\\Microsoft\\Windows\\CurrentVersion\\Uninstall entries; exercised only via Windows installer integration tests.")]
 internal static class ArpRegistration
 {
     private const string UninstallKeyRoot =
         @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
+
+    /// <summary>
+    /// The scope-correct ARP root key: HKLM for a per-machine install (visible to
+    /// all users, requires elevation), HKCU for a per-user install (no elevation).
+    /// </summary>
+    private static RegistryKey HiveFor(InstallScope scope) =>
+        scope == InstallScope.Machine ? Registry.LocalMachine : Registry.CurrentUser;
 
     /// <summary>Bundle of fields the OS reads from a per-app ARP key.</summary>
     /// <param name="AppId">Subkey name under <see cref="UninstallKeyRoot"/>.</param>
@@ -42,16 +51,16 @@ internal static class ArpRegistration
         long EstimatedSizeBytes);
 
     /// <summary>
-    /// Create or update the ARP key for <paramref name="entry"/>.
-    /// Requires HKLM write access — the wrapper's UAC manifest already
-    /// elevates the install run (Task 18+), so the call site is safe.
+    /// Create or update the ARP key for <paramref name="entry"/> in the
+    /// scope-correct hive (T12). A per-machine install writes HKLM (requires the
+    /// elevated relaunch); a per-user install writes HKCU (no elevation).
     /// </summary>
-    public static void Register(Entry entry)
+    public static void Register(Entry entry, InstallScope scope)
     {
         ArgumentNullException.ThrowIfNull(entry);
 
         var keyPath = $@"{UninstallKeyRoot}\{entry.AppId}";
-        using var key = Registry.LocalMachine.CreateSubKey(keyPath, writable: true)
+        using var key = HiveFor(scope).CreateSubKey(keyPath, writable: true)
             ?? throw new InvalidOperationException($"could not create ARP key '{keyPath}'");
 
         key.SetValue("DisplayName",     entry.DisplayName);
@@ -67,17 +76,17 @@ internal static class ArpRegistration
     }
 
     /// <summary>
-    /// Best-effort delete of the ARP key for <paramref name="appId"/>.
-    /// Missing keys are silently ignored.
+    /// Best-effort delete of the ARP key for <paramref name="appId"/> from the
+    /// scope-correct hive (T12). Missing keys are silently ignored.
     /// </summary>
-    public static void Remove(string appId)
+    public static void Remove(string appId, InstallScope scope)
     {
         ArgumentException.ThrowIfNullOrEmpty(appId);
         var keyPath = $@"{UninstallKeyRoot}\{appId}";
 #pragma warning disable CA1031 // Best-effort; a leftover ARP entry is preferable to a crash on uninstall.
         try
         {
-            Registry.LocalMachine.DeleteSubKeyTree(keyPath, throwOnMissingSubKey: false);
+            HiveFor(scope).DeleteSubKeyTree(keyPath, throwOnMissingSubKey: false);
         }
         catch
         {
@@ -89,11 +98,16 @@ internal static class ArpRegistration
     /// <summary>
     /// Construct the <c>UninstallString</c> the OS calls when the user clicks
     /// "Uninstall" in Add or Remove Programs. Points at <em>this</em> wrapper
-    /// exe with <c>/S /Uninstall</c> appended.
+    /// exe with <c>/S /Uninstall</c> and the scope flag appended (T12): a
+    /// per-machine install emits <c>/allusers</c>, a per-user install
+    /// <c>/currentuser</c>, so the uninstall re-resolves to the same scope it was
+    /// installed with regardless of the manifest default (HKLM vs HKCU ARP,
+    /// %ProgramData% vs %LocalAppData% state, elevation).
     /// </summary>
-    public static string BuildUninstallString(string wrapperExePath)
+    public static string BuildUninstallString(string wrapperExePath, InstallScope scope)
     {
         ArgumentException.ThrowIfNullOrEmpty(wrapperExePath);
-        return $"\"{wrapperExePath}\" /S /Uninstall";
+        var scopeFlag = scope == InstallScope.Machine ? "/allusers" : "/currentuser";
+        return $"\"{wrapperExePath}\" /S /Uninstall {scopeFlag}";
     }
 }

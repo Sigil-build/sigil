@@ -33,6 +33,22 @@ public static partial class Program
             return 64;
         }
 
+        // T12 — self-elevation. This MUST run before any scope-requiring work
+        // (payload extraction, HKLM/Program Files writes) and before the T18 GUI
+        // native bootstrap below. The host manifest requests `asInvoker`, so a
+        // per-user install never triggers UAC; only a resolved per-machine scope
+        // from a non-elevated process relaunches self with the `runas` verb,
+        // forwarding ALL original args, and propagates the elevated child's exit
+        // code as this process's exit code. Update mode is unsupported and never
+        // elevates — it falls through to the headless 64 path below.
+        if (OperatingSystem.IsWindows()
+            && session.RequiresElevation
+            && session.Mode != WrapperMode.Update)
+        {
+            AttachParentConsole();
+            return Elevation.RelaunchElevatedAndWait(args);
+        }
+
         // Headless whenever /silent or /verysilent is present, or a
         // non-interactive mode (uninstall / the unsupported update) is requested.
         // Interactive uninstall is Task T15; for now uninstall is headless-only.

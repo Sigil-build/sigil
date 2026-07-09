@@ -3,6 +3,7 @@ namespace SigilBuild.Wrapper.Engine;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using SigilBuild.Core.Manifest;
 using SigilBuild.Wrapper.Cli;
 
 /// <summary>
@@ -18,34 +19,41 @@ using SigilBuild.Wrapper.Cli;
 public sealed class UninstallEngine
 {
     /// <summary>
-    /// Drive the auto-derived uninstall flow for <paramref name="appId"/>.
+    /// Drive the auto-derived uninstall flow for <paramref name="appId"/> in the
+    /// scope it was installed under (T12). <paramref name="preferredScope"/> is the
+    /// scope resolved from the uninstall command line (the ARP
+    /// <c>UninstallString</c> carries <c>/allusers</c> or <c>/currentuser</c>); the
+    /// state store searches it first, then the recorded scope in the state file
+    /// drives ARP-hive and state-dir selection so the uninstall reverses exactly
+    /// what the install wrote.
     /// </summary>
     [System.Diagnostics.CodeAnalysis.SuppressMessage(
         "Performance",
         "CA1822:Mark members as static",
         Justification = "Public engine surface is intentionally instance-based, mirroring InstallEngine.")]
-    public async Task<EngineResult> RunAsync(string appId, CancellationToken ct = default)
+    public async Task<EngineResult> RunAsync(
+        string appId, InstallScope preferredScope = InstallScope.User, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(appId);
 
-        var journal = UninstallStateStore.TryLoad(appId);
-        if (journal is null)
+        var loaded = UninstallStateStore.TryLoad(appId, preferredScope);
+        if (loaded is null)
         {
             return EngineResult.Failed(
                 new RollbackJournal(),
-                $"no uninstall state found for '{appId}' (expected at {UninstallStateStore.PathFor(appId)})");
+                $"no uninstall state found for '{appId}' (expected at {UninstallStateStore.PathFor(appId, preferredScope)})");
         }
 
-        await journal.UndoAsync(ct).ConfigureAwait(false);
+        await loaded.Journal.UndoAsync(ct).ConfigureAwait(false);
 
-        // Remove the ARP entry we wrote on install. Best-effort: if the user
-        // already cleaned it manually, keep going.
+        // Remove the ARP entry we wrote on install, from the recorded scope's hive.
+        // Best-effort: if the user already cleaned it manually, keep going.
         if (OperatingSystem.IsWindows())
         {
-            ArpRegistration.Remove(appId);
+            ArpRegistration.Remove(appId, loaded.Scope);
         }
 
-        UninstallStateStore.Delete(appId);
-        return EngineResult.Ok(journal);
+        UninstallStateStore.Delete(appId, loaded.Scope);
+        return EngineResult.Ok(loaded.Journal);
     }
 }

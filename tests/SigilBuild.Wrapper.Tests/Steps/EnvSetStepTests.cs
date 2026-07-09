@@ -1,6 +1,7 @@
 namespace SigilBuild.Wrapper.Tests.Steps;
 
 using System;
+using System.Collections.Generic;
 using System.Runtime.Versioning;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -12,6 +13,21 @@ using Xunit;
 [SupportedOSPlatform("windows")]
 public class EnvSetStepTests
 {
+    [Theory]
+    // Explicit user/machine is authoritative regardless of install scope.
+    [InlineData("user", InstallScope.Machine, "user")]
+    [InlineData("machine", InstallScope.User, "machine")]
+    // "auto" (and empty) defer to the resolved install scope (T12).
+    [InlineData("auto", InstallScope.Machine, "machine")]
+    [InlineData("auto", InstallScope.User, "user")]
+    [InlineData("", InstallScope.Machine, "machine")]
+    public void ResolveEnvScope_defers_auto_to_the_install_scope(
+        string specScope, InstallScope installScope, string expected)
+    {
+        var ctx = new StepContext(new Dictionary<string, object?>(), scope: installScope);
+        EnvSetStep.ResolveEnvScope(specScope, ctx).Should().Be(expected);
+    }
+
     [Theory]
     [InlineData("set",     "old",       "new", ";", "new")]
     [InlineData("set",     null,        "new", ";", "new")]

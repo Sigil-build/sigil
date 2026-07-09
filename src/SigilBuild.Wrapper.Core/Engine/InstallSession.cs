@@ -32,40 +32,48 @@ public sealed class InstallSession
 {
     private readonly WrapperBlob _blob;
     private readonly ParsedCommandLine _parsed;
+    private readonly InstallScope _scope;
 
-    private InstallSession(WrapperBlob blob, ParsedCommandLine parsed)
+    private InstallSession(WrapperBlob blob, ParsedCommandLine parsed, InstallScope scope)
     {
         _blob = blob;
         _parsed = parsed;
+        _scope = scope;
     }
 
     /// <summary>
-    /// Build a session for the running exe: read the embedded blob, then parse
-    /// <paramref name="args"/> against its parameter schema.
+    /// Build a session for the running exe: read the embedded blob, parse
+    /// <paramref name="args"/> against its parameter schema, and resolve the
+    /// effective install scope (T12) from the manifest scope + <c>/allusers</c> /
+    /// <c>/currentuser</c> flags.
     /// </summary>
     /// <exception cref="UsageException">
-    /// Bad flag / undeclared parameter, or — in silent install mode — a required
-    /// parameter (no default) left unset.
+    /// Bad flag / undeclared parameter; a required parameter (no default) left
+    /// unset in silent install mode; or a scope flag that conflicts with a fixed
+    /// manifest scope (<c>/allusers</c> against <c>scope: user</c>, etc.).
     /// </exception>
     public static InstallSession Create(IReadOnlyList<string> args)
     {
         ArgumentNullException.ThrowIfNull(args);
         var blob = WrapperBlob.LoadFromSelf();
         var parsed = CommandLineParser.Parse(args, blob.Parameters);
-        return new InstallSession(blob, parsed);
+        var scope = ScopeResolver.Resolve(blob.Scope, parsed.Scope);
+        return new InstallSession(blob, parsed, scope);
     }
 
     /// <summary>
     /// Build a session directly from an in-memory blob + parsed command line,
     /// bypassing <see cref="WrapperBlob.LoadFromSelf"/>. Test-only seam: lets a
     /// test drive the real install lifecycle (payload extraction → engine →
-    /// temp cleanup) with a synthesised blob instead of a stamped exe.
+    /// temp cleanup) with a synthesised blob instead of a stamped exe. Resolves
+    /// scope the same way <see cref="Create"/> does.
     /// </summary>
     internal static InstallSession ForTesting(WrapperBlob blob, ParsedCommandLine parsed)
     {
         ArgumentNullException.ThrowIfNull(blob);
         ArgumentNullException.ThrowIfNull(parsed);
-        return new InstallSession(blob, parsed);
+        var scope = ScopeResolver.Resolve(blob.Scope, parsed.Scope);
+        return new InstallSession(blob, parsed, scope);
     }
 
     /// <summary>The requested operating mode (install / update / uninstall).</summary>
@@ -85,6 +93,23 @@ public sealed class InstallSession
 
     /// <summary>The full parsed command line (overrides, install-dir, scope) for GUI defaults.</summary>
     public ParsedCommandLine CommandLine => _parsed;
+
+    /// <summary>
+    /// The effective install scope (T12) resolved from the manifest scope and the
+    /// <c>/allusers</c> / <c>/currentuser</c> flags. Always
+    /// <see cref="InstallScope.User"/> or <see cref="InstallScope.Machine"/>.
+    /// </summary>
+    public InstallScope ResolvedScope => _scope;
+
+    /// <summary>
+    /// True when this install needs an elevated relaunch: a per-machine scope was
+    /// resolved but the current process is not elevated (T12). The entry point
+    /// relaunches itself via <see cref="Elevation.RelaunchElevatedAndWait"/> and
+    /// propagates the child's exit code. Per-user (and auto-user) installs are
+    /// always <c>false</c>, so they stay prompt-free.
+    /// </summary>
+    public bool RequiresElevation =>
+        _scope == InstallScope.Machine && !Elevation.IsProcessElevated();
 
     /// <summary>
     /// Run to completion without any UI. Routes by mode, echoing the engine's
@@ -200,7 +225,7 @@ public sealed class InstallSession
                 payloadRoot = payload.Root;
             }
 
-            var ctx = StepContext.From(_blob, _parsed, payloadRoot, _collectedValues);
+            var ctx = StepContext.From(_blob, _parsed, payloadRoot, _collectedValues, _scope);
             var result = await new InstallEngine().RunAsync(
                 preInstall: _blob.PreInstall,
                 installSteps: _blob.InstallSteps,
@@ -234,8 +259,10 @@ public sealed class InstallSession
     /// <remarks>
     /// The DisplayName/Version/Publisher/size values are the acknowledged
     /// placeholders (Task T10 threads the real <c>manifest.App.*</c> fields and
-    /// the packed size through the blob). No-ops for an un-stamped runtime (the
-    /// dev/smoke <see cref="WrapperBlob.Empty"/>) and off Windows.
+    /// the packed size through the blob). The ARP hive, state-store location, and
+    /// uninstall-string scope flag all follow the resolved scope (T12). No-ops for
+    /// an un-stamped runtime (the dev/smoke <see cref="WrapperBlob.Empty"/>) and
+    /// off Windows.
     /// </remarks>
     private void PersistCompletion(
         RollbackJournal journal,
@@ -251,19 +278,21 @@ public sealed class InstallSession
         }
 
         // Redact any secret value from the persisted uninstall state (decision 6).
-        UninstallStateStore.Save(_blob.AppId, journal, secretValues);
+        // The scope is recorded so uninstall runs in the same scope (T12).
+        UninstallStateStore.Save(_blob.AppId, journal, _scope, secretValues);
         ArpRegistration.Register(new ArpRegistration.Entry(
             AppId: _blob.AppId,
             DisplayName: _blob.AppId,
             DisplayVersion: "1.0.0",
             Publisher: "Unknown",
-            UninstallString: ArpRegistration.BuildUninstallString(Environment.ProcessPath ?? "."),
-            EstimatedSizeBytes: 0));
+            UninstallString: ArpRegistration.BuildUninstallString(Environment.ProcessPath ?? ".", _scope),
+            EstimatedSizeBytes: 0),
+            _scope);
     }
 
     private async Task<int> RunUninstallAsync(TextWriter error, CancellationToken ct)
     {
-        var result = await new UninstallEngine().RunAsync(_blob.AppId, ct).ConfigureAwait(false);
+        var result = await new UninstallEngine().RunAsync(_blob.AppId, _scope, ct).ConfigureAwait(false);
         if (!result.Success)
         {
             if (result.Error is not null)

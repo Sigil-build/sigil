@@ -64,7 +64,8 @@ internal sealed record SerializableWrapperBlob
             InstallSteps: ConvertSteps(s.InstallSteps),
             PreInstall:   ConvertSteps(s.PreInstall),
             PostInstall:  ConvertSteps(s.PostInstall),
-            UpdateSteps:  ConvertSteps(s.UpdateSteps));
+            UpdateSteps:  ConvertSteps(s.UpdateSteps),
+            Scope:        s.Scope);
     }
 
     public static SerializableWrapperBlob FromWrapperBlob(WrapperBlob blob)
@@ -78,6 +79,7 @@ internal sealed record SerializableWrapperBlob
             PreInstall   = SerializeSteps(blob.PreInstall),
             PostInstall  = SerializeSteps(blob.PostInstall),
             UpdateSteps  = SerializeSteps(blob.UpdateSteps),
+            Scope        = blob.Scope,
         };
     }
 

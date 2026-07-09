@@ -19,16 +19,31 @@ public sealed class StepContext
     public StepContext(
         System.Collections.Generic.IReadOnlyDictionary<string, object?> values,
         string? payloadRoot = null,
-        System.Collections.Generic.IReadOnlyList<string>? secretValues = null)
+        System.Collections.Generic.IReadOnlyList<string>? secretValues = null,
+        InstallScope scope = InstallScope.User)
     {
         System.ArgumentNullException.ThrowIfNull(values);
         _values = values;
         _secretValues = secretValues ?? System.Array.Empty<string>();
         PayloadRoot = payloadRoot;
+        Layout = ScopeLayout.For(scope);
     }
 
     public static StepContext Empty { get; } =
         new StepContext(new System.Collections.Generic.Dictionary<string, object?>());
+
+    /// <summary>
+    /// The resolved per-scope layout for this run (T12): install root, ARP hive,
+    /// PATH scope, and shortcut folders. Scope-varying steps
+    /// (<see cref="Steps.EnvSetStep"/>, <see cref="Steps.ShortcutCreateStep"/>)
+    /// consult this rather than hardcoding machine/user paths. Defaults to
+    /// per-user for a context built without an explicit scope (e.g.
+    /// <see cref="Empty"/> and the step unit tests).
+    /// </summary>
+    public ScopeLayout Layout { get; }
+
+    /// <summary>The resolved install scope (<see cref="InstallScope.User"/> / <see cref="InstallScope.Machine"/>).</summary>
+    public InstallScope Scope => Layout.Scope;
 
     /// <summary>
     /// The resolved string values of every <see cref="ParameterType.Secret"/>
@@ -91,11 +106,13 @@ public sealed class StepContext
         WrapperBlob blob,
         ParsedCommandLine parsed,
         string? payloadRoot = null,
-        System.Collections.Generic.IReadOnlyDictionary<string, string>? collected = null)
+        System.Collections.Generic.IReadOnlyDictionary<string, string>? collected = null,
+        InstallScope scope = InstallScope.User)
     {
         System.ArgumentNullException.ThrowIfNull(blob);
         System.ArgumentNullException.ThrowIfNull(parsed);
 
+        var layout = ScopeLayout.For(scope);
         var dict = new System.Collections.Generic.Dictionary<string, object?>(System.StringComparer.Ordinal);
         var secrets = new System.Collections.Generic.List<string>();
 
@@ -137,7 +154,14 @@ public sealed class StepContext
         // Env context (only the well-known PATH for now; full env exposure is policy-deferred).
         dict["env.PATH"] = System.Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
 
-        return new StepContext(dict, payloadRoot, secrets);
+        // Scope context (T12): the resolved install scope as a bare `scope`
+        // identifier (usable in a step `when: "scope == \"machine\""`) plus the
+        // per-scope install root as `scope.root` (the default install-dir base,
+        // T13). Both `scope` and `scope.root` mirror how T9 exposed `param.*`.
+        dict["scope"] = layout.Name;
+        dict["scope.root"] = layout.InstallRoot;
+
+        return new StepContext(dict, payloadRoot, secrets, layout.Scope);
     }
 
     /// <summary>

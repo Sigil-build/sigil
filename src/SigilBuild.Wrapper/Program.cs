@@ -20,6 +20,18 @@ internal static class Program
             // The console shell is always headless; the Avalonia host shares the
             // same InstallSession for its /silent path and its GUI wizard.
             var session = InstallSession.Create(args);
+
+            // T12 — self-elevation. A resolved per-machine scope from a
+            // non-elevated process relaunches self with the `runas` verb,
+            // forwarding all args, and propagates the elevated child's exit code.
+            // Per-user installs stay prompt-free. Mirrors the host entry path.
+            if (OperatingSystem.IsWindows()
+                && session.RequiresElevation
+                && session.Mode != WrapperMode.Update)
+            {
+                return Elevation.RelaunchElevatedAndWait(args);
+            }
+
             return await session.RunHeadlessAsync(Console.Out, Console.Error).ConfigureAwait(false);
         }
         catch (UsageException ex)

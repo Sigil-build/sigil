@@ -1,5 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <!-- T12: request `asInvoker` so a per-user install NEVER triggers UAC. A
+       per-machine scope (Program Files / HKLM / machine PATH) is handled by an
+       explicit self-elevation relaunch in Program.cs (ShellExecuteExW + `runas`),
+       not by requesting admin unconditionally here. -->
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
       <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/PM</dpiAware>

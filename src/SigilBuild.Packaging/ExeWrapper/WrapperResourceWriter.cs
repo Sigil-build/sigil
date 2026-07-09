@@ -19,9 +19,9 @@ namespace SigilBuild.Packaging.ExeWrapper;
 ///     <c>SIGIL_BLOB_V1</c> — the JSON-serialised step + parameter blob.
 ///   </item>
 ///   <item>
-///     <c>SIGIL_PAYLOAD_V1</c> — the user payload bytes (zip archive of the
-///     manifest's <c>SourceDirectory</c> for now; richer payload-extraction
-///     story lands with Tasks 15+).
+///     <c>SIGIL_PAYLOAD_V2</c> — the user payload bytes as the deterministic
+///     zstd container of the manifest's <c>SourceDirectory</c> (T6, see
+///     <c>SigilBuild.Wrapper.Codec.PayloadCodec</c>).
 ///   </item>
 ///   <item>
 ///     <c>SIGIL_RUNTIME_V1</c> — (T18) the host's native dependencies
@@ -50,7 +50,13 @@ internal static partial class WrapperResourceWriter
     private const ushort LangNeutral = 0;
 
     private const string BlobResourceName = "SIGIL_BLOB_V1";
-    private const string PayloadResourceName = "SIGIL_PAYLOAD_V1";
+
+    // T6: bumped from SIGIL_PAYLOAD_V1 (deterministic Deflate zip) to
+    // SIGIL_PAYLOAD_V2 (deterministic zstd container, see PayloadCodec). The
+    // decode side (WrapperBlob.LoadPayloadBytes / PayloadExtraction) is gated on
+    // this exact marker, so a V1 blob is treated as "no payload" rather than
+    // mis-parsed.
+    private const string PayloadResourceName = "SIGIL_PAYLOAD_V2";
 
     // T18: the host's native dependencies (Skia/ANGLE/HarfBuzz) archived so a
     // standalone stamped Setup.exe can extract + load them before the GUI starts.

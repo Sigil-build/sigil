@@ -22,6 +22,14 @@
     <ProjectReference Include="..\SigilBuild.Core\SigilBuild.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <!-- T6: pure-managed zstd codec for the embedded payload container. No native
+         libzstd, so it publishes clean under Native AOT + trimming with nothing to
+         bundle beside the AOT host. Homed here (not in Packaging) because both the
+         packager's encode and the host's decode call the one PayloadCodec, and the
+         future delta-update engine reuses it (spec section 5). -->
+    <PackageReference Include="ZstdSharp.Port" />
+  </ItemGroup>
+  <ItemGroup>
     <!-- The engine, step implementations, expression evaluator, JSON DTOs and
          CLI parser are intentionally internal — they are the wrapper runtime's
          private contract, not a third-party extension surface. Consumers that

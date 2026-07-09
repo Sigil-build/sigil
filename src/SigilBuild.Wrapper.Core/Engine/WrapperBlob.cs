@@ -62,16 +62,16 @@ internal sealed partial record WrapperBlob(
     }
 
     /// <summary>
-    /// Read the embedded payload bytes (<c>SIGIL_PAYLOAD_V1</c>) from the
+    /// Read the embedded payload bytes (<c>SIGIL_PAYLOAD_V2</c>) from the
     /// running executable. Returns an empty array when the resource isn't
     /// embedded, mirroring <see cref="LoadFromSelf"/>'s graceful-fallback
     /// behaviour for un-stamped runtimes.
     /// </summary>
     /// <remarks>
-    /// Payload extraction (uncompressing a zip into a temp dir for
-    /// <c>payload://</c>-prefixed file_copy sources) is an
-    /// <c>InstallEngine</c> concern landing in Tasks 15+. Task 14 only
-    /// exposes the raw bytes.
+    /// The bytes are the deterministic zstd container produced by
+    /// <c>SigilBuild.Wrapper.Codec.PayloadCodec</c>; <see cref="PayloadExtraction"/>
+    /// decodes them into a temp dir for <c>payload://</c>-prefixed file_copy
+    /// sources. This method only exposes the raw resource bytes.
     /// </remarks>
     public static byte[] LoadPayloadBytes()
     {
@@ -165,7 +165,12 @@ internal sealed partial record WrapperBlob(
     }
 
     private const string BlobResourceName = "SIGIL_BLOB_V1";
-    private const string PayloadResourceName = "SIGIL_PAYLOAD_V1";
+
+    // T6: the payload marker is bumped to SIGIL_PAYLOAD_V2 (deterministic zstd
+    // container, see SigilBuild.Wrapper.Codec.PayloadCodec). Gating the reader on
+    // the V2 name means a legacy V1 (Deflate zip) resource, or an un-stamped
+    // runtime, both surface as an empty payload — never as a mis-decoded archive.
+    private const string PayloadResourceName = "SIGIL_PAYLOAD_V2";
 
     // RT_RCDATA — application-defined raw data resource (winuser.h).
     private static readonly IntPtr RtRcData = (IntPtr)10;

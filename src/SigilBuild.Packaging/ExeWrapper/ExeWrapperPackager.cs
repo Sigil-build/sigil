@@ -9,6 +9,7 @@ using SigilBuild.Core.Diagnostics;
 using SigilBuild.Core.Manifest;
 using SigilBuild.Packaging.Common;
 using SigilBuild.Packaging.Installer;
+using SigilBuild.Wrapper.Codec;
 using SigilBuild.Wrapper.Engine;
 using SigilBuild.Wrapper.Json;
 
@@ -22,9 +23,9 @@ namespace SigilBuild.Packaging.ExeWrapper;
 /// <remarks>
 /// Task 14 implementation: the packager copies the stub runtime to
 /// <c>{OutputDirectory}/{App.Name}-Setup.exe</c>, then embeds the JSON
-/// step + parameter blob (<c>SIGIL_BLOB_V1</c>) and a zip archive of the
-/// source directory (<c>SIGIL_PAYLOAD_V1</c>) as Win32 <c>RT_RCDATA</c>
-/// resources via <see cref="WrapperResourceWriter"/>.
+/// step + parameter blob (<c>SIGIL_BLOB_V1</c>) and a deterministic zstd
+/// container of the source directory (<c>SIGIL_PAYLOAD_V2</c>, T6) as Win32
+/// <c>RT_RCDATA</c> resources via <see cref="WrapperResourceWriter"/>.
 /// </remarks>
 public sealed class ExeWrapperPackager : IPackager
 {
@@ -66,9 +67,10 @@ public sealed class ExeWrapperPackager : IPackager
         // with the wrapper runtime.
         var blobBytes = BuildBlobBytes(manifest, options.SourceDirectory, diagnostics);
 
-        // Build the SIGIL_PAYLOAD_V1 wire payload: a zip archive of the
-        // source directory. Richer payload-extraction (zstd, splitting,
-        // payload:// path resolution) lands with Tasks 15+.
+        // Build the SIGIL_PAYLOAD_V2 wire payload: the source directory packed
+        // into the deterministic zstd container (T6), decoded on the host side by
+        // PayloadExtraction. The codec is shared with the future delta-update
+        // engine (spec section 5).
         var payloadBytes = BuildPayloadBytes(options.SourceDirectory, ct);
 
         // T18: archive the host's staged native dependencies (Skia/ANGLE/HarfBuzz)
@@ -247,29 +249,33 @@ public sealed class ExeWrapperPackager : IPackager
         return arr;
     }
 
-    private static byte[] BuildPayloadBytes(string sourceDirectory, CancellationToken ct)
+    /// <summary>
+    /// Build the <c>SIGIL_PAYLOAD_V2</c> wire payload: the source directory
+    /// packed into the deterministic zstd container defined by
+    /// <see cref="PayloadCodec"/> (T6). Every file is enumerated, read, and handed
+    /// to the codec, which sorts entries by ordinal relative path and stores no
+    /// timestamps — so the container, and therefore the stamped Setup.exe, is
+    /// byte-identical across builds of the same input. The host decompresses the
+    /// same container via the same codec (see <c>PayloadExtraction</c>), and the
+    /// future delta-update engine reuses it (spec section 5).
+    /// </summary>
+    internal static byte[] BuildPayloadBytes(string sourceDirectory, CancellationToken ct)
     {
         if (string.IsNullOrEmpty(sourceDirectory) || !Directory.Exists(sourceDirectory))
         {
             return Array.Empty<byte>();
         }
 
-        using var ms = new MemoryStream();
-        using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
+        var root = Path.GetFullPath(sourceDirectory);
+        var entries = new List<PayloadEntry>();
+        foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
         {
-            var root = Path.GetFullPath(sourceDirectory);
-            foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
-            {
-                ct.ThrowIfCancellationRequested();
-                var rel = Path.GetRelativePath(root, file).Replace('\\', '/');
-                var entry = zip.CreateEntry(rel, CompressionLevel.Optimal);
-                entry.LastWriteTime = DeterministicMtime;
-                using var entryStream = entry.Open();
-                using var fs = File.OpenRead(file);
-                fs.CopyTo(entryStream);
-            }
+            ct.ThrowIfCancellationRequested();
+            var rel = Path.GetRelativePath(root, file).Replace('\\', '/');
+            entries.Add(new PayloadEntry(rel, File.ReadAllBytes(file)));
         }
-        return ms.ToArray();
+
+        return PayloadCodec.Encode(entries);
     }
 
     /// <summary>

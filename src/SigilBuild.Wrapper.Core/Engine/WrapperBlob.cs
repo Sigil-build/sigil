@@ -122,7 +122,8 @@ internal sealed partial record WrapperBlob(
             HeroBase64: s.HeroBase64,
             DisplayName: s.DisplayName,
             Publisher: s.Publisher,
-            Version: s.Version);
+            Version: s.Version,
+            SignDeclared: s.SignDeclared);
     }
 
     /// <summary>
@@ -270,7 +271,11 @@ public sealed record InstallerBrandData(
     string? HeroBase64,
     string? DisplayName,
     string? Publisher,
-    string? Version);
+    string? Version,
+    // T11 / decision 7: whether the artifact declared a verified `sign` block.
+    // Combined with WinVerifyTrust(self) to gate the trust line (see
+    // InstallerTrustLoader). Appended last to keep the record backward-compatible.
+    bool SignDeclared = false);
 
 /// <summary>
 /// Public entry point for the host to read brand data from the stamped exe's
@@ -315,4 +320,47 @@ public static class InstallerLicenseLoader
     /// <c>SIGIL_BLOB_V1</c> resource, or <c>null</c> when none is present.
     /// </summary>
     public static string? LoadFromSelf() => WrapperBlob.LoadLicenseFromSelf();
+}
+
+/// <summary>
+/// Public entry point for the host to resolve the verified-signature-gated trust
+/// line (T11 / decision 7). The "Signed by {publisher}" line renders ONLY when the
+/// manifest declared a <c>sign</c> block (<c>SignDeclared</c>, carried in the blob)
+/// AND the running exe's Authenticode signature verifies via <see cref="AuthenticodeVerifier"/>
+/// — so an unsigned artifact, or a signed-then-tampered / re-stamped one whose
+/// signature no longer validates, shows no trust line. The neutral publisher name
+/// (rail) is always shown; the trust line is the additional, security-bearing label.
+/// Parallels <see cref="InstallerBrandLoader"/> — the Avalonia host consumes it
+/// without depending on the engine's internal types.
+/// </summary>
+public static class InstallerTrustLoader
+{
+    /// <summary>
+    /// The pure trust-line decision, factored out so the three-case gating logic
+    /// (signed → line; unsigned → none; signed-then-tampered → none) is unit-testable
+    /// by faking <paramref name="signatureValid"/> without a real Authenticode cert.
+    /// Returns the trust-line label when <paramref name="signDeclared"/> AND
+    /// <paramref name="signatureValid"/>, otherwise <c>null</c> (no trust line).
+    /// </summary>
+    public static string? ResolveTrustLine(bool signDeclared, bool signatureValid, string? publisher)
+        => signDeclared && signatureValid
+            ? (string.IsNullOrWhiteSpace(publisher) ? "Signed" : $"Signed by {publisher}")
+            : null;
+
+    /// <summary>
+    /// Full self-check: reads <c>SignDeclared</c> + publisher from the running exe's
+    /// embedded blob, verifies the exe's OWN Authenticode signature via
+    /// <see cref="AuthenticodeVerifier.VerifySelf"/>, and resolves the trust line.
+    /// Returns <c>null</c> for an un-stamped runtime, an unsigned artifact, or a
+    /// signature that fails to verify. The GUI host calls this once at startup.
+    /// </summary>
+    public static string? ResolveFromSelf()
+    {
+        var brand = WrapperBlob.LoadBrandFromSelf();
+        var signDeclared = brand?.SignDeclared ?? false;
+        // Short-circuit the P/Invoke when the artifact never declared signing —
+        // no point verifying a signature that was never intended to exist.
+        var valid = signDeclared && AuthenticodeVerifier.VerifySelf();
+        return ResolveTrustLine(signDeclared, valid, brand?.Publisher);
+    }
 }

@@ -147,6 +147,14 @@ public sealed class ExeWrapperPackager : IPackager
             // the stamped host shows the License screen. Missing/unreadable/empty
             // → null + a non-fatal diagnostic (the screen is simply omitted).
             LicenseText = ReadLicenseText(manifest.Installer?.License, sourceDirectory, diagnostics),
+            // T11 / decision 7: mark the artifact as INTENDED to be signed iff the
+            // manifest declares a real `sign` block. The trust line is gated at
+            // install time on SignDeclared && WinVerifyTrust(self) == valid — never
+            // on App.publisher alone — so an unsigned pack (or one whose signature
+            // is later invalidated) never shows "Signed by …". Pipeline ordering:
+            // pack stamps resources FIRST (invalidating any prior signature), then
+            // `sigil sign` signs the finished Setup.exe LAST.
+            SignDeclared = manifest.Sign is { Provider: not SignProvider.None },
         };
 
         var json = System.Text.Json.JsonSerializer.Serialize(

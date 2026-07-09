@@ -44,6 +44,14 @@ public class SerializableWrapperBlobRoundtripTests
         back.HeroBase64.Should().BeNull();
         back.LicenseText.Should().BeNull();
         back.Screens.Should().BeEmpty();
+        back.SignDeclared.Should().BeFalse();
+    }
+
+    [Fact]
+    public void SignDeclared_roundtrips()
+    {
+        RoundTrip(new SerializableWrapperBlob { SignDeclared = true }).SignDeclared.Should().BeTrue();
+        RoundTrip(new SerializableWrapperBlob { SignDeclared = false }).SignDeclared.Should().BeFalse();
     }
 
     [Fact]

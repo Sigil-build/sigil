@@ -33,6 +33,19 @@ internal sealed record SerializableWrapperBlob
     /// <summary>Resolved install scope (T12). Defaults to <see cref="InstallScope.Auto"/>.</summary>
     public InstallScope Scope { get; init; } = InstallScope.Auto;
 
+    // --- Signing (T11 / decision 7). ---
+
+    /// <summary>
+    /// True iff the manifest declared a verified <c>sign</c> block — i.e. the
+    /// artifact is INTENDED to be Authenticode-signed. Set by the packager, never
+    /// derived from <c>App.publisher</c> alone. The runtime gates the "Signed by
+    /// {publisher}" trust line on <c>SignDeclared &amp;&amp; WinVerifyTrust(self) == valid</c>,
+    /// so a tampered or re-stamped exe (signature invalid) drops the line even when
+    /// this flag is set. A host-rendering concern, delivered like the brand fields
+    /// (side-channel via the blob, not carried on the in-memory <see cref="WrapperBlob"/>).
+    /// </summary>
+    public bool SignDeclared { get; init; }
+
     // --- Branding (T7). Derived at pack time (Avalonia cannot color-mix at
     //     runtime), delivered inside the blob rather than a sidecar file. ---
 

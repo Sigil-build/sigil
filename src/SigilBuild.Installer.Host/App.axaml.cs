@@ -75,6 +75,12 @@ public partial class App : Application
                 // imply acceptance.
                 _vm.LoadLicense(InstallerLicenseLoader.LoadFromSelf());
 
+                // T10: surface the reinstall notice when a prior install of this app
+                // is already recorded in the resolved scope. The engine performs the
+                // v1 uninstall-then-install itself (idempotent); the wizard only tells
+                // the user what continuing will do.
+                _vm.SetExistingInstall(session.ExistingInstallDetected);
+
                 // T13: seed the Destination screen from the session — the scope-aware
                 // default install dir (honoring /D= + the manifest install_dir), and
                 // whether the user/machine scope toggle shows (manifest `scope: auto`).

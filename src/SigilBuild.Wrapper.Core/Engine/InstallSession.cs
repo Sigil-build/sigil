@@ -255,6 +255,27 @@ public sealed class InstallSession
     /// </summary>
     public bool ScopeIsSelectable => _blob.Scope == InstallScope.Auto;
 
+    /// <summary>
+    /// True when a prior install of this <see cref="AppId"/> is already recorded in
+    /// the resolved scope (T10 re-install / upgrade detection). The wizard surfaces a
+    /// repair/reinstall notice (v1: uninstall-then-install), and every install path
+    /// (silent and GUI) first replays the recorded uninstall so a second consecutive
+    /// install re-lays each mutation exactly once — no duplicate PATH entries,
+    /// shortcuts, or ARP rows. Always <c>false</c> off Windows and for the un-stamped
+    /// <see cref="WrapperBlob.Empty"/> runtime.
+    /// </summary>
+    public bool ExistingInstallDetected
+    {
+        get
+        {
+            if (ReferenceEquals(_blob, WrapperBlob.Empty) || !OperatingSystem.IsWindows())
+            {
+                return false;
+            }
+            return UninstallStateStore.TryLoad(_blob.AppId, _scope) is not null;
+        }
+    }
+
     public Task<InstallOutcome> RunInstallAsync(IProgress<StepProgress>? progress, CancellationToken ct = default)
         => RunInstallCoreAsync(WrapperBlob.LoadPayloadBytes(), progress, ct);
 
@@ -319,6 +340,14 @@ public sealed class InstallSession
     {
         ArgumentNullException.ThrowIfNull(payloadBytes);
 
+        // T10 re-install / upgrade idempotency: if a prior install of this AppId is
+        // already recorded (in the resolved scope), replay its recorded uninstall
+        // BEFORE the fresh install. This reverses the earlier PATH append, shortcut,
+        // and ARP row so the reinstall re-lays each exactly once — no duplication —
+        // and applies uniformly to both the /silent and wizard paths (v1:
+        // uninstall-then-install, per T10). No-op when no prior install exists.
+        await PerformReinstallCleanupAsync(ct).ConfigureAwait(false);
+
         PayloadExtraction? payload = null;
         try
         {
@@ -356,15 +385,40 @@ public sealed class InstallSession
     }
 
     /// <summary>
+    /// T10 re-install / upgrade cleanup: when a prior install of this AppId is
+    /// recorded in the resolved scope, drive <see cref="UninstallEngine"/> to replay
+    /// its persisted journal in reverse (restoring the prior PATH, deleting the prior
+    /// shortcut / files, removing the prior ARP row + state) before the fresh install
+    /// re-applies everything. Because the earlier PATH append is undone first, the
+    /// reinstall appends the install dir exactly once — the double-install case no
+    /// longer duplicates PATH entries, shortcuts, or ARP rows. A best-effort step: a
+    /// failed prior-uninstall (e.g. missing state) must not block the reinstall, so
+    /// the outcome is intentionally ignored. No-op for the un-stamped runtime and
+    /// off Windows.
+    /// </summary>
+    private async Task PerformReinstallCleanupAsync(CancellationToken ct)
+    {
+        if (!ExistingInstallDetected)
+        {
+            return;
+        }
+        // UndoAsync + ARP.Remove + state delete. Progress is suppressed — the
+        // reinstall's own progress stream begins with the fresh install below.
+        await new UninstallEngine()
+            .RunAsync(_blob.AppId, _scope, progress: null, ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Shared install-completion helper: on a successful install, snapshot the
     /// rollback journal to the state store and register the ARP entry so the
     /// app appears in Add/Remove Programs. Used by both the console and GUI
     /// paths.
     /// </summary>
     /// <remarks>
-    /// The DisplayName/Version/Publisher/size values are the acknowledged
-    /// placeholders (Task T10 threads the real <c>manifest.App.*</c> fields and
-    /// the packed size through the blob). The ARP hive, state-store location, and
+    /// The DisplayName/Version/Publisher/size values are the real
+    /// <c>manifest.App.*</c> fields and the packed size, threaded through the blob
+    /// at pack time (T10). The ARP hive, state-store location, and
     /// uninstall-string scope flag all follow the resolved scope (T12). The
     /// <c>UninstallString</c> points at the copied <c>uninstall.exe</c> (T15), never
     /// at <see cref="Environment.ProcessPath"/> — so uninstall survives deletion of
@@ -397,13 +451,17 @@ public sealed class InstallSession
         // AFTER the uninstaller-copy step is journaled so the RemoveUninstaller
         // record is part of the persisted, replay-on-uninstall journal.
         UninstallStateStore.Save(_blob.AppId, journal, _scope, secretValues);
+        // T10: register the REAL manifest.App.* fields + packed size threaded through
+        // the blob, not the former AppId / "1.0.0" / "Unknown" / 0 placeholders. The
+        // fallbacks only fire for a (theoretical) blob that omitted them — a real
+        // packed blob always carries them.
         ArpRegistration.Register(new ArpRegistration.Entry(
             AppId: _blob.AppId,
-            DisplayName: _blob.AppId,
-            DisplayVersion: "1.0.0",
-            Publisher: "Unknown",
+            DisplayName: string.IsNullOrWhiteSpace(_blob.DisplayName) ? _blob.AppId : _blob.DisplayName,
+            DisplayVersion: string.IsNullOrWhiteSpace(_blob.Version) ? "0.0.0" : _blob.Version,
+            Publisher: string.IsNullOrWhiteSpace(_blob.Publisher) ? "Unknown" : _blob.Publisher,
             UninstallString: ArpRegistration.BuildUninstallString(uninstallerPath, _scope),
-            EstimatedSizeBytes: 0),
+            EstimatedSizeBytes: _blob.EstimatedSizeBytes),
             _scope);
     }
 

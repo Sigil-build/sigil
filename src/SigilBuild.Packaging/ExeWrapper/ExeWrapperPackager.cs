@@ -131,7 +131,17 @@ public sealed class ExeWrapperPackager : IPackager
             // runtime resolves the effective install dir (default / manifest / /D=)
             // and the {install_dir} token in step paths + expressions.
             AppName: manifest.App.Name,
-            InstallDir: manifest.Installer?.InstallDir);
+            InstallDir: manifest.Installer?.InstallDir,
+            // T10: the real Add/Remove Programs fields. DisplayName/Publisher/Version
+            // come straight from manifest.App.*; EstimatedSizeBytes is the installed
+            // footprint estimate — the uncompressed payload size (the bytes that land
+            // on disk once the zstd container is extracted), which is what ARP's size
+            // column is meant to reflect. The runtime registers these instead of the
+            // former AppId / "1.0.0" / "Unknown" / 0 placeholders.
+            DisplayName: manifest.App.Name,
+            Publisher: manifest.App.Publisher,
+            Version: manifest.App.Version,
+            EstimatedSizeBytes: ComputeInstalledSizeBytes(sourceDirectory));
 
         // T7: derive the full light/dark palette at pack time and carry it, plus
         // the base64 logo/hero bytes, inside the blob so the stamped exe renders
@@ -293,6 +303,30 @@ public sealed class ExeWrapperPackager : IPackager
             arr[i++] = kv.Value;
         }
         return arr;
+    }
+
+    /// <summary>
+    /// Estimate the installed footprint (T10) reported to Add/Remove Programs as
+    /// <c>EstimatedSize</c>. Defined as the sum of the <em>uncompressed</em> payload
+    /// file sizes — the bytes that actually land on disk once the zstd container is
+    /// extracted — which is a truer reflection of the on-disk footprint than the
+    /// compressed Setup.exe size. Deterministic (file order does not affect the sum),
+    /// and <c>0</c> when the source directory is absent/empty. <c>ArpRegistration</c>
+    /// converts bytes → KB for the OS.
+    /// </summary>
+    internal static long ComputeInstalledSizeBytes(string sourceDirectory)
+    {
+        if (string.IsNullOrEmpty(sourceDirectory) || !Directory.Exists(sourceDirectory))
+        {
+            return 0;
+        }
+
+        long total = 0;
+        foreach (var file in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories))
+        {
+            total += new FileInfo(file).Length;
+        }
+        return total;
     }
 
     /// <summary>

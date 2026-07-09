@@ -72,6 +72,46 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
 
     public BrandTokens Brand { get; }
 
+    // T10: a prior install of this app was detected (ARP/state). The wizard shows a
+    // reinstall notice on the Welcome screen; the engine performs uninstall-then-
+    // install so the reinstall stays idempotent (no duplicate PATH/shortcuts/ARP).
+    private bool _existingInstallDetected;
+
+    /// <summary>
+    /// True when the session found a prior install of this app in the resolved scope
+    /// (T10). Drives the Welcome-screen reinstall notice; wired by the host from
+    /// <c>InstallSession.ExistingInstallDetected</c>. The v1 repair/reinstall flow is
+    /// uninstall-then-install, performed by the engine — this flag only informs the user.
+    /// </summary>
+    public bool ExistingInstallDetected
+    {
+        get => _existingInstallDetected;
+        private set
+        {
+            if (_existingInstallDetected != value)
+            {
+                _existingInstallDetected = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(ReinstallNotice));
+            }
+        }
+    }
+
+    /// <summary>
+    /// The Welcome-screen notice shown when <see cref="ExistingInstallDetected"/> is
+    /// set — empty otherwise. Explains that continuing reinstalls the app (the current
+    /// version is removed first), the v1 repair/reinstall behaviour (T10).
+    /// </summary>
+    public string ReinstallNotice => _existingInstallDetected
+        ? $"{Brand.AppName} is already installed. Continuing will reinstall it — the current version is removed first."
+        : string.Empty;
+
+    /// <summary>
+    /// Wire the reinstall notice (T10). Called by the host from the session's
+    /// <c>ExistingInstallDetected</c>. Idempotent; safe to call before the flow renders.
+    /// </summary>
+    public void SetExistingInstall(bool detected) => ExistingInstallDetected = detected;
+
     /// <summary>The declared custom screen currently shown (T9), or null off a custom screen.</summary>
     private CustomScreenViewModel? _currentCustomScreen;
     public CustomScreenViewModel? CurrentCustomScreen

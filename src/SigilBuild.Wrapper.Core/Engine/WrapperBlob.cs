@@ -33,7 +33,18 @@ internal sealed partial record WrapperBlob(
     // reference {scope_root} / {app.*}), null when the manifest omits it so the
     // default `<scope root>\<App.Name>` applies. Both feed InstallDirResolver.
     string? AppName = null,
-    string? InstallDir = null)
+    string? InstallDir = null,
+    // T10: the real Add/Remove Programs fields, sourced at pack time from
+    // manifest.App.* (DisplayName ← App.Name, Publisher ← App.Publisher,
+    // Version ← App.Version) and the packed size (EstimatedSizeBytes ← the
+    // uncompressed payload footprint). Threaded into the ArpRegistration.Register
+    // call by InstallSession.PersistCompletion — replacing the former
+    // AppId / "1.0.0" / "Unknown" / 0 placeholders. Null/0 for an un-stamped
+    // runtime, where PersistCompletion no-ops anyway.
+    string? DisplayName = null,
+    string? Publisher = null,
+    string? Version = null,
+    long EstimatedSizeBytes = 0)
 {
     /// <summary>
     /// Empty sentinel blob: well-known <c>AppId</c> placeholder and zero-length

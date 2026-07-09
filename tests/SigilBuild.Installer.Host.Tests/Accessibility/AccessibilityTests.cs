@@ -17,9 +17,15 @@ public class AccessibilityTests
     public void Navigation_CanProgressThroughAllSteps_Without_DeadEnd()
     {
         var vm = new InstallerViewModel(new BrandTokens());
+        vm.LoadLicense("Example EULA text."); // T14: opt the License screen into the flow.
 
-        // Welcome → License
+        // Welcome → InstallOptions (destination)
         vm.CurrentStep.Should().Be(InstallerStep.Welcome);
+        vm.CanGoNext.Should().BeTrue();
+        vm.Next();
+
+        // InstallOptions (destination) → License, per decision 4
+        vm.CurrentStep.Should().Be(InstallerStep.InstallOptions);
         vm.CanGoNext.Should().BeTrue();
         vm.Next();
 
@@ -27,11 +33,6 @@ public class AccessibilityTests
         vm.CurrentStep.Should().Be(InstallerStep.License);
         vm.CanGoNext.Should().BeTrue();   // button is enabled; the guard lives in Next()
         vm.LicenseAccepted = true;
-        vm.Next();
-
-        // InstallOptions → Installing
-        vm.CurrentStep.Should().Be(InstallerStep.InstallOptions);
-        vm.CanGoNext.Should().BeTrue();
         vm.Next();
 
         // Installing — back and next are both locked during installation
@@ -50,20 +51,21 @@ public class AccessibilityTests
     public void Navigation_BackTraversal_ReachesWelcome()
     {
         var vm = new InstallerViewModel(new BrandTokens());
+        vm.LoadLicense("Example EULA text."); // T14: License screen in the flow.
         vm.LicenseAccepted = true;
 
-        // Walk forward to InstallOptions
-        vm.Next(); // Welcome → License
-        vm.Next(); // License → InstallOptions
+        // Walk forward to License (decision-4 flow: Welcome → Location → License).
+        vm.Next(); // Welcome → InstallOptions
+        vm.Next(); // InstallOptions → License
 
-        vm.CurrentStep.Should().Be(InstallerStep.InstallOptions);
-        vm.CanGoBack.Should().BeTrue();
-
-        vm.Back(); // InstallOptions → License
         vm.CurrentStep.Should().Be(InstallerStep.License);
         vm.CanGoBack.Should().BeTrue();
 
-        vm.Back(); // License → Welcome
+        vm.Back(); // License → InstallOptions
+        vm.CurrentStep.Should().Be(InstallerStep.InstallOptions);
+        vm.CanGoBack.Should().BeTrue();
+
+        vm.Back(); // InstallOptions → Welcome
         vm.CurrentStep.Should().Be(InstallerStep.Welcome);
         vm.CanGoBack.Should().BeFalse();
     }

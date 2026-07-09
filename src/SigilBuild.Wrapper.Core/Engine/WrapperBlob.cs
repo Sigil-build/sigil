@@ -132,6 +132,25 @@ internal sealed partial record WrapperBlob(
         return result;
     }
 
+    /// <summary>
+    /// Read the embedded license text (T14) from the running exe's
+    /// <c>SIGIL_BLOB_V1</c> resource. Returns <c>null</c> for an un-stamped
+    /// runtime, a blob with no license, or an empty license. Kept separate from
+    /// <see cref="LoadFromSelf"/> because the in-memory <see cref="WrapperBlob"/>
+    /// record does not carry license text — it is a host-rendering concern
+    /// delivered via <see cref="SerializableWrapperBlob"/>.
+    /// </summary>
+    internal static string? LoadLicenseFromSelf()
+    {
+        var bytes = TryReadResource(BlobResourceName);
+        if (bytes is null) return null;
+
+        var json = System.Text.Encoding.UTF8.GetString(bytes);
+        var s = System.Text.Json.JsonSerializer.Deserialize(
+            json, WrapperBlobJsonContext.Default.SerializableWrapperBlob);
+        return string.IsNullOrWhiteSpace(s?.LicenseText) ? null : s!.LicenseText;
+    }
+
     private const string BlobResourceName = "SIGIL_BLOB_V1";
     private const string PayloadResourceName = "SIGIL_PAYLOAD_V1";
 
@@ -255,4 +274,21 @@ public static class InstallerScreensLoader
     /// </summary>
     public static System.Collections.Generic.IReadOnlyList<InstallerScreen> LoadFromSelf()
         => WrapperBlob.LoadScreensFromSelf();
+}
+
+/// <summary>
+/// Public entry point for the host to read the embedded license text (T14) from
+/// the stamped exe's blob without depending on the engine's internal wire DTOs.
+/// Returns <c>null</c> when no license is embedded (un-stamped runtime, or a
+/// manifest with no <c>installer.license</c>) — the host then omits the License
+/// screen entirely. Parallels <see cref="InstallerScreensLoader"/> /
+/// <see cref="InstallerBrandLoader"/>.
+/// </summary>
+public static class InstallerLicenseLoader
+{
+    /// <summary>
+    /// Read the embedded license text from the running exe's
+    /// <c>SIGIL_BLOB_V1</c> resource, or <c>null</c> when none is present.
+    /// </summary>
+    public static string? LoadFromSelf() => WrapperBlob.LoadLicenseFromSelf();
 }

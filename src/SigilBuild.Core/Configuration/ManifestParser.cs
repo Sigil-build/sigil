@@ -161,7 +161,12 @@ public static class ManifestParser
                 Hero: GetScalar(brand, "hero"),
                 PrimaryColor: GetScalar(brand, "primaryColor"),
                 AccentColor: GetScalar(brand, "accentColor")),
-            Screens: screens);
+            Screens: screens,
+            // T14: capture the license path string only. The actual file read +
+            // embed happens at PACK time (ExeWrapperPackager.BuildBlobBytes), which
+            // can resolve it against the pack source dir and emit a diagnostic if
+            // the file is missing/unreadable/empty.
+            License: GetScalar(node, "license"));
     }
 
     // Interpolation tokens permitted in a screen Title / Subtitle (T9). Kept in

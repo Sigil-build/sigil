@@ -53,10 +53,15 @@ public sealed class ExeWrapperPackager : IPackager
 
         ct.ThrowIfCancellationRequested();
 
+        // Diagnostics surfaced during blob construction (T14: a missing /
+        // unreadable / empty license file is a non-fatal warning — the pack
+        // succeeds and the License screen is simply omitted).
+        var diagnostics = new List<Diagnostic>();
+
         // Build the SIGIL_BLOB_V1 wire payload: serialize a
         // SerializableWrapperBlob via the source-generated context shared
         // with the wrapper runtime.
-        var blobBytes = BuildBlobBytes(manifest, options.SourceDirectory);
+        var blobBytes = BuildBlobBytes(manifest, options.SourceDirectory, diagnostics);
 
         // Build the SIGIL_PAYLOAD_V1 wire payload: a zip archive of the
         // source directory. Richer payload-extraction (zstd, splitting,
@@ -73,10 +78,11 @@ public sealed class ExeWrapperPackager : IPackager
         var size = new FileInfo(outputPath).Length;
 
         var artifact = new PackedArtifact(outputPath, sha256, size);
-        return new PackResult(artifact, Array.Empty<Diagnostic>());
+        return new PackResult(artifact, diagnostics);
     }
 
-    internal static byte[] BuildBlobBytes(SigilManifest manifest, string sourceDirectory)
+    internal static byte[] BuildBlobBytes(
+        SigilManifest manifest, string sourceDirectory, ICollection<Diagnostic>? diagnostics = null)
     {
         var parameters = manifest.Parameters is null
             ? Array.Empty<ParameterDefinition>()
@@ -108,6 +114,10 @@ public sealed class ExeWrapperPackager : IPackager
             // stamped host can render them. Parameters are already populated by
             // FromWrapperBlob; screens live only on the manifest's InstallerSection.
             Screens = ScreensToArray(manifest.Installer?.Screens),
+            // T14: read the manifest-referenced license file and embed its text so
+            // the stamped host shows the License screen. Missing/unreadable/empty
+            // → null + a non-fatal diagnostic (the screen is simply omitted).
+            LicenseText = ReadLicenseText(manifest.Installer?.License, sourceDirectory, diagnostics),
         };
 
         var json = System.Text.Json.JsonSerializer.Serialize(
@@ -134,6 +144,64 @@ public sealed class ExeWrapperPackager : IPackager
             return null;
 
         return Convert.ToBase64String(File.ReadAllBytes(resolved));
+    }
+
+    /// <summary>
+    /// Reads the manifest-referenced license file (<c>installer.license</c>, T14)
+    /// as text, resolving a relative path against the pack source directory.
+    /// Returns <c>null</c> — and appends a non-fatal <see cref="DiagnosticCodes.LicenseFileUnreadable"/>
+    /// warning to <paramref name="diagnostics"/> — when the path is set but the
+    /// file is missing, unreadable, or empty. Per T14 this never hard-fails the
+    /// pack; the License screen is simply omitted. Plain text only (RTF-as-text v1;
+    /// no RTF parsing).
+    /// </summary>
+    private static string? ReadLicenseText(
+        string? path, string sourceDirectory, ICollection<Diagnostic>? diagnostics)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return null;
+
+        var resolved = Path.IsPathRooted(path)
+            ? path
+            : Path.GetFullPath(Path.Combine(sourceDirectory ?? string.Empty, path));
+
+        string text;
+        try
+        {
+            if (!File.Exists(resolved))
+            {
+                ReportLicense(diagnostics,
+                    $"installer license file not found: '{path}' (resolved to '{resolved}') — the License screen will be omitted");
+                return null;
+            }
+
+            text = File.ReadAllText(resolved);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            ReportLicense(diagnostics,
+                $"installer license file could not be read: '{path}' — {ex.Message}; the License screen will be omitted");
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            ReportLicense(diagnostics,
+                $"installer license file is empty: '{path}' — the License screen will be omitted");
+            return null;
+        }
+
+        return text;
+    }
+
+    private static void ReportLicense(ICollection<Diagnostic>? diagnostics, string message)
+    {
+        diagnostics?.Add(new Diagnostic(
+            DiagnosticSeverity.Warning,
+            DiagnosticCodes.LicenseFileUnreadable,
+            message,
+            SourceLocation.Unknown,
+            "https://docs.sigil.build/diagnostics/SIG0250"));
     }
 
     private static SigilBuild.Wrapper.Json.SerializableInstallerScreen[] ScreensToArray(

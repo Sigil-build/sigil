@@ -187,7 +187,9 @@ public sealed class ParsedCommandLine
 /// the Avalonia <c>SigilBuild.Installer.Host</c>). Recognized tokens (Windows
 /// installer convention):
 /// <list type="bullet">
-///   <item><description><c>/silent</c> (alias <c>/S</c>) — headless install.</description></item>
+///   <item><description><c>/silent</c> (alias <c>/S</c>) — headless install. Implies
+///   acceptance of the license (T14): the headless path never shows the License
+///   screen, so a silent install proceeds without an interactive accept gate.</description></item>
 ///   <item><description><c>/verysilent</c> — headless install with suppressed progress.</description></item>
 ///   <item><description><c>/Update</c> — run <c>update_steps</c> instead of <c>install_steps</c>.</description></item>
 ///   <item><description><c>/Uninstall</c> — run the auto-derived uninstall sequence.</description></item>

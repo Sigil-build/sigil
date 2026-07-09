@@ -175,7 +175,14 @@ public static class ManifestParser
             // T12: install scope (user | machine | auto, default auto). The schema
             // enum is the hard gate; here we map the string leniently and emit a
             // non-fatal diagnostic on an unrecognized value, falling back to auto.
-            Scope: ParseScope(node, diagnostics, fileName));
+            Scope: ParseScope(node, diagnostics, fileName),
+            // T13: optional install-dir override. Captured verbatim as a template;
+            // the engine resolves its {scope_root} / {app.*} tokens at install time
+            // (StepContext), against the resolved scope. A blank value is treated as
+            // absent so the default (<scope root>\<App.Name>) applies.
+            InstallDir: string.IsNullOrWhiteSpace(GetScalar(node, "install_dir"))
+                ? null
+                : GetScalar(node, "install_dir"));
     }
 
     /// <summary>

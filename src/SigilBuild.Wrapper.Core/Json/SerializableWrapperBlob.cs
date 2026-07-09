@@ -33,6 +33,20 @@ internal sealed record SerializableWrapperBlob
     /// <summary>Resolved install scope (T12). Defaults to <see cref="InstallScope.Auto"/>.</summary>
     public InstallScope Scope { get; init; } = InstallScope.Auto;
 
+    /// <summary>
+    /// The manifest's <c>App.Name</c> (T13). The <c>&lt;App.Name&gt;</c> segment of
+    /// the default install dir (<c>&lt;scope root&gt;\&lt;App.Name&gt;</c>) and the
+    /// value of the <c>{app.name}</c> token in an <c>install_dir</c> override.
+    /// </summary>
+    public string? AppName { get; init; }
+
+    /// <summary>
+    /// The manifest's optional <c>installer.install_dir</c> override template (T13);
+    /// <c>null</c> when omitted so the default install dir applies. May reference
+    /// <c>{scope_root}</c> / <c>{app.*}</c>; resolved at install time by the engine.
+    /// </summary>
+    public string? InstallDir { get; init; }
+
     // --- Branding (T7). Derived at pack time (Avalonia cannot color-mix at
     //     runtime), delivered inside the blob rather than a sidecar file. ---
 
@@ -73,7 +87,9 @@ internal sealed record SerializableWrapperBlob
             PostInstall:  ConvertSteps(s.PostInstall),
             UpdateSteps:  ConvertSteps(s.UpdateSteps),
             Scope:        s.Scope,
-            Options:      ConvertOptions(s.Options));
+            Options:      ConvertOptions(s.Options),
+            AppName:      s.AppName,
+            InstallDir:   s.InstallDir);
     }
 
     public static SerializableWrapperBlob FromWrapperBlob(WrapperBlob blob)
@@ -89,6 +105,8 @@ internal sealed record SerializableWrapperBlob
             UpdateSteps  = SerializeSteps(blob.UpdateSteps),
             Scope        = blob.Scope,
             Options      = SerializeOptions(blob.Options),
+            AppName      = blob.AppName,
+            InstallDir   = blob.InstallDir,
         };
     }
 

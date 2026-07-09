@@ -4,7 +4,15 @@
     <RootNamespace>SigilBuild.Installer.Host</RootNamespace>
     <AssemblyName>installer</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <!-- T3 / ADR-avalonia-aot: BuiltInComInteropSupport is deliberately NOT set.
+         It was the sole source of the IL2026 trim warning (the built-in-COM
+         *server* activation path, ComActivator.GetClassFactoryForTypeInternal —
+         a managed-COM-server export an installer wizard never uses). Avalonia 12's
+         Win32 backend uses ComWrappers-based Micro-COM for its clipboard / OLE /
+         shell-dialog *client* interop, which needs no built-in COM support, so
+         dropping the flag removes the dead server path and makes the Native AOT
+         publish warning-clean under TreatWarningsAsErrors — the honest fix per the
+         ADR (rd.xml / a root descriptor would only mask the dead path). -->
     <!-- Required for the source-generated [LibraryImport] AttachConsole P/Invoke
          used by the /silent headless path (Program.cs). -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>

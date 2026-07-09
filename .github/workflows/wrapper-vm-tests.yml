@@ -38,11 +38,14 @@ jobs:
         with:
           global-json-file: global.json
 
-      - name: Publish wrapper AOT runtime
+      - name: Publish + stage installer host AOT runtime
+        shell: pwsh
         run: |
-          dotnet publish src/SigilBuild.Wrapper -c Release -r win-x64 -p:PublishAot=true
-          # TODO: copy the published exe into the test project's runtimes/win-x64/.
-          # Tracked separately as part of the SDK packaging story.
+          # T3: WrapperRuntimeLocator now resolves
+          # runtimes/<rid>/SigilBuild.Installer.Host.exe. Stage the Native AOT host
+          # into the integration-test output so Locate(arch) succeeds.
+          $dest = "tests/SigilBuild.Wrapper.IntegrationTests/bin/Release/net10.0"
+          ./scripts/publish-installer-runtime.ps1 -Rids win-x64 -Configuration Release -DestinationRoot $dest
 
       - name: Run integration tests
         run: dotnet test tests/SigilBuild.Wrapper.IntegrationTests/SigilBuild.Wrapper.IntegrationTests.csproj --logger "trx;LogFileName=wrapper-vm-tests.trx"

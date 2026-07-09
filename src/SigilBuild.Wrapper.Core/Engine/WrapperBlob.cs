@@ -106,6 +106,32 @@ internal sealed partial record WrapperBlob(
             Version: s.Version);
     }
 
+    /// <summary>
+    /// Read the declared custom wizard screens (T9) from the embedded
+    /// <c>SIGIL_BLOB_V1</c> resource. Returns an empty list for an un-stamped
+    /// runtime (dev/preview) or a blob that declares no screens. Kept separate
+    /// from <see cref="LoadFromSelf"/> because the in-memory <see cref="WrapperBlob"/>
+    /// record does not carry screens — they are a host-rendering concern delivered
+    /// via <see cref="SerializableWrapperBlob"/>.
+    /// </summary>
+    internal static System.Collections.Generic.IReadOnlyList<InstallerScreen> LoadScreensFromSelf()
+    {
+        var bytes = TryReadResource(BlobResourceName);
+        if (bytes is null) return Array.Empty<InstallerScreen>();
+
+        var json = System.Text.Encoding.UTF8.GetString(bytes);
+        var s = System.Text.Json.JsonSerializer.Deserialize(
+            json, WrapperBlobJsonContext.Default.SerializableWrapperBlob);
+        if (s is null || s.Screens.Length == 0) return Array.Empty<InstallerScreen>();
+
+        var result = new InstallerScreen[s.Screens.Length];
+        for (var i = 0; i < s.Screens.Length; i++)
+        {
+            result[i] = SerializableInstallerScreen.ToInstallerScreen(s.Screens[i]);
+        }
+        return result;
+    }
+
     private const string BlobResourceName = "SIGIL_BLOB_V1";
     private const string PayloadResourceName = "SIGIL_PAYLOAD_V1";
 
@@ -214,4 +240,19 @@ public static class InstallerBrandLoader
     /// <c>SIGIL_BLOB_V1</c> resource, or <c>null</c> for an un-stamped runtime.
     /// </summary>
     public static InstallerBrandData? LoadFromSelf() => WrapperBlob.LoadBrandFromSelf();
+}
+
+/// <summary>
+/// Public entry point for the host to read the declared custom wizard screens
+/// (T9) from the stamped exe's embedded blob without depending on the engine's
+/// internal wire DTOs. Returns an empty list for an un-stamped runtime.
+/// </summary>
+public static class InstallerScreensLoader
+{
+    /// <summary>
+    /// Read the declared custom wizard screens from the running exe's
+    /// <c>SIGIL_BLOB_V1</c> resource, or an empty list for an un-stamped runtime.
+    /// </summary>
+    public static System.Collections.Generic.IReadOnlyList<InstallerScreen> LoadFromSelf()
+        => WrapperBlob.LoadScreensFromSelf();
 }

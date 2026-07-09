@@ -82,7 +82,8 @@ public sealed class InstallEngine
         }
         catch (StepFailureException ex)
         {
-            reporter?.ReportMessage($"error: {ex.Message}", isError: true);
+            // Redact in case a step surfaced a resolved secret in its error text.
+            reporter?.ReportMessage($"error: {ctx.Redact(ex.Message)}", isError: true);
             reporter?.ReportMessage("rollback: reverting changes", isError: true);
             await journal.UndoAsync(ct).ConfigureAwait(false);
             return EngineResult.Failed(journal, ex.Message);
@@ -138,7 +139,7 @@ public sealed class InstallEngine
 
             if (result.Success)
             {
-                reporter?.Advance(Describe(spec), isError: false);
+                reporter?.Advance(ctx.Redact(Describe(spec)), isError: false);
                 continue;
             }
 
@@ -146,7 +147,7 @@ public sealed class InstallEngine
             {
                 case OnFailure.Continue:
                     // Non-fatal: advance the fraction, keep going.
-                    reporter?.Advance(Describe(spec), isError: false);
+                    reporter?.Advance(ctx.Redact(Describe(spec)), isError: false);
                     continue;
                 case OnFailure.Rollback:
                 case OnFailure.Fail:

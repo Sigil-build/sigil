@@ -14,7 +14,7 @@
     <PackageReference Include="FluentAssertions" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\src\SigilBuild.Wrapper\SigilBuild.Wrapper.csproj" />
+    <ProjectReference Include="..\..\src\SigilBuild.Wrapper.Core\SigilBuild.Wrapper.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />

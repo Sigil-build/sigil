@@ -26,23 +26,12 @@
              dotnet publish src/SigilBuild.Wrapper -c Release -r win-x64 -p:PublishAot=true
          (PublishAot=true implicitly sets SelfContained=true; -r supplies the
          RID. See .github/workflows/wrapper-vm-tests.yml.) -->
-    <!-- Required for [LibraryImport] source-generated P/Invokes used by
-         Engine/WrapperBlob.cs (FindResource / LoadResource). The generated
-         marshalling code is unsafe but never user-authored. -->
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\SigilBuild.Core\SigilBuild.Core.csproj" />
-  </ItemGroup>
-  <ItemGroup>
-    <!-- Step implementations and the IStep interface are intentionally
-         internal — they are the wrapper runtime's private contract, not a
-         third-party extension surface. The test project drives them
-         directly and so needs InternalsVisibleTo. -->
-    <InternalsVisibleTo Include="SigilBuild.Wrapper.Tests" />
-    <!-- The packager builds the SIGIL_BLOB_V1 JSON via the same internal
-         DTOs + source-generated context the wrapper uses to read it back. -->
-    <InternalsVisibleTo Include="SigilBuild.Packaging" />
-    <InternalsVisibleTo Include="SigilBuild.Packaging.Tests" />
+    <!-- The step engine, WrapperBlob, CLI parser and all runtime types now live
+         in SigilBuild.Wrapper.Core (extracted in Task T1) so the Avalonia host
+         can share them. This project is a thin console/silent shell around it;
+         Program.cs is the only remaining source file. Core flows transitively. -->
+    <ProjectReference Include="..\SigilBuild.Wrapper.Core\SigilBuild.Wrapper.Core.csproj" />
   </ItemGroup>
 </Project>

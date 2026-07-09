@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using SigilBuild.Core.Manifest;
@@ -37,12 +38,16 @@ public sealed class InstallEngine
     {
         System.ArgumentNullException.ThrowIfNull(steps);
         System.ArgumentNullException.ThrowIfNull(ctx);
-        return RunAsync(Array.Empty<InstallStep>(), steps, Array.Empty<InstallStep>(), ctx, ct);
+        return RunAsync(Array.Empty<InstallStep>(), steps, Array.Empty<InstallStep>(), ctx, progress: null, ct: ct);
     }
 
     /// <summary>
     /// Run a full <c>pre_install</c> → <c>install_steps</c> → <c>post_install</c>
-    /// sequence under a single shared <see cref="RollbackJournal"/>.
+    /// sequence under a single shared <see cref="RollbackJournal"/>. When
+    /// <paramref name="progress"/> is supplied the engine emits a
+    /// <see cref="StepProgress"/> per executed (or skipped) step plus
+    /// <c>error:</c>/<c>rollback:</c> lines on failure, so the GUI host and the
+    /// headless console can render identical logs from one engine run.
     /// </summary>
     [System.Diagnostics.CodeAnalysis.SuppressMessage(
         "Performance",
@@ -53,6 +58,7 @@ public sealed class InstallEngine
         IEnumerable<InstallStep> installSteps,
         IReadOnlyList<InstallStep> postInstall,
         StepContext ctx,
+        IProgress<StepProgress>? progress = null,
         CancellationToken ct = default)
     {
         System.ArgumentNullException.ThrowIfNull(preInstall);
@@ -60,22 +66,30 @@ public sealed class InstallEngine
         System.ArgumentNullException.ThrowIfNull(postInstall);
         System.ArgumentNullException.ThrowIfNull(ctx);
 
+        var installList = installSteps as IReadOnlyList<InstallStep> ?? installSteps.ToList();
+        var reporter = progress is null
+            ? null
+            : new ProgressReporter(progress, preInstall.Count + installList.Count + postInstall.Count);
+
         var journal = new RollbackJournal();
         try
         {
-            await ExecutePhaseAsync(preInstall, ctx, journal, phaseLabel: "pre_install", ct).ConfigureAwait(false);
-            await ExecutePhaseAsync(installSteps, ctx, journal, phaseLabel: "install_steps", ct).ConfigureAwait(false);
-            await ExecutePhaseAsync(postInstall, ctx, journal, phaseLabel: "post_install", ct).ConfigureAwait(false);
+            await ExecutePhaseAsync(preInstall, ctx, journal, phaseLabel: "pre_install", reporter, ct).ConfigureAwait(false);
+            await ExecutePhaseAsync(installList, ctx, journal, phaseLabel: "install_steps", reporter, ct).ConfigureAwait(false);
+            await ExecutePhaseAsync(postInstall, ctx, journal, phaseLabel: "post_install", reporter, ct).ConfigureAwait(false);
 
             return EngineResult.Ok(journal);
         }
         catch (StepFailureException ex)
         {
+            reporter?.ReportMessage($"error: {ex.Message}", isError: true);
+            reporter?.ReportMessage("rollback: reverting changes", isError: true);
             await journal.UndoAsync(ct).ConfigureAwait(false);
             return EngineResult.Failed(journal, ex.Message);
         }
         catch (System.OperationCanceledException)
         {
+            reporter?.ReportMessage("rollback: reverting changes", isError: true);
             await journal.UndoAsync(CancellationToken.None).ConfigureAwait(false);
             throw;
         }
@@ -96,6 +110,7 @@ public sealed class InstallEngine
         StepContext ctx,
         RollbackJournal journal,
         string phaseLabel,
+        ProgressReporter? reporter,
         CancellationToken ct)
     {
         foreach (var spec in steps)
@@ -103,6 +118,8 @@ public sealed class InstallEngine
             ct.ThrowIfCancellationRequested();
             if (spec.When is not null && !ctx.Evaluate(spec.When))
             {
+                // Skipped: advance the fraction but emit no log line.
+                reporter?.Advance(message: null, isError: false);
                 continue;
             }
 
@@ -121,12 +138,15 @@ public sealed class InstallEngine
 
             if (result.Success)
             {
+                reporter?.Advance(Describe(spec), isError: false);
                 continue;
             }
 
             switch (spec.OnFailure)
             {
                 case OnFailure.Continue:
+                    // Non-fatal: advance the fraction, keep going.
+                    reporter?.Advance(Describe(spec), isError: false);
                     continue;
                 case OnFailure.Rollback:
                 case OnFailure.Fail:
@@ -134,5 +154,56 @@ public sealed class InstallEngine
                     throw new StepFailureException(spec.Id, $"{phaseLabel}: {result.Error}");
             }
         }
+    }
+
+    /// <summary>
+    /// Render a short, prototype-style log line for a step from its declared
+    /// (unresolved) fields. Deliberately never resolves parameter templates, so
+    /// secret values can never leak into the log.
+    /// </summary>
+    private static string Describe(InstallStep spec) => spec switch
+    {
+        InstallStep.FileCopy fc => $"copy {fc.From} → {fc.To}",
+        InstallStep.DirectoryCreate dc => $"mkdir {dc.Path}",
+        InstallStep.FileDelete fd => $"del {fd.Path}",
+        InstallStep.DirectoryDelete dd => $"rmdir {dd.Path}",
+        InstallStep.RegistryWrite rw => $"reg {rw.Hive}\\{rw.Key}\\{rw.Name}",
+        InstallStep.RegistryDeleteValue rdv => $"reg del {rdv.Hive}\\{rdv.Key}\\{rdv.Name}",
+        InstallStep.RegistryDeleteKey rdk => $"reg del {rdk.Hive}\\{rdk.Key}",
+        InstallStep.ShortcutCreate sc => $"link {sc.Location}\\{sc.Name}",
+        InstallStep.EnvSet es => es.Name.Equals("PATH", StringComparison.OrdinalIgnoreCase)
+            ? $"path + {es.Value}"
+            : $"env {es.Name}={es.Value}",
+        InstallStep.RunProgram rp => $"run {rp.Program}",
+        _ => spec.Id,
+    };
+
+    /// <summary>
+    /// Mutable progress cursor shared across the three phases: tracks how many
+    /// steps have completed against the fixed total and forwards each event to
+    /// the caller-supplied <see cref="IProgress{T}"/>.
+    /// </summary>
+    private sealed class ProgressReporter
+    {
+        private readonly IProgress<StepProgress> _sink;
+        private readonly int _total;
+        private int _completed;
+
+        public ProgressReporter(IProgress<StepProgress> sink, int total)
+        {
+            _sink = sink;
+            _total = total;
+        }
+
+        /// <summary>Advance the completed counter by one and report (message may be null for a silent advance).</summary>
+        public void Advance(string? message, bool isError)
+        {
+            _completed++;
+            _sink.Report(new StepProgress(_completed, _total, message, isError));
+        }
+
+        /// <summary>Report a log line without advancing the counter (error / rollback lines).</summary>
+        public void ReportMessage(string message, bool isError)
+            => _sink.Report(new StepProgress(_completed, _total, message, isError));
     }
 }

@@ -10,13 +10,13 @@
     <ProjectReference Include="..\SigilBuild.Core\SigilBuild.Core.csproj" />
     <ProjectReference Include="..\SigilBuild.Installer.BrandGenerator\SigilBuild.Installer.BrandGenerator.csproj"
                       ReferenceOutputAssembly="true" />
-    <!-- The wrapper project is OutputType=Exe but emits a regular managed
-         assembly that the packager needs at compile time so it can build the
-         JSON blob via the same source-generated SerializerContext used by
-         the wrapper runtime at install time (single source of truth for the
-         SIGIL_BLOB_V1 wire schema). PrivateAssets="all" prevents the wrapper
-         binary from flowing through to Packaging consumers. -->
-    <ProjectReference Include="..\SigilBuild.Wrapper\SigilBuild.Wrapper.csproj"
+    <!-- The packager builds the SIGIL_BLOB_V1 JSON at pack time via the same
+         internal DTOs + source-generated SerializerContext the wrapper runtime
+         uses to read it back (single source of truth for the wire schema).
+         Those types live in SigilBuild.Wrapper.Core after the Task T1 engine
+         split. PrivateAssets="all" keeps the engine assembly from flowing
+         through to Packaging consumers. -->
+    <ProjectReference Include="..\SigilBuild.Wrapper.Core\SigilBuild.Wrapper.Core.csproj"
                       ReferenceOutputAssembly="true"
                       PrivateAssets="all" />
   </ItemGroup>

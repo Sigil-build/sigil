@@ -5,8 +5,8 @@
 |---|---|
 | [`sigil validate`](#sigil-validate) | <path>  Validate a sigil.yaml manifest [default: sigil.yaml] |
 | [`sigil init`](#sigil-init) | Create a new sigil.yaml manifest |
-| [`sigil pack`](#sigil-pack) | <path>      Pack the app per the manifest [default: sigil.yaml] |
-| [`sigil sign`](#sigil-sign) | <path>      Sign an artifact per the manifest's sign provider [default: sigil.yaml] |
+| [`sigil pack`](#sigil-pack) | <path>      Pack the app per the manifest. Note: the 'exe' installer format is produced only on a Windows pack host — it stamps the payload into the installer runtime via the Win32 resource-update APIs (BeginUpdateResourceW), which have no cross-platform equivalent. On non-Windows hosts 'sigil pack' emits a clear diagnostic and skips the exe format (other formats still pack). Pipeline order: 'sigil pack' MUST run BEFORE 'sigil sign' — stamping resources invalidates any prior Authenticode signature, so sign the finished Setup.exe last. [default: sigil.yaml] |
+| [`sigil sign`](#sigil-sign) | <path>      Sign an artifact per the manifest's sign provider. IMPORTANT: run 'sigil sign' AFTER 'sigil pack' — pack stamps the payload/brand/blob into the installer via the Win32 resource-update APIs, and any resource edit invalidates a prior Authenticode signature. Signing must therefore be the LAST step (pack → sign); the installer's verified 'Signed by {publisher}' trust line only appears when the finished Setup.exe verifies at install time. [default: sigil.yaml] |
 
 ## `sigil validate`
 
@@ -50,7 +50,7 @@ Options:
 
 ```
 Description:
-  Pack the app per the manifest
+  Pack the app per the manifest. Note: the 'exe' installer format is produced only on a Windows pack host — it stamps the payload into the installer runtime via the Win32 resource-update APIs (BeginUpdateResourceW), which have no cross-platform equivalent. On non-Windows hosts 'sigil pack' emits a clear diagnostic and skips the exe format (other formats still pack). Pipeline order: 'sigil pack' MUST run BEFORE 'sigil sign' — stamping resources invalidates any prior Authenticode signature, so sign the finished Setup.exe last.
 
 Usage:
   sigil pack [<path>] [options]
@@ -67,7 +67,7 @@ Options:
 
 ```
 Description:
-  Sign an artifact per the manifest's sign provider
+  Sign an artifact per the manifest's sign provider. IMPORTANT: run 'sigil sign' AFTER 'sigil pack' — pack stamps the payload/brand/blob into the installer via the Win32 resource-update APIs, and any resource edit invalidates a prior Authenticode signature. Signing must therefore be the LAST step (pack → sign); the installer's verified 'Signed by {publisher}' trust line only appears when the finished Setup.exe verifies at install time.
 
 Usage:
   sigil sign [<path>] [options]

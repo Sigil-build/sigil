@@ -50,17 +50,21 @@ public static class ManifestParser
     private static SigilManifest MapManifest(YamlMappingNode root, string file, List<Diagnostic> diagnostics)
     {
         var loc = new SourceLocation(file, (int)root.Start.Line, (int)root.Start.Column);
+        var app = MapApp(GetMapping(root, "app", required: true)!);
+        // Parameters are parsed before the installer block so declared custom
+        // screens (T9) can resolve their field references against them.
+        var parameters = ParseParameters(GetMapping(root, "parameters"), diagnostics, file);
         return new SigilManifest(
             Spec: GetScalar(root, "spec") ?? "",
-            App: MapApp(GetMapping(root, "app", required: true)!),
+            App: app,
             Build: MapBuild(GetMapping(root, "build", required: true)!),
             Package: MapPackage(GetMapping(root, "package")),
             Sign: MapSign(GetMapping(root, "sign")),
             Publish: MapPublish(GetMapping(root, "publish")),
             Updates: MapUpdates(GetMapping(root, "updates")),
-            Installer: MapInstaller(GetMapping(root, "installer")),
+            Installer: MapInstaller(GetMapping(root, "installer"), app, parameters, diagnostics, file),
             Location: loc,
-            Parameters: ParseParameters(GetMapping(root, "parameters"), diagnostics, file),
+            Parameters: parameters,
             InstallSteps: ParseInstallSteps(GetSequenceOfMappings(root, "install_steps"), diagnostics, file),
             PreInstall: ParseInstallSteps(GetSequenceOfMappings(root, "pre_install"), diagnostics, file),
             PostInstall: ParseInstallSteps(GetSequenceOfMappings(root, "post_install"), diagnostics, file),
@@ -142,20 +146,357 @@ public static class ManifestParser
             SigningKey: GetScalar(node, "signingKey"));
     }
 
-    private static InstallerSection? MapInstaller(YamlMappingNode? node)
+    private static InstallerSection? MapInstaller(
+        YamlMappingNode? node,
+        AppSection app,
+        IReadOnlyDictionary<string, ParameterDefinition>? parameters,
+        List<Diagnostic> diagnostics,
+        string fileName)
     {
         if (node is null) return null;
         var brand = GetMapping(node, "brand");
-        var brandSection = brand is null ? null : new InstallerBrand(
-            Logo: GetScalar(brand, "logo"),
-            Hero: GetScalar(brand, "hero"),
-            PrimaryColor: GetScalar(brand, "primaryColor"),
-            AccentColor: GetScalar(brand, "accentColor"),
-            GradientStart: GetScalar(brand, "gradientStart"),
-            GradientMid: GetScalar(brand, "gradientMid"),
-            GradientEnd: GetScalar(brand, "gradientEnd"));
-        var icon = GetScalar(node, "icon");
-        return new InstallerSection(brandSection, icon);
+        var screens = ParseScreens(
+            GetSequenceOfMappings(node, "screens"), app, parameters, diagnostics, fileName);
+        return new InstallerSection(
+            brand is null ? null : new InstallerBrand(
+                Logo: GetScalar(brand, "logo"),
+                Hero: GetScalar(brand, "hero"),
+                PrimaryColor: GetScalar(brand, "primaryColor"),
+                AccentColor: GetScalar(brand, "accentColor")),
+            // T8: built-in configurable components (desktop_shortcut, start_menu,
+            // add_to_path, file_associations). Each is a shorthand true/false or an
+            // object { enabled, default, locked, ...component keys }. Pack time turns
+            // each ENABLED component into its gated install step(s).
+            Options: ParseOptions(GetMapping(node, "options")),
+            Screens: screens,
+            // T14: capture the license path string only. The actual file read +
+            // embed happens at PACK time (ExeWrapperPackager.BuildBlobBytes), which
+            // can resolve it against the pack source dir and emit a diagnostic if
+            // the file is missing/unreadable/empty.
+            License: GetScalar(node, "license"),
+            // T12: install scope (user | machine | auto, default auto). The schema
+            // enum is the hard gate; here we map the string leniently and emit a
+            // non-fatal diagnostic on an unrecognized value, falling back to auto.
+            Scope: ParseScope(node, diagnostics, fileName),
+            // T13: optional install-dir override. Captured verbatim as a template;
+            // the engine resolves its {scope_root} / {app.*} tokens at install time
+            // (StepContext), against the resolved scope. A blank value is treated as
+            // absent so the default (<scope root>\<App.Name>) applies.
+            InstallDir: string.IsNullOrWhiteSpace(GetScalar(node, "install_dir"))
+                ? null
+                : GetScalar(node, "install_dir"),
+            // PR #8: optional custom installer-exe icon (.ico) path. Null falls
+            // back to the bundled default installer icon at pack time.
+            Icon: GetScalar(node, "icon"));
+    }
+
+    /// <summary>
+    /// Map the manifest's <c>installer.scope</c> scalar into
+    /// <see cref="InstallScope"/> (T12). Recognizes <c>user</c> / <c>machine</c> /
+    /// <c>auto</c> case-insensitively; an absent value defaults to
+    /// <see cref="InstallScope.Auto"/>; an out-of-enum value falls back to
+    /// <see cref="InstallScope.Auto"/> with a non-fatal
+    /// <see cref="DiagnosticCodes.InvalidInstallerScope"/> diagnostic.
+    /// </summary>
+    private static InstallScope ParseScope(
+        YamlMappingNode node, List<Diagnostic> diagnostics, string fileName)
+    {
+        var raw = GetScalar(node, "scope");
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return InstallScope.Auto;
+        }
+
+        switch (raw.Trim().ToLowerInvariant())
+        {
+            case "user": return InstallScope.User;
+            case "machine": return InstallScope.Machine;
+            case "auto": return InstallScope.Auto;
+            default:
+                diagnostics.Add(new Diagnostic(
+                    DiagnosticSeverity.Warning,
+                    DiagnosticCodes.InvalidInstallerScope,
+                    $"installer.scope '{raw}' is not one of user|machine|auto — defaulting to auto",
+                    new SourceLocation(fileName, (int)node.Start.Line, (int)node.Start.Column),
+                    "https://docs.sigil.build/diagnostics/SIG0260"));
+                return InstallScope.Auto;
+        }
+    }
+
+    /// <summary>
+    /// Parse the manifest's <c>installer.options</c> block (T8). Each of the four
+    /// built-in components (<c>desktop_shortcut</c>, <c>start_menu</c>,
+    /// <c>add_to_path</c>, <c>file_associations</c>) is either a shorthand boolean
+    /// or an object <c>{ enabled, default, locked, ...component keys }</c>. The
+    /// shorthand maps onto the M0 records: <c>true</c> →
+    /// <c>{ Enabled = true, Default = true }</c>; <c>false</c> →
+    /// <c>{ Enabled = false }</c>. An absent component stays <c>null</c> (its
+    /// built-in default: not declared, so nothing is generated). Returns
+    /// <c>null</c> when the block is absent or declares no component.
+    /// </summary>
+    private static InstallerOptions? ParseOptions(YamlMappingNode? node)
+    {
+        if (node is null) return null;
+
+        var desktop = ParseBoolOption(node, "desktop_shortcut");
+        var startMenu = ParseBoolOption(node, "start_menu");
+        var addToPath = ParseBoolOption(node, "add_to_path");
+        var fileAssoc = ParseFileAssociationOption(node, "file_associations");
+
+        if (desktop is null && startMenu is null && addToPath is null && fileAssoc is null)
+        {
+            return null;
+        }
+
+        return new InstallerOptions(desktop, startMenu, addToPath, fileAssoc);
+    }
+
+    /// <summary>
+    /// Parse a single boolean-shaped option component (<c>desktop_shortcut</c> /
+    /// <c>start_menu</c> / <c>add_to_path</c>): shorthand boolean or the
+    /// <c>{ enabled, default, locked }</c> object. Returns <c>null</c> when the key
+    /// is absent.
+    /// </summary>
+    private static InstallerOption? ParseBoolOption(YamlMappingNode parent, string key)
+    {
+        if (!parent.Children.TryGetValue(new YamlScalarNode(key), out var node))
+        {
+            return null;
+        }
+
+        return node switch
+        {
+            YamlScalarNode s when bool.TryParse(s.Value, out var b) =>
+                b ? new InstallerOption(Enabled: true, Default: true)
+                  : new InstallerOption(Enabled: false),
+            YamlMappingNode m => new InstallerOption(
+                Enabled: GetBool(m, "enabled", defaultValue: true),
+                Default: GetBool(m, "default", defaultValue: true),
+                Locked: GetBool(m, "locked", defaultValue: false)),
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// Parse the <c>file_associations</c> component: shorthand boolean or the
+    /// <c>{ enabled, default, locked, extensions: [".x"] }</c> object. Returns
+    /// <c>null</c> when the key is absent.
+    /// </summary>
+    private static FileAssociationOption? ParseFileAssociationOption(YamlMappingNode parent, string key)
+    {
+        if (!parent.Children.TryGetValue(new YamlScalarNode(key), out var node))
+        {
+            return null;
+        }
+
+        return node switch
+        {
+            YamlScalarNode s when bool.TryParse(s.Value, out var b) =>
+                b ? new FileAssociationOption(Enabled: true, Default: true)
+                  : new FileAssociationOption(Enabled: false),
+            YamlMappingNode m => new FileAssociationOption(
+                Enabled: GetBool(m, "enabled", defaultValue: true),
+                Default: GetBool(m, "default", defaultValue: true),
+                Locked: GetBool(m, "locked", defaultValue: false),
+                Extensions: GetSequence(m, "extensions")),
+            _ => null,
+        };
+    }
+
+    // Interpolation tokens permitted in a screen Title / Subtitle (T9). Kept in
+    // sync with the substitution surface the wizard resolves at render time.
+    private static readonly string[] KnownScreenTokens =
+        { "app.name", "app.id", "app.version", "app.publisher" };
+
+    private static List<InstallerScreen>? ParseScreens(
+        List<YamlMappingNode>? nodes,
+        AppSection app,
+        IReadOnlyDictionary<string, ParameterDefinition>? parameters,
+        List<Diagnostic> diagnostics,
+        string fileName)
+    {
+        _ = app; // App is available for future token-value validation; tokens are name-checked below.
+        if (nodes is null) return null;
+        var list = new List<InstallerScreen>(nodes.Count);
+        foreach (var node in nodes)
+        {
+            var loc = new SourceLocation(fileName, (int)node.Start.Line, (int)node.Start.Column);
+            var id = GetScalar(node, "id") ?? string.Empty;
+            var title = GetScalar(node, "title") ?? string.Empty;
+            var subtitle = GetScalar(node, "subtitle");
+            var when = GetScalar(node, "when");
+
+            ValidateInterpolationTokens(title, loc, diagnostics);
+            if (subtitle is not null)
+            {
+                ValidateInterpolationTokens(subtitle, loc, diagnostics);
+            }
+
+            if (!string.IsNullOrWhiteSpace(when))
+            {
+                ValidateWhenExpression(when!, loc, diagnostics);
+            }
+
+            var fields = ParseScreenFields(node, parameters, diagnostics, loc);
+            list.Add(new InstallerScreen(id, title, subtitle, when, fields));
+        }
+        return list;
+    }
+
+    private static List<ScreenField> ParseScreenFields(
+        YamlMappingNode screenNode,
+        IReadOnlyDictionary<string, ParameterDefinition>? parameters,
+        List<Diagnostic> diagnostics,
+        SourceLocation loc)
+    {
+        var fields = new List<ScreenField>();
+        if (!screenNode.Children.TryGetValue(new YamlScalarNode("fields"), out var node)
+            || node is not YamlSequenceNode seq)
+        {
+            return fields;
+        }
+
+        foreach (var child in seq.Children)
+        {
+            string? param;
+            string? widget = null;
+            switch (child)
+            {
+                case YamlScalarNode s:
+                    param = s.Value;
+                    break;
+                case YamlMappingNode m:
+                    param = GetScalar(m, "param");
+                    widget = GetScalar(m, "widget");
+                    break;
+                default:
+                    continue;
+            }
+
+            if (string.IsNullOrEmpty(param))
+            {
+                continue;
+            }
+
+            if (parameters is null || !parameters.ContainsKey(param))
+            {
+                diagnostics.Add(new Diagnostic(
+                    DiagnosticSeverity.Error,
+                    DiagnosticCodes.UnknownScreenParameterRef,
+                    $"installer screen field references unknown parameter '{param}' — declare it under the top-level 'parameters:' block",
+                    loc,
+                    "https://docs.sigil.build/diagnostics/SIG0240"));
+            }
+
+            fields.Add(new ScreenField(param, widget));
+        }
+
+        return fields;
+    }
+
+    private static void ValidateInterpolationTokens(
+        string text, SourceLocation loc, List<Diagnostic> diagnostics)
+    {
+        var i = 0;
+        while (i < text.Length)
+        {
+            if (text[i] != '{')
+            {
+                i++;
+                continue;
+            }
+
+            var end = text.IndexOf('}', i + 1);
+            if (end < 0)
+            {
+                diagnostics.Add(new Diagnostic(
+                    DiagnosticSeverity.Error,
+                    DiagnosticCodes.InvalidScreenTitleToken,
+                    $"installer screen title/subtitle has an unterminated '{{' token: '{text}'",
+                    loc,
+                    "https://docs.sigil.build/diagnostics/SIG0242"));
+                return;
+            }
+
+            var token = text.Substring(i + 1, end - i - 1).Trim();
+            var known = false;
+            foreach (var t in KnownScreenTokens)
+            {
+                if (string.Equals(t, token, StringComparison.Ordinal)) { known = true; break; }
+            }
+            if (!known)
+            {
+                diagnostics.Add(new Diagnostic(
+                    DiagnosticSeverity.Error,
+                    DiagnosticCodes.InvalidScreenTitleToken,
+                    $"installer screen title/subtitle references unknown interpolation token '{{{token}}}' (allowed: {string.Join(", ", KnownScreenTokens)})",
+                    loc,
+                    "https://docs.sigil.build/diagnostics/SIG0242"));
+            }
+
+            i = end + 1;
+        }
+    }
+
+    // Lightweight structural validation of a screen `when` expression. The full
+    // grammar is evaluated at install time by the Wrapper.Core expression engine;
+    // SigilBuild.Core cannot reference that engine without a layering cycle
+    // (Wrapper.Core → Core), so this catches gross malformations (empty text,
+    // unbalanced parentheses/brackets, illegal characters) at pack/validate time.
+    private static void ValidateWhenExpression(
+        string when, SourceLocation loc, List<Diagnostic> diagnostics)
+    {
+        void Report(string reason) => diagnostics.Add(new Diagnostic(
+            DiagnosticSeverity.Error,
+            DiagnosticCodes.InvalidScreenWhenExpression,
+            $"installer screen 'when' expression is invalid ({reason}): '{when}'",
+            loc,
+            "https://docs.sigil.build/diagnostics/SIG0241"));
+
+        var depthParen = 0;
+        var depthBracket = 0;
+        var inString = false;
+        var sawContent = false;
+        foreach (var c in when)
+        {
+            if (inString)
+            {
+                sawContent = true;
+                if (c == '"') { inString = false; }
+                continue;
+            }
+
+            switch (c)
+            {
+                case '"': inString = true; sawContent = true; break;
+                case '(': depthParen++; break;
+                case ')':
+                    depthParen--;
+                    if (depthParen < 0) { Report("unbalanced parentheses"); return; }
+                    break;
+                case '[': depthBracket++; break;
+                case ']':
+                    depthBracket--;
+                    if (depthBracket < 0) { Report("unbalanced brackets"); return; }
+                    break;
+                default:
+                    if (char.IsLetterOrDigit(c) || "._!=<>&|,-+ \t'".Contains(c, StringComparison.Ordinal))
+                    {
+                        if (!char.IsWhiteSpace(c)) { sawContent = true; }
+                    }
+                    else
+                    {
+                        Report($"illegal character '{c}'");
+                        return;
+                    }
+                    break;
+            }
+        }
+
+        if (inString) { Report("unterminated string literal"); return; }
+        if (depthParen != 0) { Report("unbalanced parentheses"); return; }
+        if (depthBracket != 0) { Report("unbalanced brackets"); return; }
+        if (!sawContent) { Report("empty expression"); }
     }
 
     private static Dictionary<string, ParameterDefinition>? ParseParameters(

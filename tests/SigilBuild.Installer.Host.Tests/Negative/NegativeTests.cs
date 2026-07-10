@@ -45,11 +45,22 @@ public class NegativeTests
 
     // ── InstallerViewModel navigation guard tests ────────────────────────────
 
+    // T14: the License screen is present only once license text is loaded, and
+    // sits after the destination (Location) screen per decision 4.
+    private static InstallerViewModel NavigateToLicense()
+    {
+        var vm = new InstallerViewModel(new BrandTokens());
+        vm.LoadLicense("Example EULA text.");
+        vm.Next(); // Welcome → InstallOptions (destination)
+        vm.Next(); // InstallOptions → License
+        vm.CurrentStep.Should().Be(InstallerStep.License);
+        return vm;
+    }
+
     [Fact]
     public void InstallerViewModel_LicenseNotAccepted_BlocksNextFromLicense()
     {
-        var vm = new InstallerViewModel(new BrandTokens());
-        vm.CurrentStep = InstallerStep.License;
+        var vm = NavigateToLicense();
         vm.LicenseAccepted = false;
 
         vm.Next();
@@ -60,23 +71,26 @@ public class NegativeTests
     [Fact]
     public void InstallerViewModel_LicenseAccepted_AllowsNextFromLicense()
     {
-        var vm = new InstallerViewModel(new BrandTokens());
-        vm.CurrentStep = InstallerStep.License;
+        var vm = NavigateToLicense();
         vm.LicenseAccepted = true;
 
         vm.Next();
 
-        vm.CurrentStep.Should().Be(InstallerStep.InstallOptions);
+        vm.CurrentStep.Should().Be(InstallerStep.Installing);
     }
 
-    // ── BrandTokens fallback test ────────────────────────────────────────────
+    // ── BrandTokens default test ─────────────────────────────────────────────
+    // The BrandTokens.g.json sidecar was removed in T7; brand data now travels
+    // inside the WrapperBlob. An un-stamped/dev host falls back to defaults.
 
     [Fact]
-    public void BrandTokens_MissingFile_FallsBackToDefaults()
+    public void BrandTokens_Default_UsesNeutralDefaults()
     {
-        var tokens = BrandTokens.LoadOrDefault("nonexistent_brand_tokens_xyz.json");
+        var tokens = new BrandTokens();
         tokens.AppName.Should().Be("Application");
         tokens.PrimaryColor.Should().Be("#1F2937");
+        tokens.LightTokens.Should().BeEmpty();
+        tokens.DarkTokens.Should().BeEmpty();
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────
@@ -87,7 +101,6 @@ public class NegativeTests
             new BuildSection("./out", null, null, true),
             null, null, null, null,
             Installer: primaryColor is null ? null : new InstallerSection(
-                new InstallerBrand(null, null, primaryColor, "#3B82F6", null, null, null),
-                null),
+                new InstallerBrand(null, null, primaryColor, "#3B82F6")),
             Location: SourceLocation.Unknown);
 }

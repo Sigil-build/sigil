@@ -85,23 +85,18 @@ public sealed class CancelFlowTests
         vm.OutcomeCode.Should().Be(InstallerOutcomeCode.Completed, "outcome must not change");
     }
 
-    // ── Finish screen: "Close" button closes with Completed ───────────────────
+    // ── Finish screen: cancel is a no-op ─────────────────────────────────────
 
     [Fact]
-    public async Task CancelAsync_FromFinish_ClosesWithCompletedOutcome()
+    public async Task CancelAsync_FromFinish_IsNoOp_OutcomeRemainsCompleted()
     {
-        // On Finish, the same UI button reads "Close" instead of "Cancel"
-        // (see InstallerViewModel.CancelButtonText). Clicking it should
-        // close the wizard cleanly with the Completed exit code so the
-        // wrapper treats the install as successful, NOT as a user cancel.
         var vm = new InstallerViewModel(new BrandTokens());
         vm.CurrentStep = InstallerStep.Finish;
 
         var result = await vm.CancelAsync(confirmAsync: null);
 
-        result.Should().BeTrue("Finish screen's button closes the wizard");
+        result.Should().BeFalse("Finish screen has no cancel");
         vm.OutcomeCode.Should().Be(InstallerOutcomeCode.Completed);
-        vm.CancelButtonText.Should().Be("Close");
     }
 
     // ── CanCancel property ────────────────────────────────────────────────────
@@ -110,8 +105,8 @@ public sealed class CancelFlowTests
     [InlineData(InstallerStep.Welcome,        true)]
     [InlineData(InstallerStep.License,        true)]
     [InlineData(InstallerStep.InstallOptions, true)]
-    [InlineData(InstallerStep.Installing,     false)] // child subprocess running; cancel would orphan it
-    [InlineData(InstallerStep.Finish,         true)]  // same button, relabelled "Close"
+    [InlineData(InstallerStep.Installing,     true)]
+    [InlineData(InstallerStep.Finish,         false)]
     public void CanCancel_ReflectsCurrentStep(InstallerStep step, bool expected)
     {
         var vm = new InstallerViewModel(new BrandTokens());

@@ -4,20 +4,9 @@
              x:DataType="vm:InstallerViewModel"
              x:Class="SigilBuild.Installer.Host.Views.Screens.FinishView">
   <StackPanel Spacing="12" VerticalAlignment="Center">
-    <TextBlock FontSize="22" FontWeight="Bold" TextWrapping="Wrap"
+    <TextBlock FontSize="22" FontWeight="Bold"
                Text="{Binding Brand.AppName, StringFormat='{}{0} is installed'}" />
-    <TextBlock TextWrapping="Wrap" Foreground="#4B5563"
-               Text="Installation completed successfully." />
-    <!--
-      "Launch now" checkbox is gated on the manifest declaring a launchable
-      target. The yaml-to-checkbox wiring lands in the next task — until then
-      HasLaunchTarget is hard-coded false in the VM and the checkbox stays
-      hidden. Previous "Launch now" + hard-coded help text promised something
-      Sigil didn't actually do (the wrapper never ran the launch command),
-      so leaving the checkbox visible was a UX bug.
-    -->
-    <CheckBox Content="{Binding LaunchAfterInstallLabel}"
-              IsChecked="{Binding LaunchAfterInstall, Mode=TwoWay}"
-              IsVisible="{Binding HasLaunchTarget}" />
+    <TextBlock Text="You can now launch the application from the Start menu." Foreground="#4B5563" />
+    <CheckBox Content="Launch now" IsChecked="{Binding LaunchAfterInstall, Mode=TwoWay}" />
   </StackPanel>
 </UserControl>

@@ -2,12 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using SigilBuild.Core.Diagnostics;
 using SigilBuild.Core.Manifest;
 using SigilBuild.Packaging.Common;
 using SigilBuild.Packaging.Installer;
+using SigilBuild.Wrapper.Codec;
 using SigilBuild.Wrapper.Engine;
 using SigilBuild.Wrapper.Json;
 
@@ -15,15 +17,15 @@ namespace SigilBuild.Packaging.ExeWrapper;
 
 /// <summary>
 /// Packs an application as a single self-extracting <c>.exe</c> wrapper —
-/// the AOT-published <c>SigilBuild.Wrapper</c> runtime, stamped with a step
-/// blob and the payload archive as Win32 resources (see ADR-008).
+/// the Native-AOT-published <c>SigilBuild.Installer.Host</c> runtime, stamped
+/// with a step blob and the payload archive as Win32 resources (see ADR-008).
 /// </summary>
 /// <remarks>
 /// Task 14 implementation: the packager copies the stub runtime to
 /// <c>{OutputDirectory}/{App.Name}-Setup.exe</c>, then embeds the JSON
-/// step + parameter blob (<c>SIGIL_BLOB_V1</c>) and a zip archive of the
-/// source directory (<c>SIGIL_PAYLOAD_V1</c>) as Win32 <c>RT_RCDATA</c>
-/// resources via <see cref="WrapperResourceWriter"/>.
+/// step + parameter blob (<c>SIGIL_BLOB_V1</c>) and a deterministic zstd
+/// container of the source directory (<c>SIGIL_PAYLOAD_V2</c>, T6) as Win32
+/// <c>RT_RCDATA</c> resources via <see cref="WrapperResourceWriter"/>.
 /// </remarks>
 public sealed class ExeWrapperPackager : IPackager
 {
@@ -34,13 +36,16 @@ public sealed class ExeWrapperPackager : IPackager
         ArgumentNullException.ThrowIfNull(manifest);
         ArgumentNullException.ThrowIfNull(options);
 
-        // Locate the AOT-published wrapper runtime. Surface the missing-runtime
-        // case as a SIG0120 diagnostic — the dev workflow expects build-wrappers
-        // to stage the AOT exe alongside the SDK before pack-time.
+        // Locate the AOT-published host runtime for the target architecture.
+        // A manifest declaring architectures: [x64, arm64] produces one Setup.exe
+        // per architecture, each stamped from the matching per-RID runtime.
+        // Surface the missing-runtime case as a SIG0120 diagnostic (PR #8) — the
+        // dev workflow expects build-wrappers to stage the AOT exe alongside the
+        // SDK before pack-time — rather than throwing deep in the packager.
         string stubPath;
         try
         {
-            stubPath = WrapperRuntimeLocator.Locate();
+            stubPath = WrapperRuntimeLocator.Locate(options.Architecture);
         }
         catch (FileNotFoundException ex)
         {
@@ -69,58 +74,38 @@ public sealed class ExeWrapperPackager : IPackager
 
         ct.ThrowIfCancellationRequested();
 
+        // Diagnostics surfaced during blob construction (T14: a missing /
+        // unreadable / empty license file is a non-fatal warning — the pack
+        // succeeds and the License screen is simply omitted).
+        var diagnostics = new List<Diagnostic>();
+
         // Build the SIGIL_BLOB_V1 wire payload: serialize a
         // SerializableWrapperBlob via the source-generated context shared
         // with the wrapper runtime.
-        var blobBytes = BuildBlobBytes(manifest);
+        var blobBytes = BuildBlobBytes(manifest, options.SourceDirectory, diagnostics);
 
-        // Build the SIGIL_PAYLOAD_V1 wire payload: a zip archive of the
-        // source directory. Richer payload-extraction (zstd, splitting,
-        // payload:// path resolution) lands with Tasks 15+.
+        // Build the SIGIL_PAYLOAD_V2 wire payload: the source directory packed
+        // into the deterministic zstd container (T6), decoded on the host side by
+        // PayloadExtraction. The codec is shared with the future delta-update
+        // engine (spec section 5).
         var payloadBytes = BuildPayloadBytes(options.SourceDirectory, ct);
 
-        // Resolve the installer icon ONCE up front. Same bytes flow to two
-        // places: (a) the InstallerHostBundle, which stamps the bundled
-        // wizard exe + ships installer-icon.ico for Window.Icon at runtime;
-        // (b) the final IconResourceWriter.WriteAsync call that stamps the
-        // outer setup.exe's Explorer/Shell icon.
+        // T18: archive the host's staged native dependencies (Skia/ANGLE/HarfBuzz)
+        // so the stamped Setup.exe is self-contained and can launch the GUI wizard
+        // standalone. Empty when no natives are staged (SIGIL_RUNTIME_V1 is then
+        // simply not written — the pre-T18 exe-only behaviour, still /silent-capable).
+        var nativeDepPaths = WrapperRuntimeLocator.LocateNativeDeps(options.Architecture);
+        var runtimeBytes = BuildRuntimeBytes(nativeDepPaths, ct);
+
+        // Resolve the installer icon (PR #8) up front — stamped into the produced
+        // setup.exe's Explorer/Shell icon after the resource-update cycle below.
+        // Null when neither a manifest installer.icon nor the bundled default is
+        // readable (the wrapper then keeps its stock icon).
         var iconBytes = ResolveIconBytes(manifest);
 
-        // Build the SIGIL_INSTALLER_HOST_V1 wire payload when the manifest
-        // declares an `installer:` block AND the AOT-published installer.exe
-        // is staged next to the SDK. When it's missing, fall through to the
-        // headless path — the wrapper runs install_steps without a wizard.
-        // This mirrors the policy MsixPackager.Bundle uses for MSIX.
-        var (installerHostBundle, installerHostDiagnostic) =
-            TryBuildInstallerHostBundle(manifest, iconBytes);
-
-        // When the manifest declares an uninstall: block, generate a lightweight
-        // uninstaller.exe stamped with those steps and embed it in setup.exe as
-        // SIGIL_UNINSTALLER_V1. The wrapper drops the resource to install_dir on
-        // successful install + writes the ARP UninstallString.
-        byte[]? uninstallerExeBytes = null;
-        string? uninstallerTempPath = null;
-        if (manifest.Uninstall is { Count: > 0 } uninstallSteps)
-        {
-            var app = new AppMetadata(
-                Id: manifest.App.Id, Name: manifest.App.Name, Version: manifest.App.Version,
-                Publisher: manifest.App.Publisher, Description: manifest.App.Description,
-                Homepage: manifest.App.Homepage);
-            uninstallerTempPath = await UninstallerExeBuilder.BuildAsync(
-                stubPath, manifest.App.Id, app, uninstallSteps, ct).ConfigureAwait(false);
-            uninstallerExeBytes = await File.ReadAllBytesAsync(uninstallerTempPath, ct).ConfigureAwait(false);
-        }
-
-        // Embed all resources via the Win32 update-resource flow.
-        await WrapperResourceWriter.WriteAsync(
-            outputPath, blobBytes, payloadBytes, installerHostBundle, uninstallerExeBytes, ct)
+        // Embed the resources via the Win32 update-resource flow.
+        await WrapperResourceWriter.WriteAsync(outputPath, blobBytes, payloadBytes, runtimeBytes, ct)
             .ConfigureAwait(false);
-
-        // Clean up the temp uninstaller file — its bytes are now embedded.
-        if (uninstallerTempPath is not null)
-        {
-            try { File.Delete(uninstallerTempPath); } catch { /* best-effort */ }
-        }
 
         // Stamp the icon AFTER WrapperResourceWriter has finished its
         // BeginUpdateResource / EndUpdateResource cycle. Concurrent updates on
@@ -137,9 +122,6 @@ public sealed class ExeWrapperPackager : IPackager
         var size = new FileInfo(outputPath).Length;
 
         var artifact = new PackedArtifact(outputPath, sha256, size);
-        var diagnostics = installerHostDiagnostic is null
-            ? Array.Empty<Diagnostic>()
-            : new[] { installerHostDiagnostic };
         return new PackResult(artifact, diagnostics);
     }
 
@@ -173,93 +155,204 @@ public sealed class ExeWrapperPackager : IPackager
         return ms.ToArray();
     }
 
-    /// <summary>
-    /// Try to build the <c>SIGIL_INSTALLER_HOST_V1</c> bundle. Returns
-    /// <c>(null, null)</c> when the manifest has no <c>installer:</c> block;
-    /// <c>(null, SIG0121-warning)</c> when the block is present but the
-    /// AOT-published installer.exe is not staged (caller continues with a
-    /// headless setup.exe); <c>(bundleBytes, null)</c> on success.
-    /// </summary>
-    private static (byte[]? Bundle, Diagnostic? Diagnostic) TryBuildInstallerHostBundle(SigilManifest manifest, byte[]? iconBytes)
-    {
-        if (manifest.Installer is null)
-        {
-            return (null, null);
-        }
 
-        var hostExePath = InstallerHostLocator.TryLocate();
-        if (hostExePath is null)
-        {
-            return (null, new Diagnostic(DiagnosticSeverity.Warning, "SIG0121",
-                "manifest declares an installer: block but the AOT-published installer.exe was not found. " +
-                "Setup.exe is built without a wizard — install_steps will run headlessly. " +
-                "Stage installer.exe under runtimes/win-x64/ next to the SDK to enable the wizard.",
-                SourceLocation.Unknown,
-                "https://docs.sigil.build/diagnostics/SIG0121"));
-        }
-
-        // Resolve the brand logo path declared in the manifest (relative to
-        // the manifest file's directory) and bundle the file under a
-        // wizard-friendly name. When the manifest declares no logo (or the
-        // file doesn't exist on the build machine), pass null and the wizard
-        // falls back to the default no-logo state.
-        string? brandLogoAbsolutePath = null;
-        string? bundledLogoName = null;
-        var brandLogo = manifest.Installer?.Brand?.Logo;
-        if (!string.IsNullOrEmpty(brandLogo))
-        {
-            var manifestDir = Path.GetDirectoryName(manifest.Location.File);
-            var candidate = Path.IsPathRooted(brandLogo) || string.IsNullOrEmpty(manifestDir)
-                ? brandLogo
-                : Path.GetFullPath(Path.Combine(manifestDir, brandLogo));
-            if (File.Exists(candidate))
-            {
-                brandLogoAbsolutePath = candidate;
-                bundledLogoName = InstallerHostBundle.BrandLogoEntryPrefix + Path.GetExtension(candidate);
-            }
-        }
-
-        // BrandTokenEmitter is the shared brand-token serializer used by the
-        // MSIX path too — see SigilBuild.Packaging.Installer.BrandTokenEmitter.
-        // Warnings (e.g. WCAG-AA contrast failures) are accepted at pack time;
-        // a future task can surface them through diagnostics.
-        var tokens = BrandTokenEmitter.Emit(manifest, allowLowContrast: true, bundledLogoFileName: bundledLogoName);
-        var installTimeParams = BrandTokenEmitter.EmitInstallTimeParameters(manifest);
-        var bundle = InstallerHostBundle.Build(hostExePath, tokens, installTimeParams, brandLogoAbsolutePath, iconBytes);
-        return (bundle, null);
-    }
-
-    private static byte[] BuildBlobBytes(SigilManifest manifest)
+    internal static byte[] BuildBlobBytes(
+        SigilManifest manifest, string sourceDirectory, ICollection<Diagnostic>? diagnostics = null)
     {
         var parameters = manifest.Parameters is null
             ? Array.Empty<ParameterDefinition>()
             : ParametersToList(manifest.Parameters);
 
+        // T8: for each ENABLED built-in option component, auto-generate its install
+        // step(s), each gated on `option.<component>`. A disabled component yields
+        // nothing. The generated steps run AFTER the manifest's own install_steps
+        // (shortcuts / PATH / associations follow the file copies), and the ENABLED
+        // component list is carried in the blob so the runtime can seed `option.*`
+        // and the host can render the Options screen.
+        var (optionSteps, optionComponents) =
+            OptionStepGenerator.Generate(manifest.Installer?.Options, manifest.App);
+        var installSteps = CombineSteps(manifest.InstallSteps, optionSteps);
+
         var inMemory = new WrapperBlob(
             AppId: manifest.App.Id,
-            App: new AppMetadata(
-                Id: manifest.App.Id,
-                Name: manifest.App.Name,
-                Version: manifest.App.Version,
-                Publisher: manifest.App.Publisher,
-                Description: manifest.App.Description,
-                Homepage: manifest.App.Homepage),
             Parameters: parameters,
-            InstallSteps: manifest.InstallSteps ?? Array.Empty<InstallStep>(),
+            InstallSteps: installSteps,
             PreInstall: manifest.PreInstall ?? Array.Empty<InstallStep>(),
             PostInstall: manifest.PostInstall ?? Array.Empty<InstallStep>(),
             // Update-step block doesn't yet exist on SigilManifest (Task 19+);
             // emit an empty list for forward compatibility.
             UpdateSteps: Array.Empty<InstallStep>(),
-            Uninstall: manifest.Uninstall ?? Array.Empty<InstallStep>(),
-            // setup.exe blob — the dedicated uninstaller.exe stamps its own
-            // blob with IsUninstaller: true (Task 5.3).
-            IsUninstaller: false);
+            // T12: carry the manifest's install scope (user | machine | auto) into
+            // the blob so the runtime can resolve the effective scope (against the
+            // /allusers /currentuser flags) and elevate when a machine install is
+            // requested from a non-elevated process.
+            Scope: manifest.Installer?.Scope ?? InstallScope.Auto,
+            // T8: the enabled option components the runtime + wizard consume.
+            Options: optionComponents,
+            // T13: carry App.Name (the default install-dir base + {app.name} token)
+            // and the optional install_dir override template into the blob so the
+            // runtime resolves the effective install dir (default / manifest / /D=)
+            // and the {install_dir} token in step paths + expressions.
+            AppName: manifest.App.Name,
+            InstallDir: manifest.Installer?.InstallDir,
+            // T10: the real Add/Remove Programs fields. DisplayName/Publisher/Version
+            // come straight from manifest.App.*; EstimatedSizeBytes is the installed
+            // footprint estimate — the uncompressed payload size (the bytes that land
+            // on disk once the zstd container is extracted), which is what ARP's size
+            // column is meant to reflect. The runtime registers these instead of the
+            // former AppId / "1.0.0" / "Unknown" / 0 placeholders.
+            DisplayName: manifest.App.Name,
+            Publisher: manifest.App.Publisher,
+            Version: manifest.App.Version,
+            EstimatedSizeBytes: ComputeInstalledSizeBytes(sourceDirectory));
 
-        var serializable = SerializableWrapperBlob.FromWrapperBlob(inMemory);
+        // T7: derive the full light/dark palette at pack time and carry it, plus
+        // the base64 logo/hero bytes, inside the blob so the stamped exe renders
+        // branded with no loose files beside it (decision 11).
+        var palette = BrandTokenEmitter.Derive(manifest);
+        var brand = manifest.Installer?.Brand;
+
+        var serializable = SerializableWrapperBlob.FromWrapperBlob(inMemory) with
+        {
+            BrandTokensLight = new Dictionary<string, string>(palette.Light),
+            BrandTokensDark = new Dictionary<string, string>(palette.Dark),
+            LogoBase64 = ReadImageBase64(brand?.Logo, sourceDirectory),
+            HeroBase64 = ReadImageBase64(brand?.Hero, sourceDirectory),
+            // T9: carry the declared custom wizard screens into the blob so the
+            // stamped host can render them. Parameters are already populated by
+            // FromWrapperBlob; screens live only on the manifest's InstallerSection.
+            Screens = ScreensToArray(manifest.Installer?.Screens),
+            // T14: read the manifest-referenced license file and embed its text so
+            // the stamped host shows the License screen. Missing/unreadable/empty
+            // → null + a non-fatal diagnostic (the screen is simply omitted).
+            LicenseText = ReadLicenseText(manifest.Installer?.License, sourceDirectory, diagnostics),
+            // T11 / decision 7: mark the artifact as INTENDED to be signed iff the
+            // manifest declares a real `sign` block. The trust line is gated at
+            // install time on SignDeclared && WinVerifyTrust(self) == valid — never
+            // on App.publisher alone — so an unsigned pack (or one whose signature
+            // is later invalidated) never shows "Signed by …". Pipeline ordering:
+            // pack stamps resources FIRST (invalidating any prior signature), then
+            // `sigil sign` signs the finished Setup.exe LAST.
+            SignDeclared = manifest.Sign is { Provider: not SignProvider.None },
+        };
+
         var json = System.Text.Json.JsonSerializer.Serialize(
             serializable, WrapperBlobJsonContext.Default.SerializableWrapperBlob);
         return System.Text.Encoding.UTF8.GetBytes(json);
+    }
+
+    /// <summary>
+    /// Reads a manifest brand image (logo/hero) as base64, resolving a relative
+    /// path against the pack source directory. Returns <c>null</c> when the path
+    /// is unset or the file is missing — brand assets are optional and their
+    /// absence must not fail the pack.
+    /// </summary>
+    private static string? ReadImageBase64(string? path, string sourceDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return null;
+
+        var resolved = Path.IsPathRooted(path)
+            ? path
+            : Path.GetFullPath(Path.Combine(sourceDirectory ?? string.Empty, path));
+
+        if (!File.Exists(resolved))
+            return null;
+
+        return Convert.ToBase64String(File.ReadAllBytes(resolved));
+    }
+
+    /// <summary>
+    /// Reads the manifest-referenced license file (<c>installer.license</c>, T14)
+    /// as text, resolving a relative path against the pack source directory.
+    /// Returns <c>null</c> — and appends a non-fatal <see cref="DiagnosticCodes.LicenseFileUnreadable"/>
+    /// warning to <paramref name="diagnostics"/> — when the path is set but the
+    /// file is missing, unreadable, or empty. Per T14 this never hard-fails the
+    /// pack; the License screen is simply omitted. Plain text only (RTF-as-text v1;
+    /// no RTF parsing).
+    /// </summary>
+    private static string? ReadLicenseText(
+        string? path, string sourceDirectory, ICollection<Diagnostic>? diagnostics)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return null;
+
+        var resolved = Path.IsPathRooted(path)
+            ? path
+            : Path.GetFullPath(Path.Combine(sourceDirectory ?? string.Empty, path));
+
+        string text;
+        try
+        {
+            if (!File.Exists(resolved))
+            {
+                ReportLicense(diagnostics,
+                    $"installer license file not found: '{path}' (resolved to '{resolved}') — the License screen will be omitted");
+                return null;
+            }
+
+            text = File.ReadAllText(resolved);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            ReportLicense(diagnostics,
+                $"installer license file could not be read: '{path}' — {ex.Message}; the License screen will be omitted");
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            ReportLicense(diagnostics,
+                $"installer license file is empty: '{path}' — the License screen will be omitted");
+            return null;
+        }
+
+        return text;
+    }
+
+    private static void ReportLicense(ICollection<Diagnostic>? diagnostics, string message)
+    {
+        diagnostics?.Add(new Diagnostic(
+            DiagnosticSeverity.Warning,
+            DiagnosticCodes.LicenseFileUnreadable,
+            message,
+            SourceLocation.Unknown,
+            "https://docs.sigil.build/diagnostics/SIG0250"));
+    }
+
+    /// <summary>
+    /// Append the pack-time-generated option steps (T8) after the manifest's own
+    /// <c>install_steps</c>, preserving order. Returns the manifest list unchanged
+    /// when no option steps were generated, and an empty list when both are empty.
+    /// </summary>
+    private static IReadOnlyList<InstallStep> CombineSteps(
+        IReadOnlyList<InstallStep>? manifestSteps, IReadOnlyList<InstallStep> generated)
+    {
+        var baseSteps = manifestSteps ?? Array.Empty<InstallStep>();
+        if (generated.Count == 0)
+        {
+            return baseSteps;
+        }
+
+        var combined = new List<InstallStep>(baseSteps.Count + generated.Count);
+        combined.AddRange(baseSteps);
+        combined.AddRange(generated);
+        return combined;
+    }
+
+    private static SigilBuild.Wrapper.Json.SerializableInstallerScreen[] ScreensToArray(
+        IReadOnlyList<InstallerScreen>? screens)
+    {
+        if (screens is null || screens.Count == 0)
+        {
+            return Array.Empty<SigilBuild.Wrapper.Json.SerializableInstallerScreen>();
+        }
+        var arr = new SigilBuild.Wrapper.Json.SerializableInstallerScreen[screens.Count];
+        for (var i = 0; i < screens.Count; i++)
+        {
+            arr[i] = SigilBuild.Wrapper.Json.SerializableInstallerScreen.FromInstallerScreen(screens[i]);
+        }
+        return arr;
     }
 
     private static ParameterDefinition[] ParametersToList(
@@ -275,25 +368,93 @@ public sealed class ExeWrapperPackager : IPackager
         return arr;
     }
 
-    private static byte[] BuildPayloadBytes(string sourceDirectory, CancellationToken ct)
+    /// <summary>
+    /// Estimate the installed footprint (T10) reported to Add/Remove Programs as
+    /// <c>EstimatedSize</c>. Defined as the sum of the <em>uncompressed</em> payload
+    /// file sizes — the bytes that actually land on disk once the zstd container is
+    /// extracted — which is a truer reflection of the on-disk footprint than the
+    /// compressed Setup.exe size. Deterministic (file order does not affect the sum),
+    /// and <c>0</c> when the source directory is absent/empty. <c>ArpRegistration</c>
+    /// converts bytes → KB for the OS.
+    /// </summary>
+    internal static long ComputeInstalledSizeBytes(string sourceDirectory)
+    {
+        if (string.IsNullOrEmpty(sourceDirectory) || !Directory.Exists(sourceDirectory))
+        {
+            return 0;
+        }
+
+        long total = 0;
+        foreach (var file in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories))
+        {
+            total += new FileInfo(file).Length;
+        }
+        return total;
+    }
+
+    /// <summary>
+    /// Build the <c>SIGIL_PAYLOAD_V2</c> wire payload: the source directory
+    /// packed into the deterministic zstd container defined by
+    /// <see cref="PayloadCodec"/> (T6). Every file is enumerated, read, and handed
+    /// to the codec, which sorts entries by ordinal relative path and stores no
+    /// timestamps — so the container, and therefore the stamped Setup.exe, is
+    /// byte-identical across builds of the same input. The host decompresses the
+    /// same container via the same codec (see <c>PayloadExtraction</c>), and the
+    /// future delta-update engine reuses it (spec section 5).
+    /// </summary>
+    internal static byte[] BuildPayloadBytes(string sourceDirectory, CancellationToken ct)
     {
         if (string.IsNullOrEmpty(sourceDirectory) || !Directory.Exists(sourceDirectory))
         {
             return Array.Empty<byte>();
         }
 
+        var root = Path.GetFullPath(sourceDirectory);
+        var entries = new List<PayloadEntry>();
+        foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+        {
+            ct.ThrowIfCancellationRequested();
+            var rel = Path.GetRelativePath(root, file).Replace('\\', '/');
+            entries.Add(new PayloadEntry(rel, File.ReadAllBytes(file)));
+        }
+
+        return PayloadCodec.Encode(entries);
+    }
+
+    /// <summary>
+    /// Archive the staged native-dependency DLLs (T18) into the deterministic zip
+    /// container carried by <c>SIGIL_RUNTIME_V1</c>. Entries are flat file names
+    /// (the runtime bootstrap loads every DLL from one search directory), sorted
+    /// ordinal, with a pinned mtime — so the archive, and therefore the stamped
+    /// Setup.exe, is byte-identical across builds. Returns an empty array when no
+    /// native deps are supplied; the writer then omits the resource entirely.
+    /// </summary>
+    internal static byte[] BuildRuntimeBytes(IReadOnlyList<string> nativeDependencyPaths, CancellationToken ct)
+    {
+        if (nativeDependencyPaths is null || nativeDependencyPaths.Count == 0)
+        {
+            return Array.Empty<byte>();
+        }
+
+        // Store by (deduplicated) file name, sorted for determinism regardless of
+        // the caller's enumeration order.
+        var ordered = nativeDependencyPaths
+            .Select(p => (Name: Path.GetFileName(p), Path: p))
+            .GroupBy(e => e.Name, StringComparer.Ordinal)
+            .Select(g => g.First())
+            .OrderBy(e => e.Name, StringComparer.Ordinal)
+            .ToArray();
+
         using var ms = new MemoryStream();
         using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
         {
-            var root = Path.GetFullPath(sourceDirectory);
-            foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+            foreach (var (name, path) in ordered)
             {
                 ct.ThrowIfCancellationRequested();
-                var rel = Path.GetRelativePath(root, file).Replace('\\', '/');
-                var entry = zip.CreateEntry(rel, CompressionLevel.Optimal);
+                var entry = zip.CreateEntry(name, CompressionLevel.Optimal);
                 entry.LastWriteTime = DeterministicMtime;
                 using var entryStream = entry.Open();
-                using var fs = File.OpenRead(file);
+                using var fs = File.OpenRead(path);
                 fs.CopyTo(entryStream);
             }
         }

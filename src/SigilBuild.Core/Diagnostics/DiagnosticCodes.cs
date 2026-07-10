@@ -20,4 +20,20 @@ public static class DiagnosticCodes
 
     // SIG0234 — parameter `source:` block validation (uninstaller-icon-nsis-parity Section 8)
     public const string ParameterSourceInvalid = "SIG0234";
+
+    // SIG024x — installer.screens: block (T9, declared custom screens)
+    public const string UnknownScreenParameterRef = "SIG0240";
+    public const string InvalidScreenWhenExpression = "SIG0241";
+    public const string InvalidScreenTitleToken = "SIG0242";
+
+    // SIG025x — installer.license: block (T14, License screen backing)
+    // Emitted at pack time when the referenced license file is
+    // missing/unreadable/empty. Non-fatal: the pack succeeds and the License
+    // screen is simply omitted.
+    public const string LicenseFileUnreadable = "SIG0250";
+
+    // SIG026x — installer.scope: block (T12, dual install scope)
+    // Emitted when installer.scope holds a value outside {user, machine, auto};
+    // the parser falls back to auto. Non-fatal (the schema enum is the hard gate).
+    public const string InvalidInstallerScope = "SIG0260";
 }

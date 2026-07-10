@@ -49,11 +49,11 @@ public class UninstallEngineTests
             Directory.Exists(Path.Combine(dst.Path, "sub")).Should().BeTrue();
 
             // Persist journal — this is what Program.Main does on install success.
-            UninstallStateStore.Save(appId, installResult.Journal);
-            File.Exists(UninstallStateStore.PathFor(appId)).Should().BeTrue();
+            UninstallStateStore.Save(appId, installResult.Journal, InstallScope.User);
+            File.Exists(UninstallStateStore.PathFor(appId, InstallScope.User)).Should().BeTrue();
 
             // Uninstall: rehydrate + UndoAsync in reverse.
-            var uninstallResult = await new UninstallEngine().RunAsync(appId);
+            var uninstallResult = await new UninstallEngine().RunAsync(appId, InstallScope.User);
             uninstallResult.Success.Should().BeTrue();
 
             // Verify state is restored: copied file gone, created dir gone.
@@ -61,13 +61,13 @@ public class UninstallEngineTests
             Directory.Exists(Path.Combine(dst.Path, "sub")).Should().BeFalse();
 
             // Uninstall state cleaned up.
-            File.Exists(UninstallStateStore.PathFor(appId)).Should().BeFalse();
+            File.Exists(UninstallStateStore.PathFor(appId, InstallScope.User)).Should().BeFalse();
         }
         finally
         {
             // Best-effort cleanup if the test threw mid-flight.
 #pragma warning disable CA1031 // Test cleanup must never mask the original assertion failure.
-            try { UninstallStateStore.Delete(appId); } catch { /* best-effort */ }
+            try { UninstallStateStore.Delete(appId, InstallScope.User); } catch { /* best-effort */ }
             try
             {
                 Microsoft.Win32.Registry.LocalMachine.DeleteSubKeyTree(
@@ -112,25 +112,26 @@ public class UninstallEngineTests
             journal.Append(new RollbackRecord.RemoveDirectory(
                 Path.Combine(dst.Path, "d")));
 
-            UninstallStateStore.Save(appId, journal);
-            var loaded = UninstallStateStore.TryLoad(appId);
+            UninstallStateStore.Save(appId, journal, InstallScope.User);
+            var loaded = UninstallStateStore.TryLoad(appId, InstallScope.User);
             loaded.Should().NotBeNull();
-            loaded!.Records.Should().HaveCount(2);
-            loaded.Records[0].Should().BeOfType<RollbackRecord.RestoreFile>();
-            loaded.Records[1].Should().BeOfType<RollbackRecord.RemoveDirectory>();
+            loaded!.Journal.Records.Should().HaveCount(2);
+            loaded.Journal.Records[0].Should().BeOfType<RollbackRecord.RestoreFile>();
+            loaded.Journal.Records[1].Should().BeOfType<RollbackRecord.RemoveDirectory>();
+            loaded.Scope.Should().Be(InstallScope.User);
 
-            var restoreFile = (RollbackRecord.RestoreFile)loaded.Records[0];
+            var restoreFile = (RollbackRecord.RestoreFile)loaded.Journal.Records[0];
             restoreFile.Path.Should().Be(Path.Combine(dst.Path, "f.txt"));
             restoreFile.ExistedBefore.Should().BeFalse();
             restoreFile.BackupPath.Should().BeNull();
 
-            var removeDir = (RollbackRecord.RemoveDirectory)loaded.Records[1];
+            var removeDir = (RollbackRecord.RemoveDirectory)loaded.Journal.Records[1];
             removeDir.Path.Should().Be(Path.Combine(dst.Path, "d"));
         }
         finally
         {
 #pragma warning disable CA1031 // Test cleanup must never mask the original assertion failure.
-            try { UninstallStateStore.Delete(appId); } catch { /* best-effort */ }
+            try { UninstallStateStore.Delete(appId, InstallScope.User); } catch { /* best-effort */ }
 #pragma warning restore CA1031
         }
     }

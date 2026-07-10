@@ -14,7 +14,7 @@ Source: `schemas/sigil-schema.json` (JSON Schema, draft-07).
 | `sign` | object | - | - | _(undocumented)_ |
 | `publish` | object | - | - | _(undocumented)_ |
 | `updates` | object | - | - | _(undocumented)_ |
-| `installer` | object | - | - | Branded Windows installer wizard config (Phase 2.5 / D-011). Tokens are emitted at pack time by BrandTokenEmitter; WCAG-AA contrast is enforced against white text. |
+| `installer` | object | - | - | Branded Windows installer wizard config. Tokens are emitted at pack time by BrandTokenEmitter; WCAG-AA contrast is enforced against white text. |
 | `parameters` | object | - | - | Install-time / pack-time parameter declarations consumed by the wrapper installer (Sprint 5c). |
 | `install_steps` | array | - | - | Main install-time step list executed by the wrapper installer (Sprint 5c). Per-step parameter shapes are validated by the typed deserializer. |
 | `pre_install` | array | - | - | Steps executed before the main install_steps block. |
@@ -114,6 +114,11 @@ Source: `schemas/sigil-schema.json` (JSON Schema, draft-07).
 |---|---|---|---|---|
 | `icon` | string | - | - | Path (relative to the manifest) to a .ico file that becomes the produced setup.exe's Explorer icon. When omitted, the bundled default icon is used. |
 | `brand` | object | - | - | _(undocumented)_ |
+| `scope` | string | - | `auto` | Install scope: per-user, per-machine, or auto-resolve (T12). |
+| `install_dir` | string | - | - | Optional install-dir override; may reference {app.*} / {scope_root} tokens (T13). |
+| `license` | string | - | - | License file path or inline text; shows the License screen (T14). |
+| `options` | object | - | - | Built-in configurable installer components (T8). |
+| `screens` | array | - | - | Declared custom wizard screens over parameters (T9). |
 
 ## `installer.brand`
 
@@ -123,9 +128,17 @@ Source: `schemas/sigil-schema.json` (JSON Schema, draft-07).
 | `hero` | string | - | - | _(undocumented)_ |
 | `primaryColor` | string | - | - | _(undocumented)_ |
 | `accentColor` | string | - | - | _(undocumented)_ |
-| `gradientStart` | string | - | - | First stop of the three-stop sidebar gradient. |
-| `gradientMid` | string | - | - | Middle stop of the three-stop sidebar gradient. |
-| `gradientEnd` | string | - | - | Last stop of the three-stop sidebar gradient. |
+| `primary_color` | string | - | - | _(undocumented)_ |
+| `accent_color` | string | - | - | _(undocumented)_ |
+
+## `installer.options`
+
+| Property | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `desktop_shortcut` | InstallerOption | - | - | _(undocumented)_ |
+| `start_menu` | InstallerOption | - | - | _(undocumented)_ |
+| `add_to_path` | InstallerOption | - | - | _(undocumented)_ |
+| `file_associations` | FileAssociationOption | - | - | _(undocumented)_ |
 
 ## `parameters.<name>`
 
@@ -159,4 +172,14 @@ Source: `schemas/sigil-schema.json` (JSON Schema, draft-07).
 | `type` | string | yes | - | _(undocumented)_ |
 | `when` | string | - | - | _(undocumented)_ |
 | `on_failure` | string | - | - | _(undocumented)_ |
+
+## Definition: `InstallerScreen`
+
+| Property | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `id` | string | yes | - | _(undocumented)_ |
+| `title` | string | yes | - | _(undocumented)_ |
+| `subtitle` | string | - | - | _(undocumented)_ |
+| `when` | string | - | - | _(undocumented)_ |
+| `fields` | array | yes | - | _(undocumented)_ |
 

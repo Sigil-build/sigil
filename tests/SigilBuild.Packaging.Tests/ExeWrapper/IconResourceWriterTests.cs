@@ -14,7 +14,7 @@ public class IconResourceWriterTests
     [Fact(Skip = "Requires the AOT-published Wrapper.exe in runtimes/win-x64/.")]
     public async Task WriteAsync_ReplacesIconInWrapperExe()
     {
-        var stubExe = WrapperRuntimeLocator.Locate();
+        var stubExe = WrapperRuntimeLocator.Locate(SigilBuild.Core.Manifest.TargetArchitecture.X64);
         var tmp = Path.Combine(Path.GetTempPath(), $"sigil-icon-{Guid.NewGuid():N}.exe");
         File.Copy(stubExe, tmp, overwrite: true);
         try
@@ -39,7 +39,7 @@ public class IconResourceWriterTests
     public async Task ExeWrapperPackager_StampsIconOnProducedSetupExe_WhenWrapperRuntimeStaged()
     {
         string stubExe;
-        try { stubExe = WrapperRuntimeLocator.Locate(); }
+        try { stubExe = WrapperRuntimeLocator.Locate(SigilBuild.Core.Manifest.TargetArchitecture.X64); }
         catch (FileNotFoundException) { return; /* soft-skip — AOT runtime not staged */ }
 
         var fixtureDir = Path.Combine(AppContext.BaseDirectory, "Fixtures", "minimal-payload");

@@ -19,25 +19,15 @@ namespace SigilBuild.Packaging.ExeWrapper;
 ///     <c>SIGIL_BLOB_V1</c> — the JSON-serialised step + parameter blob.
 ///   </item>
 ///   <item>
-///     <c>SIGIL_PAYLOAD_V1</c> — the user payload bytes (zip archive of the
-///     manifest's <c>SourceDirectory</c> for now; richer payload-extraction
-///     story lands with Tasks 15+).
+///     <c>SIGIL_PAYLOAD_V2</c> — the user payload bytes as the deterministic
+///     zstd container of the manifest's <c>SourceDirectory</c> (T6, see
+///     <c>SigilBuild.Wrapper.Codec.PayloadCodec</c>).
 ///   </item>
 ///   <item>
-///     <c>SIGIL_INSTALLER_HOST_V1</c> (optional) — a zip archive containing
-///     <c>installer.exe</c> + <c>BrandTokens.g.json</c>. Present only when the
-///     manifest declares an <c>installer:</c> block. The wrapper runtime
-///     extracts it at install time and launches the wizard before running
-///     <c>install_steps</c>. Pass <c>null</c> to <see cref="WriteAsync"/> to
-///     skip embedding (headless-only setup.exe — current default).
-///   </item>
-///   <item>
-///     <c>SIGIL_UNINSTALLER_V1</c> (optional) — the bytes of a standalone
-///     <c>uninstaller.exe</c> built by <c>UninstallerExeBuilder</c>. Present
-///     only when the manifest declares an <c>uninstall:</c> block. The
-///     wrapper runtime materialises this beside the installed app so the
-///     wrapper itself never has to evaluate its uninstall steps. Pass
-///     <c>null</c> to skip embedding (no uninstaller).
+///     <c>SIGIL_RUNTIME_V1</c> — (T18) the host's native dependencies
+///     (Skia/ANGLE/HarfBuzz) as a deterministic zip, embedded only when native
+///     deps were staged, so a standalone stamped <c>Setup.exe</c> can extract
+///     and load them before the GUI wizard starts.
 ///   </item>
 /// </list>
 /// Both resources are read at install time by the wrapper runtime via
@@ -60,32 +50,32 @@ internal static partial class WrapperResourceWriter
     private const ushort LangNeutral = 0;
 
     private const string BlobResourceName = "SIGIL_BLOB_V1";
-    private const string PayloadResourceName = "SIGIL_PAYLOAD_V1";
-    private const string InstallerHostResourceName = "SIGIL_INSTALLER_HOST_V1";
-    private const string UninstallerResourceName = "SIGIL_UNINSTALLER_V1";
+
+    // T6: bumped from SIGIL_PAYLOAD_V1 (deterministic Deflate zip) to
+    // SIGIL_PAYLOAD_V2 (deterministic zstd container, see PayloadCodec). The
+    // decode side (WrapperBlob.LoadPayloadBytes / PayloadExtraction) is gated on
+    // this exact marker, so a V1 blob is treated as "no payload" rather than
+    // mis-parsed.
+    private const string PayloadResourceName = "SIGIL_PAYLOAD_V2";
+
+    // T18: the host's native dependencies (Skia/ANGLE/HarfBuzz) archived so a
+    // standalone stamped Setup.exe can extract + load them before the GUI starts.
+    private const string RuntimeResourceName = "SIGIL_RUNTIME_V1";
 
     public static Task WriteAsync(
-        string exePath,
-        byte[] blob,
-        byte[] payload,
-        byte[]? installerHostBundle,
-        byte[]? uninstallerExe,
-        CancellationToken ct)
+        string exePath, byte[] blob, byte[] payload, byte[] runtime, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(exePath);
         ArgumentNullException.ThrowIfNull(blob);
         ArgumentNullException.ThrowIfNull(payload);
-        // installerHostBundle and uninstallerExe are intentionally nullable —
-        // manifests without an `installer:` block produce a headless-only
-        // setup.exe, and manifests without an `uninstall:` block produce a
-        // setup.exe with no embedded uninstaller.
+        ArgumentNullException.ThrowIfNull(runtime);
         ct.ThrowIfCancellationRequested();
 
-        WriteCore(exePath, blob, payload, installerHostBundle, uninstallerExe);
+        WriteCore(exePath, blob, payload, runtime);
         return Task.CompletedTask;
     }
 
-    private static void WriteCore(string exePath, byte[] blob, byte[] payload, byte[]? installerHostBundle, byte[]? uninstallerExe)
+    private static void WriteCore(string exePath, byte[] blob, byte[] payload, byte[] runtime)
     {
         // BeginUpdateResource(deleteExistingResources: false) keeps the AOT
         // binary's pre-existing resources (manifest, version info, icon)
@@ -100,8 +90,7 @@ internal static partial class WrapperResourceWriter
 
         var blobNamePtr = IntPtr.Zero;
         var payloadNamePtr = IntPtr.Zero;
-        var hostNamePtr = IntPtr.Zero;
-        var uninstNamePtr = IntPtr.Zero;
+        var runtimeNamePtr = IntPtr.Zero;
         var committed = false;
         try
         {
@@ -117,16 +106,13 @@ internal static partial class WrapperResourceWriter
                 UpdateOne(hUpdate, payloadNamePtr, payload, PayloadResourceName);
             }
 
-            if (installerHostBundle is not null && installerHostBundle.Length > 0)
+            // T18: only stamp the native-runtime resource when there is one to
+            // stamp. An empty archive (no native deps staged) leaves SIGIL_RUNTIME_V1
+            // absent, so the host bootstrap correctly no-ops as an un-stamped run.
+            if (runtime.Length > 0)
             {
-                hostNamePtr = Marshal.StringToHGlobalUni(InstallerHostResourceName);
-                UpdateOne(hUpdate, hostNamePtr, installerHostBundle, InstallerHostResourceName);
-            }
-
-            if (uninstallerExe is not null && uninstallerExe.Length > 0)
-            {
-                uninstNamePtr = Marshal.StringToHGlobalUni(UninstallerResourceName);
-                UpdateOne(hUpdate, uninstNamePtr, uninstallerExe, UninstallerResourceName);
+                runtimeNamePtr = Marshal.StringToHGlobalUni(RuntimeResourceName);
+                UpdateOne(hUpdate, runtimeNamePtr, runtime, RuntimeResourceName);
             }
 
             // Commit — fDiscard: false writes the changes to disk.
@@ -142,8 +128,7 @@ internal static partial class WrapperResourceWriter
         {
             if (blobNamePtr != IntPtr.Zero) Marshal.FreeHGlobal(blobNamePtr);
             if (payloadNamePtr != IntPtr.Zero) Marshal.FreeHGlobal(payloadNamePtr);
-            if (hostNamePtr != IntPtr.Zero) Marshal.FreeHGlobal(hostNamePtr);
-            if (uninstNamePtr != IntPtr.Zero) Marshal.FreeHGlobal(uninstNamePtr);
+            if (runtimeNamePtr != IntPtr.Zero) Marshal.FreeHGlobal(runtimeNamePtr);
 
             // If we threw before commit, discard the in-memory update so the
             // exe on disk is unchanged. Ignore the bool result — we are

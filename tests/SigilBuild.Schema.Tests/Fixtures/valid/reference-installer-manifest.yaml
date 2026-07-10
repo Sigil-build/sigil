@@ -1,0 +1,52 @@
+# IMPLEMENTATION_SPEC.md section 3 — end-to-end reference manifest.
+# The updated schema (M0 installer surface) MUST validate this document.
+# The illustrative `sign:` block from section 3 is omitted here: the schema's
+# pre-existing sign `allOf` requires an `azureTrustedSigning` sub-block for the
+# azure-trusted-signing provider, which is orthogonal to the installer surface
+# under test and out of M0 scope.
+spec: v1.0
+
+app:
+  id: com.acme.Studio
+  name: Acme Studio
+  version: 3.2.0
+  publisher: Acme, Inc.
+
+build:
+  source: ./out
+
+package:
+  formats: [exe]
+  architectures: [x64, arm64]
+
+parameters:
+  server_address: { type: string, default: "https://acme.internal", install_time: true, description: "Server address" }
+  license_key:    { type: secret, install_time: true, description: "License key" }
+  autostart:      { type: bool,   default: true,  description: "Start when I sign in" }
+  channel:        { type: enum,   values: [stable, beta, nightly], default: stable, description: "Update channel" }
+
+installer:
+  scope: auto                 # user | machine | auto (T12)
+  install_dir: "{scope_root}/Acme Studio"   # optional override (T13)
+  license: ./LICENSE.txt      # shows the License screen (T14)
+  brand:
+    primary_color: "#312E81"
+    accent_color:  "#4F46E5"
+    logo: ./brand/logo.png
+  options:
+    desktop_shortcut: true
+    add_to_path: { default: true }
+    file_associations: { enabled: true, extensions: [".acme"], default: false }
+    start_menu: false
+  screens:
+    - id: configure
+      title: "Configure {app.name}"
+      subtitle: "Connect to your server and set preferences."
+      fields:
+        - server_address
+        - license_key
+        - { param: channel, widget: radio }
+        - autostart
+
+install_steps:
+  - { id: run_first_launch, type: run_program, program: "{install_dir}/acme.exe", args: ["--register"], when: "param.autostart == true", on_failure: continue }

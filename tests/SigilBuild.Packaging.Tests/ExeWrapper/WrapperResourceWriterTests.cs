@@ -15,72 +15,54 @@ using Xunit;
 namespace SigilBuild.Packaging.Tests.ExeWrapper;
 
 /// <summary>
-/// Win32 round-trip tests for the SIGIL_BLOB_V1 / SIGIL_PAYLOAD_V1 embed
-/// path. The "embed" half (<see cref="WrapperResourceWriter.WriteAsync"/>)
-/// requires a real PE file to update — there is no in-memory equivalent of
-/// <c>BeginUpdateResource</c>. Tests therefore depend on the AOT-published
-/// wrapper runtime being copied into <c>runtimes/win-x64/</c>; that wiring
-/// is the responsibility of the build pipeline (see
-/// <see cref="WrapperRuntimeLocator"/>) and is tracked as a follow-up.
+/// Win32 round-trip tests for the SIGIL_BLOB_V1 / SIGIL_PAYLOAD_V2 /
+/// SIGIL_RUNTIME_V1 embed path. The "embed" half
+/// (<see cref="WrapperResourceWriter.WriteAsync"/>) requires a real PE file to
+/// update — there is no in-memory equivalent of <c>BeginUpdateResource</c>. The
+/// round-trip does NOT need the (slow-to-produce) AOT-published host: any valid
+/// PE carries a resource table, so — as T18's <c>NativeRuntimeBootstrapTests</c>
+/// established — the running test host exe is used as a stand-in PE. This keeps
+/// the test in the normal <c>dotnet test</c> loop (no AOT publish, no staged
+/// runtime) while still exercising the real Win32 writer + reader (T17: this
+/// fact is no longer skipped).
 /// </summary>
 public class WrapperResourceWriterTests
 {
-    [Fact(Skip = "Requires the AOT-published Wrapper.exe in runtimes/win-x64/. Tracked as a build-pipeline follow-up to Task 14.")]
+    [Fact]
     public async Task Roundtrip_blob_via_resource_apis()
     {
-        var stubExe = WrapperRuntimeLocator.Locate();
+        if (!OperatingSystem.IsWindows())
+        {
+            return; // BeginUpdateResourceW / FindResourceW are Win32-only APIs.
+        }
+
+        // Use the running test host exe as a stand-in PE (no AOT publish needed).
+        var stubExe = Environment.ProcessPath;
+        if (string.IsNullOrEmpty(stubExe) || !File.Exists(stubExe) ||
+            !stubExe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+        {
+            return; // No apphost PE available in this run — nothing to update.
+        }
+
         var tmp = Path.Combine(Path.GetTempPath(), $"sigil-rw-{Guid.NewGuid():N}.exe");
         File.Copy(stubExe, tmp, overwrite: true);
         try
         {
             var blob = Encoding.UTF8.GetBytes("hello-blob");
             var payload = new byte[] { 1, 2, 3 };
-            await WrapperResourceWriter.WriteAsync(tmp, blob, payload, installerHostBundle: null, uninstallerExe: null, CancellationToken.None);
+            var runtime = new byte[] { 4, 5, 6, 7 };
+            await WrapperResourceWriter.WriteAsync(tmp, blob, payload, runtime, CancellationToken.None);
 
             // Read the resource back via raw Win32 APIs without launching the
             // wrapper exe (which would also exercise Half B).
             var roundtrippedBlob = ResourceReader.Read(tmp, "SIGIL_BLOB_V1");
             roundtrippedBlob.Should().Equal(blob);
 
-            var roundtrippedPayload = ResourceReader.Read(tmp, "SIGIL_PAYLOAD_V1");
+            var roundtrippedPayload = ResourceReader.Read(tmp, "SIGIL_PAYLOAD_V2");
             roundtrippedPayload.Should().Equal(payload);
-        }
-        finally
-        {
-            try { File.Delete(tmp); } catch (IOException) { }
-        }
-    }
 
-    /// <summary>
-    /// Three-resource round-trip: when <c>installerHostBundle</c> is supplied,
-    /// the writer must embed it under <c>SIGIL_INSTALLER_HOST_V1</c> alongside
-    /// the existing BLOB + PAYLOAD resources, and the wrapper-side reader
-    /// (which lives in <c>WrapperBlob.LoadInstallerHostBundleBytes</c>) must
-    /// see exactly the same bytes back. Soft-skips when the AOT runtime isn't
-    /// staged (same gate as the existing 2-resource test, just non-blocking).
-    /// </summary>
-    [Fact]
-    public async Task Roundtrip_three_resources_includes_installer_host_bundle()
-    {
-        string stubExe;
-        try { stubExe = WrapperRuntimeLocator.Locate(); }
-        catch (FileNotFoundException) { return; /* soft-skip — runtime not staged */ }
-
-        var tmp = Path.Combine(Path.GetTempPath(), $"sigil-rw3-{Guid.NewGuid():N}.exe");
-        File.Copy(stubExe, tmp, overwrite: true);
-        try
-        {
-            var blob = Encoding.UTF8.GetBytes("hello-blob");
-            var payload = new byte[] { 1, 2, 3 };
-            // Synthetic bundle bytes — the writer doesn't care that this isn't
-            // a valid zip; it's a black-box round-trip.
-            var hostBundle = Encoding.UTF8.GetBytes("PK\x03\x04synthetic-bundle");
-
-            await WrapperResourceWriter.WriteAsync(tmp, blob, payload, hostBundle, uninstallerExe: null, CancellationToken.None);
-
-            ResourceReader.Read(tmp, "SIGIL_BLOB_V1").Should().Equal(blob);
-            ResourceReader.Read(tmp, "SIGIL_PAYLOAD_V1").Should().Equal(payload);
-            ResourceReader.Read(tmp, "SIGIL_INSTALLER_HOST_V1").Should().Equal(hostBundle);
+            var roundtrippedRuntime = ResourceReader.Read(tmp, "SIGIL_RUNTIME_V1");
+            roundtrippedRuntime.Should().Equal(runtime);
         }
         finally
         {
@@ -107,7 +89,6 @@ public class WrapperResourceWriterTests
     {
         var blob = new WrapperBlob(
             AppId: "com.example.app",
-            App: AppMetadata.Empty with { Id = "com.example.app", Name = "Example", Version = "1.0.0", Publisher = "ExampleCo" },
             Parameters: new[]
             {
                 new ParameterDefinition(
@@ -134,9 +115,7 @@ public class WrapperResourceWriterTests
             InstallSteps: Array.Empty<InstallStep>(),
             PreInstall: Array.Empty<InstallStep>(),
             PostInstall: Array.Empty<InstallStep>(),
-            UpdateSteps: Array.Empty<InstallStep>(),
-            Uninstall: Array.Empty<InstallStep>(),
-            IsUninstaller: false);
+            UpdateSteps: Array.Empty<InstallStep>());
 
         var deserialized = DeserializeBlob(SerializeBlob(blob));
 
@@ -156,7 +135,6 @@ public class WrapperResourceWriterTests
     {
         var blob = new WrapperBlob(
             AppId: "com.example.app",
-            App: AppMetadata.Empty with { Id = "com.example.app", Name = "Example", Version = "1.0.0", Publisher = "ExampleCo" },
             Parameters: Array.Empty<ParameterDefinition>(),
             InstallSteps: new InstallStep[]
             {
@@ -175,9 +153,7 @@ public class WrapperResourceWriterTests
             },
             PreInstall: Array.Empty<InstallStep>(),
             PostInstall: Array.Empty<InstallStep>(),
-            UpdateSteps: Array.Empty<InstallStep>(),
-            Uninstall: Array.Empty<InstallStep>(),
-            IsUninstaller: false);
+            UpdateSteps: Array.Empty<InstallStep>());
 
         var deserialized = DeserializeBlob(SerializeBlob(blob));
 
@@ -228,8 +204,53 @@ public class WrapperResourceWriterTests
 internal static partial class ResourceReader
 {
     private static readonly IntPtr RtRcData = (IntPtr)10;
+    // RT_GROUP_ICON — icon-directory resource (winuser.h). Used to verify the
+    // installer icon stamped by IconResourceWriter (PR #8).
     private static readonly IntPtr RtGroupIcon = (IntPtr)14;
     private const uint LoadLibraryAsDataFile = 0x00000002;
+
+    /// <summary>
+    /// Reads an <c>RT_GROUP_ICON</c> resource by name (e.g. <c>MAINICON</c>) via
+    /// the same LoadLibraryEx datafile flow as <see cref="Read"/>. Used by the
+    /// icon-resource tests to confirm setup.exe got the branded icon.
+    /// </summary>
+    public static byte[] ReadIconGroup(string filePath, string resourceName)
+    {
+        var hModule = LoadLibraryExW(filePath, IntPtr.Zero, LoadLibraryAsDataFile);
+        if (hModule == IntPtr.Zero)
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error(),
+                $"LoadLibraryEx failed for '{filePath}'");
+        }
+
+        var namePtr = Marshal.StringToHGlobalUni(resourceName);
+        try
+        {
+            var hRes = FindResourceW(hModule, namePtr, RtGroupIcon);
+            if (hRes == IntPtr.Zero)
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(),
+                    $"FindResource failed for RT_GROUP_ICON '{resourceName}'");
+            }
+
+            var size = SizeofResource(hModule, hRes);
+            var hData = LoadResource(hModule, hRes);
+            if (hData == IntPtr.Zero)
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "LoadResource failed");
+            }
+
+            var ptr = LockResource(hData);
+            var managed = new byte[size];
+            Marshal.Copy(ptr, managed, 0, (int)size);
+            return managed;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(namePtr);
+            FreeLibrary(hModule);
+        }
+    }
 
     public static byte[] Read(string filePath, string resourceName)
     {
@@ -257,34 +278,6 @@ internal static partial class ResourceReader
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "LoadResource failed");
             }
 
-            var ptr = LockResource(hData);
-            var managed = new byte[size];
-            Marshal.Copy(ptr, managed, 0, (int)size);
-            return managed;
-        }
-        finally
-        {
-            Marshal.FreeHGlobal(namePtr);
-            FreeLibrary(hModule);
-        }
-    }
-
-    public static byte[] ReadIconGroup(string filePath, string resourceName)
-    {
-        var hModule = LoadLibraryExW(filePath, IntPtr.Zero, LoadLibraryAsDataFile);
-        if (hModule == IntPtr.Zero)
-            throw new Win32Exception(Marshal.GetLastWin32Error(),
-                $"LoadLibraryEx failed for '{filePath}'");
-
-        var namePtr = Marshal.StringToHGlobalUni(resourceName);
-        try
-        {
-            var hRes = FindResourceW(hModule, namePtr, RtGroupIcon);
-            if (hRes == IntPtr.Zero)
-                throw new Win32Exception(Marshal.GetLastWin32Error(),
-                    $"FindResource failed for RT_GROUP_ICON '{resourceName}'");
-            var size = SizeofResource(hModule, hRes);
-            var hData = LoadResource(hModule, hRes);
             var ptr = LockResource(hData);
             var managed = new byte[size];
             Marshal.Copy(ptr, managed, 0, (int)size);

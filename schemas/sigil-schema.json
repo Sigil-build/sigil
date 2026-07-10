@@ -84,6 +84,71 @@
           "on_failure": { "type": "string", "enum": ["rollback", "continue", "fail"] }
         }
       }
+    },
+    "InstallerOption": {
+      "description": "Built-in configurable installer component: shorthand boolean or an object.",
+      "oneOf": [
+        { "type": "boolean" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "default": { "type": "boolean" },
+            "locked": { "type": "boolean" }
+          }
+        }
+      ]
+    },
+    "FileAssociationOption": {
+      "description": "file_associations component: shorthand boolean or an object with extensions.",
+      "oneOf": [
+        { "type": "boolean" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "default": { "type": "boolean" },
+            "locked": { "type": "boolean" },
+            "extensions": {
+              "type": "array",
+              "items": { "type": "string", "pattern": "^\\.[A-Za-z0-9]+$" }
+            }
+          }
+        }
+      ]
+    },
+    "InstallerScreen": {
+      "type": "object",
+      "description": "A declared custom wizard screen (form over declared parameters).",
+      "required": ["id", "title", "fields"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "subtitle": { "type": "string" },
+        "when": { "type": "string" },
+        "fields": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/ScreenField" }
+        }
+      }
+    },
+    "ScreenField": {
+      "description": "A screen field: a bare parameter-name string or a { param, widget } object.",
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        {
+          "type": "object",
+          "required": ["param"],
+          "additionalProperties": false,
+          "properties": {
+            "param": { "type": "string", "minLength": 1 },
+            "widget": { "type": "string" }
+          }
+        }
+      ]
     }
   },
   "properties": {
@@ -279,7 +344,7 @@
     },
     "installer": {
       "type": "object",
-      "description": "Branded Windows installer wizard config (Phase 2.5 / D-011). Tokens are emitted at pack time by BrandTokenEmitter; WCAG-AA contrast is enforced against white text.",
+      "description": "Branded Windows installer wizard config. Tokens are emitted at pack time by BrandTokenEmitter; WCAG-AA contrast is enforced against white text.",
       "additionalProperties": false,
       "properties": {
         "icon": {
@@ -300,22 +365,47 @@
               "type": "string",
               "pattern": "^#[0-9A-Fa-f]{6}$"
             },
-            "gradientStart": {
+            "primary_color": {
               "type": "string",
-              "pattern": "^#[0-9A-Fa-f]{6}$",
-              "description": "First stop of the three-stop sidebar gradient."
+              "pattern": "^#[0-9A-Fa-f]{6}$"
             },
-            "gradientMid": {
+            "accent_color": {
               "type": "string",
-              "pattern": "^#[0-9A-Fa-f]{6}$",
-              "description": "Middle stop of the three-stop sidebar gradient."
-            },
-            "gradientEnd": {
-              "type": "string",
-              "pattern": "^#[0-9A-Fa-f]{6}$",
-              "description": "Last stop of the three-stop sidebar gradient."
+              "pattern": "^#[0-9A-Fa-f]{6}$"
             }
           }
+        },
+        "scope": {
+          "type": "string",
+          "description": "Install scope: per-user, per-machine, or auto-resolve (T12).",
+          "enum": ["user", "machine", "auto"],
+          "default": "auto"
+        },
+        "install_dir": {
+          "type": "string",
+          "description": "Optional install-dir override; may reference {app.*} / {scope_root} tokens (T13).",
+          "minLength": 1
+        },
+        "license": {
+          "type": "string",
+          "description": "License file path or inline text; shows the License screen (T14).",
+          "minLength": 1
+        },
+        "options": {
+          "type": "object",
+          "description": "Built-in configurable installer components (T8).",
+          "additionalProperties": false,
+          "properties": {
+            "desktop_shortcut": { "$ref": "#/definitions/InstallerOption" },
+            "start_menu": { "$ref": "#/definitions/InstallerOption" },
+            "add_to_path": { "$ref": "#/definitions/InstallerOption" },
+            "file_associations": { "$ref": "#/definitions/FileAssociationOption" }
+          }
+        },
+        "screens": {
+          "type": "array",
+          "description": "Declared custom wizard screens over parameters (T9).",
+          "items": { "$ref": "#/definitions/InstallerScreen" }
         }
       }
     },

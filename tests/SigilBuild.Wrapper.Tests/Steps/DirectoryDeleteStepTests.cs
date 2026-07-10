@@ -26,6 +26,29 @@ public class DirectoryDeleteStepTests
 
         result.Success.Should().BeTrue();
         Directory.Exists(target).Should().BeFalse();
+
+        // Success path: no rollback runs, so mirror the install commit and reclaim
+        // the transient rollback stash so this test leaves no %TEMP%\sigil-dd-*
+        // residue (regression guard for T17 temp-dir cleanliness).
+        journal.DiscardTransientStashes();
+        AssertNoStashResidue(journal);
+    }
+
+    /// <summary>
+    /// Asserts every stash-bearing rollback record's <c>%TEMP%</c> stash was
+    /// reclaimed — the property the install-commit path (and these tests) must
+    /// uphold so a full <c>dotnet test</c> run leaves no <c>sigil-dd-*</c> residue.
+    /// </summary>
+    private static void AssertNoStashResidue(RollbackJournal journal)
+    {
+        foreach (var record in journal.Records)
+        {
+            if (record is RollbackRecord.RestoreDeletedDirectory d)
+            {
+                Directory.Exists(d.StashPath).Should().BeFalse(
+                    "the transient directory_delete stash must be reclaimed on commit");
+            }
+        }
     }
 
     [Fact]

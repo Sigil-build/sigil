@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>SigilBuild.Wrapper</RootNamespace>
+    <AssemblyName>SigilBuild.Wrapper.Core</AssemblyName>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Class library form of the wrapper runtime engine. The console shell
+         (SigilBuild.Wrapper) and, from Task T2, the Avalonia host
+         (SigilBuild.Installer.Host) both reference this so they share one
+         step engine. AOT/trim analysis still runs here on Release builds via
+         Directory.Build.props (EnableTrimAnalyzer); the engine is consumed by
+         AOT-published exes, so it must stay AOT-safe. -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <!-- Required for [LibraryImport] source-generated P/Invokes used by
+         Engine/WrapperBlob.cs (FindResource / LoadResource) and the shell-link
+         COM interop under Steps/Win32. The generated marshalling code is unsafe
+         but never user-authored. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\SigilBuild.Core\SigilBuild.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- T6: pure-managed zstd codec for the embedded payload container. No native
+         libzstd, so it publishes clean under Native AOT + trimming with nothing to
+         bundle beside the AOT host. Homed here (not in Packaging) because both the
+         packager's encode and the host's decode call the one PayloadCodec, and the
+         future delta-update engine reuses it (spec section 5). -->
+    <PackageReference Include="ZstdSharp.Port" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The engine, step implementations, expression evaluator, JSON DTOs and
+         CLI parser are intentionally internal — they are the wrapper runtime's
+         private contract, not a third-party extension surface. Consumers that
+         drive them directly need InternalsVisibleTo. -->
+    <InternalsVisibleTo Include="SigilBuild.Wrapper" />
+    <InternalsVisibleTo Include="SigilBuild.Installer.Host" />
+    <!-- The packager builds the SIGIL_BLOB_V1 JSON via the same internal
+         DTOs + source-generated context the wrapper uses to read it back. -->
+    <InternalsVisibleTo Include="SigilBuild.Packaging" />
+    <InternalsVisibleTo Include="SigilBuild.Wrapper.Tests" />
+    <InternalsVisibleTo Include="SigilBuild.Packaging.Tests" />
+  </ItemGroup>
+</Project>

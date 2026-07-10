@@ -6,7 +6,6 @@ using System.Threading.Tasks;
 using SigilBuild.Core.Diagnostics;
 using SigilBuild.Core.Manifest;
 using SigilBuild.Packaging.Common;
-using SigilBuild.Packaging.Installer;
 
 namespace SigilBuild.Packaging.Msix;
 
@@ -55,15 +54,10 @@ public sealed class MsixPackager : IPackager
             else
                 CreatePlaceholderAssets(assetsDir);
 
-            if (manifest.Installer is not null)
-            {
-                var envExe = Environment.GetEnvironmentVariable("SIGIL_INSTALLER_HOST_EXE");
-                var hostExe = envExe ?? Path.Combine(AppContext.BaseDirectory, "installer", "installer.exe");
-                // When env var is explicitly set, treat it as authoritative — Bundle will throw if missing.
-                // On the fallback path, skip silently if the host binary hasn't been published yet.
-                if (envExe is not null || File.Exists(hostExe))
-                    InstallerHostBundler.Bundle(manifest, hostExe, stagingDir);
-            }
+            // MSIX is a native OS installer: Windows lays down the CopyTree payload and
+            // launches the app entry point declared in AppxManifest.xml. There is no
+            // bundled companion wizard — see docs/architecture/adr-msix-companion.md
+            // (option b). Branding flows through <VisualElements> + Assets/ logos only.
 
             Directory.CreateDirectory(options.OutputDirectory);
             var archStr = options.Architecture.ToString().ToLowerInvariant();

@@ -12,6 +12,7 @@
     <Project Path="src/SigilBuild.Packaging/SigilBuild.Packaging.csproj" />
     <Project Path="src/SigilBuild.Signing/SigilBuild.Signing.csproj" />
     <Project Path="src/SigilBuild.Wrapper/SigilBuild.Wrapper.csproj" />
+    <Project Path="src/SigilBuild.Wrapper.Core/SigilBuild.Wrapper.Core.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/SigilBuild.Cli.Tests/SigilBuild.Cli.Tests.csproj" />

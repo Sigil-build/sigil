@@ -1,9 +1,14 @@
-using System.IO;
-using System.Text.Json;
-using System.Text.Json.Serialization;
+using System.Collections.Generic;
 
 namespace SigilBuild.Installer.Host.Branding;
 
+/// <summary>
+/// Brand data consumed by the wizard. The full light/dark palette is derived at
+/// pack time (Avalonia cannot <c>color-mix</c> at runtime) and delivered inside
+/// the WrapperBlob — there is no <c>BrandTokens.g.json</c> sidecar for a stamped
+/// <c>.exe</c> (decision 11). <see cref="LightTokens"/> / <see cref="DarkTokens"/>
+/// map token names (railBg, accent, winBg, …) to <c>#RRGGBB</c> values.
+/// </summary>
 public sealed class BrandTokens
 {
     public string AppName { get; init; } = "Application";
@@ -11,29 +16,34 @@ public sealed class BrandTokens
     public string Publisher { get; init; } = "Publisher";
     public string PrimaryColor { get; init; } = "#1F2937";
     public string AccentColor { get; init; } = "#3B82F6";
-    public string GradientStart { get; init; } = "#0F172A";
-    public string GradientMid { get; init; } = "#1E1B4B";
-    public string GradientEnd { get; init; } = "#4F46E5";
     public string LogoFile { get; init; } = "default-logo.png";
     public string HeroFile { get; init; } = "default-hero.png";
 
-    public static BrandTokens LoadOrDefault(string sideloadPath)
-    {
-        if (!File.Exists(sideloadPath)) return new BrandTokens();
-        return JsonSerializer.Deserialize(
-            File.ReadAllText(sideloadPath),
-            BrandTokensJsonContext.Default.BrandTokens) ?? new BrandTokens();
-    }
-}
+    /// <summary>Derived light-mode token map. Empty => the palette's literal
+    /// defaults (BrandPalette.axaml) are used, e.g. an un-stamped dev run.</summary>
+    public IReadOnlyDictionary<string, string> LightTokens { get; init; }
+        = new Dictionary<string, string>();
 
-// PropertyNamingPolicy = CamelCase aligns the source-gen with the camelCase
-// keys emitted by SigilBuild.Packaging.Installer.BrandTokenEmitter
-// (primaryColor, accentColor, gradientStart, gradientMid, gradientEnd, …).
-// Without this, deserialization is case-sensitive against PascalCase property
-// names and every brand token silently keeps its hard-coded default — except
-// when the AOT runtime mismatches and one or more properties end up null,
-// which crashes BrandPalette.Apply with ArgumentNullException("Value cannot
-// be null. (Parameter 's')") inside Color.Parse.
-[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
-[JsonSerializable(typeof(BrandTokens))]
-internal sealed partial class BrandTokensJsonContext : JsonSerializerContext { }
+    /// <summary>Derived dark-mode token map.</summary>
+    public IReadOnlyDictionary<string, string> DarkTokens { get; init; }
+        = new Dictionary<string, string>();
+
+    /// <summary>Base64-encoded brand logo bytes carried in the blob, if any.</summary>
+    public string? LogoBase64 { get; init; }
+
+    /// <summary>Base64-encoded brand hero bytes carried in the blob, if any.</summary>
+    public string? HeroBase64 { get; init; }
+
+    /// <summary>
+    /// The verified-signature-gated trust line (T11 / decision 7), e.g.
+    /// <c>"Signed by Acme, Inc."</c>. Non-null ONLY when the manifest declared a
+    /// <c>sign</c> block AND the running exe's Authenticode signature verified;
+    /// <c>null</c> for an unsigned, un-stamped, or tampered/re-stamped artifact —
+    /// the wizard then shows no trust line (the neutral publisher name still
+    /// renders separately). <see cref="HasTrustLine"/> drives its visibility.
+    /// </summary>
+    public string? TrustLine { get; init; }
+
+    /// <summary>True when a verified trust line should render.</summary>
+    public bool HasTrustLine => !string.IsNullOrEmpty(TrustLine);
+}

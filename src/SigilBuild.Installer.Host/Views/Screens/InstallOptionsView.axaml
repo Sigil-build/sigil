@@ -3,40 +3,44 @@
              xmlns:vm="using:SigilBuild.Installer.Host.ViewModels"
              x:DataType="vm:InstallerViewModel"
              x:Class="SigilBuild.Installer.Host.Views.Screens.InstallOptionsView">
+  <!-- Destination screen (T13): where the app installs. The collected path becomes
+       {install_dir}. When scope is `auto` (T12) the user/machine radios show and
+       swap the default path between %LocalAppData%\Programs and Program Files. -->
   <StackPanel Spacing="12">
-    <TextBlock FontSize="20" FontWeight="SemiBold" Text="{Binding CurrentGroupTitle}" />
-    <TextBlock Text="Confirm the values below; tab through to edit." Foreground="#4B5563" />
+    <TextBlock FontSize="20" FontWeight="SemiBold"
+               Foreground="{DynamicResource TextPriBrush}" Text="Choose install location" />
+    <TextBlock Foreground="{DynamicResource TextMutBrush}" TextWrapping="Wrap"
+               Text="Where should the application be installed?" />
 
-    <ItemsControl ItemsSource="{Binding CurrentGroupFields}" Margin="0,8,0,0">
-      <ItemsControl.ItemTemplate>
-        <DataTemplate DataType="vm:ParameterFieldVm">
-          <StackPanel Spacing="4" Margin="0,0,0,8">
-            <TextBlock Text="{Binding Label}" FontWeight="SemiBold" />
-            <!-- Static enum: ComboBox bound to manifest-declared `values:` list -->
-            <ComboBox ItemsSource="{Binding Values}"
-                      SelectedItem="{Binding CurrentValue, Mode=TwoWay}"
-                      HorizontalAlignment="Stretch"
-                      IsVisible="{Binding IsStaticEnum}" />
-            <!-- Dynamic enum: ComboBox bound to options fetched at attach time from `source:`.
-                 SelectedValueBinding pulls .Value out of each HttpOption so the bound CurrentValue
-                 ends up being the canonical id (not a record reference). -->
-            <ComboBox ItemsSource="{Binding DynamicOptions}"
-                      DisplayMemberBinding="{Binding Label}"
-                      SelectedValueBinding="{Binding Value}"
-                      SelectedValue="{Binding CurrentValue, Mode=TwoWay}"
-                      HorizontalAlignment="Stretch"
-                      IsVisible="{Binding IsDynamicEnum}" />
-            <!-- Bool: CheckBox bound to BoolValue (derived view of CurrentValue
-                 as a bool). The Label TextBlock above doubles as the field
-                 caption so we keep the checkbox content empty. -->
-            <CheckBox IsChecked="{Binding BoolValue, Mode=TwoWay}"
-                      Content="Enable"
-                      IsVisible="{Binding IsBool}" />
-            <TextBox Text="{Binding CurrentValue, Mode=TwoWay}"
-                     IsVisible="{Binding IsTextual}" />
-          </StackPanel>
-        </DataTemplate>
-      </ItemsControl.ItemTemplate>
-    </ItemsControl>
+    <Grid ColumnDefinitions="*,Auto">
+      <TextBox Grid.Column="0" x:Name="InstallPath"
+               Text="{Binding InstallPath, Mode=TwoWay}" />
+      <Button Grid.Column="1" x:Name="BrowseButton" Content="Browse…"
+              Margin="8,0,0,0" Click="OnBrowse" />
+    </Grid>
+
+    <!-- Inline validation error: absolute / non-file / writable-or-elevatable. -->
+    <TextBlock Foreground="{DynamicResource DangerTextBrush}" FontSize="12"
+               TextWrapping="Wrap"
+               IsVisible="{Binding HasInstallPathError}"
+               Text="{Binding InstallPathError}" />
+
+    <!-- Scope choice (T12), shown only when the manifest scope is `auto`. -->
+    <StackPanel Spacing="8" Margin="0,8,0,0" IsVisible="{Binding ScopeSelectable}">
+      <RadioButton GroupName="scope" IsChecked="{Binding IsUserScope, Mode=TwoWay}">
+        <StackPanel>
+          <TextBlock Text="Just for me (recommended)" FontWeight="SemiBold" />
+          <TextBlock Text="No administrator permission needed"
+                     Foreground="{DynamicResource TextMutBrush}" FontSize="12" />
+        </StackPanel>
+      </RadioButton>
+      <RadioButton GroupName="scope" IsChecked="{Binding IsMachineScope, Mode=TwoWay}">
+        <StackPanel>
+          <TextBlock Text="All users of this computer" FontWeight="SemiBold" />
+          <TextBlock Text="Installs to Program Files — Windows will ask for permission"
+                     Foreground="{DynamicResource TextMutBrush}" FontSize="12" />
+        </StackPanel>
+      </RadioButton>
+    </StackPanel>
   </StackPanel>
 </UserControl>

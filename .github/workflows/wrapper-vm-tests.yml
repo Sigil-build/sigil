@@ -1,26 +1,29 @@
 # wrapper-vm-tests
 #
-# Opt-in CI job for the multi-edition install integration test (Sprint 5c,
-# WBS 2.24, Task 13). The job is currently DISABLED via `if: false` because
-# the underlying flow has two prerequisites that are not yet wired:
+# End-to-end install/uninstall verification for the stamped Setup.exe, run on a
+# real Windows runner (the "VM"). Opt-in via workflow_dispatch so it never blocks
+# the push/PR `ci` workflow; the real VM verdict is CI's, not a dev box's.
 #
-#   1. The AOT-published `SigilBuild.Wrapper.exe` must be staged under
-#      `runtimes/win-x64/` next to the test assembly so
-#      `WrapperRuntimeLocator.Locate()` succeeds. See
-#      `src/SigilBuild.Packaging/ExeWrapper/WrapperRuntimeLocator.cs`.
-#   2. (Future) A real Windows Sandbox `.wsb` profile, if/when we harden the
-#      `VmSandbox` helper from a host-process runner to true OS isolation.
+# T17 consolidation: T5 (pack → /silent roundtrip), T12 (user × machine scope),
+# T15 (uninstall survives deletion of the original setup exe) and T10 (double-
+# install idempotency + real ARP values) each appended their own job/step over
+# time. They are unified here into ONE coherent matrix:
 #
-# To enable: flip `if: false` to `if: true`, add the publish-and-copy step
-# below the placeholder, and remove this banner.
+#   scope ∈ { currentuser, allusers }              (T12 — both scopes)
+#     × install → verify payload/ARP/PATH/shortcuts (T5/T10)
+#     × uninstall → verify everything reversed       (T5/T12)
+#     × deleted-original-setup-exe uninstall         (T15)
+#     × double-install idempotency                   (T10)
+#
+# The publish-runtime step ALWAYS runs before any pack: the packager stamps the
+# AOT installer host, so it must be staged next to the integration-test assembly
+# (runtimes/win-x64/) before `Sigil.PackAsync` is invoked inside a test.
 name: wrapper-vm-tests
 
-# Opt-in: only runs on demand. Until the AOT runtime publish + Windows
-# Sandbox config land, this job is a no-op shell intentionally.
+# Opt-in: manual dispatch only. Real installs mutate the runner's registry/PATH,
+# so this must never run on every push/PR.
 on:
   workflow_dispatch:
-  # push: ... (intentionally NOT enabled on push — opt-in until the AOT
-  # publish-and-copy step is wired into the build pipeline)
 
 permissions:
   contents: read
@@ -28,9 +31,22 @@ permissions:
 jobs:
   wrapper-vm-tests:
     runs-on: windows-latest
-    if: false  # disabled by default; flip to true once AOT publish lands
+    strategy:
+      # Run both scopes even if one fails, so a per-scope regression is isolated.
+      fail-fast: false
+      matrix:
+        scope: [currentuser, allusers]
+    name: vm (${{ matrix.scope }})
     env:
+      # Opt the soft-skip integration tests into their real end-to-end body.
       SIGIL_VM_TESTS: "1"
+      # T12: which scope this matrix leg exercises (/currentuser | /allusers).
+      SIGIL_VM_SCOPE: ${{ matrix.scope }}
+      # Scenario toggles — one leg exercises the full contract per scope:
+      SIGIL_VM_SCOPE_MATRIX: "1"       # T12 scope-correct surfaces (ARP hive, roots, PATH, shortcuts)
+      SIGIL_VM_ARP_VALUES: "1"         # T10 real manifest.App.* ARP values (DisplayName/Version/Publisher/size)
+      SIGIL_VM_UNINSTALL_SURVIVE: "1"  # T15 uninstall after the original setup exe is deleted
+      SIGIL_VM_DOUBLE_INSTALL: "1"     # T10 running the same Setup.exe twice never duplicates PATH/shortcut/ARP
     steps:
       - uses: actions/checkout@v4
 
@@ -38,18 +54,45 @@ jobs:
         with:
           global-json-file: global.json
 
-      - name: Publish wrapper AOT runtime
+      # Build first so the publish step can stage the runtime INTO the test's
+      # output directory (AppContext.BaseDirectory) that WrapperRuntimeLocator reads.
+      - name: build integration test project
+        run: >
+          dotnet build tests/SigilBuild.Wrapper.IntegrationTests/SigilBuild.Wrapper.IntegrationTests.csproj
+          --configuration Release
+
+      # MUST run before any pack: stage the Native-AOT installer host (+ its
+      # SIGIL_RUNTIME_V1 native deps) so ExeWrapperPackager can stamp a Setup.exe.
+      # windows-latest carries the "Desktop development with C++" workload the AOT
+      # link needs; the SAME script drives local pack, so CI and `sigil pack` stamp
+      # byte-identical runtimes (spec T3/T18).
+      - name: publish + stage installer host AOT runtime (before packing)
+        shell: pwsh
         run: |
-          dotnet publish src/SigilBuild.Wrapper -c Release -r win-x64 -p:PublishAot=true
-          # TODO: copy the published exe into the test project's runtimes/win-x64/.
-          # Tracked separately as part of the SDK packaging story.
+          $dest = "tests/SigilBuild.Wrapper.IntegrationTests/bin/Release/net10.0"
+          ./scripts/publish-installer-runtime.ps1 `
+            -Rids win-x64 `
+            -Configuration Release `
+            -DestinationRoot $dest `
+            -SizeGateMb 40
 
-      - name: Run integration tests
-        run: dotnet test tests/SigilBuild.Wrapper.IntegrationTests/SigilBuild.Wrapper.IntegrationTests.csproj --logger "trx;LogFileName=wrapper-vm-tests.trx"
+      # One run per scope exercises the whole contract (install → verify →
+      # uninstall → verify, plus the T15 deleted-original and T10 double-install
+      # scenarios) via the env toggles above. The integration tests pack a fixture
+      # Setup.exe, run it /silent in the selected scope, and assert the scope-correct
+      # filesystem/registry/PATH/shortcut surfaces end-to-end.
+      - name: run install/uninstall matrix (${{ matrix.scope }})
+        shell: pwsh
+        run: |
+          dotnet test tests/SigilBuild.Wrapper.IntegrationTests/SigilBuild.Wrapper.IntegrationTests.csproj `
+            --configuration Release `
+            --no-build `
+            --logger "trx;LogFileName=wrapper-vm-tests-${{ matrix.scope }}.trx"
 
-      - name: Upload test results
+      - name: upload test results (${{ matrix.scope }})
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: wrapper-vm-test-results
+          name: wrapper-vm-test-results-${{ matrix.scope }}
           path: '**/TestResults/**/*.trx'
+          if-no-files-found: warn

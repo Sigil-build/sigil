@@ -1,463 +1,333 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
-using System.IO;
-using System.Linq;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
-using Avalonia.Media;
-using Avalonia.Media.Imaging;
+using SigilBuild.Core.Manifest;
 using SigilBuild.Installer.Host.Branding;
 using SigilBuild.Installer.Host.Services;
+using SigilBuild.Wrapper.Engine;
+using SigilBuild.Wrapper.Expressions;
 
 namespace SigilBuild.Installer.Host.ViewModels;
 
-/// <summary>
-/// Coarse wizard step enum. Retained as the legacy public surface; the
-/// underlying step machine is now a list of <see cref="InstallerStepDef"/>
-/// entries so the InstallOptions surface can fan out across an arbitrary
-/// number of NSIS-style themed pages plus a dedicated Install Directory page.
-/// Setting <see cref="InstallerViewModel.CurrentStep"/> to an enum value maps
-/// onto the first list entry of that kind.
-/// </summary>
-public enum InstallerStep { Welcome, License, InstallOptions, Installing, Finish, Custom }
+public enum InstallerStep { Welcome, License, InstallOptions, Options, Installing, Finish, Failed, Custom }
 
-/// <summary>Windows MSI-convention exit codes surfaced by the installer process.</summary>
+/// <summary>
+/// Process exit code surfaced by the installer, per the unified T2 command-line
+/// contract shared with the console wrapper: <c>0</c> ok, <c>1</c> step failure
+/// (rolled back), <c>2</c> user cancelled (rolled back).
+/// </summary>
 public enum InstallerOutcomeCode
 {
-    Completed    = 0,
-    UserCancelled = 1602,
-    Failed       = 1603,
+    Completed     = 0,
+    Failed        = 1,
+    UserCancelled = 2,
 }
 
-/// <summary>
-/// Discriminated union of installer wizard steps. The step machine is a flat
-/// <see cref="IReadOnlyList{T}"/> of these; the wizard renders one screen per
-/// entry in order. Welcome / License / Installing / Finish are singletons;
-/// <see cref="InstallDir"/> appears only when the manifest declared an
-/// install-time <c>install_dir</c> parameter; <see cref="ParameterGroup"/>
-/// repeats once per distinct <c>screen:</c> value declared on install-time
-/// parameters (plus one synthetic "Install Options" group at the end for
-/// parameters that omitted the field).
-/// </summary>
-public abstract record InstallerStepDef(string Id, string Title)
-{
-    public sealed record Welcome() : InstallerStepDef("welcome", "Welcome");
-    public sealed record License() : InstallerStepDef("license", "License");
-    public sealed record InstallDir() : InstallerStepDef("install_dir", "Choose Install Location");
-    public sealed record ParameterGroup(string ScreenName, IReadOnlyList<ParameterFieldVm> Fields)
-        : InstallerStepDef($"group:{ScreenName}", ScreenName);
-    public sealed record Installing() : InstallerStepDef("installing", "Installing");
-    public sealed record Finish() : InstallerStepDef("finish", "Finish");
-    public sealed record Custom() : InstallerStepDef("custom", "Custom");
-}
+/// <summary>A single line in the Installing / Failed screen log.</summary>
+public sealed record InstallLogLine(string Text, bool IsError);
 
 public sealed class InstallerViewModel : INotifyPropertyChanged
 {
-    private const string DefaultParameterGroupName = "Install Options";
-
-    private int _currentStepIndex;
+    private InstallerStep _step = InstallerStep.Welcome;
     private string _installPath;
     private CancellationTokenSource? _engineCts;
+    private Func<IProgress<StepProgress>, CancellationToken, Task<InstallOutcome>>? _installRunner;
+
+    // T9 flow: an ordered list of wizard positions. Custom screens (declared over
+    // parameters) are inserted before Installing. The flow is screen-list driven
+    // rather than hardcoded so T14 (license) and later tasks can extend it.
+    private readonly List<FlowNode> _flow = new();
+    private int _flowIndex;
+    private IReadOnlyList<CustomScreenViewModel> _customScreens = Array.Empty<CustomScreenViewModel>();
+    private IReadOnlyList<ParameterDefinition> _parameters = Array.Empty<ParameterDefinition>();
+
+    // T14: the License screen (and its rail entry) appear IFF the blob carries
+    // license text. Absent by default so an un-stamped/dev host and a manifest
+    // with no `installer.license` skip the screen entirely.
+    private bool _hasLicense;
+
+    // T8: the built-in Options screen (and its rail entry) appear IFF the blob
+    // carries at least one enabled option component. Absent by default so an
+    // un-stamped/dev host and a manifest with no `installer.options` skip it.
+    private bool _hasOptions;
 
     public InstallerViewModel(BrandTokens tokens)
-        : this(tokens, Array.Empty<InstallTimeParameter>())
-    {
-    }
-
-    public InstallerViewModel(BrandTokens tokens, IReadOnlyList<InstallTimeParameter> installTimeParameters)
     {
         Brand = tokens;
-        InstallTimeParameters = installTimeParameters ?? Array.Empty<InstallTimeParameter>();
-        _parameterValues = SeedDefaults(InstallTimeParameters);
-
-        // install_dir is special: it's the value the InstallDirView's TextBox
-        // binds to. Preselect the user's manifest default if it declared an
-        // install-time parameter named "install_dir"; otherwise fall back to
-        // the conventional Program Files\AppName.
-        if (_parameterValues.TryGetValue("install_dir", out var installDirDefault) &&
-            !string.IsNullOrWhiteSpace(installDirDefault))
-        {
-            _installPath = installDirDefault;
-        }
-        else
-        {
-            _installPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-                tokens.AppName);
-        }
-
-        // Build the per-parameter VMs that drive the InstallOptionsView's
-        // ItemsControl. Each ParameterFieldVm carries the static metadata
-        // (name, label, type, allowed values for enums) plus the current
-        // user-edited value; CurrentValue changes flow back into
-        // _parameterValues so the install subprocess launcher reads the
-        // user's edits, not the defaults.
-        var fields = new List<ParameterFieldVm>(InstallTimeParameters.Count);
-        foreach (var p in InstallTimeParameters)
-        {
-            _parameterValues.TryGetValue(p.Name, out var current);
-            var field = new ParameterFieldVm
-            {
-                Name = p.Name,
-                Label = string.IsNullOrEmpty(p.Description) ? p.Name : p.Description!,
-                Type = p.Type,
-                Values = p.Values,
-                Source = p.Source,
-                Screen = p.Screen,
-                CurrentValue = current ?? p.DefaultAsString,
-            };
-            fields.Add(field);
-        }
-        foreach (var f in fields)
-        {
-            var capture = f;
-            capture.PropertyChanged += (_, e) =>
-            {
-                if (e.PropertyName == nameof(ParameterFieldVm.CurrentValue))
-                {
-                    _parameterValues[capture.Name] = capture.CurrentValue;
-                    if (capture.Name == "install_dir") InstallPath = capture.CurrentValue;
-                }
-            };
-        }
-        ParameterFields = fields;
-
-        Steps = BuildSteps(InstallTimeParameters, fields);
-
-        LogoImage = TryLoadLogo(tokens.LogoFile);
-    }
-
-    /// <summary>
-    /// Builds the ordered step list from the manifest's install-time
-    /// parameters. Always includes Welcome / License / Installing / Finish.
-    /// Inserts an InstallDir page when an <c>install_dir</c> parameter was
-    /// declared. Inserts one ParameterGroup per unique <c>screen:</c> value,
-    /// in first-appearance order. Parameters without a <c>screen:</c> value
-    /// land in a trailing synthetic "Install Options" group. The
-    /// <c>install_dir</c> parameter is excluded from every group — it lives
-    /// exclusively on the InstallDir page.
-    /// </summary>
-    private static List<InstallerStepDef> BuildSteps(
-        IReadOnlyList<InstallTimeParameter> parameters,
-        IReadOnlyList<ParameterFieldVm> fields)
-    {
-        var steps = new List<InstallerStepDef>(8)
-        {
-            new InstallerStepDef.Welcome(),
-            new InstallerStepDef.License(),
-        };
-
-        var hasInstallDir = parameters.Any(p =>
-            string.Equals(p.Name, "install_dir", StringComparison.OrdinalIgnoreCase));
-        if (hasInstallDir)
-            steps.Add(new InstallerStepDef.InstallDir());
-
-        // Group parameter fields by manifest-declared screen value. The
-        // install_dir parameter never appears in any group (it gets its own
-        // page above). Parameters without a screen value go into a trailing
-        // synthetic "Install Options" group so single-page installers keep
-        // their NSIS-equivalent look-and-feel.
-        var grouped = new Dictionary<string, List<ParameterFieldVm>>(StringComparer.Ordinal);
-        var orderedKeys = new List<string>();
-        var defaultGroup = new List<ParameterFieldVm>();
-        foreach (var f in fields)
-        {
-            if (string.Equals(f.Name, "install_dir", StringComparison.OrdinalIgnoreCase))
-                continue;
-            if (string.IsNullOrEmpty(f.Screen))
-            {
-                defaultGroup.Add(f);
-                continue;
-            }
-            if (!grouped.TryGetValue(f.Screen, out var bucket))
-            {
-                bucket = new List<ParameterFieldVm>();
-                grouped[f.Screen] = bucket;
-                orderedKeys.Add(f.Screen);
-            }
-            bucket.Add(f);
-        }
-
-        foreach (var key in orderedKeys)
-        {
-            steps.Add(new InstallerStepDef.ParameterGroup(key, grouped[key]));
-        }
-        if (defaultGroup.Count > 0)
-        {
-            steps.Add(new InstallerStepDef.ParameterGroup(DefaultParameterGroupName, defaultGroup));
-        }
-
-        // If neither install_dir nor any parameters at all are declared, keep
-        // the Install Options page visible so the wizard still has a screen
-        // between License and Installing — the page just renders empty fields.
-        if (!hasInstallDir && grouped.Count == 0 && defaultGroup.Count == 0)
-        {
-            steps.Add(new InstallerStepDef.ParameterGroup(
-                DefaultParameterGroupName,
-                Array.Empty<ParameterFieldVm>()));
-        }
-
-        steps.Add(new InstallerStepDef.Installing());
-        steps.Add(new InstallerStepDef.Finish());
-        return steps;
+        // Fallback default (T13): the per-user scope root — %LocalAppData%\Programs\
+        // <App> — matching the auto→user default (decision 9). The host overrides
+        // this via ConfigureDestination with the session's scope-aware resolution
+        // (honoring /D= + the manifest install_dir). Kept user-writable so the
+        // Destination gate passes without elevation.
+        _installPath = System.IO.Path.Combine(
+            System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData),
+            "Programs",
+            tokens.AppName);
+        RebuildFlow();
     }
 
     public BrandTokens Brand { get; }
 
-    /// <summary>
-    /// The declared install-time parameters from the manifest, as emitted by
-    /// <c>BrandTokenEmitter.EmitInstallTimeParameters</c>. Each entry has a
-    /// name, type, default, and (for enums) allowed values. Used by the
-    /// install subprocess launcher to translate user overrides into the
-    /// wrapper's <c>/Name=value</c> CLI form.
-    /// </summary>
-    public IReadOnlyList<InstallTimeParameter> InstallTimeParameters { get; }
+    // http-options runtime wiring: a source-backed enum field fetches its dropdown
+    // options when its custom screen becomes visible. The fetch is injectable so
+    // unit tests supply canned options without real network I/O; production uses
+    // the real HTTP loader.
+    private OptionsFetcher _optionsFetcher = HttpOptionsLoader.LoadAsync;
 
     /// <summary>
-    /// Flat list of every install-time parameter as a per-field view-model.
-    /// The Install Options page binds to the slice for the current
-    /// <see cref="InstallerStepDef.ParameterGroup"/>; this flat list survives
-    /// so existing wiring (HTTPS option fetch, install-subprocess launcher)
-    /// can iterate every parameter regardless of which page hosts it.
+    /// Override the option source used by source-backed dropdowns (default:
+    /// <see cref="HttpOptionsLoader.LoadAsync"/>). Tests inject a canned fetcher so
+    /// no unit test hits the network.
     /// </summary>
-    public IReadOnlyList<ParameterFieldVm> ParameterFields { get; } = Array.Empty<ParameterFieldVm>();
+    public void ConfigureOptionsFetcher(OptionsFetcher fetcher)
+        => _optionsFetcher = fetcher ?? throw new ArgumentNullException(nameof(fetcher));
 
     /// <summary>
-    /// Ordered list of wizard step definitions. Always begins with Welcome
-    /// + License and ends with Installing + Finish; InstallDir / one or more
-    /// ParameterGroup entries sit in between depending on the manifest.
+    /// Kick off the dynamic option fetch for every source-backed dropdown on a
+    /// custom screen. Fire-and-forget so navigation (and the UI thread) never
+    /// blocks on the network; each field surfaces its own loading/error state and
+    /// LoadDynamicOptionsAsync never throws. The <c>${parameters.*}</c> URL
+    /// placeholders are substituted from the values collected so far.
     /// </summary>
-    public IReadOnlyList<InstallerStepDef> Steps { get; }
-
-    /// <summary>Zero-based index into <see cref="Steps"/>.</summary>
-    public int CurrentStepIndex
+    private void TriggerDynamicOptionLoads(CustomScreenViewModel screen)
     {
-        get => _currentStepIndex;
+        var collected = CollectedParameterValues;
+        foreach (var field in screen.Fields)
+        {
+            if (field.HasDynamicOptions)
+            {
+                _ = field.LoadDynamicOptionsAsync(_optionsFetcher, collected);
+            }
+        }
+    }
+
+    // T10: a prior install of this app was detected (ARP/state). The wizard shows a
+    // reinstall notice on the Welcome screen; the engine performs uninstall-then-
+    // install so the reinstall stays idempotent (no duplicate PATH/shortcuts/ARP).
+    private bool _existingInstallDetected;
+
+    /// <summary>
+    /// True when the session found a prior install of this app in the resolved scope
+    /// (T10). Drives the Welcome-screen reinstall notice; wired by the host from
+    /// <c>InstallSession.ExistingInstallDetected</c>. The v1 repair/reinstall flow is
+    /// uninstall-then-install, performed by the engine — this flag only informs the user.
+    /// </summary>
+    public bool ExistingInstallDetected
+    {
+        get => _existingInstallDetected;
         private set
         {
-            if (_currentStepIndex == value) return;
-            _currentStepIndex = value;
-            OnPropertyChanged();
-            OnPropertyChanged(nameof(CurrentStepDef));
-            OnPropertyChanged(nameof(CurrentStep));
-            OnPropertyChanged(nameof(CanGoBack));
-            OnPropertyChanged(nameof(CanGoNext));
-            OnPropertyChanged(nameof(CanCancel));
-            OnPropertyChanged(nameof(CancelButtonText));
-            OnPropertyChanged(nameof(CurrentGroupFields));
-            OnPropertyChanged(nameof(CurrentGroupTitle));
-        }
-    }
-
-    /// <summary>Current step definition; one entry from <see cref="Steps"/>.</summary>
-    public InstallerStepDef CurrentStepDef => Steps[_currentStepIndex];
-
-    private readonly Dictionary<string, string> _parameterValues;
-
-    /// <summary>
-    /// Current value (default or user-edited) for each install-time parameter,
-    /// keyed by canonical name. Read by the install launcher when building the
-    /// <c>setup.exe /S /Name=Value …</c> command line.
-    /// </summary>
-    public IReadOnlyDictionary<string, string> ParameterValues => _parameterValues;
-
-    public void SetParameterValue(string name, string value)
-    {
-        _parameterValues[name] = value;
-        if (name == "install_dir") InstallPath = value;
-    }
-
-    private static Dictionary<string, string> SeedDefaults(IReadOnlyList<InstallTimeParameter> parameters)
-    {
-        var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var p in parameters)
-        {
-            dict[p.Name] = p.DefaultAsString;
-        }
-        return dict;
-    }
-
-    /// <summary>
-    /// Branded logo loaded from disk at startup. Null when no logo is bundled
-    /// or the file failed to decode — the sidebar Image binding tolerates null
-    /// (renders nothing) so the wizard always shows even with a broken logo.
-    /// Avoids the AOT-trimming landmine of loading bitmaps via
-    /// <c>avares://</c> URIs at XAML-compile time (Avalonia's BitmapTypeConverter
-    /// fails when assets aren't preserved through trimming).
-    /// </summary>
-    public IImage? LogoImage { get; }
-
-    private static Bitmap? TryLoadLogo(string? logoFile)
-    {
-        if (string.IsNullOrWhiteSpace(logoFile))
-        {
-            InstallerLog.Info("LogoImage: BrandTokens.LogoFile is empty — sidebar renders without an image");
-            return null;
-        }
-        // The brand-logo path is interpreted relative to the wizard exe's
-        // directory (its extract location). The EXE-wrapper packager bundles
-        // the logo as `brand-logo.<ext>` next to sigil-wizard.exe so this
-        // Path.Combine resolves to an extracted file at runtime.
-        var basePath = Path.GetDirectoryName(Environment.ProcessPath ?? "") ?? Environment.CurrentDirectory;
-        var fullPath = Path.IsPathRooted(logoFile) ? logoFile : Path.Combine(basePath, logoFile);
-
-        if (!File.Exists(fullPath))
-        {
-            InstallerLog.Error($"LogoImage: file not found at '{fullPath}' (relative '{logoFile}') — sidebar renders without an image");
-            return null;
-        }
-
-        try
-        {
-            // SVG → rasterize via Svg.Skia (already referenced by the wizard
-            // csproj for the FluentTheme bridge). Avalonia's Bitmap.ctor only
-            // decodes raster formats; passing an SVG stream throws
-            // "Unable to load bitmap from provided data".
-            if (Path.GetExtension(fullPath).Equals(".svg", StringComparison.OrdinalIgnoreCase))
+            if (_existingInstallDetected != value)
             {
-                return RasterizeSvg(fullPath);
+                _existingInstallDetected = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(ReinstallNotice));
             }
-
-            using var fs = File.OpenRead(fullPath);
-            var bmp = new Bitmap(fs);
-            InstallerLog.Info($"LogoImage: loaded '{fullPath}' ({bmp.PixelSize.Width}x{bmp.PixelSize.Height})");
-            return bmp;
-        }
-        catch (Exception ex)
-        {
-            InstallerLog.Error($"LogoImage: failed to decode '{fullPath}'", ex);
-            return null;
         }
     }
 
     /// <summary>
-    /// Render an SVG file to an Avalonia <see cref="Bitmap"/> at the sidebar
-    /// logo height (48 px), preserving aspect ratio. SkiaSharp is already in
-    /// the wizard's dependency closure via <c>Svg.Skia</c>; we encode the
-    /// rendered surface to PNG and re-decode into Avalonia so consumers stay
-    /// in the IImage world without taking a hard dependency on Avalonia.Svg.Skia.
+    /// The Welcome-screen notice shown when <see cref="ExistingInstallDetected"/> is
+    /// set — empty otherwise. Explains that continuing reinstalls the app (the current
+    /// version is removed first), the v1 repair/reinstall behaviour (T10).
     /// </summary>
-    private static Bitmap? RasterizeSvg(string svgPath)
+    public string ReinstallNotice => _existingInstallDetected
+        ? $"{Brand.AppName} is already installed. Continuing will reinstall it — the current version is removed first."
+        : string.Empty;
+
+    /// <summary>
+    /// Wire the reinstall notice (T10). Called by the host from the session's
+    /// <c>ExistingInstallDetected</c>. Idempotent; safe to call before the flow renders.
+    /// </summary>
+    public void SetExistingInstall(bool detected) => ExistingInstallDetected = detected;
+
+    /// <summary>The declared custom screen currently shown (T9), or null off a custom screen.</summary>
+    private CustomScreenViewModel? _currentCustomScreen;
+    public CustomScreenViewModel? CurrentCustomScreen
     {
-        const int targetHeight = 96;   // sidebar shows at Height=48; 2× for crisp HiDPI
-        using var svg = new Svg.Skia.SKSvg();
-        var picture = svg.Load(svgPath);
-        if (picture is null)
+        get => _currentCustomScreen;
+        private set { if (!ReferenceEquals(_currentCustomScreen, value)) { _currentCustomScreen = value; OnPropertyChanged(); } }
+    }
+
+    /// <summary>The rail step indicator, generated from the resolved (When-visible) screen set.</summary>
+    public ObservableCollection<RailStep> RailSteps { get; } = new();
+
+    /// <summary>
+    /// Load the manifest-declared custom screens + parameter schema (T9) and rebuild
+    /// the flow + rail. Called by the host once it has read them from the blob.
+    /// </summary>
+    public void LoadScreens(
+        IReadOnlyList<InstallerScreen> screens, IReadOnlyList<ParameterDefinition> parameters)
+    {
+        _parameters = parameters ?? Array.Empty<ParameterDefinition>();
+        var byName = new Dictionary<string, ParameterDefinition>(StringComparer.Ordinal);
+        foreach (var p in _parameters)
         {
-            InstallerLog.Error($"LogoImage: Svg.Skia returned null Picture for '{svgPath}'");
-            return null;
+            byName[p.Name] = p;
         }
 
-        var bounds = picture.CullRect;
-        if (bounds.IsEmpty || bounds.Height <= 0 || bounds.Width <= 0)
+        var built = new List<CustomScreenViewModel>();
+        foreach (var screen in screens ?? Array.Empty<InstallerScreen>())
         {
-            InstallerLog.Error($"LogoImage: SVG '{svgPath}' has empty cull rect");
-            return null;
+            var fields = new List<FieldViewModel>();
+            foreach (var f in screen.Fields)
+            {
+                if (byName.TryGetValue(f.Param, out var def))
+                {
+                    fields.Add(new FieldViewModel(def, f.Widget));
+                }
+            }
+            built.Add(new CustomScreenViewModel(
+                screen.Id, Interpolate(screen.Title) ?? screen.Title, Interpolate(screen.Subtitle), screen.When, fields));
         }
 
-        var scale = targetHeight / bounds.Height;
-        var width = (int)Math.Ceiling(bounds.Width * scale);
-        var height = (int)Math.Ceiling(bounds.Height * scale);
+        _customScreens = built;
+        RebuildFlow();
+    }
 
-        using var surface = SkiaSharp.SKSurface.Create(new SkiaSharp.SKImageInfo(width, height));
-        surface.Canvas.Clear(SkiaSharp.SKColors.Transparent);
-        surface.Canvas.Scale(scale);
-        surface.Canvas.DrawPicture(picture);
-        using var img = surface.Snapshot();
-        using var data = img.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
-        using var ms = new MemoryStream(data.ToArray());
-        var bmp = new Bitmap(ms);
-        InstallerLog.Info($"LogoImage: rasterized SVG '{svgPath}' to {width}x{height}");
-        return bmp;
+    /// <summary>
+    /// Load the embedded license text (T14). Called by the host once it has read
+    /// it from the blob (<c>InstallerLicenseLoader.LoadFromSelf()</c>). When the
+    /// text is present the License screen + its rail entry appear (after the
+    /// destination screen, per decision 4); when null/blank they are absent.
+    /// Only the interactive wizard consults this — the headless <c>/silent</c>
+    /// path never shows the License screen, so silent installs imply acceptance.
+    /// </summary>
+    public void LoadLicense(string? licenseText)
+    {
+        _hasLicense = !string.IsNullOrWhiteSpace(licenseText);
+        if (_hasLicense)
+        {
+            LicenseText = licenseText!;
+        }
+        RebuildFlow();
+    }
+
+    /// <summary>
+    /// The built-in option components rendered on the Options screen (T8), one
+    /// checkbox each. Populated by <see cref="LoadOptions"/> from the blob; empty
+    /// when the manifest declared no enabled option and the screen is absent.
+    /// </summary>
+    public ObservableCollection<OptionItemViewModel> OptionItems { get; } = new();
+
+    /// <summary>
+    /// Load the enabled built-in option components (T8). Called by the host once it
+    /// has read them from the blob (via <c>InstallSession.Options</c>). When ≥ 1
+    /// component is present the Options screen + its rail entry appear (after the
+    /// License screen, per decision 4); when none, they are omitted. Each checkbox
+    /// is seeded from the component's resolved default; <c>locked</c> components
+    /// render disabled (always applied). Only the interactive wizard consults this —
+    /// the headless <c>/silent</c> path resolves options to their manifest defaults.
+    /// </summary>
+    public void LoadOptions(IReadOnlyList<InstallerOptionComponent> options)
+    {
+        OptionItems.Clear();
+        foreach (var component in options ?? Array.Empty<InstallerOptionComponent>())
+        {
+            OptionItems.Add(new OptionItemViewModel(component));
+        }
+        _hasOptions = OptionItems.Count > 0;
+        RebuildFlow();
+    }
+
+    /// <summary>
+    /// The wizard-collected option checkbox states, keyed by canonical component
+    /// name — the exact map the engine binds into <c>option.*</c> for step gating.
+    /// </summary>
+    public IReadOnlyDictionary<string, bool> CollectedOptionValues
+    {
+        get
+        {
+            var dict = new Dictionary<string, bool>(StringComparer.Ordinal);
+            foreach (var item in OptionItems)
+            {
+                dict[item.Name] = item.IsChecked;
+            }
+            return dict;
+        }
+    }
+
+    /// <summary>
+    /// The wizard-collected parameter values, keyed by canonical parameter name, as
+    /// strings — the exact map the engine binds into <c>param.*</c> / <c>parameters.*</c>.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> CollectedParameterValues
+    {
+        get
+        {
+            var dict = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var screen in _customScreens)
+            {
+                foreach (var f in screen.Fields)
+                {
+                    dict[f.ParamName] = f.GetStringValue();
+                }
+            }
+            return dict;
+        }
     }
 
     public InstallerOutcomeCode OutcomeCode { get; private set; } = InstallerOutcomeCode.Completed;
 
-    /// <summary>
-    /// Legacy coarse-grained step accessor for tests and back-compat callers.
-    /// Setting this jumps to the FIRST step of the matching kind:
-    /// <c>InstallOptions</c> picks the InstallDir page if one exists,
-    /// otherwise the first ParameterGroup.
-    /// </summary>
+    /// <summary>Growing log of the engine's copy/reg/path/link output for the Installing + Failed screens.</summary>
+    public ObservableCollection<InstallLogLine> LogLines { get; } = new();
+
     public InstallerStep CurrentStep
     {
-        get => MapToEnum(CurrentStepDef);
+        get => _step;
         set
         {
-            var targetIndex = FindFirstIndexFor(value);
-            if (targetIndex >= 0)
-                CurrentStepIndex = targetIndex;
+            if (_step != value)
+            {
+                _step = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(CanGoBack));
+                OnPropertyChanged(nameof(CanGoNext));
+                OnPropertyChanged(nameof(CanCancel));
+                // When the step is set directly (tests, engine outcome) rather than
+                // through Next/Back, resync the flow cursor so navigation stays correct.
+                if (!_navigating)
+                {
+                    SyncFlowIndexToStep();
+                }
+            }
         }
     }
 
-    private static InstallerStep MapToEnum(InstallerStepDef def) => def switch
-    {
-        InstallerStepDef.Welcome => InstallerStep.Welcome,
-        InstallerStepDef.License => InstallerStep.License,
-        InstallerStepDef.InstallDir => InstallerStep.InstallOptions,
-        InstallerStepDef.ParameterGroup => InstallerStep.InstallOptions,
-        InstallerStepDef.Installing => InstallerStep.Installing,
-        InstallerStepDef.Finish => InstallerStep.Finish,
-        InstallerStepDef.Custom => InstallerStep.Custom,
-        _ => InstallerStep.Welcome,
-    };
+    private bool _navigating;
 
-    private int FindFirstIndexFor(InstallerStep step)
+    private void SyncFlowIndexToStep()
     {
-        for (var i = 0; i < Steps.Count; i++)
+        for (var i = 0; i < _flow.Count; i++)
         {
-            if (MapToEnum(Steps[i]) == step)
-                return i;
+            if (_flow[i].Step == _step)
+            {
+                _flowIndex = i;
+                CurrentCustomScreen = _flow[i].Screen;
+                RebuildRail();
+                return;
+            }
         }
-        return -1;
+        // Terminal step (Finish/Failed) not in the linear flow: leave the cursor.
     }
 
-    public bool CanGoBack =>
-        CurrentStepIndex > 0
-        && CurrentStepDef is not InstallerStepDef.Installing
-        && CurrentStepDef is not InstallerStepDef.Finish;
+    public bool CanGoBack => _step is not InstallerStep.Welcome and not InstallerStep.Installing and not InstallerStep.Finish and not InstallerStep.Failed;
+    public bool CanGoNext => _step is not InstallerStep.Installing and not InstallerStep.Finish and not InstallerStep.Failed;
 
-    public bool CanGoNext =>
-        CurrentStepIndex < Steps.Count - 1
-        && CurrentStepDef is not InstallerStepDef.Installing
-        && CurrentStepDef is not InstallerStepDef.Finish;
+    /// <summary>False only on the Finish screen — install is already done, nothing to cancel.</summary>
+    public bool CanCancel => _step is not InstallerStep.Finish;
 
     /// <summary>
-    /// Cancel/Close button enable state.
-    /// False ONLY on Installing — the child setup.exe /S subprocess is in
-    /// flight (sc.exe / registry / file_copy operations); killing the wizard
-    /// would orphan the child and leave the system half-installed. On Finish
-    /// the same button text changes to "Close" (see <see cref="CancelButtonText"/>)
-    /// and the click handler closes with <see cref="InstallerOutcomeCode.Completed"/>.
+    /// The embedded license text shown on the License screen (T14). Empty until
+    /// <see cref="LoadLicense"/> supplies the blob's text; an empty value means no
+    /// license is embedded and the License screen is absent from the flow.
     /// </summary>
-    public bool CanCancel => CurrentStepDef is not InstallerStepDef.Installing;
-
-    /// <summary>
-    /// Dynamic label for the bottom-row button. "Close" on the Finish screen
-    /// (install is done — clicking closes the wizard with Completed exit code),
-    /// "Cancel" everywhere else (user is abandoning; closes with UserCancelled).
-    /// </summary>
-    public string CancelButtonText => CurrentStepDef is InstallerStepDef.Finish ? "Close" : "Cancel";
-
-    /// <summary>
-    /// Fields displayed on the current parameter-group page. Empty for any
-    /// non-ParameterGroup step.
-    /// </summary>
-    public IReadOnlyList<ParameterFieldVm> CurrentGroupFields =>
-        CurrentStepDef is InstallerStepDef.ParameterGroup group
-            ? group.Fields
-            : Array.Empty<ParameterFieldVm>();
-
-    /// <summary>
-    /// Title text displayed at the top of the current step. Used by the
-    /// Install Options view to show the manifest-declared screen name (e.g.
-    /// "Server Settings", "Kiosk Settings") instead of a static heading.
-    /// </summary>
-    public string CurrentGroupTitle => CurrentStepDef.Title;
-
-    public string LicenseText { get; set; } = "MIT License (placeholder — replace with the app's actual EULA).";
+    public string LicenseText { get; set; } = string.Empty;
 
     private bool _licenseAccepted;
     public bool LicenseAccepted
@@ -473,18 +343,6 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
         set { if (_launchAfterInstall != value) { _launchAfterInstall = value; OnPropertyChanged(); } }
     }
 
-    /// <summary>
-    /// True when the manifest declares a launchable target (e.g. an
-    /// <c>installer.launch.path</c> yaml field). Drives the FinishView's
-    /// "Launch now" checkbox visibility — when false, the checkbox is hidden
-    /// so the wizard doesn't promise a launch the manifest didn't configure.
-    /// Until the yaml schema for launch lands, this stays false by default.
-    /// </summary>
-    public bool HasLaunchTarget { get; init; }
-
-    /// <summary>Dynamic label for the "Launch now" checkbox.</summary>
-    public string LaunchAfterInstallLabel => $"Launch {Brand.AppName} now";
-
     public string InstallPath
     {
         get => _installPath;
@@ -493,67 +351,204 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
             if (_installPath != value)
             {
                 _installPath = value;
-                // Mirror back into the parameter values so the install
-                // subprocess launcher reads the user's edit, not the default.
-                _parameterValues["install_dir"] = value;
                 OnPropertyChanged();
-                OnPropertyChanged(nameof(InstallDirDriveLabel));
-                OnPropertyChanged(nameof(InstallDirSpaceLabel));
+                // Re-validate live so a corrected path clears the inline error and
+                // re-enables Next without needing a second click.
+                if (_step == InstallerStep.InstallOptions)
+                {
+                    ValidateDestination();
+                }
             }
         }
     }
 
-    /// <summary>
-    /// Drive name + filesystem label for the disk the chosen install path
-    /// lives on. Recomputed whenever <see cref="InstallPath"/> changes; falls
-    /// back to a friendly placeholder when the path is invalid or the drive
-    /// can't be queried (network drives, removable media not present, ...).
-    /// </summary>
-    public string InstallDirDriveLabel =>
-        TryGetDriveInfo() is { } d
-            ? $"Drive: {d.Name.TrimEnd('\\')}  ({d.DriveFormat})"
-            : "Drive: (unavailable)";
+    // --- Destination screen (T13): scope toggle + inline path validation ---
+
+    private Func<bool, string>? _defaultPathResolver;
+    private bool _scopeSelectable;
 
     /// <summary>
-    /// Human-readable free / total space readout for the destination drive
-    /// (e.g. "Free space: 152.31 GB  /  Total: 931.51 GB"). NSIS-style
-    /// disk-space indicator on the Install Directory page.
+    /// Whether the Destination screen shows the user/machine scope radios (T12
+    /// <c>scope: auto</c>). A manifest that fixes the scope hides them.
     /// </summary>
-    public string InstallDirSpaceLabel =>
-        TryGetDriveInfo() is { IsReady: true } d
-            ? $"Free space: {FormatBytes(d.AvailableFreeSpace)}  /  Total: {FormatBytes(d.TotalSize)}"
-            : "Free space: (drive not ready)";
-
-    private DriveInfo? TryGetDriveInfo()
+    public bool ScopeSelectable
     {
-        try
-        {
-            var root = Path.GetPathRoot(_installPath);
-            if (string.IsNullOrEmpty(root)) return null;
-            return new DriveInfo(root);
-        }
-#pragma warning disable CA1031 // disk-info readout must never crash the wizard
-        catch
-        {
-            return null;
-        }
-#pragma warning restore CA1031
+        get => _scopeSelectable;
+        private set { if (_scopeSelectable != value) { _scopeSelectable = value; OnPropertyChanged(); } }
     }
 
-    private static string FormatBytes(long bytes)
+    private bool _isMachineScope;
+
+    /// <summary>
+    /// The "All users of this computer" scope radio. Selecting it swaps the
+    /// pre-filled install path to the machine scope root (Program Files), per the
+    /// design brief. Bound two-way; paired with <see cref="IsUserScope"/>.
+    /// </summary>
+    public bool IsMachineScope
     {
-        const double KB = 1024d;
-        const double MB = KB * 1024d;
-        const double GB = MB * 1024d;
-        const double TB = GB * 1024d;
-        return bytes switch
+        get => _isMachineScope;
+        set
         {
-            >= (long)TB => $"{bytes / TB:F2} TB",
-            >= (long)GB => $"{bytes / GB:F2} GB",
-            >= (long)MB => $"{bytes / MB:F2} MB",
-            >= (long)KB => $"{bytes / KB:F2} KB",
-            _ => $"{bytes} B",
-        };
+            if (_isMachineScope != value)
+            {
+                _isMachineScope = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsUserScope));
+                // Toggling scope recomputes a clean default path for the new scope.
+                if (_defaultPathResolver is not null)
+                {
+                    InstallPath = _defaultPathResolver(_isMachineScope);
+                }
+            }
+        }
+    }
+
+    /// <summary>The "Just for me" scope radio — the inverse of <see cref="IsMachineScope"/>.</summary>
+    public bool IsUserScope
+    {
+        get => !_isMachineScope;
+        set { if (value) { IsMachineScope = false; } }
+    }
+
+    private string? _installPathError;
+
+    /// <summary>
+    /// The inline validation error shown under the path input on the Destination
+    /// screen, or null when the path is valid. A non-null value blocks Next.
+    /// </summary>
+    public string? InstallPathError
+    {
+        get => _installPathError;
+        private set
+        {
+            if (_installPathError != value)
+            {
+                _installPathError = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(HasInstallPathError));
+            }
+        }
+    }
+
+    /// <summary>True when <see cref="InstallPathError"/> is set (drives the error text visibility).</summary>
+    public bool HasInstallPathError => !string.IsNullOrEmpty(_installPathError);
+
+    /// <summary>
+    /// Wire the Destination screen (T13): whether the scope radios show, a resolver
+    /// that maps a scope selection (<c>isMachine</c>) to its default install path,
+    /// and the initial pre-filled path. Called by the host from the session; unit
+    /// tests may call it directly or drive <see cref="InstallPath"/> alone.
+    /// </summary>
+    public void ConfigureDestination(bool scopeSelectable, Func<bool, string> defaultPathResolver, string initialPath)
+    {
+        System.ArgumentNullException.ThrowIfNull(defaultPathResolver);
+        _defaultPathResolver = defaultPathResolver;
+        ScopeSelectable = scopeSelectable;
+        InstallPath = initialPath;
+        InstallPathError = null;
+    }
+
+    /// <summary>
+    /// Validate the chosen install location before advancing (T13): non-blank,
+    /// absolute, not an existing file, and writable — or elevatable when a machine
+    /// scope is selected. Sets <see cref="InstallPathError"/> (inline, blocks Next)
+    /// and returns false on failure; clears it and returns true on success.
+    /// </summary>
+    public bool ValidateDestination()
+    {
+        var path = _installPath?.Trim() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            InstallPathError = "Enter an install location.";
+            return false;
+        }
+        if (!System.IO.Path.IsPathFullyQualified(path))
+        {
+            InstallPathError = "Enter an absolute path (for example C:\\Program Files\\App).";
+            return false;
+        }
+        if (System.IO.File.Exists(path))
+        {
+            InstallPathError = "That location is a file. Choose a folder.";
+            return false;
+        }
+        if (!IsWritableOrElevatable(path))
+        {
+            InstallPathError = "You don't have permission to install there. Choose another folder.";
+            return false;
+        }
+
+        InstallPathError = null;
+        return true;
+    }
+
+    /// <summary>
+    /// True when the target — or its nearest existing ancestor — is writable, or a
+    /// machine-scope install is selected (elevation will grant the write). A target
+    /// whose drive/parent chain does not exist at all is rejected.
+    /// </summary>
+    private bool IsWritableOrElevatable(string path)
+    {
+        var nearest = NearestExistingAncestor(path);
+        if (nearest is null)
+        {
+            return false; // the drive / parent folder does not exist.
+        }
+        // A machine install elevates, so Program Files being unwritable unelevated
+        // is fine — the elevated child performs the write.
+        if (_isMachineScope)
+        {
+            return true;
+        }
+        return CanWriteInto(nearest);
+    }
+
+    private static string? NearestExistingAncestor(string path)
+    {
+        var current = path;
+        while (!string.IsNullOrEmpty(current))
+        {
+            if (System.IO.Directory.Exists(current))
+            {
+                return current;
+            }
+            var parent = System.IO.Path.GetDirectoryName(current);
+            if (string.Equals(parent, current, StringComparison.Ordinal))
+            {
+                break;
+            }
+            current = parent;
+        }
+        return null;
+    }
+
+    private static bool CanWriteInto(string directory)
+    {
+        var probe = System.IO.Path.Combine(directory, ".sigil-write-probe-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using (System.IO.File.Create(probe)) { }
+            System.IO.File.Delete(probe);
+            return true;
+        }
+        // Only a genuine permission denial blocks the install. Any other transient
+        // IO quirk is given the benefit of the doubt (the engine rolls back if the
+        // write later fails) so validation never flakes on an otherwise-valid path.
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (System.Security.SecurityException)
+        {
+            return false;
+        }
+#pragma warning disable CA1031 // Unexpected IO conditions must not falsely block a valid path.
+        catch (Exception)
+        {
+            return true;
+        }
+#pragma warning restore CA1031
     }
 
     private double _installProgress;
@@ -570,30 +565,308 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
         set { _installCurrentItem = value; OnPropertyChanged(); }
     }
 
-    /// <summary>
-    /// Advances one step forward. Honours the License-acceptance gate: when
-    /// the current step is License and the user hasn't ticked the agreement,
-    /// the call is a no-op so the Next button feels disabled even though it
-    /// stays clickable.
-    /// </summary>
-    public void Next()
+    private string? _errorMessage;
+    /// <summary>The engine's failure message, surfaced on the Failed screen.</summary>
+    public string? ErrorMessage
     {
-        if (CurrentStepDef is InstallerStepDef.License && !LicenseAccepted)
-            return;
-        if (CurrentStepIndex < Steps.Count - 1)
-            CurrentStepIndex = CurrentStepIndex + 1;
+        get => _errorMessage;
+        private set { _errorMessage = value; OnPropertyChanged(); }
     }
 
     /// <summary>
-    /// Walks one step back. Locked on Installing (can't rewind a running
-    /// install) and Finish (no behind to go to).
+    /// Wire the real install driver (an <see cref="InstallSession"/>-backed
+    /// delegate). When set, entering the Installing screen kicks off the engine.
+    /// Left null in unit tests, which drive the step machine directly.
     /// </summary>
+    public void ConfigureInstallRunner(Func<IProgress<StepProgress>, CancellationToken, Task<InstallOutcome>> runner)
+        => _installRunner = runner;
+
+    public void Next()
+    {
+        // Destination gate (T13): a blank / relative / file / unwritable path shows
+        // an inline error and blocks advancing off the destination screen.
+        if (_flow[_flowIndex].Step == InstallerStep.InstallOptions && !ValidateDestination())
+        {
+            return;
+        }
+
+        // License gate: stay put until "I accept" is checked.
+        if (_flow[_flowIndex].Step == InstallerStep.License && !LicenseAccepted)
+        {
+            return;
+        }
+
+        // Validate the current custom screen's fields before advancing (inline errors).
+        if (_flow[_flowIndex].Screen is { } current && !current.Validate())
+        {
+            return;
+        }
+
+        var next = _flowIndex + 1;
+        while (next < _flow.Count && _flow[next].Screen is { } s && !EvaluateWhen(s))
+        {
+            next++; // skip a declared screen whose `when` is false at runtime.
+        }
+        if (next >= _flow.Count)
+        {
+            return;
+        }
+
+        MoveTo(next);
+
+        if (_flow[_flowIndex].Step == InstallerStep.Installing)
+        {
+            InstallTask = StartInstallAsync();
+        }
+    }
+
+    /// <summary>
+    /// The running (or completed) install operation started when the wizard
+    /// entered the Installing screen. Null until then. Exposed so the shell and
+    /// tests can observe completion; the UI itself reacts via
+    /// <see cref="CurrentStep"/> transitions.
+    /// </summary>
+    public Task? InstallTask { get; private set; }
+
     public void Back()
     {
-        if (CurrentStepDef is InstallerStepDef.Installing || CurrentStepDef is InstallerStepDef.Finish)
+        if (_flowIndex == 0 || _flow[_flowIndex].Step == InstallerStep.Installing)
+        {
             return;
-        if (CurrentStepIndex > 0)
-            CurrentStepIndex = CurrentStepIndex - 1;
+        }
+
+        var prev = _flowIndex - 1;
+        while (prev > 0 && _flow[prev].Screen is { } s && !EvaluateWhen(s))
+        {
+            prev--; // skip hidden declared screens on the way back too.
+        }
+        MoveTo(prev);
+    }
+
+    // --- Flow machinery (T9): screen-list-driven navigation + rail generation ---
+
+    private sealed record FlowNode(InstallerStep Step, CustomScreenViewModel? Screen);
+
+    /// <summary>
+    /// Rebuild the linear flow, per locked-design decision 4:
+    /// welcome → destination → license? → [declared screens] → installing.
+    /// The <see cref="InstallerStep.InstallOptions"/> node is the destination /
+    /// "Install location" screen; the License screen (T14) is inserted after it,
+    /// and only when <see cref="_hasLicense"/> is set. Declared screens follow.
+    /// When-gating of declared screens is applied at navigation time, not here, so
+    /// a screen can become visible after an earlier field is set.
+    /// </summary>
+    private void RebuildFlow()
+    {
+        _flow.Clear();
+        _flow.Add(new FlowNode(InstallerStep.Welcome, null));
+        _flow.Add(new FlowNode(InstallerStep.InstallOptions, null));
+        if (_hasLicense)
+        {
+            _flow.Add(new FlowNode(InstallerStep.License, null));
+        }
+        // T8: the built-in Options screen sits after license, before the declared
+        // screens (decision 4: welcome → destination → license? → options? → …).
+        if (_hasOptions)
+        {
+            _flow.Add(new FlowNode(InstallerStep.Options, null));
+        }
+        foreach (var screen in _customScreens)
+        {
+            _flow.Add(new FlowNode(InstallerStep.Custom, screen));
+        }
+        _flow.Add(new FlowNode(InstallerStep.Installing, null));
+
+        if (_flowIndex >= _flow.Count)
+        {
+            _flowIndex = 0;
+        }
+        RebuildRail();
+    }
+
+    private void MoveTo(int index)
+    {
+        _navigating = true;
+        try
+        {
+            _flowIndex = index;
+            var node = _flow[index];
+            CurrentCustomScreen = node.Screen;
+            CurrentStep = node.Step; // triggers the view swap
+
+            // Entering a custom screen: fetch any source-backed dropdown's options
+            // now that the earlier screens' values are available for URL substitution.
+            if (node.Screen is { } screen)
+            {
+                TriggerDynamicOptionLoads(screen);
+            }
+        }
+        finally
+        {
+            _navigating = false;
+        }
+        RebuildRail();
+    }
+
+    private void RebuildRail()
+    {
+        RailSteps.Clear();
+        for (var i = 0; i < _flow.Count; i++)
+        {
+            var node = _flow[i];
+            if (node.Screen is { } screen && !EvaluateWhen(screen))
+            {
+                continue; // hidden declared screen: absent from the rail.
+            }
+
+            var label = node.Step switch
+            {
+                InstallerStep.Welcome => "Welcome",
+                InstallerStep.License => "License",
+                InstallerStep.InstallOptions => "Location",
+                InstallerStep.Options => "Options",
+                InstallerStep.Installing => "Install",
+                InstallerStep.Custom => node.Screen?.Id ?? "Configure",
+                _ => node.Step.ToString(),
+            };
+            RailSteps.Add(new RailStep(label, isCurrent: i == _flowIndex, isDone: i < _flowIndex));
+        }
+    }
+
+    /// <summary>
+    /// Evaluate a declared screen's <c>when</c> against the current field values.
+    /// No expression → always visible. An evaluation error fails open (screen
+    /// shown) so a malformed manifest never hides a screen silently.
+    /// </summary>
+    private bool EvaluateWhen(CustomScreenViewModel screen)
+    {
+        if (string.IsNullOrWhiteSpace(screen.When))
+        {
+            return true;
+        }
+
+        var ctx = BuildExpressionContext();
+        try
+        {
+            return new Evaluator().EvaluateBool(screen.When!, ctx);
+        }
+#pragma warning disable CA1031 // Fail-open: a bad `when` must not hide the screen or crash the wizard.
+        catch (Exception)
+        {
+            return true;
+        }
+#pragma warning restore CA1031
+    }
+
+    private Dictionary<string, object?> BuildExpressionContext()
+    {
+        var collected = CollectedParameterValues;
+        var ctx = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var def in _parameters)
+        {
+            object? value;
+            if (collected.TryGetValue(def.Name, out var raw))
+            {
+                value = ConvertToTyped(raw, def.Type);
+            }
+            else
+            {
+                value = def.Default;
+            }
+            ctx["param." + def.Name] = value;
+            ctx["parameters." + def.Name] = value;
+        }
+        return ctx;
+    }
+
+    private static object? ConvertToTyped(string? raw, ParameterType type)
+    {
+        if (raw is null)
+        {
+            return null;
+        }
+        return type switch
+        {
+            ParameterType.Bool => bool.TryParse(raw, out var b) ? b : (object)raw,
+            ParameterType.Int => int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var i)
+                ? i
+                : (object)raw,
+            _ => raw,
+        };
+    }
+
+    private string? Interpolate(string? text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return text;
+        }
+        return text
+            .Replace("{app.name}", Brand.AppName, StringComparison.Ordinal)
+            .Replace("{app.version}", Brand.AppVersion, StringComparison.Ordinal)
+            .Replace("{app.publisher}", Brand.Publisher, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Drive the real engine for the Installing screen: create the cancellation
+    /// source, feed a <see cref="StepProgress"/> adapter into
+    /// <see cref="InstallProgress"/> / <see cref="InstallCurrentItem"/> /
+    /// <see cref="LogLines"/>, then route to Finish (success) or Failed (step
+    /// failure). Cancellation is handled by <see cref="CancelAsync"/>; the engine
+    /// rolls back and throws, which lands here as a no-op close.
+    /// </summary>
+    private async Task StartInstallAsync()
+    {
+        if (_installRunner is null)
+        {
+            return; // not wired (unit tests): navigation is driven manually.
+        }
+
+        LogLines.Clear();
+        InstallProgress = 0;
+        ErrorMessage = null;
+
+        var cts = new CancellationTokenSource();
+        SetEngineCts(cts);
+        var progress = new Progress<StepProgress>(ApplyProgress);
+
+        try
+        {
+            var outcome = await _installRunner(progress, cts.Token).ConfigureAwait(true);
+            if (outcome.Success)
+            {
+                InstallProgress = 1;
+                OutcomeCode = InstallerOutcomeCode.Completed;
+                CurrentStep = InstallerStep.Finish;
+            }
+            else
+            {
+                ErrorMessage = outcome.Error;
+                OutcomeCode = InstallerOutcomeCode.Failed;
+                CurrentStep = InstallerStep.Failed;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // User cancelled: the engine already rolled back and CancelAsync set
+            // the outcome + is closing the window. Nothing more to do here.
+            OutcomeCode = InstallerOutcomeCode.UserCancelled;
+        }
+        finally
+        {
+            _engineCts = null;
+            cts.Dispose();
+        }
+    }
+
+    private void ApplyProgress(StepProgress p)
+    {
+        InstallProgress = p.Fraction;
+        if (p.Message is not null)
+        {
+            InstallCurrentItem = p.Message;
+            LogLines.Add(new InstallLogLine(p.Message, p.IsError));
+        }
     }
 
     /// <summary>
@@ -605,7 +878,9 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     /// <summary>
     /// Attempts to cancel the installation.  Returns <c>true</c> when the caller should
     /// close the window; <c>false</c> when the user dismissed the confirmation dialog.
-    /// On the Finish screen this is always a no-op (returns <c>false</c>).
+    /// On the Finish screen this is always a no-op (returns <c>false</c>). On the Failed
+    /// screen it closes the window preserving the failure exit code (never downgrades to
+    /// "user cancelled").
     /// </summary>
     /// <param name="confirmAsync">
     /// A delegate that, when the install is actively running, must show a confirmation dialog
@@ -614,17 +889,13 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     /// </param>
     public async Task<bool> CancelAsync(Func<Task<bool>>? confirmAsync = null)
     {
-        // On Finish, the same UI button is labelled "Close" — the install
-        // completed successfully, the user is just dismissing the wizard.
-        // Surface that as Completed (exit 0), not UserCancelled (1602), so the
-        // wrapper doesn't treat it as a cancel and skip its post-actions.
-        if (CurrentStepDef is InstallerStepDef.Finish)
-        {
-            OutcomeCode = InstallerOutcomeCode.Completed;
-            return true;
-        }
+        if (_step == InstallerStep.Finish)
+            return false;   // install completed — no cancel
 
-        if (CurrentStepDef is InstallerStepDef.Installing && _engineCts is not null)
+        if (_step == InstallerStep.Failed)
+            return true;    // already failed + rolled back — close, keep exit code 1
+
+        if (_step == InstallerStep.Installing && _engineCts is not null)
         {
             // Confirm with the user before interrupting a running install.
             if (confirmAsync is not null)
@@ -645,136 +916,4 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
 
     private void OnPropertyChanged([CallerMemberName] string? name = null)
         => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name ?? ""));
-}
-
-/// <summary>
-/// Per-parameter view-model entry rendered by the Install Options screen's
-/// ItemsControl. The view template chooses ComboBox vs TextBox based on
-/// <see cref="Type"/>; binding writes flow back into the parent
-/// <see cref="InstallerViewModel"/>'s parameter-value dictionary via the
-/// <see cref="PropertyChanged"/> subscription wired in the constructor.
-/// </summary>
-public sealed class ParameterFieldVm : INotifyPropertyChanged
-{
-    /// <summary>Canonical parameter name from sigil.yaml.</summary>
-    public string Name { get; init; } = "";
-
-    /// <summary>Human-readable label (description text, falls back to <see cref="Name"/>).</summary>
-    public string Label { get; init; } = "";
-
-    /// <summary>Scalar type: <c>string</c>, <c>path</c>, <c>bool</c>, <c>int</c>, <c>enum</c>, <c>secret</c>.</summary>
-    public string Type { get; init; } = "string";
-
-    /// <summary>Allowed values when <see cref="Type"/> is <c>enum</c>; null otherwise.</summary>
-    public IReadOnlyList<string>? Values { get; init; }
-
-    /// <summary>
-    /// When the manifest declares a <c>source</c> block on this parameter, the
-    /// wizard fetches the dropdown options at install time and stuffs them into
-    /// <see cref="DynamicOptions"/>. Null means "static" — the field renders as
-    /// a TextBox or, if <see cref="Type"/> is <c>enum</c>, a ComboBox bound to
-    /// <see cref="Values"/>.
-    /// </summary>
-    public InstallTimeParameterSource? Source { get; init; }
-
-    /// <summary>
-    /// Manifest-declared <c>screen:</c> value for this parameter. Drives the
-    /// wizard's multi-page grouping — fields with the same screen value land
-    /// on the same Install Options page. Null/empty means "Install Options"
-    /// (the synthetic default group).
-    /// </summary>
-    public string? Screen { get; init; }
-
-    private IReadOnlyList<HttpOption> _dynamicOptions = Array.Empty<HttpOption>();
-    /// <summary>
-    /// Options fetched from <see cref="Source"/> at attach time. Empty until the
-    /// HTTPS fetch completes (or forever if it fails — the field still renders
-    /// but the dropdown is empty so the user knows something is off).
-    /// </summary>
-    public IReadOnlyList<HttpOption> DynamicOptions
-    {
-        get => _dynamicOptions;
-        set
-        {
-            _dynamicOptions = value;
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DynamicOptions)));
-        }
-    }
-
-    /// <summary>
-    /// True when the manifest declared <c>type: enum</c> with a static
-    /// <c>values:</c> list and no <c>source:</c> block — drives the static
-    /// ComboBox's visibility in the view.
-    /// </summary>
-    public bool IsStaticEnum =>
-        string.Equals(Type, "enum", StringComparison.OrdinalIgnoreCase) && Source is null && Values is not null;
-
-    /// <summary>
-    /// True when the manifest declared a <c>source:</c> block (dynamic options
-    /// fetched over HTTPS at install time) — drives the dynamic ComboBox's
-    /// visibility.
-    /// </summary>
-    public bool IsDynamicEnum => Source is not null;
-
-    /// <summary>
-    /// True when the manifest declared <c>type: bool</c> — drives CheckBox
-    /// visibility. Bool defaults arrive as the strings "True"/"False" from
-    /// <see cref="InstallTimeParameter.DefaultAsString"/>; <see cref="BoolValue"/>
-    /// is the two-way bound property the CheckBox binds to.
-    /// </summary>
-    public bool IsBool =>
-        string.Equals(Type, "bool", StringComparison.OrdinalIgnoreCase) && !IsStaticEnum && !IsDynamicEnum;
-
-    /// <summary>
-    /// True when none of {static enum, dynamic enum, bool} — drives TextBox
-    /// visibility (string / path / int / secret typed in by hand).
-    /// </summary>
-    public bool IsTextual => !IsStaticEnum && !IsDynamicEnum && !IsBool;
-
-    /// <summary>
-    /// Boolean projection of <see cref="CurrentValue"/> for CheckBox.IsChecked
-    /// two-way binding. Parses "True"/"False"/"true"/"false" case-insensitively;
-    /// anything else maps to false. Writes back the canonical "True"/"False"
-    /// form so the install-launcher's <c>/Name=Value</c> argv stays consistent
-    /// with the manifest's bool defaults.
-    /// </summary>
-    public bool BoolValue
-    {
-        get => bool.TryParse(CurrentValue, out var b) && b;
-        set
-        {
-            var s = value ? "True" : "False";
-            if (CurrentValue != s) CurrentValue = s;
-        }
-    }
-
-    /// <summary>
-    /// Legacy alias preserved for tests / callers that predated the
-    /// static-vs-dynamic split. Equivalent to <see cref="IsStaticEnum"/>
-    /// (a parameter with a <c>source</c> is no longer considered "enum"
-    /// for view-binding purposes — it gets its own dynamic ComboBox).
-    /// </summary>
-    public bool IsEnum => IsStaticEnum;
-
-    private string _current = "";
-    /// <summary>The currently bound value (default at construction, mutated by ComboBox/TextBox edits).</summary>
-    public string CurrentValue
-    {
-        get => _current;
-        set
-        {
-            if (_current != value)
-            {
-                _current = value;
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CurrentValue)));
-                // BoolValue is a derived view of CurrentValue; notify so the
-                // CheckBox.IsChecked binding refreshes when CurrentValue is
-                // mutated through any path (write-back, programmatic set,
-                // initial seed).
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(BoolValue)));
-            }
-        }
-    }
-
-    public event PropertyChangedEventHandler? PropertyChanged;
 }

@@ -69,6 +69,13 @@ public partial class CustomView : UserControl
 
         container.Children.Add(BuildInput(field));
 
+        // Source-backed dropdown: an inline "Loading…" / "couldn't load options"
+        // hint, kept in sync with the field VM's async fetch state.
+        if (field.HasDynamicOptions)
+        {
+            container.Children.Add(BuildOptionsStatus(field));
+        }
+
         // Inline validation error, kept in sync with the field VM.
         var error = new TextBlock
         {
@@ -176,14 +183,84 @@ public partial class CustomView : UserControl
 
     private static ComboBox BuildDropdown(FieldViewModel field)
     {
-        var combo = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
-        foreach (var option in field.EnumOptions)
+        // Bound to the field's observable option list: a static enum's items are
+        // seeded up front; a source-backed dropdown's items arrive when the async
+        // fetch completes, and the ComboBox refreshes automatically. Each item is a
+        // DropdownOption whose ToString() is its Label (shown); its Value is bound
+        // into param.*.
+        var combo = new ComboBox
         {
-            combo.Items.Add(option);
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            ItemsSource = field.DropdownOptions,
+        };
+
+        void SelectByValue()
+        {
+            DropdownOption? match = null;
+            foreach (var o in field.DropdownOptions)
+            {
+                if (string.Equals(o.Value, field.SelectedOption, StringComparison.Ordinal)) { match = o; break; }
+            }
+            if (!ReferenceEquals(combo.SelectedItem, match))
+            {
+                combo.SelectedItem = match;
+            }
         }
-        combo.SelectedItem = field.SelectedOption;
-        combo.SelectionChanged += (_, _) => field.SelectedOption = combo.SelectedItem as string;
+
+        SelectByValue();
+        combo.SelectionChanged += (_, _) => field.SelectedOption = (combo.SelectedItem as DropdownOption)?.Value;
+        // Re-sync the selection when the VM resets it (e.g. after a dynamic reload
+        // drops the previously-selected value).
+        field.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(FieldViewModel.SelectedOption))
+            {
+                SelectByValue();
+            }
+        };
         return combo;
+    }
+
+    private static TextBlock BuildOptionsStatus(FieldViewModel field)
+    {
+        var status = new TextBlock
+        {
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+        };
+
+        void Sync()
+        {
+            if (field.IsLoadingOptions)
+            {
+                status.Text = "Loading options…";
+                status.Foreground = Brushes.Gray;
+                status.IsVisible = true;
+            }
+            else if (field.HasOptionsError)
+            {
+                status.Text = field.OptionsError;
+                status.Foreground = Brushes.Firebrick;
+                status.IsVisible = true;
+            }
+            else
+            {
+                status.Text = string.Empty;
+                status.IsVisible = false;
+            }
+        }
+
+        Sync();
+        field.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(FieldViewModel.IsLoadingOptions)
+                or nameof(FieldViewModel.OptionsError)
+                or nameof(FieldViewModel.HasOptionsError))
+            {
+                Sync();
+            }
+        };
+        return status;
     }
 
     private static TextBox BuildSecret(FieldViewModel field)

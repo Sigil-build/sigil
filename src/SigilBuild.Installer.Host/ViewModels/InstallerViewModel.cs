@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using SigilBuild.Core.Manifest;
 using SigilBuild.Installer.Host.Branding;
+using SigilBuild.Installer.Host.Services;
 using SigilBuild.Wrapper.Engine;
 using SigilBuild.Wrapper.Expressions;
 
@@ -71,6 +72,39 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     }
 
     public BrandTokens Brand { get; }
+
+    // http-options runtime wiring: a source-backed enum field fetches its dropdown
+    // options when its custom screen becomes visible. The fetch is injectable so
+    // unit tests supply canned options without real network I/O; production uses
+    // the real HTTP loader.
+    private OptionsFetcher _optionsFetcher = HttpOptionsLoader.LoadAsync;
+
+    /// <summary>
+    /// Override the option source used by source-backed dropdowns (default:
+    /// <see cref="HttpOptionsLoader.LoadAsync"/>). Tests inject a canned fetcher so
+    /// no unit test hits the network.
+    /// </summary>
+    public void ConfigureOptionsFetcher(OptionsFetcher fetcher)
+        => _optionsFetcher = fetcher ?? throw new ArgumentNullException(nameof(fetcher));
+
+    /// <summary>
+    /// Kick off the dynamic option fetch for every source-backed dropdown on a
+    /// custom screen. Fire-and-forget so navigation (and the UI thread) never
+    /// blocks on the network; each field surfaces its own loading/error state and
+    /// LoadDynamicOptionsAsync never throws. The <c>${parameters.*}</c> URL
+    /// placeholders are substituted from the values collected so far.
+    /// </summary>
+    private void TriggerDynamicOptionLoads(CustomScreenViewModel screen)
+    {
+        var collected = CollectedParameterValues;
+        foreach (var field in screen.Fields)
+        {
+            if (field.HasDynamicOptions)
+            {
+                _ = field.LoadDynamicOptionsAsync(_optionsFetcher, collected);
+            }
+        }
+    }
 
     // T10: a prior install of this app was detected (ARP/state). The wizard shows a
     // reinstall notice on the Welcome screen; the engine performs uninstall-then-
@@ -659,6 +693,13 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
             var node = _flow[index];
             CurrentCustomScreen = node.Screen;
             CurrentStep = node.Step; // triggers the view swap
+
+            // Entering a custom screen: fetch any source-backed dropdown's options
+            // now that the earlier screens' values are available for URL substitution.
+            if (node.Screen is { } screen)
+            {
+                TriggerDynamicOptionLoads(screen);
+            }
         }
         finally
         {

@@ -1,12 +1,37 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 using SigilBuild.Core.Manifest;
+using SigilBuild.Installer.Host.Services;
 
 namespace SigilBuild.Installer.Host.ViewModels;
+
+/// <summary>
+/// A selectable dropdown entry — <see cref="Label"/> is shown to the user,
+/// <see cref="Value"/> is bound into <c>param.*</c>. For a static manifest enum
+/// the two are identical; for an HTTP <c>source</c>-backed dropdown they differ
+/// (e.g. a friendly name vs an opaque id). <see cref="ToString"/> returns the
+/// label so the imperatively-built ComboBox shows it without a template.
+/// </summary>
+public sealed record DropdownOption(string Label, string Value)
+{
+    public override string ToString() => Label;
+}
+
+/// <summary>
+/// Injectable seam for fetching a dynamic dropdown's options. The production
+/// default is <see cref="HttpOptionsLoader.LoadAsync"/>; tests substitute a
+/// canned delegate so unit tests never touch the network. The parameter order
+/// mirrors <see cref="HttpOptionsLoader.LoadAsync"/> exactly.
+/// </summary>
+public delegate Task<IReadOnlyList<HttpOption>> OptionsFetcher(
+    string url, string itemsPath, string labelProperty, string valueProperty, CancellationToken ct);
 
 /// <summary>
 /// The rendered widget for a declared screen field (T9). Inferred from the
@@ -34,13 +59,16 @@ public enum WizardWidget
 /// </summary>
 public static class WidgetFactory
 {
-    public static WizardWidget Infer(ParameterType type, string? widgetOverride, int enumCount)
+    public static WizardWidget Infer(ParameterType type, string? widgetOverride, int enumCount, bool hasSource = false)
     {
         var w = widgetOverride?.Trim().ToLowerInvariant();
         return type switch
         {
             ParameterType.Bool => w == "switch" ? WizardWidget.Switch : WizardWidget.Checkbox,
-            ParameterType.Enum => w == "radio" ? WizardWidget.Radio
+            // A source-backed enum has no static values to count and always renders
+            // as a ComboBox (per ParameterSource's contract) — never a radio group.
+            ParameterType.Enum => hasSource ? WizardWidget.Dropdown
+                : w == "radio" ? WizardWidget.Radio
                 : w == "dropdown" ? WizardWidget.Dropdown
                 : enumCount <= 4 ? WizardWidget.Radio : WizardWidget.Dropdown,
             ParameterType.Secret => WizardWidget.SecretInput,
@@ -64,8 +92,19 @@ public sealed class FieldViewModel : INotifyPropertyChanged
     {
         Definition = def ?? throw new ArgumentNullException(nameof(def));
         EnumOptions = def.EnumValues ?? Array.Empty<string>();
-        Widget = WidgetFactory.Infer(def.Type, widgetOverride, EnumOptions.Count);
+        Widget = WidgetFactory.Infer(def.Type, widgetOverride, EnumOptions.Count, def.Source is not null);
         Label = string.IsNullOrWhiteSpace(def.Description) ? def.Name : def.Description!;
+
+        // Seed the dropdown's items. A static enum's items are (label == value ==
+        // option); a source-backed dropdown starts empty and is populated on
+        // navigation by LoadDynamicOptionsAsync.
+        if (Widget == WizardWidget.Dropdown && def.Source is null)
+        {
+            foreach (var opt in EnumOptions)
+            {
+                DropdownOptions.Add(new DropdownOption(opt, opt));
+            }
+        }
 
         // Seed the initial value from the schema default.
         switch (Widget)
@@ -125,6 +164,142 @@ public sealed class FieldViewModel : INotifyPropertyChanged
     {
         get => _selectedOption;
         set { if (_selectedOption != value) { _selectedOption = value; OnPropertyChanged(); } }
+    }
+
+    // --- Dynamic (source-backed) dropdown options ---
+
+    /// <summary>
+    /// The dropdown's items. For a static enum these are (label == value) pairs
+    /// seeded in the constructor; for a <c>source</c>-backed dropdown they are
+    /// filled by <see cref="LoadDynamicOptionsAsync"/> when the screen is shown.
+    /// </summary>
+    public ObservableCollection<DropdownOption> DropdownOptions { get; } = new();
+
+    /// <summary>True when this field pulls its options from an HTTP <c>source</c>.</summary>
+    public bool HasDynamicOptions => Definition.Source is not null;
+
+    private bool _isLoadingOptions;
+    /// <summary>True while a dynamic option fetch is in flight (drives a "Loading…" hint).</summary>
+    public bool IsLoadingOptions
+    {
+        get => _isLoadingOptions;
+        private set { if (_isLoadingOptions != value) { _isLoadingOptions = value; OnPropertyChanged(); } }
+    }
+
+    private string? _optionsError;
+    /// <summary>
+    /// Set to an inline "couldn't load options" message when the fetch fails or
+    /// returns nothing; null on success. Never blocks the wizard — the user can
+    /// go back or proceed (subject to the field's required/enum validation).
+    /// </summary>
+    public string? OptionsError
+    {
+        get => _optionsError;
+        private set
+        {
+            if (_optionsError != value)
+            {
+                _optionsError = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(HasOptionsError));
+            }
+        }
+    }
+
+    public bool HasOptionsError => !string.IsNullOrEmpty(_optionsError);
+
+    private static readonly Regex _paramPlaceholder =
+        new(@"\$\{parameters\.([A-Za-z0-9_]+)\}", RegexOptions.Compiled, TimeSpan.FromSeconds(1));
+
+    /// <summary>
+    /// Substitute <c>${parameters.name}</c> placeholders in a source URL from the
+    /// currently-collected parameter values. An unknown name resolves to empty so
+    /// a stale placeholder never leaks the literal token into the request.
+    /// </summary>
+    public static string SubstituteParameters(string url, IReadOnlyDictionary<string, string> values)
+    {
+        if (string.IsNullOrEmpty(url) || url.IndexOf("${", StringComparison.Ordinal) < 0)
+        {
+            return url;
+        }
+        return _paramPlaceholder.Replace(url, m =>
+            values is not null && values.TryGetValue(m.Groups[1].Value, out var v) ? v : string.Empty);
+    }
+
+    /// <summary>
+    /// Fetch this field's dropdown options from its <c>source</c> endpoint and
+    /// populate <see cref="DropdownOptions"/>. The URL's <c>${parameters.*}</c>
+    /// placeholders are substituted from <paramref name="collectedValues"/> before
+    /// the fetch. No-op for a static (source-less) field. A failed/empty fetch is
+    /// caught, logged, and surfaced via <see cref="OptionsError"/> — it never
+    /// throws, so the wizard keeps running.
+    /// </summary>
+    /// <param name="fetcher">The option source (production: <see cref="HttpOptionsLoader.LoadAsync"/>).</param>
+    public async Task LoadDynamicOptionsAsync(
+        OptionsFetcher fetcher,
+        IReadOnlyDictionary<string, string> collectedValues,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(fetcher);
+        var source = Definition.Source;
+        if (source is null)
+        {
+            return; // static field: nothing to fetch.
+        }
+
+        var url = SubstituteParameters(source.Url, collectedValues ?? new Dictionary<string, string>());
+        IsLoadingOptions = true;
+        OptionsError = null;
+        try
+        {
+            var options = await fetcher(url, source.ItemsPath, source.LabelProperty, source.ValueProperty, ct)
+                .ConfigureAwait(true);
+
+            DropdownOptions.Clear();
+            foreach (var o in options)
+            {
+                DropdownOptions.Add(new DropdownOption(o.Label, o.Value));
+            }
+
+            // Preserve a prior selection only if it still exists among the new items.
+            if (_selectedOption is { } sel && !DropdownOptionsContainValue(sel))
+            {
+                SelectedOption = null;
+            }
+
+            if (DropdownOptions.Count == 0)
+            {
+                OptionsError = "Couldn't load options.";
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw; // navigating away / disposal — let the caller observe cancellation.
+        }
+#pragma warning disable CA1031 // A network/HTTP/parse failure must not crash the wizard — surface inline.
+        catch (Exception ex)
+        {
+            InstallerLog.Error($"LoadDynamicOptions '{ParamName}' failed", ex);
+            DropdownOptions.Clear();
+            OptionsError = "Couldn't load options.";
+        }
+#pragma warning restore CA1031
+        finally
+        {
+            IsLoadingOptions = false;
+        }
+    }
+
+    private bool DropdownOptionsContainValue(string value)
+    {
+        foreach (var o in DropdownOptions)
+        {
+            if (string.Equals(o.Value, value, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private bool _revealSecret;
@@ -196,13 +371,22 @@ public sealed class FieldViewModel : INotifyPropertyChanged
             return false;
         }
 
-        // Enum membership.
+        // Enum membership. A dropdown validates against its live items (which for a
+        // source-backed field are the fetched values); a radio against its static
+        // enum set.
         if ((IsRadio || IsDropdown) && !string.IsNullOrEmpty(value))
         {
             var member = false;
-            foreach (var opt in EnumOptions)
+            if (IsDropdown)
             {
-                if (string.Equals(opt, value, StringComparison.Ordinal)) { member = true; break; }
+                member = DropdownOptionsContainValue(value);
+            }
+            else
+            {
+                foreach (var opt in EnumOptions)
+                {
+                    if (string.Equals(opt, value, StringComparison.Ordinal)) { member = true; break; }
+                }
             }
             if (!member)
             {

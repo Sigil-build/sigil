@@ -1,6 +1,8 @@
 # Migrating from WiX to Sigil
 
 > **Skeleton (Sprint 5a / WBS 2.13f).** Detailed migration recipes are filled in during Sprint 11 (WBS 6.1 — `docs.sigil.build`). Tier assignments below reflect the [Sprint 5a catalog lock](../../../sigil-docs/implementation/sprints/sprint-05a.md), not the as-drafted ADR-008 summary.
+>
+> **Uninstaller + ARP entry shipped (D-016, 2026-05-14).** WiX customers relying on the `Product` element's automatic Add/Remove Programs registration get equivalent behaviour from Sigil's `uninstall:` block — see "Uninstaller mapping" below.
 
 ## Element-to-step mapping
 
@@ -38,6 +40,31 @@
 - **Merge modules:** declined — author shared step blocks via YAML anchors.
 - **Custom-action DLL types:** declined — Sigil does not load arbitrary DLLs at install time. Use a signed `run_program` invoking a small helper exe instead.
 - **Numeric `CustomAction Type=`:** WiX 4/5 abandoned numeric Types entirely; the linker computes them from declarative attributes. The Sprint 5a survey shows 0 corpus-wide for numeric Types — this is a measurement artefact of modern WiX, not an indicator that custom actions are unused.
+
+## Uninstaller mapping
+
+> Shipped in D-016 (2026-05-14). WiX's `Product` element auto-registers an Add/Remove Programs entry with `MsiExec.exe /x{ProductCode}` as the uninstall command. Sigil produces a sibling `uninstaller.exe` and writes the same ARP entry.
+
+| WiX construct | Sigil equivalent | Notes |
+|---|---|---|
+| `<Product>` (auto-registers ARP entry) | top-level `uninstall:` step list + automatic deployment | the packager generates a ~4 MB stamped wrapper copy, embeds it as the `SIGIL_UNINSTALLER_V1` resource, and the wrapper drops it to `install_dir\uninstaller.exe` on install success |
+| `<RegistrySearch>` for `UninstallString` | (automatic) | the wrapper writes both `HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\<AppId>\UninstallString` and `QuietUninstallString` to point at the deployed exe |
+| `MsiExec.exe /x{...}` invocation | `<install_dir>\uninstaller.exe` (silent: append `/S`) | the dedicated exe replays the install journal automatically; the manifest's `uninstall:` block runs first for tear-down the journal can't infer |
+| `<Product Icon=`...`>` for the ARP icon | `installer.icon` | the same icon stamps `setup.exe`, the bundled wizard exe, and the produced `uninstaller.exe` |
+| `<Property Id="ARPNOREMOVE" Value="1"/>` | (no direct equivalent — omit `uninstall:` to skip generation) | when the manifest has no `uninstall:` block, no uninstaller.exe is generated and no ARP entry is written |
+
+## Wizard page mapping
+
+> Shipped in D-016 (2026-05-14). WiX UI sets (`WixUI_InstallDir`, `WixUI_FeatureTree`, …) are realised by Sigil's wizard host, configured via the `parameters:` block.
+
+| WixUI dialog | Sigil equivalent | Notes |
+|---|---|---|
+| `LicenseAgreementDlg` | always rendered (License step) | manifest will accept a license path field; placeholder text today |
+| `InstallDirDlg` (and the WixUI_InstallDir set's path picker) | auto-inserted when `parameters.install_dir` is declared | dedicated screen with TextBox + Browse… + drive selector + free-space readout |
+| `CustomizeDlg` (WixUI_FeatureTree feature selector) | `parameters.<feature>.type: bool` with `screen:` grouping | one CheckBox per bool parameter; group with the new `screen:` field |
+| `WixUI_*` themed sequences | `parameters.<name>.screen: "Page Title"` | one wizard page per unique `screen` value, in declaration order |
+| `ProgressDlg` | always rendered (Installing step) | locked layout |
+| `ExitDialog` | always rendered (Finish step) | "Launch now" checkbox configurable post-MVP |
 
 ## Examples
 

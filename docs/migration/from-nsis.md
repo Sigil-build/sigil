@@ -1,6 +1,8 @@
 # Migrating from NSIS to Sigil
 
 > **Skeleton (Sprint 5a / WBS 2.13f).** Detailed migration recipes are filled in during Sprint 11 (WBS 6.1). Tier assignments reflect the [Sprint 5a catalog lock](../../../sigil-docs/implementation/sprints/sprint-05a.md).
+>
+> **Wizard + uninstaller shipped (D-016, 2026-05-14).** The Modern UI page model and the auto-generated uninstaller — features previously called out as needing a workaround — are now first-class in Sigil. See "Wizard page mapping" and "Uninstaller mapping" below.
 
 ## Command-to-step mapping
 
@@ -36,8 +38,45 @@
 - **Sections:** NSIS `Section` blocks group commands and contribute to component selection. Sigil's `parameters: { type: enum }` + `when:` clauses replace this.
 - **`OnInit` / `.onInstSuccess`:** map to `pre_install:` / `post_install:` blocks.
 - **Plugin model:** NSIS's plugin DLLs (`SimpleSC`, `AccessControl`, `nsisFirewall`, `InetC`/`NSISdl`, `System::Call`) are absent from Sigil's surface. The functionality they provide is split between dedicated MUST/SHOULD step types (`service_install`, `acl_grant`, `firewall_rule`), the `run_program` escape hatch, and explicit declines.
-- **Modern UI macros:** `MUI_*` macros (e.g., `!insertmacro MUI_PAGE_STARTMENU`) belong to the wizard host (Sprint 5b), not the step engine. The migration story for a Modern UI installer goes through the wizard's screen 6 (Custom template) plus `parameters:`.
+- **Modern UI macros:** `MUI_*` macros are realised by the wizard host. The `MUI_PAGE_DIRECTORY` page is auto-generated when the manifest declares an `install_dir` parameter (with a disk-space readout); `MUI_PAGE_INSTFILES` is the wizard's locked Installing screen. See "Wizard page mapping" below.
 - **Case-insensitivity:** NSIS commands are case-insensitive (`File`, `file`, `FILE` all work). Sigil step names are case-**sensitive** lowercase. Migrate canonical-cased.
+
+## Wizard page mapping
+
+> Shipped in D-016 (2026-05-14). The wizard flow is built dynamically from the `parameters:` block — there's no Sigil equivalent of hand-coding `!insertmacro MUI_PAGE_*` directives.
+
+| NSIS Modern UI directive | Sigil equivalent | Notes |
+|---|---|---|
+| `!insertmacro MUI_PAGE_WELCOME` | always rendered (Welcome step) | brand slots customise the logo / app name / version |
+| `!insertmacro MUI_PAGE_LICENSE` | always rendered (License step) | manifest will accept a `installer.license_path` field; today the wizard ships a placeholder |
+| `!insertmacro MUI_PAGE_DIRECTORY` | auto-inserted when `parameters.install_dir` is declared | dedicated screen with TextBox + Browse… + drive selector + free-space readout |
+| `!insertmacro MUI_PAGE_COMPONENTS` | (no direct equivalent) | model components as `parameters.<feature>.type: bool` with `screen:` grouping; the wizard renders one CheckBox per bool |
+| `!insertmacro MUI_PAGE_CUSTOMFUNCTION_*` (themed pages) | `parameters.<name>.screen: "Page Title"` | one wizard page per unique `screen` value, in declaration order |
+| `!insertmacro MUI_PAGE_INSTFILES` | always rendered (Installing step) | locked layout |
+| `!insertmacro MUI_PAGE_FINISH` | always rendered (Finish step) | "Launch now" checkbox configurable post-MVP |
+| `!insertmacro MUI_UNPAGE_*` | (no direct equivalent) | uninstall flow is currently silent — see Uninstaller mapping below |
+
+**Per-parameter widget selection (FR-IU-16):**
+
+| Manifest declaration | Widget |
+|---|---|
+| `type: enum`, `values: [...]` | static ComboBox |
+| any `type` + `source: { url, items_path, value_property, label_property }` | dynamic ComboBox (HTTPS-fetched on page-attach; URL template substitution via `${parameters.X}`) |
+| `type: bool` | CheckBox |
+| anything else (`string`, `path`, `int`, `secret`) | TextBox |
+
+## Uninstaller mapping
+
+> Shipped in D-016 (2026-05-14). NSIS auto-generates `uninstall.exe` from a `Section Uninstall`; Sigil does the same from the manifest's `uninstall:` block.
+
+| NSIS construct | Sigil equivalent | Notes |
+|---|---|---|
+| `Section "Uninstall"` | top-level `uninstall:` step list | renamed from `pre_uninstall:` per D-016; the legacy key is no longer accepted |
+| `WriteUninstaller "$INSTDIR\Uninstall.exe"` | (automatic) | the packager generates a ~4 MB stamped wrapper copy, embeds it as the `SIGIL_UNINSTALLER_V1` resource, and the wrapper drops it to `install_dir\uninstaller.exe` on install success |
+| `WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\$AppId" "UninstallString" "..."` | (automatic) | the wrapper writes both `UninstallString` and `QuietUninstallString` to point at the deployed exe |
+| `Delete $INSTDIR\file.dat` inside the uninstall section | (use the install journal) | the wrapper's rollback journal already replays a reverse-install when `uninstaller.exe` runs; declare `uninstall:` only for tear-down that the journal can't infer (e.g. stopping a service, deleting an AppData cache) |
+| `RMDir /r $INSTDIR` at the end of the uninstall section | (automatic) | the journal replay removes everything the installer wrote, then the install dir itself |
+| Custom uninstaller icon via `!define MUI_UNICON` | (single icon for installer + uninstaller) | the `installer.icon` manifest field stamps the icon on `setup.exe`, the bundled wizard exe, and the produced `uninstaller.exe` |
 
 ## Examples
 

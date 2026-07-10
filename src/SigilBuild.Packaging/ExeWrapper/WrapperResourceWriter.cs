@@ -95,10 +95,16 @@ internal static partial class WrapperResourceWriter
         try
         {
             blobNamePtr = Marshal.StringToHGlobalUni(BlobResourceName);
-            payloadNamePtr = Marshal.StringToHGlobalUni(PayloadResourceName);
-
             UpdateOne(hUpdate, blobNamePtr, blob, BlobResourceName);
-            UpdateOne(hUpdate, payloadNamePtr, payload, PayloadResourceName);
+
+            // UpdateResource with cbData=0 means "delete the named resource". A
+            // freshly-copied wrapper has no SIGIL_PAYLOAD_V1 yet, so the delete
+            // returns failure. Skip the call entirely when there is no payload.
+            if (payload.Length > 0)
+            {
+                payloadNamePtr = Marshal.StringToHGlobalUni(PayloadResourceName);
+                UpdateOne(hUpdate, payloadNamePtr, payload, PayloadResourceName);
+            }
 
             // T18: only stamp the native-runtime resource when there is one to
             // stamp. An empty archive (no native deps staged) leaves SIGIL_RUNTIME_V1

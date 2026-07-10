@@ -1,0 +1,30 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Folder Name="/src/">
+    <Project Path="src/SigilBuild.Cli/SigilBuild.Cli.csproj" />
+    <Project Path="src/SigilBuild.Core/SigilBuild.Core.csproj" />
+    <Project Path="src/SigilBuild.Installer.BrandGenerator/SigilBuild.Installer.BrandGenerator.csproj" />
+    <Project Path="src/SigilBuild.Installer.Host/SigilBuild.Installer.Host.csproj" />
+    <Project Path="src/SigilBuild.Packaging/SigilBuild.Packaging.csproj" />
+    <Project Path="src/SigilBuild.Signing/SigilBuild.Signing.csproj" />
+    <Project Path="src/SigilBuild.Wrapper/SigilBuild.Wrapper.csproj" />
+    <Project Path="src/SigilBuild.Wrapper.Core/SigilBuild.Wrapper.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SigilBuild.Cli.Tests/SigilBuild.Cli.Tests.csproj" />
+    <Project Path="tests/SigilBuild.Core.Tests/SigilBuild.Core.Tests.csproj" />
+    <Project Path="tests/SigilBuild.Installer.BrandGenerator.Tests/SigilBuild.Installer.BrandGenerator.Tests.csproj" />
+    <Project Path="tests/SigilBuild.Installer.Host.Tests/SigilBuild.Installer.Host.Tests.csproj" />
+    <Project Path="tests/SigilBuild.Packaging.IntegrationTests/SigilBuild.Packaging.IntegrationTests.csproj" />
+    <Project Path="tests/SigilBuild.Packaging.Tests/SigilBuild.Packaging.Tests.csproj" />
+    <Project Path="tests/SigilBuild.Schema.Tests/SigilBuild.Schema.Tests.csproj" />
+    <Project Path="tests/SigilBuild.Signing.IntegrationTests/SigilBuild.Signing.IntegrationTests.csproj" />
+    <Project Path="tests/SigilBuild.Signing.Tests/SigilBuild.Signing.Tests.csproj" />
+    <Project Path="tests/SigilBuild.Wrapper.IntegrationTests/SigilBuild.Wrapper.IntegrationTests.csproj" />
+    <Project Path="tests/SigilBuild.Wrapper.Tests/SigilBuild.Wrapper.Tests.csproj" />
+  </Folder>
+</Solution>

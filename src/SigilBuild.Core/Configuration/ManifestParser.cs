@@ -67,7 +67,8 @@ public static class ManifestParser
             Parameters: parameters,
             InstallSteps: ParseInstallSteps(GetSequenceOfMappings(root, "install_steps"), diagnostics, file),
             PreInstall: ParseInstallSteps(GetSequenceOfMappings(root, "pre_install"), diagnostics, file),
-            PostInstall: ParseInstallSteps(GetSequenceOfMappings(root, "post_install"), diagnostics, file));
+            PostInstall: ParseInstallSteps(GetSequenceOfMappings(root, "post_install"), diagnostics, file),
+            Uninstall: ParseInstallSteps(GetSequenceOfMappings(root, "uninstall"), diagnostics, file));
     }
 
     private static AppSection MapApp(YamlMappingNode node) => new(
@@ -95,7 +96,8 @@ public static class ManifestParser
         return new PackageSection(formats, arches, msix is null ? null : new MsixOptions(
             Publisher: GetScalar(msix, "publisher"),
             Logo: GetScalar(msix, "logo"),
-            Capabilities: GetSequence(msix, "capabilities")));
+            Capabilities: GetSequence(msix, "capabilities"),
+            RunWack: GetBool(msix, "runWack", defaultValue: false)));
     }
 
     private static SignSection? MapSign(YamlMappingNode? node)
@@ -182,7 +184,10 @@ public static class ManifestParser
             // absent so the default (<scope root>\<App.Name>) applies.
             InstallDir: string.IsNullOrWhiteSpace(GetScalar(node, "install_dir"))
                 ? null
-                : GetScalar(node, "install_dir"));
+                : GetScalar(node, "install_dir"),
+            // PR #8: optional custom installer-exe icon (.ico) path. Null falls
+            // back to the bundled default installer icon at pack time.
+            Icon: GetScalar(node, "icon"));
     }
 
     /// <summary>
@@ -524,7 +529,32 @@ public static class ManifestParser
             var pattern = GetScalar(value, "pattern");
             var min = GetNullableInt(value, "min");
             var max = GetNullableInt(value, "max");
+            var screen = GetScalar(value, "screen");
             var defaultValue = ReadDefault(value, type);
+
+            var sourceMap = GetMapping(value, "source");
+            ParameterSource? source = null;
+            if (sourceMap is not null)
+            {
+                var paramLoc = new SourceLocation(fileName, (int)keyNode.Start.Line, (int)keyNode.Start.Column);
+                var url     = GetScalar(sourceMap, "url");
+                var itemsP  = GetScalar(sourceMap, "items_path");
+                var valueP  = GetScalar(sourceMap, "value_property");
+                var labelP  = GetScalar(sourceMap, "label_property");
+                if (url is null || itemsP is null || valueP is null || labelP is null)
+                {
+                    diagnostics.Add(new Diagnostic(
+                        DiagnosticSeverity.Error,
+                        DiagnosticCodes.ParameterSourceInvalid,
+                        $"parameter '{name}' has a `source:` block missing required field(s)",
+                        paramLoc,
+                        "https://docs.sigil.build/diagnostics/SIG0234"));
+                }
+                else
+                {
+                    source = new ParameterSource(url, itemsP, valueP, labelP);
+                }
+            }
 
             dict[name] = new ParameterDefinition(
                 Name: name,
@@ -535,7 +565,9 @@ public static class ManifestParser
                 Description: description,
                 Pattern: pattern,
                 Min: min,
-                Max: max);
+                Max: max,
+                Source: source,
+                Screen: screen);
         }
         return dict;
     }
@@ -610,8 +642,37 @@ public static class ManifestParser
             "shortcut_create"       => BuildShortcutCreate(node, id!, when, onFailure, diagnostics, loc),
             "env_set"               => BuildEnvSet(node, id!, when, onFailure, diagnostics, loc),
             "run_program"           => BuildRunProgram(node, id!, when, onFailure, diagnostics, loc),
+            "service_install"       => BuildServiceInstall(node, id!, when, onFailure, diagnostics, loc),
             _ => ReportUnknownStepType(id!, typeStr!, loc, diagnostics),
         };
+    }
+
+    private static readonly string[] ServiceInstallFields =
+    {
+        "id", "type", "when", "on_failure",
+        "name", "binary_path", "display_name", "description",
+        "start_type", "service_account", "start_after_install",
+    };
+
+    private static InstallStep.ServiceInstall? BuildServiceInstall(
+        YamlMappingNode node, string id, string? when, OnFailure onFailure,
+        List<Diagnostic> diagnostics, SourceLocation loc)
+    {
+        var name = GetScalar(node, "name");
+        var binaryPath = GetScalar(node, "binary_path");
+        if (name is null)        { ReportMissingField(id, "service_install", "name",        loc, diagnostics); return null; }
+        if (binaryPath is null)  { ReportMissingField(id, "service_install", "binary_path", loc, diagnostics); return null; }
+
+        var displayName       = GetScalar(node, "display_name") ?? name;
+        var description       = GetScalar(node, "description");
+        var startType         = GetScalar(node, "start_type") ?? "auto";
+        var serviceAccount    = GetScalar(node, "service_account") ?? "LocalSystem";
+        var startAfterInstall = GetBool(node, "start_after_install", defaultValue: true);
+
+        ReportUnknownStepFields(node, id, "service_install", ServiceInstallFields, loc, diagnostics);
+        return new InstallStep.ServiceInstall(
+            id, name, binaryPath, displayName, description,
+            startType, serviceAccount, startAfterInstall, when, onFailure);
     }
 
     private static InstallStep? ReportUnknownStepType(

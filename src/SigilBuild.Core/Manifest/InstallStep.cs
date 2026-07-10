@@ -112,6 +112,26 @@ public abstract record InstallStep(string Id, string? When, OnFailure OnFailure)
         string? When,
         OnFailure OnFailure)
         : InstallStep(Id, When, OnFailure);
+
+    /// <summary>
+    /// SHOULD-tier (post-MVP per the action catalog, promoted MUST-tier when
+    /// the wrapper grew real installer support): create a Windows service
+    /// pointing at <see cref="BinaryPath"/>. Unlike a <c>run_program sc.exe
+    /// create</c> shellout, this step records a rollback that stops + deletes
+    /// the service so <c>setup.exe /Uninstall</c> properly tears it down.
+    /// </summary>
+    public sealed record ServiceInstall(
+        string Id,
+        string Name,
+        string BinaryPath,
+        string DisplayName,
+        string? Description,
+        string StartType,        // auto | demand | disabled
+        string ServiceAccount,   // LocalSystem (default) | NetworkService | LocalService
+        bool StartAfterInstall,
+        string? When,
+        OnFailure OnFailure)
+        : InstallStep(Id, When, OnFailure);
 }
 
 /// <summary>

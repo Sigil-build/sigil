@@ -27,10 +27,13 @@ public sealed record InstallerBrand(
 /// <param name="Scope">Install scope; defaults to <see cref="InstallScope.Auto"/> (T12).</param>
 /// <param name="InstallDir">Optional install-dir override; may reference
 /// <c>{app.*}</c> / <c>{scope_root}</c> tokens (T13).</param>
+/// <param name="Icon">Optional custom installer-exe icon path (.ico); when null
+/// the packager stamps the bundled default installer icon (PR #8).</param>
 public sealed record InstallerSection(
     InstallerBrand? Brand,
     InstallerOptions? Options = null,
     IReadOnlyList<InstallerScreen>? Screens = null,
     string? License = null,
     InstallScope Scope = InstallScope.Auto,
-    string? InstallDir = null);
+    string? InstallDir = null,
+    string? Icon = null);

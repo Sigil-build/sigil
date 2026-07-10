@@ -179,6 +179,16 @@ public sealed class StepContext
             }
         }
 
+        // App metadata (ported from PR #8) — exposes the manifest's `app:` block
+        // as `${app.*}` in step values (e.g. a registry_write writing
+        // `${app.version}` / `${app.publisher}`). Sourced from the blob's T10 ARP
+        // fields (DisplayName/Publisher/Version) plus AppId/AppName. Without these
+        // the placeholders would land in the registry as literal text.
+        dict["app.id"] = blob.AppId;
+        dict["app.name"] = blob.AppName ?? blob.DisplayName ?? blob.AppId;
+        dict["app.version"] = blob.Version ?? string.Empty;
+        dict["app.publisher"] = blob.Publisher ?? string.Empty;
+
         // System context (used by the expression evaluator's `system.*` namespace).
         dict["system.os"] = System.Environment.OSVersion.Version.ToString();
         dict["system.arch"] = System.Runtime.InteropServices.RuntimeInformation

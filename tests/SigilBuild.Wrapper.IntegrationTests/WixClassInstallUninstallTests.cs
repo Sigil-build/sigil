@@ -40,7 +40,7 @@ public class WixClassInstallUninstallTests
         var dir = AppContext.BaseDirectory;
         while (dir is not null)
         {
-            if (File.Exists(Path.Combine(dir, "Sigil.sln")))
+            if (File.Exists(Path.Combine(dir, "Sigil.slnx")))
             {
                 break;
             }
@@ -48,7 +48,7 @@ public class WixClassInstallUninstallTests
         }
         if (dir is null)
         {
-            throw new InvalidOperationException("could not locate Sigil.sln");
+            throw new InvalidOperationException("could not locate Sigil.slnx");
         }
         return Path.Combine(dir, ManifestRel.Replace('/', Path.DirectorySeparatorChar));
     }

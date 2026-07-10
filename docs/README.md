@@ -16,6 +16,20 @@ docs (build, test, branch policy), see [`../CONTRIBUTING.md`](../CONTRIBUTING.md
   with type, default, and description. *Auto-generated from
   [`schemas/sigil-schema.json`](../schemas/sigil-schema.json).*
 
+## Guides
+
+How-to guides for each shipped feature. Start with the wizard guide if
+you're building a Windows installer; start with packaging formats if you're
+not sure which output format you need.
+
+- [Installer wizard](guides/installer-wizard.md) — branded wizard host, brand slots, screen grouping, install icon.
+- [Parameters](guides/parameters.md) — install-time parameters, types, dynamic dropdowns.
+- [Install steps](guides/install-steps.md) — every step type with a worked example.
+- [Uninstaller](guides/uninstaller.md) — auto-generated `uninstaller.exe` + Add/Remove Programs entry.
+- [Packaging formats](guides/packaging-formats.md) — MSIX vs ZIP vs EXE-wrapper.
+- [Signing](guides/signing.md) — local PFX or Azure Trusted Signing.
+- [Conditional installs](guides/conditional-installs.md) — `when:` expressions and rollback.
+
 ## Concepts
 
 - [**Architecture overview**](architecture-overview.md) — what Sigil does,

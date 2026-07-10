@@ -8,7 +8,8 @@ public enum TargetArchitecture { X64, Arm64 }
 public sealed record MsixOptions(
     string? Publisher,
     string? Logo,
-    IReadOnlyList<string>? Capabilities);
+    IReadOnlyList<string>? Capabilities,
+    bool RunWack = false);
 
 public sealed record PackageSection(
     IReadOnlyList<PackageFormat> Formats,

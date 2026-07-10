@@ -83,6 +83,14 @@ internal sealed class RunProgramStep : IStep
                 return StepResult.Ok();
             }
 
+            // Drain stdout/stderr concurrently so the pipe buffer never fills
+            // (4 KB on Windows). Capturing both gives us forensic context to
+            // include in any failure message — without this, the engine surfaces
+            // only the exit code, which is rarely enough to diagnose a real
+            // failure (e.g. "sc.exe exit 5" with no hint of the SCM error).
+            var stdoutTask = proc.StandardOutput.ReadToEndAsync(ct);
+            var stderrTask = proc.StandardError.ReadToEndAsync(ct);
+
             using var timeoutCts = _spec.TimeoutSeconds is null
                 ? null
                 : CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -106,11 +114,19 @@ internal sealed class RunProgramStep : IStep
                     $"'{program}' timed out after {_spec.TimeoutSeconds}s");
             }
 
+            // Await both drains so we don't lose the tail of output if the
+            // child closed its pipes right before exit.
+            var stdout = (await stdoutTask.ConfigureAwait(false)).TrimEnd();
+            var stderr = (await stderrTask.ConfigureAwait(false)).TrimEnd();
+
             var expected = _spec.ExpectedExitCodes ?? new[] { 0 };
             if (!expected.Contains(proc.ExitCode))
             {
+                var argSummary = _spec.Args is null ? "" : " " + string.Join(' ', _spec.Args.Select(a => '"' + a + '"'));
+                var detail = string.IsNullOrEmpty(stderr) ? stdout : stderr;
+                if (string.IsNullOrEmpty(detail)) detail = "(no output)";
                 return StepResult.Failed(
-                    $"'{program}' exited {proc.ExitCode}; expected one of [{string.Join(", ", expected)}]");
+                    $"'{program}'{argSummary} exited {proc.ExitCode}; expected one of [{string.Join(", ", expected)}]. Output: {detail}");
             }
 
             return StepResult.Ok();

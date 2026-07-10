@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <!--
+    requestedExecutionLevel="requireAdministrator" is REQUIRED for the wrapper.
+
+    Without an explicit trustInfo block, Windows applies "Installer Detection"
+    heuristics to decide whether to UAC-prompt. That works for the *first*
+    launch via Explorer (filename contains "Setup", Explorer catches the
+    elevation request, prompts UAC, re-launches elevated). But when the wizard
+    spawns the wrapper a SECOND time as `setup.exe /S` to execute install_steps
+    (see InstallerHostLauncher / InstallingView), Process.Start with
+    UseShellExecute=false cannot trigger a UAC prompt. Without a manifest,
+    Windows installer-detection demotes the grandchild to unelevated → sc.exe
+    create returns 5 (ERROR_ACCESS_DENIED) and the install fails.
+
+    requireAdministrator on the wrapper does two things:
+      1. Windows prompts UAC on first launch (same UX as today).
+      2. From an already-elevated parent, the manifest tells Windows "this
+         exe needs admin and the parent has it — inherit it via CreateProcess,
+         do not re-evaluate via installer-detection." The grandchild lands
+         elevated and sc.exe create succeeds.
+
+    See: https://learn.microsoft.com/en-us/windows/win32/secauthz/uac-installer-detection
+  -->
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="requireAdministrator" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+</assembly>

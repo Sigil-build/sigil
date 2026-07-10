@@ -39,7 +39,24 @@ public sealed class ExeWrapperPackager : IPackager
         // Locate the AOT-published host runtime for the target architecture.
         // A manifest declaring architectures: [x64, arm64] produces one Setup.exe
         // per architecture, each stamped from the matching per-RID runtime.
-        var stubPath = WrapperRuntimeLocator.Locate(options.Architecture);
+        // Surface the missing-runtime case as a SIG0120 diagnostic (PR #8) — the
+        // dev workflow expects build-wrappers to stage the AOT exe alongside the
+        // SDK before pack-time — rather than throwing deep in the packager.
+        string stubPath;
+        try
+        {
+            stubPath = WrapperRuntimeLocator.Locate(options.Architecture);
+        }
+        catch (FileNotFoundException ex)
+        {
+            return new PackResult(null, new[]
+            {
+                new Diagnostic(DiagnosticSeverity.Error, "SIG0120",
+                    $"EXE-wrapper packaging requires the AOT-published SigilBuild.Wrapper runtime. {ex.Message}",
+                    SourceLocation.Unknown,
+                    "https://docs.sigil.build/diagnostics/SIG0120"),
+            });
+        }
 
         // Output filename mirrors the Zip/Msix convention: id-version-arch tag.
         // Sanitize the user-controlled App.Name segment against path-traversal /
@@ -80,9 +97,24 @@ public sealed class ExeWrapperPackager : IPackager
         var nativeDepPaths = WrapperRuntimeLocator.LocateNativeDeps(options.Architecture);
         var runtimeBytes = BuildRuntimeBytes(nativeDepPaths, ct);
 
+        // Resolve the installer icon (PR #8) up front — stamped into the produced
+        // setup.exe's Explorer/Shell icon after the resource-update cycle below.
+        // Null when neither a manifest installer.icon nor the bundled default is
+        // readable (the wrapper then keeps its stock icon).
+        var iconBytes = ResolveIconBytes(manifest);
+
         // Embed the resources via the Win32 update-resource flow.
         await WrapperResourceWriter.WriteAsync(outputPath, blobBytes, payloadBytes, runtimeBytes, ct)
             .ConfigureAwait(false);
+
+        // Stamp the icon AFTER WrapperResourceWriter has finished its
+        // BeginUpdateResource / EndUpdateResource cycle. Concurrent updates on
+        // the same PE file are not safe. Same bytes as the wizard-bundle stamp
+        // so setup.exe and the wizard window share one branded icon.
+        if (iconBytes is not null)
+        {
+            await IconResourceWriter.WriteAsync(outputPath, iconBytes, ct).ConfigureAwait(false);
+        }
 
         // Compute sha256 + size *after* the resource embed so the artifact
         // descriptor reflects the final on-disk shape.
@@ -92,6 +124,37 @@ public sealed class ExeWrapperPackager : IPackager
         var artifact = new PackedArtifact(outputPath, sha256, size);
         return new PackResult(artifact, diagnostics);
     }
+
+    /// <summary>
+    /// Resolve the bytes of the installer icon to stamp into the produced
+    /// setup.exe. Precedence:
+    ///   1. <c>installer.icon</c> in the manifest, resolved relative to the
+    ///      manifest file's directory.
+    ///   2. The bundled default icon (embedded as
+    ///      <c>SigilBuild.Packaging.DefaultInstallerIcon.ico</c>).
+    /// Returns the icon bytes, or <c>null</c> when neither path is readable
+    /// (callers skip the icon-stamp step and leave the wrapper's stock icon).
+    /// </summary>
+    private static byte[]? ResolveIconBytes(SigilManifest manifest)
+    {
+        var userIcon = manifest.Installer?.Icon;
+        if (!string.IsNullOrEmpty(userIcon))
+        {
+            var manifestDir = Path.GetDirectoryName(manifest.Location.File);
+            var candidate = Path.IsPathRooted(userIcon) || string.IsNullOrEmpty(manifestDir)
+                ? userIcon
+                : Path.GetFullPath(Path.Combine(manifestDir, userIcon));
+            if (File.Exists(candidate)) return File.ReadAllBytes(candidate);
+        }
+
+        var asm = typeof(ExeWrapperPackager).Assembly;
+        using var s = asm.GetManifestResourceStream("SigilBuild.Packaging.DefaultInstallerIcon.ico");
+        if (s is null) return null;
+        using var ms = new MemoryStream();
+        s.CopyTo(ms);
+        return ms.ToArray();
+    }
+
 
     internal static byte[] BuildBlobBytes(
         SigilManifest manifest, string sourceDirectory, ICollection<Diagnostic>? diagnostics = null)

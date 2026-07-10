@@ -28,6 +28,7 @@ public class ManifestParserFullTests
             publisher: "CN=Example Inc."
             logo: ./logo.png
             capabilities: [internetClient]
+            runWack: true
         sign:
           provider: azure-trusted-signing
           local:
@@ -80,6 +81,7 @@ public class ManifestParserFullTests
         m.Package.Msix!.Publisher.Should().Be("CN=Example Inc.");
         m.Package.Msix.Logo.Should().Be("./logo.png");
         m.Package.Msix.Capabilities.Should().Equal("internetClient");
+        m.Package.Msix.RunWack.Should().BeTrue();
 
         m.Sign!.Provider.Should().Be(SignProvider.AzureTrustedSigning);
         m.Sign.Local!.Pfx.Should().Be("./codesign.pfx");

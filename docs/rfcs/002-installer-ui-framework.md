@@ -13,7 +13,7 @@ The installer host must satisfy these constraints simultaneously:
 - **Renders the six-screen installer flow** (Welcome, License, Install options, Installing, Finish, Custom template) in an 800×500 fixed window meeting WCAG-AA contrast requirements.
 - **Runs on both win-x64 and win-arm64** — both architectures are first-class targets per D-004.
 
-The design specification is finalized in `product-architect-package/design/installer-ui.md` and the linked Figma file.
+The design specification is finalized in `sigil-docs/design/installer-ui.md` and the linked Figma file.
 
 ## Options Considered
 
@@ -64,6 +64,6 @@ WCAG-AA contrast validation is enforced at `sigil pack` time by `BrandTokenEmitt
 
 ## References
 
-- [ADR-006 (product-architect-package): Installer UI Surface — Two-Surface Model](../../product-architect-package/architecture/adr-006-installer-ui-surface.md)
+- [ADR-006: Installer UI Surface — Two-Surface Model](../../../sigil-docs/architecture/adr-006-installer-ui-surface.md)
 - [ADR-009: Brand Token Runtime JSON vs Source Generator](../sigil-docs/architecture/adr-009-brand-token-runtime-json-vs-source-gen.md)
 - D-011: Installer UI in MVP scope

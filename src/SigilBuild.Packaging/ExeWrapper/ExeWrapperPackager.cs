@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using SigilBuild.Core.Diagnostics;
 using SigilBuild.Core.Manifest;
 using SigilBuild.Packaging.Common;
+using SigilBuild.Packaging.Installer;
 using SigilBuild.Wrapper.Engine;
 using SigilBuild.Wrapper.Json;
 
@@ -33,8 +34,24 @@ public sealed class ExeWrapperPackager : IPackager
         ArgumentNullException.ThrowIfNull(manifest);
         ArgumentNullException.ThrowIfNull(options);
 
-        // Locate the AOT-published wrapper runtime.
-        var stubPath = WrapperRuntimeLocator.Locate();
+        // Locate the AOT-published wrapper runtime. Surface the missing-runtime
+        // case as a SIG0120 diagnostic — the dev workflow expects build-wrappers
+        // to stage the AOT exe alongside the SDK before pack-time.
+        string stubPath;
+        try
+        {
+            stubPath = WrapperRuntimeLocator.Locate();
+        }
+        catch (FileNotFoundException ex)
+        {
+            return new PackResult(null, new[]
+            {
+                new Diagnostic(DiagnosticSeverity.Error, "SIG0120",
+                    $"EXE-wrapper packaging requires the AOT-published SigilBuild.Wrapper runtime. {ex.Message}",
+                    SourceLocation.Unknown,
+                    "https://docs.sigil.build/diagnostics/SIG0120"),
+            });
+        }
 
         // Output filename mirrors the Zip/Msix convention: id-version-arch tag.
         // Sanitize the user-controlled App.Name segment against path-traversal /
@@ -62,9 +79,57 @@ public sealed class ExeWrapperPackager : IPackager
         // payload:// path resolution) lands with Tasks 15+.
         var payloadBytes = BuildPayloadBytes(options.SourceDirectory, ct);
 
-        // Embed both resources via the Win32 update-resource flow.
-        await WrapperResourceWriter.WriteAsync(outputPath, blobBytes, payloadBytes, ct)
+        // Resolve the installer icon ONCE up front. Same bytes flow to two
+        // places: (a) the InstallerHostBundle, which stamps the bundled
+        // wizard exe + ships installer-icon.ico for Window.Icon at runtime;
+        // (b) the final IconResourceWriter.WriteAsync call that stamps the
+        // outer setup.exe's Explorer/Shell icon.
+        var iconBytes = ResolveIconBytes(manifest);
+
+        // Build the SIGIL_INSTALLER_HOST_V1 wire payload when the manifest
+        // declares an `installer:` block AND the AOT-published installer.exe
+        // is staged next to the SDK. When it's missing, fall through to the
+        // headless path — the wrapper runs install_steps without a wizard.
+        // This mirrors the policy MsixPackager.Bundle uses for MSIX.
+        var (installerHostBundle, installerHostDiagnostic) =
+            TryBuildInstallerHostBundle(manifest, iconBytes);
+
+        // When the manifest declares an uninstall: block, generate a lightweight
+        // uninstaller.exe stamped with those steps and embed it in setup.exe as
+        // SIGIL_UNINSTALLER_V1. The wrapper drops the resource to install_dir on
+        // successful install + writes the ARP UninstallString.
+        byte[]? uninstallerExeBytes = null;
+        string? uninstallerTempPath = null;
+        if (manifest.Uninstall is { Count: > 0 } uninstallSteps)
+        {
+            var app = new AppMetadata(
+                Id: manifest.App.Id, Name: manifest.App.Name, Version: manifest.App.Version,
+                Publisher: manifest.App.Publisher, Description: manifest.App.Description,
+                Homepage: manifest.App.Homepage);
+            uninstallerTempPath = await UninstallerExeBuilder.BuildAsync(
+                stubPath, manifest.App.Id, app, uninstallSteps, ct).ConfigureAwait(false);
+            uninstallerExeBytes = await File.ReadAllBytesAsync(uninstallerTempPath, ct).ConfigureAwait(false);
+        }
+
+        // Embed all resources via the Win32 update-resource flow.
+        await WrapperResourceWriter.WriteAsync(
+            outputPath, blobBytes, payloadBytes, installerHostBundle, uninstallerExeBytes, ct)
             .ConfigureAwait(false);
+
+        // Clean up the temp uninstaller file — its bytes are now embedded.
+        if (uninstallerTempPath is not null)
+        {
+            try { File.Delete(uninstallerTempPath); } catch { /* best-effort */ }
+        }
+
+        // Stamp the icon AFTER WrapperResourceWriter has finished its
+        // BeginUpdateResource / EndUpdateResource cycle. Concurrent updates on
+        // the same PE file are not safe. Same bytes as the wizard-bundle stamp
+        // so setup.exe and the wizard window share one branded icon.
+        if (iconBytes is not null)
+        {
+            await IconResourceWriter.WriteAsync(outputPath, iconBytes, ct).ConfigureAwait(false);
+        }
 
         // Compute sha256 + size *after* the resource embed so the artifact
         // descriptor reflects the final on-disk shape.
@@ -72,7 +137,96 @@ public sealed class ExeWrapperPackager : IPackager
         var size = new FileInfo(outputPath).Length;
 
         var artifact = new PackedArtifact(outputPath, sha256, size);
-        return new PackResult(artifact, Array.Empty<Diagnostic>());
+        var diagnostics = installerHostDiagnostic is null
+            ? Array.Empty<Diagnostic>()
+            : new[] { installerHostDiagnostic };
+        return new PackResult(artifact, diagnostics);
+    }
+
+    /// <summary>
+    /// Resolve the bytes of the installer icon to stamp into the produced
+    /// setup.exe. Precedence:
+    ///   1. <c>installer.icon</c> in the manifest, resolved relative to the
+    ///      manifest file's directory.
+    ///   2. The bundled default icon (embedded as
+    ///      <c>SigilBuild.Packaging.DefaultInstallerIcon.ico</c>).
+    /// Returns the icon bytes, or <c>null</c> when neither path is readable
+    /// (callers skip the icon-stamp step and leave the wrapper's stock icon).
+    /// </summary>
+    private static byte[]? ResolveIconBytes(SigilManifest manifest)
+    {
+        var userIcon = manifest.Installer?.Icon;
+        if (!string.IsNullOrEmpty(userIcon))
+        {
+            var manifestDir = Path.GetDirectoryName(manifest.Location.File);
+            var candidate = Path.IsPathRooted(userIcon) || string.IsNullOrEmpty(manifestDir)
+                ? userIcon
+                : Path.GetFullPath(Path.Combine(manifestDir, userIcon));
+            if (File.Exists(candidate)) return File.ReadAllBytes(candidate);
+        }
+
+        var asm = typeof(ExeWrapperPackager).Assembly;
+        using var s = asm.GetManifestResourceStream("SigilBuild.Packaging.DefaultInstallerIcon.ico");
+        if (s is null) return null;
+        using var ms = new MemoryStream();
+        s.CopyTo(ms);
+        return ms.ToArray();
+    }
+
+    /// <summary>
+    /// Try to build the <c>SIGIL_INSTALLER_HOST_V1</c> bundle. Returns
+    /// <c>(null, null)</c> when the manifest has no <c>installer:</c> block;
+    /// <c>(null, SIG0121-warning)</c> when the block is present but the
+    /// AOT-published installer.exe is not staged (caller continues with a
+    /// headless setup.exe); <c>(bundleBytes, null)</c> on success.
+    /// </summary>
+    private static (byte[]? Bundle, Diagnostic? Diagnostic) TryBuildInstallerHostBundle(SigilManifest manifest, byte[]? iconBytes)
+    {
+        if (manifest.Installer is null)
+        {
+            return (null, null);
+        }
+
+        var hostExePath = InstallerHostLocator.TryLocate();
+        if (hostExePath is null)
+        {
+            return (null, new Diagnostic(DiagnosticSeverity.Warning, "SIG0121",
+                "manifest declares an installer: block but the AOT-published installer.exe was not found. " +
+                "Setup.exe is built without a wizard — install_steps will run headlessly. " +
+                "Stage installer.exe under runtimes/win-x64/ next to the SDK to enable the wizard.",
+                SourceLocation.Unknown,
+                "https://docs.sigil.build/diagnostics/SIG0121"));
+        }
+
+        // Resolve the brand logo path declared in the manifest (relative to
+        // the manifest file's directory) and bundle the file under a
+        // wizard-friendly name. When the manifest declares no logo (or the
+        // file doesn't exist on the build machine), pass null and the wizard
+        // falls back to the default no-logo state.
+        string? brandLogoAbsolutePath = null;
+        string? bundledLogoName = null;
+        var brandLogo = manifest.Installer?.Brand?.Logo;
+        if (!string.IsNullOrEmpty(brandLogo))
+        {
+            var manifestDir = Path.GetDirectoryName(manifest.Location.File);
+            var candidate = Path.IsPathRooted(brandLogo) || string.IsNullOrEmpty(manifestDir)
+                ? brandLogo
+                : Path.GetFullPath(Path.Combine(manifestDir, brandLogo));
+            if (File.Exists(candidate))
+            {
+                brandLogoAbsolutePath = candidate;
+                bundledLogoName = InstallerHostBundle.BrandLogoEntryPrefix + Path.GetExtension(candidate);
+            }
+        }
+
+        // BrandTokenEmitter is the shared brand-token serializer used by the
+        // MSIX path too — see SigilBuild.Packaging.Installer.BrandTokenEmitter.
+        // Warnings (e.g. WCAG-AA contrast failures) are accepted at pack time;
+        // a future task can surface them through diagnostics.
+        var tokens = BrandTokenEmitter.Emit(manifest, allowLowContrast: true, bundledLogoFileName: bundledLogoName);
+        var installTimeParams = BrandTokenEmitter.EmitInstallTimeParameters(manifest);
+        var bundle = InstallerHostBundle.Build(hostExePath, tokens, installTimeParams, brandLogoAbsolutePath, iconBytes);
+        return (bundle, null);
     }
 
     private static byte[] BuildBlobBytes(SigilManifest manifest)
@@ -83,13 +237,24 @@ public sealed class ExeWrapperPackager : IPackager
 
         var inMemory = new WrapperBlob(
             AppId: manifest.App.Id,
+            App: new AppMetadata(
+                Id: manifest.App.Id,
+                Name: manifest.App.Name,
+                Version: manifest.App.Version,
+                Publisher: manifest.App.Publisher,
+                Description: manifest.App.Description,
+                Homepage: manifest.App.Homepage),
             Parameters: parameters,
             InstallSteps: manifest.InstallSteps ?? Array.Empty<InstallStep>(),
             PreInstall: manifest.PreInstall ?? Array.Empty<InstallStep>(),
             PostInstall: manifest.PostInstall ?? Array.Empty<InstallStep>(),
             // Update-step block doesn't yet exist on SigilManifest (Task 19+);
             // emit an empty list for forward compatibility.
-            UpdateSteps: Array.Empty<InstallStep>());
+            UpdateSteps: Array.Empty<InstallStep>(),
+            Uninstall: manifest.Uninstall ?? Array.Empty<InstallStep>(),
+            // setup.exe blob — the dedicated uninstaller.exe stamps its own
+            // blob with IsUninstaller: true (Task 5.3).
+            IsUninstaller: false);
 
         var serializable = SerializableWrapperBlob.FromWrapperBlob(inMemory);
         var json = System.Text.Json.JsonSerializer.Serialize(

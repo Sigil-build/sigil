@@ -9,4 +9,4 @@ public sealed record InstallerBrand(
     string? GradientMid,
     string? GradientEnd);
 
-public sealed record InstallerSection(InstallerBrand? Brand);
+public sealed record InstallerSection(InstallerBrand? Brand, string? Icon);

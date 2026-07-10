@@ -40,6 +40,10 @@ dotnet build
 dotnet test
 ```
 
+## Credits
+
+- Install Icon by Saki (Alexandre Moore) on <a href="https://icon-icons.com/authors/32-saki-alexandre-moore">Icon-Icons.com</a>
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

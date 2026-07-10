@@ -86,7 +86,33 @@ public sealed class MsixPackager : IPackager
 
             var sha = ManifestHasher.Sha256(outPath);
             var size = new FileInfo(outPath).Length;
-            return new PackResult(new PackedArtifact(outPath, sha, size), Array.Empty<Diagnostic>());
+
+            var diagnostics = new List<Diagnostic>();
+            if (manifest.Package?.Msix?.RunWack == true)
+            {
+                if (!WackRunner.TryFromInstalled(out var wack))
+                {
+                    diagnostics.Add(new Diagnostic(DiagnosticSeverity.Warning, "SIG0111",
+                        "runWack=true but the Windows App Certification Kit (appcert.exe) is not installed; skipping WACK validation",
+                        SourceLocation.Unknown,
+                        "https://docs.sigil.build/diagnostics/SIG0111"));
+                }
+                else
+                {
+                    var reportPath = Path.Combine(options.OutputDirectory, Path.GetFileNameWithoutExtension(fileName) + ".wack-report.xml");
+                    var wackResult = await wack.RunAsync(outPath, reportPath, ct);
+                    if (wackResult.ExitCode != 0)
+                    {
+                        diagnostics.Add(new Diagnostic(DiagnosticSeverity.Error, "SIG0112",
+                            $"Windows App Certification Kit reported failures (exit {wackResult.ExitCode}); see {wackResult.ReportPath}",
+                            SourceLocation.Unknown,
+                            "https://docs.sigil.build/diagnostics/SIG0112"));
+                        return new PackResult(null, diagnostics);
+                    }
+                }
+            }
+
+            return new PackResult(new PackedArtifact(outPath, sha, size), diagnostics);
         }
         finally
         {

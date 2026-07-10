@@ -25,7 +25,23 @@
           "description": { "type": "string" },
           "pattern": { "type": "string" },
           "min": { "type": "integer" },
-          "max": { "type": "integer" }
+          "max": { "type": "integer" },
+          "screen": {
+            "type": "string",
+            "description": "Optional wizard page label. Parameters that share a screen value are grouped onto the same Install Options screen in the wrapper installer. Parameters without a screen value land on a default 'Install Options' page after all named screens."
+          },
+          "source": {
+            "type": "object",
+            "description": "Dynamic options source. The wizard fetches `url` at install time, parses JSON, and populates a ComboBox with the items at `items_path` keyed by `value_property` / labelled by `label_property`.",
+            "required": ["url", "items_path", "value_property", "label_property"],
+            "additionalProperties": false,
+            "properties": {
+              "url":            { "type": "string" },
+              "items_path":     { "type": "string" },
+              "value_property": { "type": "string" },
+              "label_property": { "type": "string" }
+            }
+          }
         }
       }
     },
@@ -41,7 +57,7 @@
           "enum": [
             "file_copy", "directory_create", "file_delete", "directory_delete",
             "registry_write", "registry_delete_value", "registry_delete_key",
-            "shortcut_create", "env_set", "run_program"
+            "shortcut_create", "env_set", "run_program", "service_install"
           ]
         },
         "when": { "type": "string" },
@@ -61,7 +77,7 @@
             "enum": [
               "file_copy", "directory_create", "file_delete", "directory_delete",
               "registry_write", "registry_delete_value", "registry_delete_key",
-              "shortcut_create", "env_set", "run_program"
+              "shortcut_create", "env_set", "run_program", "service_install"
             ]
           },
           "when": { "type": "string" },
@@ -163,6 +179,11 @@
             "capabilities": {
               "type": "array",
               "items": { "type": "string" }
+            },
+            "runWack": {
+              "type": "boolean",
+              "default": false,
+              "description": "If true, run the Windows App Certification Kit (appcert.exe) against the packed MSIX. Emits SIG0111 (warning) when WACK isn't installed and SIG0112 (error) when WACK reports failures. WBS 2.9."
             }
           }
         }
@@ -258,9 +279,13 @@
     },
     "installer": {
       "type": "object",
-      "description": "Branded Windows installer wizard config. Implementation lands in Sprint 5b.",
+      "description": "Branded Windows installer wizard config (Phase 2.5 / D-011). Tokens are emitted at pack time by BrandTokenEmitter; WCAG-AA contrast is enforced against white text.",
       "additionalProperties": false,
       "properties": {
+        "icon": {
+          "type": "string",
+          "description": "Path (relative to the manifest) to a .ico file that becomes the produced setup.exe's Explorer icon. When omitted, the bundled default icon is used."
+        },
         "brand": {
           "type": "object",
           "additionalProperties": false,
@@ -274,6 +299,21 @@
             "accentColor": {
               "type": "string",
               "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            "gradientStart": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "description": "First stop of the three-stop sidebar gradient."
+            },
+            "gradientMid": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "description": "Middle stop of the three-stop sidebar gradient."
+            },
+            "gradientEnd": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "description": "Last stop of the three-stop sidebar gradient."
             }
           }
         }
@@ -297,7 +337,23 @@
           "description": { "type": "string" },
           "pattern": { "type": "string" },
           "min": { "type": "integer" },
-          "max": { "type": "integer" }
+          "max": { "type": "integer" },
+          "screen": {
+            "type": "string",
+            "description": "Optional wizard page label. Parameters that share a screen value are grouped onto the same Install Options screen in the wrapper installer. Parameters without a screen value land on a default 'Install Options' page after all named screens."
+          },
+          "source": {
+            "type": "object",
+            "description": "Dynamic options source. The wizard fetches `url` at install time, parses JSON, and populates a ComboBox with the items at `items_path` keyed by `value_property` / labelled by `label_property`.",
+            "required": ["url", "items_path", "value_property", "label_property"],
+            "additionalProperties": false,
+            "properties": {
+              "url":            { "type": "string" },
+              "items_path":     { "type": "string" },
+              "value_property": { "type": "string" },
+              "label_property": { "type": "string" }
+            }
+          }
         }
       }
     },
@@ -315,7 +371,7 @@
             "enum": [
               "file_copy", "directory_create", "file_delete", "directory_delete",
               "registry_write", "registry_delete_value", "registry_delete_key",
-              "shortcut_create", "env_set", "run_program"
+              "shortcut_create", "env_set", "run_program", "service_install"
             ]
           },
           "when": { "type": "string" },
@@ -337,7 +393,7 @@
             "enum": [
               "file_copy", "directory_create", "file_delete", "directory_delete",
               "registry_write", "registry_delete_value", "registry_delete_key",
-              "shortcut_create", "env_set", "run_program"
+              "shortcut_create", "env_set", "run_program", "service_install"
             ]
           },
           "when": { "type": "string" },
@@ -359,7 +415,29 @@
             "enum": [
               "file_copy", "directory_create", "file_delete", "directory_delete",
               "registry_write", "registry_delete_value", "registry_delete_key",
-              "shortcut_create", "env_set", "run_program"
+              "shortcut_create", "env_set", "run_program", "service_install"
+            ]
+          },
+          "when": { "type": "string" },
+          "on_failure": { "type": "string", "enum": ["rollback", "continue", "fail"] }
+        }
+      }
+    },
+    "uninstall": {
+      "type": "array",
+      "description": "Steps executed at the start of `setup.exe /Uninstall`, BEFORE the rollback journal replays. Lets the manifest tear down services / scheduled tasks / external scripts that the install journal doesn't cover.",
+      "items": {
+        "type": "object",
+        "required": ["id", "type"],
+        "additionalProperties": true,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "type": {
+            "type": "string",
+            "enum": [
+              "file_copy", "directory_create", "file_delete", "directory_delete",
+              "registry_write", "registry_delete_value", "registry_delete_key",
+              "shortcut_create", "env_set", "run_program", "service_install"
             ]
           },
           "when": { "type": "string" },

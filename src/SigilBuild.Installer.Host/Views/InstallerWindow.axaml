@@ -7,12 +7,15 @@
         Width="800" Height="500"
         CanResize="False"
         WindowStartupLocation="CenterScreen"
-        WindowDecorations="BorderOnly">
+        WindowDecorations="Full">
 
   <Grid ColumnDefinitions="240,*" RowDefinitions="*,56">
 
-    <!-- Sidebar with brand gradient + logo -->
-    <Border Grid.Row="0" Grid.Column="0" Grid.RowSpan="2">
+    <!-- Sidebar with brand gradient + logo. PointerPressed drives a manual
+         window-move drag because WindowDecorations="BorderOnly" removes the
+         OS title bar; without this, the chromeless window can't be moved. -->
+    <Border Grid.Row="0" Grid.Column="0" Grid.RowSpan="2"
+            PointerPressed="OnDragHandlePointerPressed">
       <Border.Background>
         <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
           <GradientStop Offset="0" Color="{DynamicResource GradientStartColor}" />
@@ -21,23 +24,34 @@
         </LinearGradientBrush>
       </Border.Background>
       <StackPanel Margin="24" Spacing="16">
-        <Image Source="avares://installer/Assets/default-logo.png" Height="48" HorizontalAlignment="Left" />
-        <TextBlock Text="{Binding Brand.AppName}" Foreground="White" FontSize="22" FontWeight="SemiBold" />
-        <TextBlock Text="{Binding Brand.Publisher}" Foreground="#CCFFFFFF" FontSize="13" />
+        <!--
+          Source bound to a VM property (IImage?) rather than a literal
+          avares:// URI. XamlIl's BitmapTypeConverter evaluates literal Source
+          values at startup and trips on AOT-trimmed asset resolution; a
+          binding is lazy and tolerates null cleanly, so the wizard window
+          always renders even when no brand logo is supplied / loadable.
+        -->
+        <Image Source="{Binding LogoImage}" Height="48" HorizontalAlignment="Left" />
+        <TextBlock Text="{Binding Brand.AppName}" Foreground="White" FontSize="20" FontWeight="SemiBold" TextWrapping="Wrap" />
+        <TextBlock Text="{Binding Brand.Publisher}" Foreground="#CCFFFFFF" FontSize="13" TextWrapping="Wrap" />
       </StackPanel>
     </Border>
 
-    <!-- Content host -->
-    <ContentControl Grid.Row="0" Grid.Column="1" Margin="32"
-                    Content="{Binding}"
-                    ContentTemplate="{StaticResource ScreenSelector}" />
+    <!--
+      Content host. Its Content is set imperatively from code-behind on every
+      InstallerViewModel.CurrentStep change. The previous approach bound
+      Content="{Binding}" + ContentTemplate=ScreenSelector, but Avalonia only
+      re-runs the ContentTemplate when Content itself changes — and Content was
+      always the same VM instance, so Next never swapped the visible screen.
+    -->
+    <ContentControl Grid.Row="0" Grid.Column="1" Margin="32" x:Name="ScreenHost" />
 
     <!-- Footer -->
     <Border Grid.Row="1" Grid.Column="1" BorderBrush="#E5E7EB" BorderThickness="0,1,0,0" Padding="16,8">
       <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right">
         <Button Content="Back" IsEnabled="{Binding CanGoBack}" Click="OnBack" />
         <Button Content="Next" IsEnabled="{Binding CanGoNext}" Click="OnNext" Background="{DynamicResource AccentBrush}" Foreground="White" />
-        <Button Content="Cancel" Click="OnCancel" />
+        <Button Content="{Binding CancelButtonText}" IsEnabled="{Binding CanCancel}" Click="OnCancel" />
       </StackPanel>
     </Border>
 

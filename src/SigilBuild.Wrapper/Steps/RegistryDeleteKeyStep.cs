@@ -34,11 +34,13 @@ internal sealed class RegistryDeleteKeyStep : IStep
 
     public Task<StepResult> RunAsync(StepContext ctx, RollbackJournal journal, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(ctx);
         if (!OperatingSystem.IsWindows())
         {
             return Task.FromResult(StepResult.Failed("registry steps require Windows"));
         }
 
+        var resolvedKey = ctx.Resolve(_spec.Key);
         var hive = RegistryHelper.ParseHive(_spec.Hive);
         var view = RegistryHelper.ParseView(_spec.View);
 
@@ -46,7 +48,7 @@ internal sealed class RegistryDeleteKeyStep : IStep
         bool previouslyAbsent;
         var values = new List<RegistryValueSnapshot>();
         using (var baseKey = RegistryKey.OpenBaseKey(hive, view))
-        using (var sub = baseKey.OpenSubKey(_spec.Key, writable: false))
+        using (var sub = baseKey.OpenSubKey(resolvedKey, writable: false))
         {
             if (sub is null)
             {
@@ -72,7 +74,7 @@ internal sealed class RegistryDeleteKeyStep : IStep
 
         journal.Append(new RollbackRecord.RestoreRegistryKey(
             Hive: _spec.Hive,
-            Key: _spec.Key,
+            Key: resolvedKey,
             View: _spec.View,
             ValuesAtKeyLevel: values,
             PreviouslyAbsent: previouslyAbsent));
@@ -82,11 +84,11 @@ internal sealed class RegistryDeleteKeyStep : IStep
             using var baseKey = RegistryKey.OpenBaseKey(hive, view);
             if (_spec.Recursive)
             {
-                baseKey.DeleteSubKeyTree(_spec.Key, throwOnMissingSubKey: false);
+                baseKey.DeleteSubKeyTree(resolvedKey, throwOnMissingSubKey: false);
             }
             else
             {
-                baseKey.DeleteSubKey(_spec.Key, throwOnMissingSubKey: false);
+                baseKey.DeleteSubKey(resolvedKey, throwOnMissingSubKey: false);
             }
         }
         return Task.FromResult(StepResult.Ok());

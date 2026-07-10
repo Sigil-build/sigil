@@ -1,5 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <!--
+    requestedExecutionLevel="asInvoker" is REQUIRED for this exe.
+
+    Without an explicit trustInfo block, Windows applies "Installer Detection"
+    heuristics (Vista+) to decide whether the exe needs UAC elevation. The
+    heuristics look at multiple signals beyond just the filename:
+      * PE version-resource ProductName / FileDescription / OriginalFilename
+        all contain "installer" (AssemblyName=installer in the csproj).
+      * Even after renaming the on-disk file to sigil-wizard.exe at extract
+        time, the version-resource keywords still fire the heuristic.
+    Result: Windows demands UAC for what is just a UI shell, and the wrapper's
+    Process.Start (UseShellExecute=false) fails with Win32 740.
+
+    An explicit requestedExecutionLevel disables installer detection. The
+    wizard inherits the parent setup.exe's elevation token via normal
+    CreateProcess (the setup.exe wrapper itself is installer-detected on
+    launch — that's intended and correct, since the install_steps that
+    follow need admin to call sc.exe / write HKLM / write Program Files).
+
+    See: https://learn.microsoft.com/en-us/windows/win32/secauthz/uac-installer-detection
+  -->
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
       <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/PM</dpiAware>

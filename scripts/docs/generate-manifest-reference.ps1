@@ -55,6 +55,39 @@ function Render-PropertyTable {
 # Top-level
 Render-PropertyTable -Properties $schema.properties -Required $schema.required -Heading 'Top-level'
 
+# Walk inline object properties one level deep so nested fields like
+# installer.icon and parameters.<name>.screen show up in the reference. Without
+# this recursion the table would only list `installer object` / `parameters
+# object` with no breakdown of the actual sub-keys customers need.
+function Get-NestedProperties {
+    param($Property)
+    if ($Property.properties) { return @{ Properties = $Property.properties; Required = $Property.required } }
+    # parameters: { additionalProperties: { type: object, properties: { … } } }
+    # — render the map-value shape so customers see what each parameter accepts.
+    if ($Property.additionalProperties -and $Property.additionalProperties.properties) {
+        return @{ Properties = $Property.additionalProperties.properties; Required = $Property.additionalProperties.required; IsMap = $true }
+    }
+    return $null
+}
+
+foreach ($name in $schema.properties.PSObject.Properties.Name) {
+    $p = $schema.properties.$name
+    $nested = Get-NestedProperties -Property $p
+    if ($null -ne $nested) {
+        $heading = if ($nested.IsMap) { "``$name.<name>``" } else { "``$name``" }
+        Render-PropertyTable -Properties $nested.Properties -Required $nested.Required -Heading $heading
+        # One more level: installer.brand has its own properties block.
+        foreach ($childName in $nested.Properties.PSObject.Properties.Name) {
+            $cp = $nested.Properties.$childName
+            $childNested = Get-NestedProperties -Property $cp
+            if ($null -ne $childNested) {
+                $childHeading = if ($nested.IsMap) { "``$name.<name>.$childName``" } else { "``$name.$childName``" }
+                Render-PropertyTable -Properties $childNested.Properties -Required $childNested.Required -Heading $childHeading
+            }
+        }
+    }
+}
+
 # Each definition
 if ($schema.definitions) {
     foreach ($defName in $schema.definitions.PSObject.Properties.Name) {

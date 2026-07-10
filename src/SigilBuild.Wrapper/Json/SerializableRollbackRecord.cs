@@ -53,6 +53,18 @@ internal sealed record SerializableRollbackRecord
     // RestoreEnv (Name is shared with the registry slot above).
     public string? Scope { get; init; }
     public string? PriorValueString { get; init; }
+
+    // RestoreDeletedFile / RestoreDeletedDirectory: stash bookkeeping so the
+    // uninstaller can copy the bytes back from a temp location captured at
+    // pre-install time. OriginalPath is the file/dir we deleted; StashPath
+    // is where its bytes (or recursive copy) were stashed.
+    public string? OriginalPath { get; init; }
+    public string? StashPath { get; init; }
+
+    // RemoveService: name of the Windows service to sc stop + sc delete on
+    // rollback / uninstall. Recorded by service_install BEFORE the create
+    // so an interrupted install still tears the service down.
+    public string? ServiceName { get; init; }
 }
 
 /// <summary>
@@ -129,6 +141,26 @@ internal static class SerializableRollbackRecordExtensions
                 PreviouslyAbsent = r.PreviouslyAbsent,
             },
 
+            RollbackRecord.RestoreDeletedFile r => new SerializableRollbackRecord
+            {
+                Type = "restore_deleted_file",
+                OriginalPath = r.OriginalPath,
+                StashPath = r.StashPath,
+            },
+
+            RollbackRecord.RestoreDeletedDirectory r => new SerializableRollbackRecord
+            {
+                Type = "restore_deleted_directory",
+                OriginalPath = r.OriginalPath,
+                StashPath = r.StashPath,
+            },
+
+            RollbackRecord.RemoveService r => new SerializableRollbackRecord
+            {
+                Type = "remove_service",
+                ServiceName = r.ServiceName,
+            },
+
             _ => throw new InvalidOperationException(
                 $"unsupported RollbackRecord subtype: {record.GetType().Name}"),
         };
@@ -172,6 +204,17 @@ internal static class SerializableRollbackRecordExtensions
                 s.Name  ?? throw MissingField("restore_env", "name"),
                 s.PriorValueString,
                 s.PreviouslyAbsent ?? false),
+
+            "restore_deleted_file" => new RollbackRecord.RestoreDeletedFile(
+                s.OriginalPath ?? throw MissingField("restore_deleted_file", "originalPath"),
+                s.StashPath ?? throw MissingField("restore_deleted_file", "stashPath")),
+
+            "restore_deleted_directory" => new RollbackRecord.RestoreDeletedDirectory(
+                s.OriginalPath ?? throw MissingField("restore_deleted_directory", "originalPath"),
+                s.StashPath ?? throw MissingField("restore_deleted_directory", "stashPath")),
+
+            "remove_service" => new RollbackRecord.RemoveService(
+                s.ServiceName ?? throw MissingField("remove_service", "serviceName")),
 
             _ => throw new InvalidOperationException(
                 $"unknown rollback record type '{s.Type}'"),

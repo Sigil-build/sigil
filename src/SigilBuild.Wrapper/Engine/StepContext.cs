@@ -59,6 +59,17 @@ public sealed class StepContext
             }
         }
 
+        // App metadata — sourced from the manifest's `app:` block via
+        // WrapperBlob.App. Without these, ${app.version} / ${app.publisher}
+        // etc. in registry_write values land as literal placeholder text in
+        // the registry, which the user cannot tell from a real failure.
+        dict["app.id"] = blob.App.Id;
+        dict["app.name"] = blob.App.Name;
+        dict["app.version"] = blob.App.Version;
+        dict["app.publisher"] = blob.App.Publisher;
+        dict["app.description"] = blob.App.Description ?? string.Empty;
+        dict["app.homepage"] = blob.App.Homepage ?? string.Empty;
+
         // System context (used by the expression evaluator's `system.*` namespace).
         dict["system.os"] = System.Environment.OSVersion.Version.ToString();
         dict["system.arch"] = System.Runtime.InteropServices.RuntimeInformation
@@ -68,6 +79,20 @@ public sealed class StepContext
         dict["env.PATH"] = System.Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
 
         return new StepContext(dict);
+    }
+
+    /// <summary>
+    /// Look up a raw context value by its full identifier path
+    /// (e.g. <c>"parameters.install_dir"</c>, <c>"app.version"</c>). Returns
+    /// <c>false</c> when the key is unknown — used by code paths that need a
+    /// soft "fetch if present" semantic without the <see cref="Resolve"/>
+    /// failure mode (which throws <see cref="System.FormatException"/> on a
+    /// missing identifier).
+    /// </summary>
+    public bool TryGet(string path, out object? value)
+    {
+        System.ArgumentNullException.ThrowIfNull(path);
+        return _values.TryGetValue(path, out value);
     }
 
     /// <summary>Substitute <c>${parameters.foo}</c> patterns in <paramref name="template"/>.</summary>

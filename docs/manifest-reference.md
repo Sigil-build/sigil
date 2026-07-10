@@ -14,11 +14,142 @@ Source: `schemas/sigil-schema.json` (JSON Schema, draft-07).
 | `sign` | object | - | - | _(undocumented)_ |
 | `publish` | object | - | - | _(undocumented)_ |
 | `updates` | object | - | - | _(undocumented)_ |
-| `installer` | object | - | - | Branded Windows installer wizard config. Implementation lands in Sprint 5b. |
+| `installer` | object | - | - | Branded Windows installer wizard config (Phase 2.5 / D-011). Tokens are emitted at pack time by BrandTokenEmitter; WCAG-AA contrast is enforced against white text. |
 | `parameters` | object | - | - | Install-time / pack-time parameter declarations consumed by the wrapper installer (Sprint 5c). |
 | `install_steps` | array | - | - | Main install-time step list executed by the wrapper installer (Sprint 5c). Per-step parameter shapes are validated by the typed deserializer. |
 | `pre_install` | array | - | - | Steps executed before the main install_steps block. |
 | `post_install` | array | - | - | Steps executed after the main install_steps block. |
+| `uninstall` | array | - | - | Steps executed at the start of `setup.exe /Uninstall`, BEFORE the rollback journal replays. Lets the manifest tear down services / scheduled tasks / external scripts that the install journal doesn't cover. |
+
+## `app`
+
+| Property | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `id` | string | yes | - | Reverse-DNS application id, e.g. com.example.MyApp. |
+| `name` | string | yes | - | _(undocumented)_ |
+| `version` | string | yes | - | Semantic version (Semver 2.0.0). |
+| `publisher` | string | yes | - | Display name or X.500 distinguished name (CN=...). |
+| `description` | string | - | - | _(undocumented)_ |
+| `homepage` | string | - | - | _(undocumented)_ |
+
+## `build`
+
+| Property | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `source` | string | yes | - | Path (relative to manifest) to the directory whose contents will be packaged. |
+| `include` | array | - | - | Glob patterns (relative to source) to include. Defaults to ['**/*']. |
+| `exclude` | array | - | - | Glob patterns (relative to source) to exclude. |
+| `deterministic` | boolean | - | `True` | Reproducible build: sort entries, fixed mtimes, no host metadata. |
+
+## `package`
+
+| Property | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `formats` | array | - | `zip` | _(undocumented)_ |
+| `architectures` | array | - | `x64` | _(undocumented)_ |
+| `msix` | object | - | - | _(undocumented)_ |
+
+## `package.msix`
+
+| Property | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `publisher` | string | - | - | X.500 distinguished name; must match the signing cert subject. |
+| `logo` | string | - | - | Path to a master logo (PNG, square). Sigil will resize for tiles. |
+| `capabilities` | array | - | - | _(undocumented)_ |
+| `runWack` | boolean | - | `False` | If true, run the Windows App Certification Kit (appcert.exe) against the packed MSIX. Emits SIG0111 (warning) when WACK isn't installed and SIG0112 (error) when WACK reports failures. WBS 2.9. |
+
+## `sign`
+
+| Property | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `provider` | enum: none, local, azure-trusted-signing | - | `none` | _(undocumented)_ |
+| `local` | object | - | - | _(undocumented)_ |
+| `azureTrustedSigning` | object | - | - | _(undocumented)_ |
+
+## `sign.local`
+
+| Property | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `pfx` | string | yes | - | Path to a .pfx file. |
+| `passwordEnv` | string | - | - | Name of the environment variable holding the PFX password. |
+| `timestampUrl` | string | - | `http://timestamp.digicert.com` | _(undocumented)_ |
+
+## `sign.azureTrustedSigning`
+
+| Property | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `endpoint` | string | yes | - | _(undocumented)_ |
+| `accountName` | string | yes | - | _(undocumented)_ |
+| `certificateProfile` | string | yes | - | _(undocumented)_ |
+| `tenantIdEnv` | string | - | `AZURE_TENANT_ID` | _(undocumented)_ |
+| `clientIdEnv` | string | - | `AZURE_CLIENT_ID` | _(undocumented)_ |
+| `clientSecretEnv` | string | - | `AZURE_CLIENT_SECRET` | _(undocumented)_ |
+
+## `publish`
+
+| Property | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `github` | object | - | - | _(undocumented)_ |
+
+## `publish.github`
+
+| Property | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `repo` | string | yes | - | _(undocumented)_ |
+| `tagPrefix` | string | - | `v` | _(undocumented)_ |
+| `draft` | boolean | - | `False` | _(undocumented)_ |
+
+## `updates`
+
+| Property | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `channel` | string | - | `stable` | _(undocumented)_ |
+| `manifestUrl` | string | - | - | _(undocumented)_ |
+| `deltaTargets` | integer | - | `3` | How many previous versions to generate delta patches against. |
+| `signingKey` | string | - | - | Path to an Ed25519 private key (PEM) used to sign the update manifest. |
+
+## `installer`
+
+| Property | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `icon` | string | - | - | Path (relative to the manifest) to a .ico file that becomes the produced setup.exe's Explorer icon. When omitted, the bundled default icon is used. |
+| `brand` | object | - | - | _(undocumented)_ |
+
+## `installer.brand`
+
+| Property | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `logo` | string | - | - | _(undocumented)_ |
+| `hero` | string | - | - | _(undocumented)_ |
+| `primaryColor` | string | - | - | _(undocumented)_ |
+| `accentColor` | string | - | - | _(undocumented)_ |
+| `gradientStart` | string | - | - | First stop of the three-stop sidebar gradient. |
+| `gradientMid` | string | - | - | Middle stop of the three-stop sidebar gradient. |
+| `gradientEnd` | string | - | - | Last stop of the three-stop sidebar gradient. |
+
+## `parameters.<name>`
+
+| Property | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `type` | string | yes | - | _(undocumented)_ |
+| `default` | - | - | - | _(undocumented)_ |
+| `values` | array | - | - | _(undocumented)_ |
+| `install_time` | boolean | - | `False` | _(undocumented)_ |
+| `description` | string | - | - | _(undocumented)_ |
+| `pattern` | string | - | - | _(undocumented)_ |
+| `min` | integer | - | - | _(undocumented)_ |
+| `max` | integer | - | - | _(undocumented)_ |
+| `screen` | string | - | - | Optional wizard page label. Parameters that share a screen value are grouped onto the same Install Options screen in the wrapper installer. Parameters without a screen value land on a default 'Install Options' page after all named screens. |
+| `source` | object | - | - | Dynamic options source. The wizard fetches `url` at install time, parses JSON, and populates a ComboBox with the items at `items_path` keyed by `value_property` / labelled by `label_property`. |
+
+## `parameters.<name>.source`
+
+| Property | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `url` | string | yes | - | _(undocumented)_ |
+| `items_path` | string | yes | - | _(undocumented)_ |
+| `value_property` | string | yes | - | _(undocumented)_ |
+| `label_property` | string | yes | - | _(undocumented)_ |
 
 ## Definition: `InstallStep`
 

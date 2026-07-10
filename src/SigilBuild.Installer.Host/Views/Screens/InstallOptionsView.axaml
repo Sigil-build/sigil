@@ -4,8 +4,39 @@
              x:DataType="vm:InstallerViewModel"
              x:Class="SigilBuild.Installer.Host.Views.Screens.InstallOptionsView">
   <StackPanel Spacing="12">
-    <TextBlock FontSize="20" FontWeight="SemiBold" Text="Install location" />
-    <TextBlock Text="Where should the application be installed?" Foreground="#4B5563" />
-    <TextBox x:Name="InstallPath" Text="{Binding InstallPath, Mode=TwoWay}" />
+    <TextBlock FontSize="20" FontWeight="SemiBold" Text="{Binding CurrentGroupTitle}" />
+    <TextBlock Text="Confirm the values below; tab through to edit." Foreground="#4B5563" />
+
+    <ItemsControl ItemsSource="{Binding CurrentGroupFields}" Margin="0,8,0,0">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate DataType="vm:ParameterFieldVm">
+          <StackPanel Spacing="4" Margin="0,0,0,8">
+            <TextBlock Text="{Binding Label}" FontWeight="SemiBold" />
+            <!-- Static enum: ComboBox bound to manifest-declared `values:` list -->
+            <ComboBox ItemsSource="{Binding Values}"
+                      SelectedItem="{Binding CurrentValue, Mode=TwoWay}"
+                      HorizontalAlignment="Stretch"
+                      IsVisible="{Binding IsStaticEnum}" />
+            <!-- Dynamic enum: ComboBox bound to options fetched at attach time from `source:`.
+                 SelectedValueBinding pulls .Value out of each HttpOption so the bound CurrentValue
+                 ends up being the canonical id (not a record reference). -->
+            <ComboBox ItemsSource="{Binding DynamicOptions}"
+                      DisplayMemberBinding="{Binding Label}"
+                      SelectedValueBinding="{Binding Value}"
+                      SelectedValue="{Binding CurrentValue, Mode=TwoWay}"
+                      HorizontalAlignment="Stretch"
+                      IsVisible="{Binding IsDynamicEnum}" />
+            <!-- Bool: CheckBox bound to BoolValue (derived view of CurrentValue
+                 as a bool). The Label TextBlock above doubles as the field
+                 caption so we keep the checkbox content empty. -->
+            <CheckBox IsChecked="{Binding BoolValue, Mode=TwoWay}"
+                      Content="Enable"
+                      IsVisible="{Binding IsBool}" />
+            <TextBox Text="{Binding CurrentValue, Mode=TwoWay}"
+                     IsVisible="{Binding IsTextual}" />
+          </StackPanel>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
   </StackPanel>
 </UserControl>

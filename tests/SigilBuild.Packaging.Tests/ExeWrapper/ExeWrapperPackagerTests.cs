@@ -45,12 +45,12 @@ public class ExeWrapperPackagerTests
                 return _cachedWrapperPath;
             }
 
-            // Walk up from AppContext.BaseDirectory to find the solution root (contains Sigil.sln).
+            // Walk up from AppContext.BaseDirectory to find the solution root (contains Sigil.slnx).
             var dir = AppContext.BaseDirectory;
             string? slnRoot = null;
             for (var i = 0; i < 8; i++)
             {
-                if (File.Exists(Path.Combine(dir, "Sigil.sln")))
+                if (File.Exists(Path.Combine(dir, "Sigil.slnx")))
                 {
                     slnRoot = dir;
                     break;

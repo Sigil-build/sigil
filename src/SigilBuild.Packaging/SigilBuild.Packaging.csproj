@@ -33,4 +33,9 @@
     <PackageReference Include="SkiaSharp.NativeAssets.Win32" Condition="'$(OS)' == 'Windows_NT'" />
     <PackageReference Include="SkiaSharp.NativeAssets.Linux" Condition="'$(OS)' != 'Windows_NT'" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\assets\default-installer-icon.ico">
+      <LogicalName>SigilBuild.Packaging.DefaultInstallerIcon.ico</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
 </Project>

@@ -26,5 +26,14 @@ public sealed class BrandTokens
     }
 }
 
+// PropertyNamingPolicy = CamelCase aligns the source-gen with the camelCase
+// keys emitted by SigilBuild.Packaging.Installer.BrandTokenEmitter
+// (primaryColor, accentColor, gradientStart, gradientMid, gradientEnd, …).
+// Without this, deserialization is case-sensitive against PascalCase property
+// names and every brand token silently keeps its hard-coded default — except
+// when the AOT runtime mismatches and one or more properties end up null,
+// which crashes BrandPalette.Apply with ArgumentNullException("Value cannot
+// be null. (Parameter 's')") inside Color.Parse.
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(BrandTokens))]
 internal sealed partial class BrandTokensJsonContext : JsonSerializerContext { }

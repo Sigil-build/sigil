@@ -1,6 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <!--
+      WinExe (not Exe) suppresses the console window that flashes / persists
+      when the user double-clicks setup.exe. The wrapper still writes a
+      complete trace to the WrapperLog file next to setup.exe; console output
+      from `setup.exe /S` etc. is captured by the parent shell if launched
+      from cmd / pwsh (Windows auto-attaches stdio to the parent console for
+      a WinExe whose parent is a console).
+    -->
+    <OutputType>WinExe</OutputType>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
     <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>SigilBuild.Wrapper</RootNamespace>
     <AssemblyName>SigilBuild.Wrapper</AssemblyName>

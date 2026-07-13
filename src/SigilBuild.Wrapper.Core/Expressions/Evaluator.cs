@@ -11,7 +11,7 @@ namespace SigilBuild.Wrapper.Expressions;
 /// expression and walks the resulting AST against a context dictionary
 /// keyed by full identifier path (e.g. <c>"parameters.edition"</c>).
 ///
-/// SECURITY MODEL (see ADR-008):
+/// SECURITY MODEL (see ADR-008 — docs/architecture/adr-008-expression-policy.md §1):
 /// <list type="bullet">
 /// <item>Closed function table — see <see cref="Functions"/>.</item>
 /// <item>Closed identifier set — anything not in <paramref name="context"/>

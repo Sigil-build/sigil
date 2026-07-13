@@ -18,7 +18,9 @@ namespace SigilBuild.Packaging.ExeWrapper;
 /// <summary>
 /// Packs an application as a single self-extracting <c>.exe</c> wrapper —
 /// the Native-AOT-published <c>SigilBuild.Installer.Host</c> runtime, stamped
-/// with a step blob and the payload archive as Win32 resources (see ADR-008).
+/// with a step blob and the payload archive as Win32 resources (see ADR-008 —
+/// docs/architecture/adr-008-expression-policy.md §5, closed step catalog +
+/// deterministic stamping + wrapper-overhead cap).
 /// </summary>
 /// <remarks>
 /// Task 14 implementation: the packager copies the stub runtime to

@@ -12,8 +12,10 @@ namespace SigilBuild.Wrapper.Expressions;
 /// <see cref="ExpressionException"/> at evaluation time.
 ///
 /// SECURITY: do NOT add functions that shell out, do reflection, or
-/// perform I/O outside <c>file_exists</c> / <c>registry_exists</c>.
-/// Anyone proposing such a feature must amend ADR-008 first.
+/// perform I/O outside the bounded read-only allowance (file/registry/env
+/// reads). Anyone proposing such a feature must amend ADR-008 first —
+/// see <c>docs/architecture/adr-008-expression-policy.md</c> §1 (closed
+/// function catalog + admission criteria).
 /// </summary>
 internal static class Functions
 {

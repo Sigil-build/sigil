@@ -21,7 +21,10 @@
          Turkish-I problem). Wrapper code that needs a UI culture (e.g. localized
          install-wizard error text) MUST use ordinal/invariant comparisons; constructing
          `new CultureInfo("ru-RU")` will throw `CultureNotFoundException` at runtime.
-         If real localization is needed, revisit this together with ADR-008. -->
+         If real localization is needed, revisit this together with ADR-008
+         (docs/architecture/adr-008-expression-policy.md §4): localize via
+         source-generated culture-neutral string tables, NOT .resx satellites —
+         InvariantGlobalization stays on. -->
     <InvariantGlobalization>true</InvariantGlobalization>
     <TrimMode>full</TrimMode>
     <IlcOptimizationPreference>Size</IlcOptimizationPreference>

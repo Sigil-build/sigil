@@ -36,4 +36,9 @@ public static class DiagnosticCodes
     // Emitted when installer.scope holds a value outside {user, machine, auto};
     // the parser falls back to auto. Non-fatal (the schema enum is the hard gate).
     public const string InvalidInstallerScope = "SIG0260";
+
+    // SIG027x — installer.vars: block (P1, declarative variables)
+    // Emitted when a var expression is malformed or the vars form a reference
+    // cycle. A cycle is fatal (Error) — there is no safe evaluation order.
+    public const string InvalidInstallerVar = "SIG0270";
 }

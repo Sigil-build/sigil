@@ -89,6 +89,14 @@ internal sealed record SerializableWrapperBlob
     public SerializableOptionComponent[] Options { get; init; }
         = Array.Empty<SerializableOptionComponent>();
 
+    /// <summary>
+    /// Declarative variables from <c>installer.vars</c> (P1), in manifest
+    /// declaration order. The runtime evaluates each once at session start and
+    /// seeds <c>var.&lt;Name&gt;</c>. An ordered array (not a map) so the wire form
+    /// is deterministic and dependency order is reproducible.
+    /// </summary>
+    public SerializableVar[] Vars { get; init; } = Array.Empty<SerializableVar>();
+
     public static WrapperBlob ToWrapperBlob(SerializableWrapperBlob s)
     {
         ArgumentNullException.ThrowIfNull(s);
@@ -101,6 +109,7 @@ internal sealed record SerializableWrapperBlob
             UpdateSteps:  ConvertSteps(s.UpdateSteps),
             Scope:        s.Scope,
             Options:      ConvertOptions(s.Options),
+            Vars:         ConvertVars(s.Vars),
             AppName:      s.AppName,
             InstallDir:   s.InstallDir,
             // T10: real ARP fields threaded into the in-memory blob so
@@ -125,6 +134,7 @@ internal sealed record SerializableWrapperBlob
             UpdateSteps  = SerializeSteps(blob.UpdateSteps),
             Scope        = blob.Scope,
             Options      = SerializeOptions(blob.Options),
+            Vars         = SerializeVars(blob.Vars),
             AppName      = blob.AppName,
             InstallDir   = blob.InstallDir,
             // T10: carry the real ARP fields onto the wire DTO. A zero size is
@@ -155,6 +165,28 @@ internal sealed record SerializableWrapperBlob
         for (var i = 0; i < options.Count; i++)
         {
             result[i] = SerializableOptionComponent.FromComponent(options[i]);
+        }
+        return result;
+    }
+
+    private static InstallerVar[] ConvertVars(SerializableVar[] flat)
+    {
+        if (flat.Length == 0) return Array.Empty<InstallerVar>();
+        var result = new InstallerVar[flat.Length];
+        for (var i = 0; i < flat.Length; i++)
+        {
+            result[i] = SerializableVar.ToVar(flat[i]);
+        }
+        return result;
+    }
+
+    private static SerializableVar[] SerializeVars(IReadOnlyList<InstallerVar>? vars)
+    {
+        if (vars is null || vars.Count == 0) return Array.Empty<SerializableVar>();
+        var result = new SerializableVar[vars.Count];
+        for (var i = 0; i < vars.Count; i++)
+        {
+            result[i] = SerializableVar.FromVar(vars[i]);
         }
         return result;
     }
@@ -371,6 +403,29 @@ internal sealed record SerializableScreenField
     {
         ArgumentNullException.ThrowIfNull(field);
         return new SerializableScreenField { Param = field.Param, Widget = field.Widget };
+    }
+}
+
+/// <summary>
+/// Flat, AOT-friendly wire DTO for a single declarative variable (P1). Mirrors
+/// <see cref="InstallerVar"/> so the source-generated context can serialize it
+/// without reflection.
+/// </summary>
+internal sealed record SerializableVar
+{
+    public string Name { get; init; } = string.Empty;
+    public string Expression { get; init; } = string.Empty;
+
+    public static InstallerVar ToVar(SerializableVar s)
+    {
+        ArgumentNullException.ThrowIfNull(s);
+        return new InstallerVar(s.Name, s.Expression);
+    }
+
+    public static SerializableVar FromVar(InstallerVar v)
+    {
+        ArgumentNullException.ThrowIfNull(v);
+        return new SerializableVar { Name = v.Name, Expression = v.Expression };
     }
 }
 

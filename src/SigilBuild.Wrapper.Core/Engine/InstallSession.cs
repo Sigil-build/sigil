@@ -35,12 +35,62 @@ public sealed class InstallSession
     private readonly InstallScope _scope;
     private readonly WrapperMode _mode;
 
+    // P7: the install log for this run, opened lazily the first time a run path
+    // executes when /LOG (or /LOG=path) was supplied. Null when logging was not
+    // requested or the target could not be created (best-effort).
+    private InstallLog? _log;
+
     private InstallSession(WrapperBlob blob, ParsedCommandLine parsed, InstallScope scope)
     {
         _blob = blob;
         _parsed = parsed;
         _scope = scope;
         _mode = ResolveEffectiveMode(parsed.Mode);
+    }
+
+    /// <summary>
+    /// The resolved <c>/LOG</c> file path for this run (P7), or <c>null</c> when
+    /// logging was not requested. Explicit <c>/LOG=path</c> wins; bare <c>/LOG</c>
+    /// resolves to <c>%TEMP%\sigil-&lt;appid&gt;.log</c>. Exposed so the wizard's
+    /// Failed screen can offer to open the log.
+    /// </summary>
+    public string? LogFilePath => _parsed.LogRequested ? ResolveLogPath() : null;
+
+    private string ResolveLogPath() =>
+        _parsed.LogPath ?? Path.Combine(Path.GetTempPath(), $"sigil-{SanitizeAppId(_blob.AppId)}.log");
+
+    // Reduce the AppId to a safe file-name segment for the default log path
+    // (AppId can be "<unset>" for the dev runtime, or a reverse-DNS id).
+    private static string SanitizeAppId(string appId)
+    {
+        var sb = new System.Text.StringBuilder(appId.Length);
+        foreach (var c in appId)
+        {
+            sb.Append(char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or '_' ? c : '_');
+        }
+        var s = sb.ToString();
+        return s.Length == 0 ? "app" : s;
+    }
+
+    /// <summary>
+    /// Open the <c>/LOG</c> sink (idempotent) and write the header line. No-op when
+    /// logging was not requested or already opened. Returns the log (or null).
+    /// </summary>
+    private InstallLog? EnsureLog()
+    {
+        if (!_parsed.LogRequested)
+        {
+            return null;
+        }
+        if (_log is not null)
+        {
+            return _log;
+        }
+
+        _log = InstallLog.TryOpen(ResolveLogPath());
+        _log?.WriteLine(
+            $"=== sigil {_mode.ToString().ToLowerInvariant()} log | app={_blob.AppId} | scope={_scope} | args=[{_parsed.AuditSafeRendering()}] ===");
+        return _log;
     }
 
     /// <summary>
@@ -165,6 +215,17 @@ public sealed class InstallSession
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(error);
 
+        // P7: open the /LOG sink (header) before any work, so even an early exit
+        // (e.g. /Update → 64) still produces a log, and write the final exit code
+        // as the last line.
+        EnsureLog();
+        var code = await RunHeadlessCoreAsync(output, error, ct).ConfigureAwait(false);
+        _log?.WriteLine($"exit code: {code}");
+        return code;
+    }
+
+    private async Task<int> RunHeadlessCoreAsync(TextWriter output, TextWriter error, CancellationToken ct)
+    {
         switch (_mode)
         {
             case WrapperMode.Update:
@@ -340,6 +401,10 @@ public sealed class InstallSession
     {
         ArgumentNullException.ThrowIfNull(payloadBytes);
 
+        // P7: ensure the /LOG sink is open (idempotent — the headless path may have
+        // opened it already; the GUI path opens it here).
+        EnsureLog();
+
         // T10 re-install / upgrade idempotency: if a prior install of this AppId is
         // already recorded (in the resolved scope), replay its recorded uninstall
         // BEFORE the fresh install. This reverses the earlier PATH append, shortcut,
@@ -360,19 +425,36 @@ public sealed class InstallSession
 
             var ctx = StepContext.From(
                 _blob, _parsed, payloadRoot, _collectedValues, _scope, _collectedOptions, CollectedInstallDir);
-            var result = await new InstallEngine().RunAsync(
-                preInstall: _blob.PreInstall,
-                installSteps: _blob.InstallSteps,
-                postInstall: _blob.PostInstall,
-                ctx: ctx,
-                ct: ct,
-                progress: progress).ConfigureAwait(false);
+
+            // P7: hand the run's secrets to the log for redaction, and tee the
+            // engine's progress (step + rollback lines) into the /LOG file.
+            _log?.SetSecrets(ctx.SecretValues);
+            var effectiveProgress = _log is null ? progress : new LoggingProgress(progress, _log);
+
+            EngineResult result;
+            try
+            {
+                result = await new InstallEngine().RunAsync(
+                    preInstall: _blob.PreInstall,
+                    installSteps: _blob.InstallSteps,
+                    postInstall: _blob.PostInstall,
+                    ctx: ctx,
+                    ct: ct,
+                    progress: effectiveProgress).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                _log?.WriteLine("result: cancelled (rolled back)");
+                throw;
+            }
 
             if (!result.Success)
             {
+                _log?.WriteLine($"result: failed — {ctx.Redact(result.Error ?? "unknown error")}");
                 return new InstallOutcome(false, result.Error);
             }
 
+            _log?.WriteLine("result: success");
             PersistCompletion(result.Journal, ctx.SecretValues, ctx.InstallDir);
             // Install committed: a rollback can no longer be requested, so the
             // transient file_delete / directory_delete stashes (%TEMP%\sigil-fd-* /
@@ -493,17 +575,21 @@ public sealed class InstallSession
 
     private async Task<int> RunUninstallAsync(TextWriter error, CancellationToken ct)
     {
+        // P7: uninstall.exe honors /LOG too — tee the reversal trail into the log.
+        var progress = _log is null ? null : new LoggingProgress(null, _log);
         var result = await new UninstallEngine()
-            .RunAsync(_blob.AppId, _scope, progress: null, ct)
+            .RunAsync(_blob.AppId, _scope, progress, ct)
             .ConfigureAwait(false);
         if (!result.Success)
         {
+            _log?.WriteLine($"result: uninstall failed — {result.Error}");
             if (result.Error is not null)
             {
                 error.WriteLine(result.Error);
             }
             return 1;
         }
+        _log?.WriteLine("result: uninstall success");
         return 0;
     }
 
@@ -520,9 +606,14 @@ public sealed class InstallSession
     public async Task<InstallOutcome> RunUninstallInteractiveAsync(
         IProgress<StepProgress>? progress, CancellationToken ct = default)
     {
+        // P7: the interactive uninstall (uninstall.exe /LOG, double-clicked) logs
+        // the same reversal trail as the headless path.
+        EnsureLog();
+        var effectiveProgress = _log is null ? progress : new LoggingProgress(progress, _log);
         var result = await new UninstallEngine()
-            .RunAsync(_blob.AppId, _scope, progress, ct)
+            .RunAsync(_blob.AppId, _scope, effectiveProgress, ct)
             .ConfigureAwait(false);
+        _log?.WriteLine(result.Success ? "result: uninstall success" : $"result: uninstall failed — {result.Error}");
         return new InstallOutcome(result.Success, result.Error);
     }
 

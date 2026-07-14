@@ -161,6 +161,14 @@ internal static class SerializableRollbackRecordExtensions
                 StashPath = r.StashPath,
             },
 
+            // P8: a null StashPath means "the edit created this file" (undo deletes it).
+            RollbackRecord.RestoreConfigFile r => new SerializableRollbackRecord
+            {
+                Type = "restore_config_file",
+                OriginalPath = r.OriginalPath,
+                StashPath = r.StashPath,
+            },
+
             RollbackRecord.RemoveService r => new SerializableRollbackRecord
             {
                 Type = "remove_service",
@@ -221,6 +229,11 @@ internal static class SerializableRollbackRecordExtensions
             "restore_deleted_directory" => new RollbackRecord.RestoreDeletedDirectory(
                 s.OriginalPath ?? throw MissingField("restore_deleted_directory", "originalPath"),
                 s.StashPath ?? throw MissingField("restore_deleted_directory", "stashPath")),
+
+            // P8: StashPath is nullable (null = created file → undo deletes it).
+            "restore_config_file" => new RollbackRecord.RestoreConfigFile(
+                s.OriginalPath ?? throw MissingField("restore_config_file", "originalPath"),
+                s.StashPath),
 
             "remove_service" => new RollbackRecord.RemoveService(
                 s.ServiceName ?? throw MissingField("remove_service", "serviceName")),

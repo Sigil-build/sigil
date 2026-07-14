@@ -24,6 +24,9 @@ internal static class StepFactory
         InstallStep.ServiceInstall si       => new ServiceInstallStep(si),
 #pragma warning restore CA1416
         InstallStep.RunProgram rp      => new RunProgramStep(rp),
+        InstallStep.IniWrite iw        => new IniWriteStep(iw),
+        InstallStep.JsonEdit je        => new JsonEditStep(je),
+        InstallStep.XmlEdit xe         => new XmlEditStep(xe),
         _ => throw new System.NotSupportedException(
             $"step type '{spec.GetType().Name}' is not implemented in the current sprint."),
     };

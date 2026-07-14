@@ -717,6 +717,9 @@ public static class ManifestParser
     private static readonly string[] ShortcutCreateFields      = { "id", "type", "when", "on_failure", "target", "location", "name", "args", "working_dir", "icon", "description" };
     private static readonly string[] EnvSetFields              = { "id", "type", "when", "on_failure", "name", "value", "scope", "action", "separator" };
     private static readonly string[] RunProgramFields          = { "id", "type", "when", "on_failure", "program", "args", "wait", "cwd", "expected_exit_codes", "timeout_seconds" };
+    private static readonly string[] IniWriteFields            = { "id", "type", "when", "on_failure", "path", "section", "key", "value", "create_if_missing" };
+    private static readonly string[] JsonEditFields           = { "id", "type", "when", "on_failure", "path", "pointer", "value", "create_if_missing" };
+    private static readonly string[] XmlEditFields            = { "id", "type", "when", "on_failure", "path", "xpath", "attribute", "value", "create_if_missing" };
 
     private static List<InstallStep>? ParseInstallSteps(
         List<YamlMappingNode>? nodes, List<Diagnostic> diagnostics, string fileName)
@@ -775,6 +778,9 @@ public static class ManifestParser
             "shortcut_create"       => BuildShortcutCreate(node, id!, when, onFailure, diagnostics, loc),
             "env_set"               => BuildEnvSet(node, id!, when, onFailure, diagnostics, loc),
             "run_program"           => BuildRunProgram(node, id!, when, onFailure, diagnostics, loc),
+            "ini_write"             => BuildIniWrite(node, id!, when, onFailure, diagnostics, loc),
+            "json_edit"             => BuildJsonEdit(node, id!, when, onFailure, diagnostics, loc),
+            "xml_edit"              => BuildXmlEdit(node, id!, when, onFailure, diagnostics, loc),
             "service_install"       => BuildServiceInstall(node, id!, when, onFailure, diagnostics, loc),
             _ => ReportUnknownStepType(id!, typeStr!, loc, diagnostics),
         };
@@ -968,6 +974,50 @@ public static class ManifestParser
         var timeoutSeconds = GetNullableInt(node, "timeout_seconds");
         ReportUnknownStepFields(node, id, "run_program", RunProgramFields, loc, diagnostics);
         return new InstallStep.RunProgram(id, program, args, wait, cwd, expectedExitCodes, timeoutSeconds, when, onFailure);
+    }
+
+    private static InstallStep.IniWrite? BuildIniWrite(
+        YamlMappingNode node, string id, string? when, OnFailure onFailure,
+        List<Diagnostic> diagnostics, SourceLocation loc)
+    {
+        var path = GetScalar(node, "path");
+        var key = GetScalar(node, "key");
+        if (path is null) { ReportMissingField(id, "ini_write", "path", loc, diagnostics); return null; }
+        if (key  is null) { ReportMissingField(id, "ini_write", "key",  loc, diagnostics); return null; }
+        var section = GetScalar(node, "section") ?? string.Empty;
+        var value = GetScalar(node, "value") ?? string.Empty;
+        var createIfMissing = GetBool(node, "create_if_missing", defaultValue: false);
+        ReportUnknownStepFields(node, id, "ini_write", IniWriteFields, loc, diagnostics);
+        return new InstallStep.IniWrite(id, path, section, key, value, createIfMissing, when, onFailure);
+    }
+
+    private static InstallStep.JsonEdit? BuildJsonEdit(
+        YamlMappingNode node, string id, string? when, OnFailure onFailure,
+        List<Diagnostic> diagnostics, SourceLocation loc)
+    {
+        var path = GetScalar(node, "path");
+        var pointer = GetScalar(node, "pointer");
+        if (path    is null) { ReportMissingField(id, "json_edit", "path",    loc, diagnostics); return null; }
+        if (pointer is null) { ReportMissingField(id, "json_edit", "pointer", loc, diagnostics); return null; }
+        var value = GetScalar(node, "value") ?? string.Empty;
+        var createIfMissing = GetBool(node, "create_if_missing", defaultValue: false);
+        ReportUnknownStepFields(node, id, "json_edit", JsonEditFields, loc, diagnostics);
+        return new InstallStep.JsonEdit(id, path, pointer, value, createIfMissing, when, onFailure);
+    }
+
+    private static InstallStep.XmlEdit? BuildXmlEdit(
+        YamlMappingNode node, string id, string? when, OnFailure onFailure,
+        List<Diagnostic> diagnostics, SourceLocation loc)
+    {
+        var path = GetScalar(node, "path");
+        var xpath = GetScalar(node, "xpath");
+        if (path  is null) { ReportMissingField(id, "xml_edit", "path",  loc, diagnostics); return null; }
+        if (xpath is null) { ReportMissingField(id, "xml_edit", "xpath", loc, diagnostics); return null; }
+        var attribute = GetScalar(node, "attribute");
+        var value = GetScalar(node, "value") ?? string.Empty;
+        var createIfMissing = GetBool(node, "create_if_missing", defaultValue: false);
+        ReportUnknownStepFields(node, id, "xml_edit", XmlEditFields, loc, diagnostics);
+        return new InstallStep.XmlEdit(id, path, xpath, attribute, value, createIfMissing, when, onFailure);
     }
 
     private static void ReportMissingField(

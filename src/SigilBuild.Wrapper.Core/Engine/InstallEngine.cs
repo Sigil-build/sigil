@@ -181,6 +181,9 @@ public sealed class InstallEngine
             ? $"path + {es.Value}"
             : $"env {es.Name}={es.Value}",
         InstallStep.RunProgram rp => $"run {rp.Program}",
+        InstallStep.IniWrite iw => $"ini {iw.Path} [{iw.Section}] {iw.Key}",
+        InstallStep.JsonEdit je => $"json {je.Path} {je.JsonPointer}",
+        InstallStep.XmlEdit xe => $"xml {xe.Path} {xe.Xpath}",
         _ => spec.Id,
     };
 

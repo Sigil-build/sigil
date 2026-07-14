@@ -26,6 +26,7 @@ not sure which output format you need.
 - [Parameters](guides/parameters.md) — install-time parameters, types, dynamic dropdowns.
 - [Install steps](guides/install-steps.md) — every step type with a worked example.
 - [Uninstaller](guides/uninstaller.md) — auto-generated `uninstaller.exe` + Add/Remove Programs entry.
+- [Upgrades & downgrades](guides/upgrades.md) — version-aware install, `/force-downgrade`, install-dir preservation.
 - [Packaging formats](guides/packaging-formats.md) — MSIX vs ZIP vs EXE-wrapper.
 - [Signing](guides/signing.md) — local PFX or Azure Trusted Signing.
 - [Conditional installs](guides/conditional-installs.md) — `when:` expressions and rollback.

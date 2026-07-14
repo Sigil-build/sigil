@@ -8,5 +8,10 @@
                Text="{Binding Brand.AppName, StringFormat='Welcome to {0} setup'}" />
     <TextBlock TextWrapping="Wrap" Foreground="#4B5563"
                Text="This wizard will guide you through installation. Click Next to continue." />
+    <!-- P3: upgrade banner ("Upgrading from x.y.z"), shown only during an upgrade. -->
+    <TextBlock TextWrapping="Wrap" FontWeight="SemiBold"
+               Foreground="{DynamicResource AccentBrush}"
+               IsVisible="{Binding HasUpgradeNotice}"
+               Text="{Binding UpgradeNotice}" />
   </StackPanel>
 </UserControl>

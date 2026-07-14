@@ -122,6 +122,31 @@ public class CommandLineParserTests
         parsed.Scope.Should().Be(expected);
     }
 
+    // ── /force-downgrade (P3) ─────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("/force-downgrade")]
+    [InlineData("/FORCE-DOWNGRADE")]
+    public void Force_downgrade_flag_is_stored(string flag)
+    {
+        var parsed = CommandLineParser.Parse(new[] { flag }, Array.Empty<ParameterDefinition>());
+        parsed.ForceDowngrade.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Force_downgrade_defaults_false()
+    {
+        var parsed = CommandLineParser.Parse(new[] { "/silent" }, Array.Empty<ParameterDefinition>());
+        parsed.ForceDowngrade.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Force_downgrade_appears_in_audit_rendering()
+    {
+        var parsed = CommandLineParser.Parse(new[] { "/silent", "/force-downgrade" }, Array.Empty<ParameterDefinition>());
+        parsed.AuditSafeRendering().Should().Contain("/force-downgrade");
+    }
+
     // ── Mode flags ────────────────────────────────────────────────────────────
 
     [Fact]

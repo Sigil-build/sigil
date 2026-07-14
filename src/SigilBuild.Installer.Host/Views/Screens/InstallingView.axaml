@@ -5,6 +5,11 @@
              x:Class="SigilBuild.Installer.Host.Views.Screens.InstallingView">
   <StackPanel Spacing="16" VerticalAlignment="Center">
     <TextBlock FontSize="20" FontWeight="SemiBold" Text="Installing…" />
+    <!-- P3: upgrade banner on the progress screen ("Upgrading from x.y.z"). -->
+    <TextBlock TextWrapping="Wrap" FontWeight="SemiBold"
+               Foreground="{DynamicResource AccentBrush}"
+               IsVisible="{Binding HasUpgradeNotice}"
+               Text="{Binding UpgradeNotice}" />
     <ProgressBar Maximum="1" Value="{Binding InstallProgress}" Foreground="{DynamicResource AccentBrush}" />
     <TextBlock Text="{Binding InstallCurrentItem}" Foreground="#6B7280" />
     <Border Background="#F9FAFB" BorderBrush="#E5E7EB" BorderThickness="1" CornerRadius="8"

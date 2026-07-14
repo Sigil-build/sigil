@@ -127,7 +127,8 @@ public sealed class StepContext
         System.Collections.Generic.IReadOnlyDictionary<string, string>? collected = null,
         InstallScope scope = InstallScope.User,
         System.Collections.Generic.IReadOnlyDictionary<string, bool>? collectedOptions = null,
-        string? collectedInstallDir = null)
+        string? collectedInstallDir = null,
+        string? priorInstallDir = null)
     {
         System.ArgumentNullException.ThrowIfNull(blob);
         System.ArgumentNullException.ThrowIfNull(parsed);
@@ -136,15 +137,16 @@ public sealed class StepContext
 
         // T13: resolve the effective install dir once, up front, so the
         // {install_dir} token expands to a concrete directory in every step path
-        // and expression. Precedence: wizard-collected → /D= → manifest override →
-        // default (<scope root>\<App.Name>).
+        // and expression. Precedence: wizard-collected → /D= → prior install dir
+        // (P3 upgrade) → manifest override → default (<scope root>\<App.Name>).
         var installDir = InstallDirResolver.Resolve(
             scope: layout.Scope,
             appName: blob.AppName,
             appId: blob.AppId,
             manifestInstallDir: blob.InstallDir,
             cliOverride: parsed.InstallDir,
-            collected: collectedInstallDir);
+            collected: collectedInstallDir,
+            priorInstallDir: priorInstallDir);
 
         var dict = new System.Collections.Generic.Dictionary<string, object?>(System.StringComparer.Ordinal);
         var secrets = new System.Collections.Generic.List<string>();

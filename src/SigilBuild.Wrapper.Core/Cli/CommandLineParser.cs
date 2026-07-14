@@ -92,6 +92,13 @@ public sealed class ParsedCommandLine
     /// <summary>Scope override from <c>/allusers</c> / <c>/currentuser</c>. Stored only (Task T12).</summary>
     public ScopeOverride Scope { get; init; } = ScopeOverride.None;
 
+    /// <summary>
+    /// True when <c>/force-downgrade</c> was supplied (P3): install an older version
+    /// over an installed newer one instead of blocking. Ignored for fresh / same /
+    /// upgrade runs.
+    /// </summary>
+    public bool ForceDowngrade { get; init; }
+
     /// <summary>Names (canonical casing) of the parameters whose schema type is <see cref="ParameterType.Secret"/>.</summary>
     public IReadOnlyList<string> SecretKeys { get; init; } = Array.Empty<string>();
 
@@ -152,6 +159,12 @@ public sealed class ParsedCommandLine
                 break;
         }
 
+        if (ForceDowngrade)
+        {
+            Space();
+            sb.Append("/force-downgrade");
+        }
+
         if (InstallDir is not null)
         {
             Space();
@@ -194,6 +207,7 @@ public sealed class ParsedCommandLine
 ///   <item><description><c>/Update</c> — run <c>update_steps</c> instead of <c>install_steps</c>.</description></item>
 ///   <item><description><c>/Uninstall</c> — run the auto-derived uninstall sequence.</description></item>
 ///   <item><description><c>/allusers</c> / <c>/currentuser</c> — scope override (stored only; Task T12).</description></item>
+///   <item><description><c>/force-downgrade</c> — install an older version over an installed newer one (P3).</description></item>
 ///   <item><description><c>/D=path</c> — install-dir override (stored only; Task T13).</description></item>
 ///   <item><description><c>/P&lt;Name&gt;=&lt;Value&gt;</c> — override a declared parameter or a built-in option.</description></item>
 /// </list>
@@ -246,6 +260,7 @@ public static class CommandLineParser
         var silent = false;
         var verySilent = false;
         var scope = ScopeOverride.None;
+        var forceDowngrade = false;
         string? installDir = null;
 
         foreach (var rawArg in args)
@@ -258,7 +273,7 @@ public static class CommandLineParser
             if (rawArg[0] != '/')
             {
                 throw new UsageException(
-                    $"unexpected positional argument '{rawArg}': only /silent, /S, /verysilent, /Update, /Uninstall, /allusers, /currentuser, /D=path, and /PName=Value are accepted");
+                    $"unexpected positional argument '{rawArg}': only /silent, /S, /verysilent, /Update, /Uninstall, /allusers, /currentuser, /force-downgrade, /D=path, and /PName=Value are accepted");
             }
 
             // Strip the leading '/'.
@@ -297,6 +312,11 @@ public static class CommandLineParser
                 scope = ScopeOverride.CurrentUser;
                 continue;
             }
+            if (string.Equals(body, "force-downgrade", StringComparison.OrdinalIgnoreCase))
+            {
+                forceDowngrade = true;
+                continue;
+            }
 
             // /D=path — install-dir override (parse + store only).
             if (body.Length >= 2 &&
@@ -320,7 +340,7 @@ public static class CommandLineParser
             }
 
             throw new UsageException(
-                $"unrecognized flag '{rawArg}': expected /silent, /S, /verysilent, /Update, /Uninstall, /allusers, /currentuser, /D=path, or /PName=Value");
+                $"unrecognized flag '{rawArg}': expected /silent, /S, /verysilent, /Update, /Uninstall, /allusers, /currentuser, /force-downgrade, /D=path, or /PName=Value");
         }
 
         var secretKeys = schema
@@ -354,6 +374,7 @@ public static class CommandLineParser
             Options = options,
             InstallDir = installDir,
             Scope = scope,
+            ForceDowngrade = forceDowngrade,
             SecretKeys = secretKeys,
         };
     }

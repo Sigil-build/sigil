@@ -101,6 +101,9 @@ public partial class App : Application
                     return session.RunInstallAsync(
                         _vm.CollectedParameterValues, _vm.CollectedOptionValues, progress, ct);
                 });
+
+                // P7: surface the /LOG path so the Failed screen can offer "Open log".
+                _vm.LogFilePath = session.LogFilePath;
             }
 
             desktop.MainWindow = new InstallerWindow

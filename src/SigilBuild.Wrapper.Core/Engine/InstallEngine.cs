@@ -71,6 +71,10 @@ public sealed class InstallEngine
             ? null
             : new ProgressReporter(progress, preInstall.Count + installList.Count + postInstall.Count);
 
+        // P4: let a long-running step (http_download) stream intra-step rows to the
+        // same progress channel (wizard + /LOG) without moving the overall bar.
+        ctx.ProgressSink = progress;
+
         var journal = new RollbackJournal();
         try
         {
@@ -181,6 +185,7 @@ public sealed class InstallEngine
             ? $"path + {es.Value}"
             : $"env {es.Name}={es.Value}",
         InstallStep.RunProgram rp => $"run {rp.Program}",
+        InstallStep.HttpDownload hd => $"download {hd.Url} → {hd.Dest}",
         _ => spec.Id,
     };
 

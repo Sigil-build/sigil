@@ -51,6 +51,15 @@ public sealed class StepContext
         new StepContext(new System.Collections.Generic.Dictionary<string, object?>());
 
     /// <summary>
+    /// Optional sink a long-running step (P4 <c>http_download</c>) uses to emit
+    /// intra-step progress rows (download percentage / retry notices). Set by
+    /// <see cref="InstallEngine"/> to the run's progress channel, so the rows reach
+    /// the wizard progress screen and the /LOG file. Message-only rows report
+    /// <c>Total = 0</c> so they never move the overall progress bar.
+    /// </summary>
+    internal System.IProgress<StepProgress>? ProgressSink { get; set; }
+
+    /// <summary>
     /// The resolved per-scope layout for this run (T12): install root, ARP hive,
     /// PATH scope, and shortcut folders. Scope-varying steps
     /// (<see cref="Steps.EnvSetStep"/>, <see cref="Steps.ShortcutCreateStep"/>)

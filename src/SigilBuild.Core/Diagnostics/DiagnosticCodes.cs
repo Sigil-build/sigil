@@ -21,6 +21,11 @@ public static class DiagnosticCodes
     // SIG0234 — parameter `source:` block validation (uninstaller-icon-nsis-parity Section 8)
     public const string ParameterSourceInvalid = "SIG0234";
 
+    // SIG0235/6 — http_download step validation (P4). Both are fatal: the packer
+    // refuses to emit a download that isn't HTTPS or lacks an integrity checksum.
+    public const string HttpDownloadInsecureUrl = "SIG0235";
+    public const string HttpDownloadChecksumRequired = "SIG0236";
+
     // SIG024x — installer.screens: block (T9, declared custom screens)
     public const string UnknownScreenParameterRef = "SIG0240";
     public const string InvalidScreenWhenExpression = "SIG0241";

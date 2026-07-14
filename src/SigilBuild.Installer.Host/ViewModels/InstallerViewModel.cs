@@ -911,7 +911,13 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
 
     private void ApplyProgress(StepProgress p)
     {
-        InstallProgress = p.Fraction;
+        // Message-only rows (Total=0) — e.g. a P4 download percentage — update the
+        // log/current-item without jerking the overall bar; only real step advances
+        // (Total>0) move it.
+        if (p.Total > 0)
+        {
+            InstallProgress = p.Fraction;
+        }
         if (p.Message is not null)
         {
             InstallCurrentItem = p.Message;

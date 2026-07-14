@@ -57,7 +57,7 @@
           "enum": [
             "file_copy", "directory_create", "file_delete", "directory_delete",
             "registry_write", "registry_delete_value", "registry_delete_key",
-            "shortcut_create", "env_set", "run_program", "service_install"
+            "shortcut_create", "env_set", "run_program", "http_download", "service_install"
           ]
         },
         "when": { "type": "string" },
@@ -77,7 +77,7 @@
             "enum": [
               "file_copy", "directory_create", "file_delete", "directory_delete",
               "registry_write", "registry_delete_value", "registry_delete_key",
-              "shortcut_create", "env_set", "run_program", "service_install"
+              "shortcut_create", "env_set", "run_program", "http_download", "service_install"
             ]
           },
           "when": { "type": "string" },
@@ -470,7 +470,7 @@
             "enum": [
               "file_copy", "directory_create", "file_delete", "directory_delete",
               "registry_write", "registry_delete_value", "registry_delete_key",
-              "shortcut_create", "env_set", "run_program", "service_install"
+              "shortcut_create", "env_set", "run_program", "http_download", "service_install"
             ]
           },
           "when": { "type": "string" },
@@ -492,7 +492,7 @@
             "enum": [
               "file_copy", "directory_create", "file_delete", "directory_delete",
               "registry_write", "registry_delete_value", "registry_delete_key",
-              "shortcut_create", "env_set", "run_program", "service_install"
+              "shortcut_create", "env_set", "run_program", "http_download", "service_install"
             ]
           },
           "when": { "type": "string" },
@@ -514,7 +514,7 @@
             "enum": [
               "file_copy", "directory_create", "file_delete", "directory_delete",
               "registry_write", "registry_delete_value", "registry_delete_key",
-              "shortcut_create", "env_set", "run_program", "service_install"
+              "shortcut_create", "env_set", "run_program", "http_download", "service_install"
             ]
           },
           "when": { "type": "string" },
@@ -536,7 +536,7 @@
             "enum": [
               "file_copy", "directory_create", "file_delete", "directory_delete",
               "registry_write", "registry_delete_value", "registry_delete_key",
-              "shortcut_create", "env_set", "run_program", "service_install"
+              "shortcut_create", "env_set", "run_program", "http_download", "service_install"
             ]
           },
           "when": { "type": "string" },

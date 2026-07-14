@@ -187,7 +187,140 @@ public static class ManifestParser
                 : GetScalar(node, "install_dir"),
             // PR #8: optional custom installer-exe icon (.ico) path. Null falls
             // back to the bundled default installer icon at pack time.
-            Icon: GetScalar(node, "icon"));
+            Icon: GetScalar(node, "icon"),
+            // P1 (gap G1): declarative variables. Each is `name: <expression>`;
+            // evaluated once at install-session start, in dependency order,
+            // exposed as var.<name>. Cycles/malformed expressions are diagnosed
+            // here (SIG0270) so a broken manifest fails the pack.
+            Vars: ParseVars(GetMapping(node, "vars"), diagnostics, fileName));
+    }
+
+    /// <summary>
+    /// Parse the manifest's <c>installer.vars</c> block (P1). Each entry is
+    /// <c>name: &lt;expression&gt;</c>. Emits <see cref="DiagnosticCodes.InvalidInstallerVar"/>
+    /// (SIG0270, Error) for a non-scalar/empty value, a grossly malformed
+    /// expression, or a reference cycle among the vars. Declaration order is
+    /// preserved (deterministic packaging); dependency order is resolved later by
+    /// <see cref="InstallerVarGraph"/>. Returns <c>null</c> when the block is
+    /// absent or declares nothing usable.
+    /// </summary>
+    private static List<InstallerVar>? ParseVars(
+        YamlMappingNode? node, List<Diagnostic> diagnostics, string fileName)
+    {
+        if (node is null) return null;
+
+        var list = new List<InstallerVar>(node.Children.Count);
+        foreach (var kvp in node.Children)
+        {
+            if (kvp.Key is not YamlScalarNode keyNode) continue;
+            var name = keyNode.Value ?? string.Empty;
+            var loc = new SourceLocation(fileName, (int)keyNode.Start.Line, (int)keyNode.Start.Column);
+
+            if (string.IsNullOrWhiteSpace(name)) continue;
+
+            if (kvp.Value is not YamlScalarNode exprNode || string.IsNullOrWhiteSpace(exprNode.Value))
+            {
+                diagnostics.Add(new Diagnostic(
+                    DiagnosticSeverity.Error,
+                    DiagnosticCodes.InvalidInstallerVar,
+                    $"installer.vars '{name}' must be a non-empty expression string",
+                    loc,
+                    "https://docs.sigil.build/diagnostics/SIG0270"));
+                continue;
+            }
+
+            var expr = exprNode.Value;
+            if (!TryValidateVarStructure(expr, out var reason))
+            {
+                diagnostics.Add(new Diagnostic(
+                    DiagnosticSeverity.Error,
+                    DiagnosticCodes.InvalidInstallerVar,
+                    $"installer.vars '{name}' expression is invalid ({reason}): '{expr}'",
+                    loc,
+                    "https://docs.sigil.build/diagnostics/SIG0270"));
+                continue;
+            }
+
+            list.Add(new InstallerVar(name, expr));
+        }
+
+        if (list.Count == 0) return null;
+
+        // Structural cycle check (name-based). A cycle has no safe evaluation
+        // order, so it is fatal — the pack fails rather than emitting a blob that
+        // would loop at install time.
+        try
+        {
+            InstallerVarGraph.TopologicalOrder(list);
+        }
+        catch (InstallerVarCycleException ex)
+        {
+            diagnostics.Add(new Diagnostic(
+                DiagnosticSeverity.Error,
+                DiagnosticCodes.InvalidInstallerVar,
+                $"installer.vars form a reference cycle: {string.Join(" -> ", ex.Cycle)}",
+                new SourceLocation(fileName, (int)node.Start.Line, (int)node.Start.Column),
+                "https://docs.sigil.build/diagnostics/SIG0270"));
+        }
+
+        return list;
+    }
+
+    /// <summary>
+    /// Gross-malformation check for a <c>installer.vars</c> expression: balanced
+    /// parentheses/brackets, terminated string literals (single OR double quoted,
+    /// matching the lexer), and non-empty. Unlike the screen <c>when</c> validator
+    /// this does NOT restrict the character set outside strings — registry/file
+    /// paths carry backslashes, colons, and spaces inside string literals, and the
+    /// full grammar is checked at install time by the Wrapper.Core engine.
+    /// </summary>
+    private static bool TryValidateVarStructure(string expr, out string? reason)
+    {
+        var depthParen = 0;
+        var depthBracket = 0;
+        var sawContent = false;
+        var i = 0;
+        var n = expr.Length;
+        while (i < n)
+        {
+            var c = expr[i];
+            if (c is '\'' or '"')
+            {
+                sawContent = true;
+                var quote = c;
+                i++;
+                while (i < n && expr[i] != quote) i++;
+                if (i >= n) { reason = "unterminated string literal"; return false; }
+                i++; // consume closing quote
+                continue;
+            }
+
+            switch (c)
+            {
+                case '(': depthParen++; break;
+                case ')':
+                    depthParen--;
+                    if (depthParen < 0) { reason = "unbalanced parentheses"; return false; }
+                    break;
+                case '[': depthBracket++; break;
+                case ']':
+                    depthBracket--;
+                    if (depthBracket < 0) { reason = "unbalanced brackets"; return false; }
+                    break;
+                default:
+                    if (!char.IsWhiteSpace(c)) sawContent = true;
+                    break;
+            }
+
+            i++;
+        }
+
+        if (depthParen != 0) { reason = "unbalanced parentheses"; return false; }
+        if (depthBracket != 0) { reason = "unbalanced brackets"; return false; }
+        if (!sawContent) { reason = "empty expression"; return false; }
+
+        reason = null;
+        return true;
     }
 
     /// <summary>

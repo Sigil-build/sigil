@@ -87,6 +87,58 @@ public sealed class SecretHygieneTests
         }
     }
 
+    [Fact]
+    public async Task Secret_derived_var_is_absent_from_journal_and_log_output()
+    {
+        using var tmp = new TempDir();
+
+        // P1: a var derives from the secret param, and a step path references it as
+        // {var.tainted}. The resolved directory embeds the secret, so both the log
+        // and the persisted journal would leak it unless the var inherited
+        // secretness (ADR-008 §3) and the value is redacted end-to-end.
+        var dir = tmp.Path + "/app-{var.tainted}";
+        var blob = new WrapperBlob(
+            AppId: "com.acme.Studio",
+            Parameters: new[] { LicenseKey() },
+            InstallSteps: new InstallStep[] { new InstallStep.DirectoryCreate("mk", dir, When: null, OnFailure.Fail) },
+            PreInstall: Array.Empty<InstallStep>(),
+            PostInstall: Array.Empty<InstallStep>(),
+            UpdateSteps: Array.Empty<InstallStep>(),
+            Vars: new[] { new InstallerVar("tainted", "param.license_key") });
+
+        var parsed = CommandLineParser.Parse(new[] { $"/Plicense_key={Secret}" }, blob.Parameters);
+        var ctx = StepContext.From(blob, parsed);
+
+        // The secret-derived var carries the secret value AND is registered for redaction.
+        ctx.SecretValues.Should().Contain(Secret, "a var derived from a secret param inherits secretness");
+        ctx.Redact($"landing at {Secret}").Should().Be("landing at ***");
+
+        var events = new List<StepProgress>();
+        var result = await new InstallEngine().RunAsync(
+            Array.Empty<InstallStep>(), blob.InstallSteps, Array.Empty<InstallStep>(),
+            ctx, new ListProgress(events), CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        Directory.Exists(Path.Combine(tmp.Path, $"app-{Secret}"))
+            .Should().BeTrue("the {var.tainted} token must expand to the secret-derived value");
+
+        var log = string.Join("\n", events.Where(e => e.Message is not null).Select(e => e.Message));
+        log.Should().NotContain(Secret, "no log line may leak a secret-derived var value");
+
+        var appId = "p1-secret-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            UninstallStateStore.Save(appId, result.Journal, InstallScope.User, ctx.SecretValues);
+            var content = File.ReadAllText(UninstallStateStore.PathFor(appId, InstallScope.User));
+            content.Should().NotContain(Secret, "the persisted journal must never contain a secret-derived value");
+            content.Should().Contain("***", "the secret occurrence in the journal must be redacted");
+        }
+        finally
+        {
+            UninstallStateStore.Delete(appId, InstallScope.User);
+        }
+    }
+
     private sealed class ListProgress : IProgress<StepProgress>
     {
         private readonly List<StepProgress> _sink;

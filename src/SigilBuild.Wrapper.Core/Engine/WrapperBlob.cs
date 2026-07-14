@@ -49,7 +49,17 @@ internal sealed partial record WrapperBlob(
     // declaration order. The engine evaluates each once at session start (in
     // dependency order — see InstallerVarGraph) and seeds var.<Name>. Null/empty
     // for a manifest declaring no vars.
-    IReadOnlyList<InstallerVar>? Vars = null)
+    IReadOnlyList<InstallerVar>? Vars = null,
+    // P2 (gap G2): lifecycle hooks that run OUTSIDE the rollback journal, around
+    // the transactional body. Governed only by each step's on_failure; no rollback.
+    IReadOnlyList<InstallStep>? HookPreInstall = null,
+    IReadOnlyList<InstallStep>? HookPostInstall = null,
+    IReadOnlyList<InstallStep>? HookPreUninstall = null,
+    IReadOnlyList<InstallStep>? HookPostUninstall = null,
+    // P2 (gap G4): the Done-screen "Launch <App>" target (path + args). Null when
+    // the manifest declares no installer.run_after_install.
+    string? RunAfterInstallPath = null,
+    IReadOnlyList<string>? RunAfterInstallArgs = null)
 {
     /// <summary>
     /// Empty sentinel blob: well-known <c>AppId</c> placeholder and zero-length

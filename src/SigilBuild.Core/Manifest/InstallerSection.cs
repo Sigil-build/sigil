@@ -36,6 +36,11 @@ public sealed record InstallerBrand(
 /// in step paths/args. Order is the manifest declaration order (preserved for
 /// deterministic packaging); cross-var dependencies are resolved by topological
 /// sort — see <see cref="InstallerVarGraph"/>.</param>
+/// <param name="Hooks">Lifecycle hooks (P2, gap G2) from <c>installer.hooks</c> —
+/// pre/post install + uninstall steps that run OUTSIDE the rollback journal. See
+/// <see cref="InstallerHooks"/>.</param>
+/// <param name="RunAfterInstall">The <c>installer.run_after_install</c> launch
+/// target (P2, gap G4) backing the Done screen's "Launch &lt;App&gt;" checkbox.</param>
 public sealed record InstallerSection(
     InstallerBrand? Brand,
     InstallerOptions? Options = null,
@@ -44,7 +49,9 @@ public sealed record InstallerSection(
     InstallScope Scope = InstallScope.Auto,
     string? InstallDir = null,
     string? Icon = null,
-    IReadOnlyList<InstallerVar>? Vars = null);
+    IReadOnlyList<InstallerVar>? Vars = null,
+    InstallerHooks? Hooks = null,
+    RunAfterInstall? RunAfterInstall = null);
 
 /// <summary>
 /// A single declarative variable from <c>installer.vars</c> (P1): a name bound to

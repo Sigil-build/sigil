@@ -208,7 +208,15 @@ public sealed class ExeWrapperPackager : IPackager
             // P1: carry the declarative installer.vars (name → expression) into the
             // blob so the runtime can evaluate them once at session start and seed
             // var.<name>. Order-preserving; cycles were rejected at parse time.
-            Vars: manifest.Installer?.Vars);
+            Vars: manifest.Installer?.Vars,
+            // P2 (gap G2): lifecycle hooks that run outside the journal.
+            HookPreInstall:    manifest.Installer?.Hooks?.PreInstall,
+            HookPostInstall:   manifest.Installer?.Hooks?.PostInstall,
+            HookPreUninstall:  manifest.Installer?.Hooks?.PreUninstall,
+            HookPostUninstall: manifest.Installer?.Hooks?.PostUninstall,
+            // P2 (gap G4): the Done-screen "Launch <App>" target.
+            RunAfterInstallPath: manifest.Installer?.RunAfterInstall?.Path,
+            RunAfterInstallArgs: manifest.Installer?.RunAfterInstall?.Args);
 
         // T7: derive the full light/dark palette at pack time and carry it, plus
         // the base64 logo/hero bytes, inside the blob so the stamped exe renders

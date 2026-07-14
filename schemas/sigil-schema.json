@@ -119,6 +119,32 @@
         }
       ]
     },
+    "HookPhase": {
+      "type": "array",
+      "description": "An ordered list of lifecycle-hook steps (P2). Runs outside the rollback journal; each step is governed only by its own `on_failure` (no rollback obligations — see installer.hooks).",
+      "items": {
+        "type": "object",
+        "required": ["id", "type"],
+        "additionalProperties": true,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "type": {
+            "type": "string",
+            "enum": [
+              "file_copy", "directory_create", "file_delete", "directory_delete",
+              "registry_write", "registry_delete_value", "registry_delete_key",
+              "shortcut_create", "env_set", "run_program", "service_install"
+            ]
+          },
+          "when": { "type": "string" },
+          "on_failure": {
+            "type": "string",
+            "enum": ["fail", "continue"],
+            "description": "Hook failure policy. `fail` aborts the operation; `continue` logs and proceeds. Default: fail for pre_* phases, continue for post_* phases. (`rollback` is not meaningful for a hook — it is treated as `fail`.)"
+          }
+        }
+      }
+    },
     "InstallerScreen": {
       "type": "object",
       "description": "A declared custom wizard screen (form over declared parameters).",
@@ -414,6 +440,35 @@
             "type": "string",
             "minLength": 1,
             "description": "Expression producing the variable's value."
+          }
+        },
+        "hooks": {
+          "type": "object",
+          "description": "Lifecycle hooks (P2, gap G2). Each phase is an ordered list of ordinary step records (typically run_program) that run OUTSIDE the rollback journal. WARNING: hooks have NO rollback obligations — their side effects are never recorded and never undone. A hook is governed only by its own `on_failure`: `fail` aborts the operation (the default for pre_install/pre_uninstall — the run stops before the journal opens / before the uninstall replays); `continue` logs and proceeds (the default for post_install/post_uninstall — the install is already committed and cannot be rolled back). Hook args may use {var.*} / {install_dir} tokens.",
+          "additionalProperties": false,
+          "properties": {
+            "pre_install": { "$ref": "#/definitions/HookPhase" },
+            "post_install": { "$ref": "#/definitions/HookPhase" },
+            "pre_uninstall": { "$ref": "#/definitions/HookPhase" },
+            "post_uninstall": { "$ref": "#/definitions/HookPhase" }
+          }
+        },
+        "run_after_install": {
+          "type": "object",
+          "description": "The program the Done screen's checked-by-default 'Launch <App>' checkbox starts, and the program a headless `/silent /launch` run starts (P2, gap G4). Always launched UNELEVATED — de-elevated to the user's medium-integrity token when the installer itself ran as admin.",
+          "additionalProperties": false,
+          "required": ["path"],
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Program to launch. May use {install_dir} / {var.*} / payload:// tokens."
+            },
+            "args": {
+              "type": "array",
+              "description": "Optional arguments; each may use the same tokens.",
+              "items": { "type": "string" }
+            }
           }
         }
       }

@@ -192,7 +192,53 @@ public static class ManifestParser
             // evaluated once at install-session start, in dependency order,
             // exposed as var.<name>. Cycles/malformed expressions are diagnosed
             // here (SIG0270) so a broken manifest fails the pack.
-            Vars: ParseVars(GetMapping(node, "vars"), diagnostics, fileName));
+            Vars: ParseVars(GetMapping(node, "vars"), diagnostics, fileName),
+            // P2 (gap G2): lifecycle hooks that run OUTSIDE the rollback journal.
+            // Per-phase on_failure defaults: fail for pre_*, continue for post_*.
+            Hooks: ParseHooks(GetMapping(node, "hooks"), diagnostics, fileName),
+            // P2 (gap G4): the Done-screen "Launch <App>" target.
+            RunAfterInstall: ParseRunAfterInstall(GetMapping(node, "run_after_install")));
+    }
+
+    /// <summary>
+    /// Parse the <c>installer.hooks</c> block (P2). Each phase reuses the ordinary
+    /// step parser but with a phase-specific default <c>on_failure</c>: <c>fail</c>
+    /// for the pre_* phases (a failed pre-hook aborts before the journal opens /
+    /// before the uninstall replays) and <c>continue</c> for the post_* phases (the
+    /// install is committed and cannot be rolled back). Returns <c>null</c> when the
+    /// block declares no phase.
+    /// </summary>
+    private static InstallerHooks? ParseHooks(
+        YamlMappingNode? node, List<Diagnostic> diagnostics, string fileName)
+    {
+        if (node is null) return null;
+
+        var pre   = ParseInstallSteps(GetSequenceOfMappings(node, "pre_install"),   diagnostics, fileName, OnFailure.Fail);
+        var post  = ParseInstallSteps(GetSequenceOfMappings(node, "post_install"),  diagnostics, fileName, OnFailure.Continue);
+        var preU  = ParseInstallSteps(GetSequenceOfMappings(node, "pre_uninstall"), diagnostics, fileName, OnFailure.Fail);
+        var postU = ParseInstallSteps(GetSequenceOfMappings(node, "post_uninstall"),diagnostics, fileName, OnFailure.Continue);
+
+        if (pre is null && post is null && preU is null && postU is null)
+        {
+            return null;
+        }
+        return new InstallerHooks(pre, post, preU, postU);
+    }
+
+    /// <summary>
+    /// Parse the <c>installer.run_after_install</c> block (P2): a required
+    /// <c>path</c> and optional <c>args</c>. Returns <c>null</c> when absent or the
+    /// path is blank (the Done screen then shows no launch checkbox).
+    /// </summary>
+    private static RunAfterInstall? ParseRunAfterInstall(YamlMappingNode? node)
+    {
+        if (node is null) return null;
+        var path = GetScalar(node, "path");
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+        return new RunAfterInstall(path, GetSequence(node, "args"));
     }
 
     /// <summary>
@@ -720,20 +766,22 @@ public static class ManifestParser
     private static readonly string[] HttpDownloadFields        = { "id", "type", "when", "on_failure", "url", "dest", "sha256", "timeout_seconds", "retries" };
 
     private static List<InstallStep>? ParseInstallSteps(
-        List<YamlMappingNode>? nodes, List<Diagnostic> diagnostics, string fileName)
+        List<YamlMappingNode>? nodes, List<Diagnostic> diagnostics, string fileName,
+        OnFailure defaultOnFailure = OnFailure.Fail)
     {
         if (nodes is null) return null;
         var list = new List<InstallStep>(nodes.Count);
         foreach (var node in nodes)
         {
-            var step = ParseInstallStep(node, diagnostics, fileName);
+            var step = ParseInstallStep(node, diagnostics, fileName, defaultOnFailure);
             if (step is not null) list.Add(step);
         }
         return list;
     }
 
     private static InstallStep? ParseInstallStep(
-        YamlMappingNode node, List<Diagnostic> diagnostics, string fileName)
+        YamlMappingNode node, List<Diagnostic> diagnostics, string fileName,
+        OnFailure defaultOnFailure = OnFailure.Fail)
     {
         var loc = new SourceLocation(fileName, (int)node.Start.Line, (int)node.Start.Column);
         var id = GetScalar(node, "id");
@@ -762,7 +810,11 @@ public static class ManifestParser
         }
 
         var when = GetScalar(node, "when");
-        var onFailure = ParseOnFailure(GetScalar(node, "on_failure"));
+        // An absent on_failure uses the caller's phase default (Fail for the
+        // journaled bodies; per-phase for P2 lifecycle hooks). An explicit value
+        // is always honored.
+        var onFailureRaw = GetScalar(node, "on_failure");
+        var onFailure = onFailureRaw is null ? defaultOnFailure : ParseOnFailure(onFailureRaw);
 
         return typeStr switch
         {

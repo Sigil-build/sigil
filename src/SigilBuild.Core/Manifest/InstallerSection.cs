@@ -41,6 +41,10 @@ public sealed record InstallerBrand(
 /// <see cref="InstallerHooks"/>.</param>
 /// <param name="RunAfterInstall">The <c>installer.run_after_install</c> launch
 /// target (P2, gap G4) backing the Done screen's "Launch &lt;App&gt;" checkbox.</param>
+/// <param name="Prerequisites">First-class prerequisite units (P5, gap G6) from
+/// <c>installer.prerequisites</c> — detect-then-install dependency installers (VC++
+/// redist, .NET runtime) that run before the journaled body. See
+/// <see cref="InstallerPrerequisite"/>.</param>
 public sealed record InstallerSection(
     InstallerBrand? Brand,
     InstallerOptions? Options = null,
@@ -51,7 +55,8 @@ public sealed record InstallerSection(
     string? Icon = null,
     IReadOnlyList<InstallerVar>? Vars = null,
     InstallerHooks? Hooks = null,
-    RunAfterInstall? RunAfterInstall = null);
+    RunAfterInstall? RunAfterInstall = null,
+    IReadOnlyList<InstallerPrerequisite>? Prerequisites = null);
 
 /// <summary>
 /// A single declarative variable from <c>installer.vars</c> (P1): a name bound to

@@ -2,9 +2,6 @@ namespace SigilBuild.Wrapper.Steps;
 
 using System;
 using System.IO;
-using System.Net.Http;
-using System.Net.Sockets;
-using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using SigilBuild.Core.Manifest;
@@ -71,118 +68,21 @@ internal sealed class HttpDownloadStep : IStep
         }
         journal.Append(new RollbackRecord.RestoreFile(dest, existedBefore, backup));
 
-        Exception? lastTransient = null;
-        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        // Shared verified-download plumbing (P4/P5): retry + hash-verify over the one
+        // proxy-aware HttpClient. This step owns the journaling above; the helper owns
+        // the transfer. A genuine user cancel propagates for the engine's rollback.
+        var result = await SigilDownloader.DownloadVerifiedAsync(
+            url, dest, expected, timeout, maxAttempts,
+            report: (msg, isErr) => ctx.ProgressSink?.Report(new StepProgress(0, 0, msg, isErr)),
+            ct).ConfigureAwait(false);
+
+        if (result.Success)
         {
-            ct.ThrowIfCancellationRequested();
-            try
-            {
-                var actual = await DownloadAndHashAsync(url, dest, timeout, ctx, ct).ConfigureAwait(false);
-                if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
-                {
-                    // A wrong/corrupt file won't heal on retry — fail now (engine rolls back).
-                    return new StepResult(false,
-                        $"sha256 mismatch for '{url}': expected {expected}, got {actual}");
-                }
-                Report(ctx, $"download: verified {Path.GetFileName(dest)}", isError: false);
-                return new StepResult(true, null);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw; // genuine user cancel — propagate to the engine's rollback.
-            }
-            catch (Exception ex) when (IsTransient(ex))
-            {
-                lastTransient = ex;
-                if (attempt < maxAttempts)
-                {
-                    var backoff = TimeSpan.FromMilliseconds(500 * (1 << (attempt - 1)));
-                    Report(ctx, $"download: attempt {attempt} failed ({ex.Message}); retrying in {backoff.TotalSeconds:0.#}s", isError: true);
-                    await Task.Delay(backoff, ct).ConfigureAwait(false);
-                }
-            }
-#pragma warning disable CA1031 // Non-transient failures are surfaced as a typed StepResult (engine rolls back).
-            catch (Exception ex)
-            {
-                return new StepResult(false, $"download of '{url}' failed: {ex.Message}");
-            }
-#pragma warning restore CA1031
+            ctx.ProgressSink?.Report(new StepProgress(0, 0, $"download: verified {Path.GetFileName(dest)}", false));
+            return new StepResult(true, null);
         }
 
-        return new StepResult(false,
-            $"download of '{url}' failed after {maxAttempts} attempt(s): {lastTransient?.Message ?? "unknown error"}");
-    }
-
-    private static async Task<string> DownloadAndHashAsync(
-        string url, string dest, TimeSpan timeout, StepContext ctx, CancellationToken ct)
-    {
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(timeout);
-        var token = timeoutCts.Token;
-
-        using var resp = await SigilHttpClient.Shared
-            .GetAsync(url, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
-        if (!resp.IsSuccessStatusCode)
-        {
-            throw new DownloadException((int)resp.StatusCode);
-        }
-
-        var total = resp.Content.Headers.ContentLength;
-        var name = Path.GetFileName(dest);
-        Report(ctx, $"download: {name} …", isError: false);
-
-        using var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        var src = await resp.Content.ReadAsStreamAsync(token).ConfigureAwait(false);
-        await using (src.ConfigureAwait(false))
-        {
-            var file = new FileStream(dest, FileMode.Create, FileAccess.Write, FileShare.None);
-            await using (file.ConfigureAwait(false))
-            {
-                var buffer = new byte[81920];
-                long read = 0;
-                var lastPct = -1;
-                int n;
-                while ((n = await src.ReadAsync(buffer.AsMemory(0, buffer.Length), token).ConfigureAwait(false)) > 0)
-                {
-                    await file.WriteAsync(buffer.AsMemory(0, n), token).ConfigureAwait(false);
-                    hasher.AppendData(buffer, 0, n);
-                    read += n;
-                    if (total is long tt && tt > 0)
-                    {
-                        var pct = (int)(read * 100 / tt);
-                        if (pct != lastPct && pct % 10 == 0)
-                        {
-                            lastPct = pct;
-                            Report(ctx, $"download: {name} {pct}%", isError: false);
-                        }
-                    }
-                }
-            }
-        }
-
-        return Convert.ToHexString(hasher.GetHashAndReset()).ToLowerInvariant();
-    }
-
-    private static void Report(StepContext ctx, string message, bool isError)
-        => ctx.ProgressSink?.Report(new StepProgress(0, 0, message, isError));
-
-    // Only network/timeout/5xx are worth retrying; a 4xx or a checksum mismatch is
-    // a permanent condition.
-    private static bool IsTransient(Exception ex) => ex switch
-    {
-        DownloadException d => d.Transient,
-        OperationCanceledException => true, // a timeout (user-cancel is handled first)
-        HttpRequestException => true,
-        IOException => true,
-        SocketException => true,
-        _ => false,
-    };
-
-    private sealed class DownloadException : Exception
-    {
-        public bool Transient { get; }
-
-        public DownloadException(int statusCode) : base($"HTTP {statusCode}")
-            => Transient = statusCode is 408 or 429 || statusCode >= 500;
+        // ChecksumMismatch / Failed → typed StepResult; the engine rolls back the write.
+        return new StepResult(false, result.Error);
     }
 }

@@ -59,7 +59,11 @@ internal sealed partial record WrapperBlob(
     // P2 (gap G4): the Done-screen "Launch <App>" target (path + args). Null when
     // the manifest declares no installer.run_after_install.
     string? RunAfterInstallPath = null,
-    IReadOnlyList<string>? RunAfterInstallArgs = null)
+    IReadOnlyList<string>? RunAfterInstallArgs = null,
+    // P5 (gap G6): first-class prerequisite units from installer.prerequisites, in
+    // declaration order. Run before the journaled body (detect → install → re-detect).
+    // Null/empty for a manifest declaring no prerequisites.
+    IReadOnlyList<InstallerPrerequisite>? Prerequisites = null)
 {
     /// <summary>
     /// Empty sentinel blob: well-known <c>AppId</c> placeholder and zero-length

@@ -197,8 +197,116 @@ public static class ManifestParser
             // Per-phase on_failure defaults: fail for pre_*, continue for post_*.
             Hooks: ParseHooks(GetMapping(node, "hooks"), diagnostics, fileName),
             // P2 (gap G4): the Done-screen "Launch <App>" target.
-            RunAfterInstall: ParseRunAfterInstall(GetMapping(node, "run_after_install")));
+            RunAfterInstall: ParseRunAfterInstall(GetMapping(node, "run_after_install")),
+            // P5 (gap G6): first-class prerequisite units (detect → install → re-detect),
+            // run before the journaled body. An https source without a sha256 is refused here.
+            Prerequisites: ParsePrerequisites(GetSequenceOfMappings(node, "prerequisites"), diagnostics, fileName));
     }
+
+    /// <summary>
+    /// Parse the <c>installer.prerequisites</c> block (P5, gap G6). Each entry needs a
+    /// <c>name</c>, a <c>detect</c> expression, and a <c>source</c> (<c>payload://</c> or
+    /// <c>https://</c>); an <c>https://</c> source additionally requires a <c>sha256</c>
+    /// integrity checksum (a download without one is refused — SIG0280). Optional
+    /// <c>args</c>, <c>exit_codes_ok</c> (default <c>[0]</c>), <c>scope_required</c>
+    /// (<c>allusers</c>|<c>currentuser</c>), and <c>timeout_seconds</c>. A malformed entry
+    /// is diagnosed and skipped; returns <c>null</c> when nothing usable is declared.
+    /// </summary>
+    private static List<InstallerPrerequisite>? ParsePrerequisites(
+        List<YamlMappingNode>? nodes, List<Diagnostic> diagnostics, string fileName)
+    {
+        if (nodes is null || nodes.Count == 0) return null;
+
+        var list = new List<InstallerPrerequisite>(nodes.Count);
+        foreach (var node in nodes)
+        {
+            var loc = new SourceLocation(fileName, (int)node.Start.Line, (int)node.Start.Column);
+            var name = GetScalar(node, "name");
+            var detect = GetScalar(node, "detect");
+            var source = GetScalar(node, "source");
+            var sha256 = GetScalar(node, "sha256");
+
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                AddPrereqError(diagnostics, loc, "installer.prerequisites entry is missing a 'name'");
+                continue;
+            }
+            if (string.IsNullOrWhiteSpace(detect))
+            {
+                AddPrereqError(diagnostics, loc, $"installer.prerequisites '{name}' is missing a 'detect' expression");
+                continue;
+            }
+            // Structural check on the detect expression (balanced parens/brackets,
+            // terminated string literals) — the same gross-malformation gate as
+            // installer.vars. The full grammar is checked by the engine at install time.
+            if (!TryValidateVarStructure(detect, out var detectReason))
+            {
+                AddPrereqError(diagnostics, loc, $"installer.prerequisites '{name}' detect expression is invalid ({detectReason}): '{detect}'");
+                continue;
+            }
+            if (string.IsNullOrWhiteSpace(source))
+            {
+                AddPrereqError(diagnostics, loc, $"installer.prerequisites '{name}' is missing a 'source' (payload:// or https://)");
+                continue;
+            }
+
+            var isHttps = source.StartsWith("https://", System.StringComparison.OrdinalIgnoreCase);
+            var isPayload = source.StartsWith("payload://", System.StringComparison.OrdinalIgnoreCase);
+            if (source.StartsWith("http://", System.StringComparison.OrdinalIgnoreCase))
+            {
+                AddPrereqError(diagnostics, loc, $"installer.prerequisites '{name}' source must be https:// (got '{source}')");
+                continue;
+            }
+            if (!isHttps && !isPayload)
+            {
+                AddPrereqError(diagnostics, loc, $"installer.prerequisites '{name}' source must be a payload:// or https:// URL (got '{source}')");
+                continue;
+            }
+            // sha256 REQUIRED for https (a download without an integrity check is refused);
+            // ignored for payload:// where integrity comes from the signed package.
+            if (isHttps && string.IsNullOrWhiteSpace(sha256))
+            {
+                AddPrereqError(diagnostics, loc, $"installer.prerequisites '{name}' has an https:// source and must declare a 'sha256' — a download without an integrity checksum is refused");
+                continue;
+            }
+
+            string? scopeRequired = null;
+            var rawScope = GetScalar(node, "scope_required");
+            if (!string.IsNullOrWhiteSpace(rawScope))
+            {
+                var norm = rawScope.Trim().ToLowerInvariant();
+                if (norm is "allusers" or "currentuser")
+                {
+                    scopeRequired = norm;
+                }
+                else
+                {
+                    AddPrereqError(diagnostics, loc, $"installer.prerequisites '{name}' scope_required must be 'allusers' or 'currentuser' (got '{rawScope}')");
+                    continue;
+                }
+            }
+
+            list.Add(new InstallerPrerequisite(
+                Name: name,
+                Detect: detect,
+                Source: source,
+                Sha256: string.IsNullOrWhiteSpace(sha256) ? null : sha256,
+                Args: GetSequence(node, "args"),
+                ExitCodesOk: GetIntSequence(node, "exit_codes_ok"),
+                ScopeRequired: scopeRequired,
+                TimeoutSeconds: GetNullableInt(node, "timeout_seconds")));
+        }
+
+        return list.Count == 0 ? null : list;
+    }
+
+    private static void AddPrereqError(List<Diagnostic> diagnostics, SourceLocation loc, string message)
+        => diagnostics.Add(new Diagnostic(
+            DiagnosticSeverity.Error,
+            DiagnosticCodes.InvalidPrerequisite,
+            message,
+            loc,
+            "https://docs.sigil.build/diagnostics/SIG0280"));
 
     /// <summary>
     /// Parse the <c>installer.hooks</c> block (P2). Each phase reuses the ordinary

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Text.Json;
@@ -27,6 +28,47 @@ public class SerializableWrapperBlobRoundtripTests
             WrapperBlobJsonContext.Default.SerializableWrapperBlob);
         back.Should().NotBeNull();
         return back!;
+    }
+
+    [Fact]
+    public void Prerequisites_roundtrip_through_the_blob()
+    {
+        // P5: full WrapperBlob → DTO → JSON (source-gen) → DTO → WrapperBlob.
+        var blob = new WrapperBlob(
+            AppId: "com.x",
+            Parameters: Array.Empty<ParameterDefinition>(),
+            InstallSteps: Array.Empty<InstallStep>(),
+            PreInstall: Array.Empty<InstallStep>(),
+            PostInstall: Array.Empty<InstallStep>(),
+            UpdateSteps: Array.Empty<InstallStep>(),
+            Prerequisites: new[]
+            {
+                new InstallerPrerequisite(
+                    "VC++ 2015-2022", "registry_exists('HKLM','k','v')", "https://x/vc.exe",
+                    Sha256: "abc", Args: new[] { "/install", "/quiet" }, ExitCodesOk: new[] { 0, 3010 },
+                    ScopeRequired: "allusers", TimeoutSeconds: 120),
+                new InstallerPrerequisite(
+                    ".NET 8", "file_exists('c:/dotnet')", "payload://prereq/dotnet.exe"),
+            });
+
+        var back = SerializableWrapperBlob.ToWrapperBlob(
+            RoundTrip(SerializableWrapperBlob.FromWrapperBlob(blob)));
+
+        back.Prerequisites.Should().HaveCount(2);
+        var vc = back.Prerequisites![0];
+        vc.Name.Should().Be("VC++ 2015-2022");
+        vc.Source.Should().Be("https://x/vc.exe");
+        vc.Sha256.Should().Be("abc");
+        vc.Args.Should().Equal("/install", "/quiet");
+        vc.ExitCodesOk.Should().Equal(0, 3010);
+        vc.ScopeRequired.Should().Be("allusers");
+        vc.TimeoutSeconds.Should().Be(120);
+
+        var net = back.Prerequisites[1];
+        net.Source.Should().Be("payload://prereq/dotnet.exe");
+        net.Sha256.Should().BeNull();
+        net.Args.Should().BeNull();
+        net.ExitCodesOk.Should().BeNull();
     }
 
     [Fact]

@@ -377,6 +377,38 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
         _launchAction = launch;
     }
 
+    // P5 (gap G6): a prerequisite installed during this run reported reboot-required
+    // (exit 3010). The Done screen shows a notice; wired by the host after the install
+    // runner completes (the flag is only known post-install).
+    private bool _rebootRequired;
+
+    /// <summary>
+    /// True when a prerequisite required a reboot (P5). Gates the Done-screen reboot
+    /// notice. Set by the host from <see cref="InstallSession.RebootRequired"/> after
+    /// the install completes.
+    /// </summary>
+    public bool RebootRequired
+    {
+        get => _rebootRequired;
+        private set
+        {
+            if (_rebootRequired != value)
+            {
+                _rebootRequired = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(RebootNotice));
+            }
+        }
+    }
+
+    /// <summary>The Done-screen reboot notice, or empty when no reboot is needed (P5).</summary>
+    public string RebootNotice => _rebootRequired
+        ? "A restart is required to finish setting up a prerequisite. Please restart your computer."
+        : string.Empty;
+
+    /// <summary>Wire the post-install reboot flag (P5). Called by the host once the install runner completes.</summary>
+    public void SetRebootRequired(bool rebootRequired) => RebootRequired = rebootRequired;
+
     /// <summary>
     /// Launch the app if the install completed and the (checked-by-default) "Launch
     /// &lt;App&gt;" box is ticked. Invoked by the host when the wizard closes on the

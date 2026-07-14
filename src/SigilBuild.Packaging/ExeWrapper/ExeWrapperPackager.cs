@@ -204,7 +204,11 @@ public sealed class ExeWrapperPackager : IPackager
             DisplayName: manifest.App.Name,
             Publisher: manifest.App.Publisher,
             Version: manifest.App.Version,
-            EstimatedSizeBytes: ComputeInstalledSizeBytes(sourceDirectory));
+            EstimatedSizeBytes: ComputeInstalledSizeBytes(sourceDirectory),
+            // P1: carry the declarative installer.vars (name → expression) into the
+            // blob so the runtime can evaluate them once at session start and seed
+            // var.<name>. Order-preserving; cycles were rejected at parse time.
+            Vars: manifest.Installer?.Vars);
 
         // T7: derive the full light/dark palette at pack time and carry it, plus
         // the base64 logo/hero bytes, inside the blob so the stamped exe renders

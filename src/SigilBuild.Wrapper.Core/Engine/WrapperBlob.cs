@@ -44,7 +44,12 @@ internal sealed partial record WrapperBlob(
     string? DisplayName = null,
     string? Publisher = null,
     string? Version = null,
-    long EstimatedSizeBytes = 0)
+    long EstimatedSizeBytes = 0,
+    // P1 (gap G1): declarative variables from installer.vars, in manifest
+    // declaration order. The engine evaluates each once at session start (in
+    // dependency order — see InstallerVarGraph) and seeds var.<Name>. Null/empty
+    // for a manifest declaring no vars.
+    IReadOnlyList<InstallerVar>? Vars = null)
 {
     /// <summary>
     /// Empty sentinel blob: well-known <c>AppId</c> placeholder and zero-length

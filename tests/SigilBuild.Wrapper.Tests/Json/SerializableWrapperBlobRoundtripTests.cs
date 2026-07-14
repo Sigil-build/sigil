@@ -132,6 +132,43 @@ public class SerializableWrapperBlobRoundtripTests
     }
 
     [Fact]
+    public void Installer_vars_roundtrip_in_declaration_order()
+    {
+        // P1: installer.vars survive WrapperBlob -> Serializable -> wire ->
+        // Serializable -> WrapperBlob, preserving declaration order and expressions.
+        var blob = new WrapperBlob(
+            AppId: "com.acme.Studio",
+            Parameters: System.Array.Empty<ParameterDefinition>(),
+            InstallSteps: System.Array.Empty<InstallStep>(),
+            PreInstall: System.Array.Empty<InstallStep>(),
+            PostInstall: System.Array.Empty<InstallStep>(),
+            UpdateSteps: System.Array.Empty<InstallStep>(),
+            Vars: new[]
+            {
+                new InstallerVar("old_path", "registry_read('HKLM', 'Software\\Acme', 'Path')"),
+                new InstallerVar("is_upgrade", "installed_version(app.id) != ''"),
+            });
+
+        var wire = RoundTrip(SerializableWrapperBlob.FromWrapperBlob(blob));
+        wire.Vars.Should().HaveCount(2);
+        wire.Vars[0].Name.Should().Be("old_path");
+        wire.Vars[0].Expression.Should().Be(@"registry_read('HKLM', 'Software\Acme', 'Path')");
+        wire.Vars[1].Name.Should().Be("is_upgrade");
+
+        var reconstructed = SerializableWrapperBlob.ToWrapperBlob(wire);
+        reconstructed.Vars.Should().NotBeNull();
+        reconstructed.Vars!.Should().HaveCount(2);
+        reconstructed.Vars![0].Name.Should().Be("old_path");
+        reconstructed.Vars![1].Expression.Should().Contain("installed_version");
+    }
+
+    [Fact]
+    public void No_vars_roundtrips_to_empty()
+    {
+        RoundTrip(new SerializableWrapperBlob()).Vars.Should().BeEmpty();
+    }
+
+    [Fact]
     public void Brand_token_maps_and_assets_roundtrip()
     {
         var back = RoundTrip(new SerializableWrapperBlob

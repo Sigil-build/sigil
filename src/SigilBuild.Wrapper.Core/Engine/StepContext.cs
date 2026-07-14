@@ -148,6 +148,10 @@ public sealed class StepContext
 
         var dict = new System.Collections.Generic.Dictionary<string, object?>(System.StringComparer.Ordinal);
         var secrets = new System.Collections.Generic.List<string>();
+        // Secret identifier keys (param.<name> / parameters.<name> of a Secret
+        // parameter) so P1 vars can inherit secretness (ADR-008 §3). VarResolver
+        // extends this with any tainted var.<name>.
+        var secretIds = new System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal);
 
         // Materialise parameter values. Precedence: GUI-collected (wizard) →
         // CLI /P override → schema default → null. Both the canonical
@@ -173,9 +177,16 @@ public sealed class StepContext
             dict["parameters." + def.Name] = value;
             dict["param." + def.Name] = value;
 
-            if (def.Type == ParameterType.Secret && value is string sv && sv.Length > 0)
+            if (def.Type == ParameterType.Secret)
             {
-                secrets.Add(sv);
+                // Mark the identifier secret regardless of the current value so a
+                // var referencing an unset secret param is still tainted.
+                secretIds.Add("param." + def.Name);
+                secretIds.Add("parameters." + def.Name);
+                if (value is string sv && sv.Length > 0)
+                {
+                    secrets.Add(sv);
+                }
             }
         }
 
@@ -242,6 +253,12 @@ public sealed class StepContext
                 dict["option." + opt.Name] = value;
             }
         }
+
+        // P1: evaluate installer.vars once, now that every base identifier is
+        // seeded. Each result is exposed as var.<name> (usable in `when`, screen
+        // defaults, and {var.<name>} brace tokens). Secret-derived vars inherit
+        // secretness and land in `secrets` for redaction.
+        VarResolver.Populate(blob.Vars, dict, new Expressions.Evaluator(), secretIds, secrets);
 
         return new StepContext(dict, payloadRoot, secrets, layout.Scope, installDir, blob.AppName, blob.AppId);
     }
@@ -340,7 +357,53 @@ public sealed class StepContext
             result = result.Replace("{app.name}", _appName, System.StringComparison.Ordinal);
         }
         result = result.Replace("{app.id}", _appId, System.StringComparison.Ordinal);
+        result = ReplaceVarTokens(result);
         return result;
+    }
+
+    /// <summary>
+    /// Expand <c>{var.&lt;name&gt;}</c> brace tokens (P1) against the evaluated
+    /// <c>installer.vars</c> seeded in the context. A token whose var was not
+    /// declared is left literal (mirroring the unknown-brace-token behaviour of the
+    /// fixed tokens). This is the cross-step data-flow channel: a step
+    /// <c>to: "{var.old_path}/app.txt"</c> lands under a directory read from the
+    /// registry at session start.
+    /// </summary>
+    private string ReplaceVarTokens(string text)
+    {
+        const string prefix = "{var.";
+        if (text.IndexOf(prefix, System.StringComparison.Ordinal) < 0)
+        {
+            return text;
+        }
+
+        var sb = new System.Text.StringBuilder(text.Length);
+        var i = 0;
+        while (i < text.Length)
+        {
+            if (text[i] == '{'
+                && string.CompareOrdinal(text, i, prefix, 0, prefix.Length) == 0)
+            {
+                var end = text.IndexOf('}', i + 1);
+                if (end > i)
+                {
+                    // token is the identifier without braces, e.g. "var.old_path"
+                    var token = text.Substring(i + 1, end - i - 1);
+                    if (_values.TryGetValue(token, out var v))
+                    {
+                        sb.Append(v?.ToString() ?? string.Empty);
+                        i = end + 1;
+                        continue;
+                    }
+                }
+                // Unknown var or unterminated brace — leave the '{' literal.
+            }
+
+            sb.Append(text[i]);
+            i++;
+        }
+
+        return sb.ToString();
     }
 
     /// <summary>

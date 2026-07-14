@@ -247,6 +247,13 @@ public sealed class InstallSession
                     var outcome = await RunInstallAsync(progress, ct).ConfigureAwait(false);
                     if (outcome.Success)
                     {
+                        // P2 (gap G4): a silent install starts the run_after_install
+                        // target only when /launch was given (default-on is a wizard
+                        // affordance, not a silent one). Launched unelevated.
+                        if (_parsed.Launch)
+                        {
+                            LaunchAppUnelevated();
+                        }
                         return 0;
                     }
                     if (outcome.Error is not null)
@@ -431,6 +438,18 @@ public sealed class InstallSession
             _log?.SetSecrets(ctx.SecretValues);
             var effectiveProgress = _log is null ? progress : new LoggingProgress(progress, _log);
 
+            // P2: pre_install hooks run OUTSIDE and BEFORE the journal opens. A hook
+            // that fails (default on_failure: fail) aborts here — the InstallEngine,
+            // and therefore the rollback journal, never runs.
+            var preHook = await HookRunner.RunAsync(
+                "pre_install", _blob.HookPreInstall, ctx, effectiveProgress, ct).ConfigureAwait(false);
+            if (!preHook.Success)
+            {
+                var err = $"pre_install hook '{preHook.FailedStepId}' failed: {preHook.Error}";
+                _log?.WriteLine($"result: aborted before install — {ctx.Redact(err)}");
+                return new InstallOutcome(false, err);
+            }
+
             EngineResult result;
             try
             {
@@ -454,7 +473,6 @@ public sealed class InstallSession
                 return new InstallOutcome(false, result.Error);
             }
 
-            _log?.WriteLine("result: success");
             PersistCompletion(result.Journal, ctx.SecretValues, ctx.InstallDir);
             // Install committed: a rollback can no longer be requested, so the
             // transient file_delete / directory_delete stashes (%TEMP%\sigil-fd-* /
@@ -462,6 +480,15 @@ public sealed class InstallSession
             // never leaves %TEMP% residue (they are not part of the persisted
             // uninstall journal, so discarding them changes no post-install state).
             result.Journal.DiscardTransientStashes();
+
+            // P2: post_install hooks run OUTSIDE and AFTER the journal commits,
+            // before the Done screen. The install is already committed, so a hook
+            // failure is never rolled back — it is logged (P7); on_failure only
+            // controls whether the remaining post hooks in the phase still run.
+            await HookRunner.RunAsync(
+                "post_install", _blob.HookPostInstall, ctx, effectiveProgress, ct).ConfigureAwait(false);
+
+            _log?.WriteLine("result: success");
             return new InstallOutcome(true, null);
         }
         finally
@@ -577,6 +604,20 @@ public sealed class InstallSession
     {
         // P7: uninstall.exe honors /LOG too — tee the reversal trail into the log.
         var progress = _log is null ? null : new LoggingProgress(null, _log);
+        var ctx = BuildUninstallContext();
+
+        // P2: pre_uninstall hooks run BEFORE the journal replays. A failure (default
+        // on_failure: fail) aborts the uninstall.
+        var preHook = await HookRunner.RunAsync(
+            "pre_uninstall", _blob.HookPreUninstall, ctx, progress, ct).ConfigureAwait(false);
+        if (!preHook.Success)
+        {
+            var msg = $"pre_uninstall hook '{preHook.FailedStepId}' failed: {preHook.Error}";
+            _log?.WriteLine($"result: uninstall aborted — {ctx.Redact(msg)}");
+            error.WriteLine(msg);
+            return 1;
+        }
+
         var result = await new UninstallEngine()
             .RunAsync(_blob.AppId, _scope, progress, ct)
             .ConfigureAwait(false);
@@ -589,9 +630,23 @@ public sealed class InstallSession
             }
             return 1;
         }
+
+        // P2: post_uninstall hooks run AFTER the journal replays (best-effort
+        // cleanup; failures are logged but never fail the completed uninstall).
+        await HookRunner.RunAsync(
+            "post_uninstall", _blob.HookPostUninstall, ctx, progress, ct).ConfigureAwait(false);
+
         _log?.WriteLine("result: uninstall success");
         return 0;
     }
+
+    /// <summary>
+    /// Build a <see cref="StepContext"/> for uninstall-time hook token resolution
+    /// (<c>{var.*}</c> / <c>{install_dir}</c>). No wizard-collected values or payload
+    /// apply at uninstall; the install dir resolves to the manifest / CLI / default.
+    /// </summary>
+    private StepContext BuildUninstallContext() =>
+        StepContext.From(_blob, _parsed, payloadRoot: null, collected: null, scope: _scope);
 
     /// <summary>
     /// GUI entry point for the interactive uninstall flow (T15): drive
@@ -610,11 +665,79 @@ public sealed class InstallSession
         // the same reversal trail as the headless path.
         EnsureLog();
         var effectiveProgress = _log is null ? progress : new LoggingProgress(progress, _log);
+        var ctx = BuildUninstallContext();
+
+        // P2: pre_uninstall hooks (abort on failure) around the journal replay.
+        var preHook = await HookRunner.RunAsync(
+            "pre_uninstall", _blob.HookPreUninstall, ctx, effectiveProgress, ct).ConfigureAwait(false);
+        if (!preHook.Success)
+        {
+            var msg = $"pre_uninstall hook '{preHook.FailedStepId}' failed: {preHook.Error}";
+            _log?.WriteLine($"result: uninstall aborted — {ctx.Redact(msg)}");
+            return new InstallOutcome(false, msg);
+        }
+
         var result = await new UninstallEngine()
             .RunAsync(_blob.AppId, _scope, effectiveProgress, ct)
             .ConfigureAwait(false);
+
+        if (result.Success)
+        {
+            await HookRunner.RunAsync(
+                "post_uninstall", _blob.HookPostUninstall, ctx, effectiveProgress, ct).ConfigureAwait(false);
+        }
+
         _log?.WriteLine(result.Success ? "result: uninstall success" : $"result: uninstall failed — {result.Error}");
         return new InstallOutcome(result.Success, result.Error);
+    }
+
+    // --- P2 (gap G4): run-after-install launch ---
+
+    /// <summary>True when the manifest declares an <c>installer.run_after_install</c> target.</summary>
+    public bool HasRunAfterInstall => !string.IsNullOrEmpty(_blob.RunAfterInstallPath);
+
+    /// <summary>The Done-screen checkbox label, e.g. "Launch Acme Studio".</summary>
+    public string LaunchLabel => $"Launch {_blob.AppName ?? _blob.DisplayName ?? "application"}";
+
+    /// <summary>
+    /// Start the <c>run_after_install</c> target UNELEVATED (P2, gap G4), resolving
+    /// its <c>{install_dir}</c> / <c>{var.*}</c> tokens against the same context the
+    /// install used. Best-effort: returns false and never throws when the target is
+    /// absent, unresolvable, or fails to start.
+    /// </summary>
+    public bool LaunchAppUnelevated()
+    {
+        if (!HasRunAfterInstall)
+        {
+            return false;
+        }
+#pragma warning disable CA1031 // Launch is a convenience: never fault the install on a bad target.
+        try
+        {
+            var ctx = StepContext.From(
+                _blob, _parsed, payloadRoot: null, collected: _collectedValues,
+                scope: _scope, collectedOptions: _collectedOptions, collectedInstallDir: CollectedInstallDir);
+
+            var path = ctx.ResolvePath(_blob.RunAfterInstallPath!);
+            System.Collections.Generic.List<string>? args = null;
+            if (_blob.RunAfterInstallArgs is { Count: > 0 } raw)
+            {
+                args = new System.Collections.Generic.List<string>(raw.Count);
+                foreach (var a in raw)
+                {
+                    args.Add(ctx.Resolve(a));
+                }
+            }
+
+            _log?.WriteLine($"launch: {ctx.Redact(path)}");
+            return Launcher.LaunchUnelevated(path, args);
+        }
+        catch (Exception)
+        {
+            _log?.WriteLine("launch: failed to resolve or start run_after_install target");
+            return false;
+        }
+#pragma warning restore CA1031
     }
 
     /// <summary>

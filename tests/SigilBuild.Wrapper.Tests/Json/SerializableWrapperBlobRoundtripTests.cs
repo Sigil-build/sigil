@@ -169,6 +169,40 @@ public class SerializableWrapperBlobRoundtripTests
     }
 
     [Fact]
+    public void Lifecycle_hooks_and_run_after_install_roundtrip()
+    {
+        // P2: hooks + launch target survive WrapperBlob -> Serializable -> wire ->
+        // Serializable -> WrapperBlob.
+        InstallStep Run(string id) => new InstallStep.RunProgram(
+            id, id + ".exe", System.Array.Empty<string>(), Wait: true, Cwd: null,
+            ExpectedExitCodes: new[] { 0 }, TimeoutSeconds: null, When: null, OnFailure: OnFailure.Continue);
+
+        var blob = new WrapperBlob(
+            AppId: "com.acme.Studio",
+            Parameters: System.Array.Empty<ParameterDefinition>(),
+            InstallSteps: System.Array.Empty<InstallStep>(),
+            PreInstall: System.Array.Empty<InstallStep>(),
+            PostInstall: System.Array.Empty<InstallStep>(),
+            UpdateSteps: System.Array.Empty<InstallStep>(),
+            HookPreInstall: new[] { Run("pre") },
+            HookPostInstall: new[] { Run("post") },
+            HookPreUninstall: new[] { Run("preu") },
+            HookPostUninstall: new[] { Run("postu") },
+            RunAfterInstallPath: "{install_dir}/App.exe",
+            RunAfterInstallArgs: new[] { "--first-run" });
+
+        var reconstructed = SerializableWrapperBlob.ToWrapperBlob(
+            RoundTrip(SerializableWrapperBlob.FromWrapperBlob(blob)));
+
+        reconstructed.HookPreInstall.Should().ContainSingle();
+        reconstructed.HookPostInstall.Should().ContainSingle();
+        reconstructed.HookPreUninstall.Should().ContainSingle();
+        reconstructed.HookPostUninstall.Should().ContainSingle();
+        reconstructed.RunAfterInstallPath.Should().Be("{install_dir}/App.exe");
+        reconstructed.RunAfterInstallArgs.Should().Equal("--first-run");
+    }
+
+    [Fact]
     public void Brand_token_maps_and_assets_roundtrip()
     {
         var back = RoundTrip(new SerializableWrapperBlob

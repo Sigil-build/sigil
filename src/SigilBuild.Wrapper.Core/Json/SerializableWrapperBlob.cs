@@ -97,6 +97,17 @@ internal sealed record SerializableWrapperBlob
     /// </summary>
     public SerializableVar[] Vars { get; init; } = Array.Empty<SerializableVar>();
 
+    // --- P2 lifecycle hooks (gap G2). Ordered step lists that run OUTSIDE the
+    //     rollback journal, around the transactional body. ---
+    public SerializableInstallStep[] HookPreInstall    { get; init; } = Array.Empty<SerializableInstallStep>();
+    public SerializableInstallStep[] HookPostInstall   { get; init; } = Array.Empty<SerializableInstallStep>();
+    public SerializableInstallStep[] HookPreUninstall  { get; init; } = Array.Empty<SerializableInstallStep>();
+    public SerializableInstallStep[] HookPostUninstall { get; init; } = Array.Empty<SerializableInstallStep>();
+
+    // --- P2 run-after-install (gap G4): the Done-screen "Launch <App>" target. ---
+    public string? RunAfterInstallPath { get; init; }
+    public string[]? RunAfterInstallArgs { get; init; }
+
     public static WrapperBlob ToWrapperBlob(SerializableWrapperBlob s)
     {
         ArgumentNullException.ThrowIfNull(s);
@@ -118,7 +129,14 @@ internal sealed record SerializableWrapperBlob
             DisplayName:        s.DisplayName,
             Publisher:          s.Publisher,
             Version:            s.Version,
-            EstimatedSizeBytes: s.EstimatedSizeBytes ?? 0);
+            EstimatedSizeBytes: s.EstimatedSizeBytes ?? 0,
+            // P2: hooks + launch target.
+            HookPreInstall:      ConvertSteps(s.HookPreInstall),
+            HookPostInstall:     ConvertSteps(s.HookPostInstall),
+            HookPreUninstall:    ConvertSteps(s.HookPreUninstall),
+            HookPostUninstall:   ConvertSteps(s.HookPostUninstall),
+            RunAfterInstallPath: s.RunAfterInstallPath,
+            RunAfterInstallArgs: s.RunAfterInstallArgs);
     }
 
     public static SerializableWrapperBlob FromWrapperBlob(WrapperBlob blob)
@@ -144,7 +162,22 @@ internal sealed record SerializableWrapperBlob
             Publisher          = blob.Publisher,
             Version            = blob.Version,
             EstimatedSizeBytes = blob.EstimatedSizeBytes == 0 ? null : blob.EstimatedSizeBytes,
+            // P2: hooks + launch target.
+            HookPreInstall      = SerializeSteps(blob.HookPreInstall ?? Array.Empty<InstallStep>()),
+            HookPostInstall     = SerializeSteps(blob.HookPostInstall ?? Array.Empty<InstallStep>()),
+            HookPreUninstall    = SerializeSteps(blob.HookPreUninstall ?? Array.Empty<InstallStep>()),
+            HookPostUninstall   = SerializeSteps(blob.HookPostUninstall ?? Array.Empty<InstallStep>()),
+            RunAfterInstallPath = blob.RunAfterInstallPath,
+            RunAfterInstallArgs = blob.RunAfterInstallArgs is null ? null : ToStringArray(blob.RunAfterInstallArgs),
         };
+    }
+
+    private static string[] ToStringArray(IReadOnlyList<string> list)
+    {
+        if (list is string[] arr) return arr;
+        var copy = new string[list.Count];
+        for (var i = 0; i < list.Count; i++) copy[i] = list[i];
+        return copy;
     }
 
     private static InstallerOptionComponent[] ConvertOptions(SerializableOptionComponent[] flat)

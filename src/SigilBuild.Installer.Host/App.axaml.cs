@@ -104,6 +104,13 @@ public partial class App : Application
 
                 // P7: surface the /LOG path so the Failed screen can offer "Open log".
                 _vm.LogFilePath = session.LogFilePath;
+
+                // P2 (gap G4): wire the Done-screen "Launch <App>" checkbox to the
+                // session's unelevated launch of installer.run_after_install.
+                _vm.ConfigureLaunch(
+                    session.HasRunAfterInstall,
+                    session.LaunchLabel,
+                    () => session.LaunchAppUnelevated());
             }
 
             desktop.MainWindow = new InstallerWindow

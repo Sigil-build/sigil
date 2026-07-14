@@ -83,15 +83,20 @@ public sealed class InstallEngine
         catch (StepFailureException ex)
         {
             // Redact in case a step surfaced a resolved secret in its error text.
+            // ex.Message already names the failing step ("step '<id>' failed: …").
             reporter?.ReportMessage($"error: {ctx.Redact(ex.Message)}", isError: true);
             reporter?.ReportMessage("rollback: reverting changes", isError: true);
-            await journal.UndoAsync(ct).ConfigureAwait(false);
+            // Stream each reversal (P7): passing `progress` makes UndoAsync emit a
+            // per-record line (delete / rmdir / path - / reg -) so the rollback
+            // trail lands in the /LOG file and the wizard log pane, not just the
+            // summary line above.
+            await journal.UndoAsync(ct, progress).ConfigureAwait(false);
             return EngineResult.Failed(journal, ex.Message);
         }
         catch (System.OperationCanceledException)
         {
             reporter?.ReportMessage("rollback: reverting changes", isError: true);
-            await journal.UndoAsync(CancellationToken.None).ConfigureAwait(false);
+            await journal.UndoAsync(CancellationToken.None, progress).ConfigureAwait(false);
             throw;
         }
     }

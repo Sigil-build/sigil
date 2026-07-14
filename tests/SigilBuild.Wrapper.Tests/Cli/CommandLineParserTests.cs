@@ -178,6 +178,61 @@ public class CommandLineParserTests
         audit.Should().Contain("/PLicense=***");
     }
 
+    // ── /LOG install logging (P7) ─────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("/LOG")]
+    [InlineData("/log")]
+    public void Bare_LOG_requests_logging_with_default_path(string flag)
+    {
+        var parsed = CommandLineParser.Parse(new[] { flag }, Array.Empty<ParameterDefinition>());
+        parsed.LogRequested.Should().BeTrue();
+        parsed.LogPath.Should().BeNull("a bare /LOG defers to the session's default %TEMP% path");
+    }
+
+    [Theory]
+    [InlineData("/LOG=C:\\Temp\\setup.log", @"C:\Temp\setup.log")]
+    [InlineData("/log=out.log", "out.log")]
+    public void LOG_with_path_captures_explicit_path(string flag, string expected)
+    {
+        var parsed = CommandLineParser.Parse(new[] { flag }, Array.Empty<ParameterDefinition>());
+        parsed.LogRequested.Should().BeTrue();
+        parsed.LogPath.Should().Be(expected);
+    }
+
+    [Fact]
+    public void LOG_equals_without_path_is_usage_error()
+    {
+        var act = () => CommandLineParser.Parse(new[] { "/LOG=" }, Array.Empty<ParameterDefinition>());
+        act.Should().Throw<UsageException>();
+    }
+
+    [Fact]
+    public void LOG_prefixed_junk_is_still_rejected()
+    {
+        // /LOGGING is NOT /LOG — the closed grammar rejects it (exit 64).
+        var act = () => CommandLineParser.Parse(new[] { "/LOGGING" }, Array.Empty<ParameterDefinition>());
+        act.Should().Throw<UsageException>();
+    }
+
+    [Fact]
+    public void No_LOG_flag_means_logging_not_requested()
+    {
+        var parsed = CommandLineParser.Parse(new[] { "/silent" }, Array.Empty<ParameterDefinition>());
+        parsed.LogRequested.Should().BeFalse();
+        parsed.LogPath.Should().BeNull();
+    }
+
+    [Fact]
+    public void Audit_safe_form_includes_LOG_flag()
+    {
+        var withPath = CommandLineParser.Parse(new[] { "/LOG=x.log" }, Array.Empty<ParameterDefinition>());
+        withPath.AuditSafeRendering().Should().Contain("/LOG=x.log");
+
+        var bare = CommandLineParser.Parse(new[] { "/silent", "/LOG" }, Array.Empty<ParameterDefinition>());
+        bare.AuditSafeRendering().Should().Contain("/LOG");
+    }
+
     // ── Closed grammar rejects junk ───────────────────────────────────────────
 
     [Fact]

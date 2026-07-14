@@ -29,6 +29,13 @@ public sealed record InstallerBrand(
 /// <c>{app.*}</c> / <c>{scope_root}</c> tokens (T13).</param>
 /// <param name="Icon">Optional custom installer-exe icon path (.ico); when null
 /// the packager stamps the bundled default installer icon (PR #8).</param>
+/// <param name="Vars">Named computed values (P1, gap G1) parsed from
+/// <c>installer.vars</c>: each is an expression evaluated once at install-session
+/// start, in dependency order, and exposed as <c>var.&lt;name&gt;</c> in <c>when</c>
+/// expressions / screen-field defaults and as a <c>{var.&lt;name&gt;}</c> brace token
+/// in step paths/args. Order is the manifest declaration order (preserved for
+/// deterministic packaging); cross-var dependencies are resolved by topological
+/// sort — see <see cref="InstallerVarGraph"/>.</param>
 public sealed record InstallerSection(
     InstallerBrand? Brand,
     InstallerOptions? Options = null,
@@ -36,4 +43,17 @@ public sealed record InstallerSection(
     string? License = null,
     InstallScope Scope = InstallScope.Auto,
     string? InstallDir = null,
-    string? Icon = null);
+    string? Icon = null,
+    IReadOnlyList<InstallerVar>? Vars = null);
+
+/// <summary>
+/// A single declarative variable from <c>installer.vars</c> (P1): a name bound to
+/// an expression (in the closed <c>when</c> grammar) that is evaluated once at
+/// install-session start. The result is exposed as <c>var.&lt;Name&gt;</c>.
+/// </summary>
+/// <param name="Name">The variable name (the <c>var.&lt;Name&gt;</c> identifier and
+/// <c>{var.&lt;Name&gt;}</c> brace token; e.g. <c>old_path</c>).</param>
+/// <param name="Expression">The expression evaluated to produce the value, e.g.
+/// <c>registry_read('HKLM', 'Software\\Acme', 'Path')</c>. May reference other
+/// vars as <c>var.&lt;other&gt;</c> (resolved in dependency order).</param>
+public sealed record InstallerVar(string Name, string Expression);

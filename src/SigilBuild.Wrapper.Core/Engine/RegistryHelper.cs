@@ -1,6 +1,7 @@
 namespace SigilBuild.Wrapper.Engine;
 
 using System;
+using System.Globalization;
 using System.Runtime.Versioning;
 using Microsoft.Win32;
 
@@ -91,6 +92,40 @@ internal static class RegistryHelper
         catch
         {
             return false;
+        }
+#pragma warning restore CA1031
+    }
+
+    /// <summary>
+    /// Value reader backing the <c>registry_read(hive, key, value)</c> and
+    /// <c>installed_version(app_id)</c> expression functions (P1). Returns the
+    /// named value as an invariant-culture string, or <c>""</c> when the hive is
+    /// unrecognized, the key/value is absent, or the read is denied — read-only
+    /// and total, per ADR-008 §1.2. When <paramref name="name"/> is null/empty the
+    /// key's default (unnamed) value is read. Always <c>""</c> on non-Windows hosts.
+    /// A <c>REG_MULTI_SZ</c> is joined with the platform newline; other kinds use
+    /// their invariant <see cref="object.ToString"/> form.
+    /// </summary>
+    public static string Read(string? hive, string? key, string? name)
+    {
+        if (!OperatingSystem.IsWindows()) return string.Empty;
+        if (string.IsNullOrEmpty(hive) || string.IsNullOrEmpty(key)) return string.Empty;
+        try
+        {
+            using var baseKey = RegistryKey.OpenBaseKey(ParseHive(hive), RegistryView.Default);
+            using var sub = baseKey.OpenSubKey(key, writable: false);
+            var value = sub?.GetValue(name);
+            return value switch
+            {
+                null => string.Empty,
+                string[] multi => string.Join(Environment.NewLine, multi),
+                _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty,
+            };
+        }
+#pragma warning disable CA1031 // Best-effort read: any registry failure (bad hive, ACL denial) means "".
+        catch
+        {
+            return string.Empty;
         }
 #pragma warning restore CA1031
     }

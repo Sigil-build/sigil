@@ -49,7 +49,7 @@ internal static class CatalogParser
             }
 
             var eq = line.IndexOf('=');
-            if (eq <= 0)
+            if (eq < 0)
             {
                 malformed.Add(($"expected 'key = value', got '{line}'", i + 1));
                 continue;

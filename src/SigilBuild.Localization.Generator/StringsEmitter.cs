@@ -150,7 +150,12 @@ internal static class StringsEmitter
     private static string Quote(string s) =>
         "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n") + "\"";
 
-    private static string MethodName(string key) =>
+    /// <summary>
+    /// The single mapping from catalog key to generated method name. CatalogValidator's
+    /// SIGLOC006 check reuses this — it must observe exactly the collision the emitter
+    /// would produce, not a re-derived approximation of it.
+    /// </summary>
+    internal static string MethodName(string key) =>
         string.Concat(key.Split('.', '_').Select(Pascal));
 
     private static string Pascal(string s)

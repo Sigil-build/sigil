@@ -46,8 +46,10 @@ public class CatalogParserTests
     [Fact]
     public void Parse_RecordsMalformed_ForLineStartingWithEquals()
     {
-        // Input " = value" is trimmed to "= value", so eq == 0 and the eq <= 0 branch fires.
-        // This is NOT testing the key.Length == 0 branch, which is unreachable and resolved in Task 3.
+        // Input " = value" is trimmed to "= value", so eq == 0: there IS an '=', just with
+        // an empty key to its left. Task 3 narrowed the guard from `eq <= 0` to `eq < 0`,
+        // which separates "no '=' at all" from "empty key" and makes this branch reachable,
+        // reporting the more precise "key is empty" instead of the generic parse message.
         var text = "nav.back = Back\n = value\n";
 
         var file = CatalogParser.Parse("Strings.en.txt", text);
@@ -55,7 +57,7 @@ public class CatalogParserTests
         file.Entries.Should().ContainSingle();
         file.Malformed.Should().ContainSingle();
         file.Malformed[0].Line.Should().Be(2);
-        file.Malformed[0].Message.Should().Contain("expected 'key = value'");
+        file.Malformed[0].Message.Should().Contain("key is empty");
     }
 
     [Fact]

@@ -284,6 +284,9 @@ public sealed class ParsedCommandLine
 ///   <item><description><c>/launch</c> — after a silent install, start the
 ///   <c>run_after_install</c> target unelevated (P2). Ignored without <c>/silent</c>
 ///   (the wizard uses the Done-screen checkbox).</description></item>
+///   <item><description><c>/lang=tag</c> — request wizard language (P10). <c>tag</c> is a
+///   language tag like <c>en</c>, <c>uk</c>, or <c>pt-BR</c>.</description></item>
+///   <item><description><c>/?</c> (alias <c>/help</c>) — show help text.</description></item>
 ///   <item><description><c>/P&lt;Name&gt;=&lt;Value&gt;</c> — override a declared parameter or a built-in option.</description></item>
 /// </list>
 /// Anything else is a <see cref="UsageException"/> — the parser is intentionally
@@ -451,19 +454,20 @@ public static class CommandLineParser
 
             // /lang=<tag> — prefix form, like /D=. No collision: /launch is matched by
             // string.Equals above, and the /LOG branch tests body[1] == 'O'/'o'.
-            if (body.Length >= 4
+            if (body.Length >= 5
+                && body[4] == '='
                 && (body[0] is 'l' or 'L')
                 && (body[1] is 'a' or 'A')
                 && (body[2] is 'n' or 'N')
                 && (body[3] is 'g' or 'G'))
             {
-                if (body.Length < 6 || body[4] != '=')
+                var tag = body.Substring(5);
+                if (tag.Length == 0)
                 {
                     throw new UsageException(
                         $"'/lang=' requires a language tag (offending token: '{rawArg}')");
                 }
 
-                var tag = body.Substring(5);
                 if (!LanguageTag.IsValid(tag))
                 {
                     throw new UsageException(

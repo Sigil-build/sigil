@@ -95,6 +95,27 @@ public class LangFlagTests
         help.Should().Contain("manifest screens may supply any tag");
     }
 
+    [Fact]
+    public void NearMiss_Language_IsUnrecognizedFlag()
+    {
+        var act = () => Parse("/language=uk");
+        act.Should().Throw<UsageException>().WithMessage("*unrecognized flag*");
+    }
+
+    [Fact]
+    public void NearMiss_Langx_IsUnrecognizedFlag()
+    {
+        var act = () => Parse("/langx=uk");
+        act.Should().Throw<UsageException>().WithMessage("*unrecognized flag*");
+    }
+
+    [Fact]
+    public void NearMiss_Lan_IsUnrecognizedFlag()
+    {
+        var act = () => Parse("/lan");
+        act.Should().Throw<UsageException>().WithMessage("*unrecognized flag*");
+    }
+
     private static ParsedCommandLine Parse(params string[] args) =>
         CommandLineParser.Parse(args, Array.Empty<ParameterDefinition>());
 }

@@ -233,6 +233,31 @@ public class CommandLineParserTests
         bare.AuditSafeRendering().Should().Contain("/LOG");
     }
 
+    // ── /launch run-after-install (P2) ────────────────────────────────────────
+
+    [Theory]
+    [InlineData("/launch")]
+    [InlineData("/LAUNCH")]
+    public void Launch_flag_is_parsed(string flag)
+    {
+        var parsed = CommandLineParser.Parse(new[] { "/silent", flag }, Array.Empty<ParameterDefinition>());
+        parsed.Launch.Should().BeTrue();
+    }
+
+    [Fact]
+    public void No_launch_flag_means_launch_false()
+    {
+        CommandLineParser.Parse(new[] { "/silent" }, Array.Empty<ParameterDefinition>())
+            .Launch.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Audit_safe_form_includes_launch()
+    {
+        CommandLineParser.Parse(new[] { "/silent", "/launch" }, Array.Empty<ParameterDefinition>())
+            .AuditSafeRendering().Should().Contain("/launch");
+    }
+
     // ── Closed grammar rejects junk ───────────────────────────────────────────
 
     [Fact]

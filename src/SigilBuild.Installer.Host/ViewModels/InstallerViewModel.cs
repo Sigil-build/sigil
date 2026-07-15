@@ -343,6 +343,56 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
         set { if (_launchAfterInstall != value) { _launchAfterInstall = value; OnPropertyChanged(); } }
     }
 
+    private bool _hasRunAfterInstall;
+    private string _launchLabel = "Launch application";
+    private Action? _launchAction;
+
+    /// <summary>
+    /// True when the manifest declares <c>installer.run_after_install</c> (P2, gap
+    /// G4) — gates the Done screen's "Launch &lt;App&gt;" checkbox. When false the
+    /// checkbox is hidden and nothing is launched.
+    /// </summary>
+    public bool HasRunAfterInstall
+    {
+        get => _hasRunAfterInstall;
+        private set { if (_hasRunAfterInstall != value) { _hasRunAfterInstall = value; OnPropertyChanged(); } }
+    }
+
+    /// <summary>The Done-screen checkbox label, e.g. "Launch Acme Studio".</summary>
+    public string LaunchLabel
+    {
+        get => _launchLabel;
+        private set { if (_launchLabel != value) { _launchLabel = value; OnPropertyChanged(); } }
+    }
+
+    /// <summary>
+    /// Wire the run-after-install launch (P2). <paramref name="launch"/> starts the
+    /// app unelevated (an <see cref="InstallSession"/>-backed delegate). Left unwired
+    /// in unit/dev runs; then <see cref="LaunchIfRequested"/> is a no-op.
+    /// </summary>
+    public void ConfigureLaunch(bool hasRunAfterInstall, string launchLabel, Action launch)
+    {
+        HasRunAfterInstall = hasRunAfterInstall;
+        LaunchLabel = string.IsNullOrWhiteSpace(launchLabel) ? "Launch application" : launchLabel;
+        _launchAction = launch;
+    }
+
+    /// <summary>
+    /// Launch the app if the install completed and the (checked-by-default) "Launch
+    /// &lt;App&gt;" box is ticked. Invoked by the host when the wizard closes on the
+    /// Done screen. Idempotent-safe: no-op unless completed + checked + configured.
+    /// </summary>
+    public void LaunchIfRequested()
+    {
+        if (OutcomeCode == InstallerOutcomeCode.Completed
+            && HasRunAfterInstall
+            && LaunchAfterInstall
+            && _launchAction is not null)
+        {
+            _launchAction();
+        }
+    }
+
     public string InstallPath
     {
         get => _installPath;
@@ -911,7 +961,12 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
 
     private void ApplyProgress(StepProgress p)
     {
-        InstallProgress = p.Fraction;
+        // P2: lifecycle-hook lines report Total=0 (message-only) so they log
+        // without jerking the progress bar; only real step advances move it.
+        if (p.Total > 0)
+        {
+            InstallProgress = p.Fraction;
+        }
         if (p.Message is not null)
         {
             InstallCurrentItem = p.Message;

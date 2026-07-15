@@ -7,6 +7,8 @@
     <TextBlock FontSize="22" FontWeight="Bold"
                Text="{Binding Brand.AppName, StringFormat='{}{0} is installed'}" />
     <TextBlock Text="You can now launch the application from the Start menu." Foreground="#4B5563" />
-    <CheckBox Content="Launch now" IsChecked="{Binding LaunchAfterInstall, Mode=TwoWay}" />
+    <CheckBox Content="{Binding LaunchLabel}"
+              IsVisible="{Binding HasRunAfterInstall}"
+              IsChecked="{Binding LaunchAfterInstall, Mode=TwoWay}" />
   </StackPanel>
 </UserControl>

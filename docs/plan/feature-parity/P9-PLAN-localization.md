@@ -16,11 +16,13 @@
 - **`InvariantGlobalization=true` stays.** Never construct `CultureInfo` — `new CultureInfo("uk-UA")` throws `CultureNotFoundException` at runtime.
 - **Native AOT + `TreatWarningsAsErrors`.** Any `IL2xxx`/`IL3xxx` is a build failure. No reflection, no `Activator`, no `Assembly.*`.
 - **Source-generated serialization only.** New serializable types go in a `JsonSerializerContext`.
+- **Central package management.** Versions live in `Directory.Packages.props`; a `PackageReference` carries **no** `Version=` attribute. Add the version there if it is missing, do not inline it.
+- **The solution file is `Sigil.slnx`** (the XML format), not `Sigil.sln`. `dotnet sln Sigil.slnx add …` works normally.
 - **P/Invoke uses `[LibraryImport]`**, never `[DllImport]`.
 - **Deterministic packaging output.** Two packs of one input are byte-identical.
 - **Log output stays English.** Never route `_log?.WriteLine` or journal text through the catalog.
 - **Match `.editorconfig`.** Every behavior change lands with tests in the matching `tests/` project.
-- **Definition of done:** `dotnet build Sigil.sln -c Release` clean and `dotnet test Sigil.sln -c Release` green, plus each task's stated verification.
+- **Definition of done:** `dotnet build Sigil.slnx -c Release` clean and `dotnet test Sigil.slnx -c Release` green, plus each task's stated verification.
 - **Do not touch** files owned by other in-flight lanes. If you believe you must, stop and report.
 
 ## File Structure
@@ -49,7 +51,7 @@
 - Create: `src/SigilBuild.Localization.Generator/StringsGenerator.cs`
 - Create: `tests/SigilBuild.Localization.Generator.Tests/SigilBuild.Localization.Generator.Tests.csproj`
 - Create: `tests/SigilBuild.Localization.Generator.Tests/CatalogParserTests.cs`
-- Modify: `Sigil.sln`
+- Modify: `Sigil.slnx`
 
 **Interfaces:**
 - Produces: `CatalogParser.Parse(string fileName, string text) -> CatalogFile`, where `CatalogFile` has `string Lang` and `IReadOnlyList<CatalogEntry> Entries`; `CatalogEntry` has `string Key`, `string Value`, `IReadOnlyList<string> Placeholders`, `int Line`.
@@ -115,20 +117,21 @@ Expected: FAIL — `CatalogParser` does not exist (CS0246).
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" PrivateAssets="all" />
-    <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" PrivateAssets="all" />
+    <!-- No Version= : the repo uses central package management. Versions are
+         already pinned in Directory.Packages.props (CodeAnalysis.CSharp 4.11.0,
+         CodeAnalysis.Analyzers 3.11.0). -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" PrivateAssets="all" />
   </ItemGroup>
 </Project>
 ```
 
-Add to `Sigil.sln` (both the generator and its test project) via:
+Add to `Sigil.slnx` (both the generator and its test project) via:
 
 ```bash
-dotnet sln Sigil.sln add src/SigilBuild.Localization.Generator/SigilBuild.Localization.Generator.csproj
-dotnet sln Sigil.sln add tests/SigilBuild.Localization.Generator.Tests/SigilBuild.Localization.Generator.Tests.csproj
+dotnet sln Sigil.slnx add src/SigilBuild.Localization.Generator/SigilBuild.Localization.Generator.csproj
+dotnet sln Sigil.slnx add tests/SigilBuild.Localization.Generator.Tests/SigilBuild.Localization.Generator.Tests.csproj
 ```
-
-If `Microsoft.CodeAnalysis.CSharp` 4.14.0 does not restore, pin to the version matching the repo's SDK — check `dotnet --version` and use the closest available. Report the version you chose.
 
 - [ ] **Step 4: Write the parser**
 
@@ -226,7 +229,7 @@ Expected: PASS, 2 tests.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/SigilBuild.Localization.Generator tests/SigilBuild.Localization.Generator.Tests Sigil.sln
+git add src/SigilBuild.Localization.Generator tests/SigilBuild.Localization.Generator.Tests Sigil.slnx
 git commit -m "feat(p9): catalog parser + generator project skeleton"
 ```
 
@@ -1889,7 +1892,7 @@ Adapt `ParseManifest`/`ParseManifestDiagnostics` to the existing test helpers in
 
 - [ ] **Step 8: Run the full suite**
 
-Run: `dotnet build Sigil.sln -c Release && dotnet test Sigil.sln -c Release`
+Run: `dotnet build Sigil.slnx -c Release && dotnet test Sigil.slnx -c Release`
 Expected: green. The schema fixture tests (`SigilBuild.Schema.Tests`) must still validate the reference manifest.
 
 - [ ] **Step 9: Commit**
@@ -2934,7 +2937,7 @@ Delete the now-dead `"Launch application"` fallback at `InstallerViewModel.cs:50
 
 - [ ] **Step 5: Run test to verify it passes**
 
-Run: `dotnet test Sigil.sln -c Release`
+Run: `dotnet test Sigil.slnx -c Release`
 Expected: green.
 
 - [ ] **Step 6: Commit**
@@ -3311,8 +3314,8 @@ Expected: host ≤ 40 MB, CLI ≤ 15 MB. Record the **actual** numbers in your s
 - [ ] **Step 7: Full verification**
 
 ```bash
-dotnet build Sigil.sln -c Release
-dotnet test Sigil.sln -c Release
+dotnet build Sigil.slnx -c Release
+dotnet test Sigil.slnx -c Release
 dotnet publish src/SigilBuild.Installer.Host -c Release -r win-x64 -p:PublishAot=true
 ```
 
@@ -3329,8 +3332,8 @@ git commit -m "docs(p9): ADR-008 amendments, manifest/CLI reference, G10 status"
 
 ## Done criteria
 
-- [ ] `dotnet build Sigil.sln -c Release` clean under `TreatWarningsAsErrors`
-- [ ] `dotnet test Sigil.sln -c Release` green, zero skipped localization tests
+- [ ] `dotnet build Sigil.slnx -c Release` clean under `TreatWarningsAsErrors`
+- [ ] `dotnet test Sigil.slnx -c Release` green, zero skipped localization tests
 - [ ] AOT publish warning-free
 - [ ] Pseudo-loc render + static scan both green — **zero hardcoded UI strings**
 - [ ] uk fixture renders Ukrainian chrome *and* declared screens

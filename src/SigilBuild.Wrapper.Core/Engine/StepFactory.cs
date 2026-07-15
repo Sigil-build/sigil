@@ -24,6 +24,7 @@ internal static class StepFactory
         InstallStep.ServiceInstall si       => new ServiceInstallStep(si),
 #pragma warning restore CA1416
         InstallStep.RunProgram rp      => new RunProgramStep(rp),
+        InstallStep.HttpDownload hd    => new HttpDownloadStep(hd),
         _ => throw new System.NotSupportedException(
             $"step type '{spec.GetType().Name}' is not implemented in the current sprint."),
     };

@@ -91,6 +91,12 @@ internal sealed record SerializableInstallStep
     public int[]? ExpectedExitCodes { get; init; }
     public int? TimeoutSeconds { get; init; }
 
+    // http_download (P4). TimeoutSeconds above is shared with run_program.
+    public string? HttpUrl { get; init; }
+    public string? HttpDest { get; init; }
+    public string? Sha256 { get; init; }
+    public int? HttpRetries { get; init; }
+
     // service_install
     public string? ServiceName { get; init; }
     public string? BinaryPath { get; init; }
@@ -201,6 +207,16 @@ internal static class SerializableInstallStepConverter
                 s.Cwd,
                 s.ExpectedExitCodes,
                 s.TimeoutSeconds,
+                s.When,
+                onFailure),
+
+            "http_download" => new InstallStep.HttpDownload(
+                s.Id,
+                s.HttpUrl ?? throw MissingField("http_download", "url", s.Id),
+                s.HttpDest ?? throw MissingField("http_download", "dest", s.Id),
+                s.Sha256 ?? throw MissingField("http_download", "sha256", s.Id),
+                s.TimeoutSeconds,
+                s.HttpRetries,
                 s.When,
                 onFailure),
 
@@ -346,6 +362,19 @@ internal static class SerializableInstallStepConverter
                 Cwd = x.Cwd,
                 ExpectedExitCodes = ToArray(x.ExpectedExitCodes),
                 TimeoutSeconds = x.TimeoutSeconds,
+            },
+
+            InstallStep.HttpDownload x => new SerializableInstallStep
+            {
+                Id = x.Id,
+                Type = "http_download",
+                When = x.When,
+                OnFailure = onFailure,
+                HttpUrl = x.Url,
+                HttpDest = x.Dest,
+                Sha256 = x.Sha256,
+                TimeoutSeconds = x.TimeoutSeconds,
+                HttpRetries = x.Retries,
             },
 
             InstallStep.ServiceInstall x => new SerializableInstallStep

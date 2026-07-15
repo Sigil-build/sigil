@@ -763,6 +763,7 @@ public static class ManifestParser
     private static readonly string[] ShortcutCreateFields      = { "id", "type", "when", "on_failure", "target", "location", "name", "args", "working_dir", "icon", "description" };
     private static readonly string[] EnvSetFields              = { "id", "type", "when", "on_failure", "name", "value", "scope", "action", "separator" };
     private static readonly string[] RunProgramFields          = { "id", "type", "when", "on_failure", "program", "args", "wait", "cwd", "expected_exit_codes", "timeout_seconds" };
+    private static readonly string[] HttpDownloadFields        = { "id", "type", "when", "on_failure", "url", "dest", "sha256", "timeout_seconds", "retries" };
 
     private static List<InstallStep>? ParseInstallSteps(
         List<YamlMappingNode>? nodes, List<Diagnostic> diagnostics, string fileName,
@@ -827,6 +828,7 @@ public static class ManifestParser
             "shortcut_create"       => BuildShortcutCreate(node, id!, when, onFailure, diagnostics, loc),
             "env_set"               => BuildEnvSet(node, id!, when, onFailure, diagnostics, loc),
             "run_program"           => BuildRunProgram(node, id!, when, onFailure, diagnostics, loc),
+            "http_download"         => BuildHttpDownload(node, id!, when, onFailure, diagnostics, loc),
             "service_install"       => BuildServiceInstall(node, id!, when, onFailure, diagnostics, loc),
             _ => ReportUnknownStepType(id!, typeStr!, loc, diagnostics),
         };
@@ -1020,6 +1022,47 @@ public static class ManifestParser
         var timeoutSeconds = GetNullableInt(node, "timeout_seconds");
         ReportUnknownStepFields(node, id, "run_program", RunProgramFields, loc, diagnostics);
         return new InstallStep.RunProgram(id, program, args, wait, cwd, expectedExitCodes, timeoutSeconds, when, onFailure);
+    }
+
+    private static InstallStep.HttpDownload? BuildHttpDownload(
+        YamlMappingNode node, string id, string? when, OnFailure onFailure,
+        List<Diagnostic> diagnostics, SourceLocation loc)
+    {
+        var url = GetScalar(node, "url");
+        var dest = GetScalar(node, "dest");
+        var sha256 = GetScalar(node, "sha256");
+        if (url  is null) { ReportMissingField(id, "http_download", "url",  loc, diagnostics); return null; }
+        if (dest is null) { ReportMissingField(id, "http_download", "dest", loc, diagnostics); return null; }
+
+        // sha256 is REQUIRED — refuse to pack a download without an integrity check.
+        if (string.IsNullOrWhiteSpace(sha256))
+        {
+            diagnostics.Add(new Diagnostic(
+                DiagnosticSeverity.Error,
+                DiagnosticCodes.HttpDownloadChecksumRequired,
+                $"http_download step '{id}' must declare a 'sha256' — a download without an integrity checksum is refused",
+                loc,
+                "https://docs.sigil.build/diagnostics/SIG0236"));
+            return null;
+        }
+
+        // HTTPS only. A literal http:// URL is rejected at pack time; a URL built
+        // from {var.*}/{install_dir} tokens is additionally re-checked at run time.
+        if (url.StartsWith("http://", System.StringComparison.OrdinalIgnoreCase))
+        {
+            diagnostics.Add(new Diagnostic(
+                DiagnosticSeverity.Error,
+                DiagnosticCodes.HttpDownloadInsecureUrl,
+                $"http_download step '{id}' url must be https:// (got '{url}')",
+                loc,
+                "https://docs.sigil.build/diagnostics/SIG0235"));
+            return null;
+        }
+
+        var timeoutSeconds = GetNullableInt(node, "timeout_seconds");
+        var retries = GetNullableInt(node, "retries");
+        ReportUnknownStepFields(node, id, "http_download", HttpDownloadFields, loc, diagnostics);
+        return new InstallStep.HttpDownload(id, url, dest, sha256, timeoutSeconds, retries, when, onFailure);
     }
 
     private static void ReportMissingField(

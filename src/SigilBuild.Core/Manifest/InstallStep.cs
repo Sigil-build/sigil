@@ -114,6 +114,25 @@ public abstract record InstallStep(string Id, string? When, OnFailure OnFailure)
         : InstallStep(Id, When, OnFailure);
 
     /// <summary>
+    /// Install-time HTTP download (P4, gap G5). Streams <see cref="Url"/> (HTTPS
+    /// only) to <see cref="Dest"/>, verifies the SHA-256, and journals the write so
+    /// a rollback deletes the downloaded file. <see cref="Sha256"/> is REQUIRED —
+    /// the packer refuses to pack a download without it. Transient failures
+    /// (network / timeout / 5xx) are retried up to <see cref="Retries"/> times with
+    /// backoff; a checksum mismatch is not transient and fails immediately.
+    /// </summary>
+    public sealed record HttpDownload(
+        string Id,
+        string Url,
+        string Dest,
+        string Sha256,
+        int? TimeoutSeconds,
+        int? Retries,
+        string? When,
+        OnFailure OnFailure)
+        : InstallStep(Id, When, OnFailure);
+
+    /// <summary>
     /// SHOULD-tier (post-MVP per the action catalog, promoted MUST-tier when
     /// the wrapper grew real installer support): create a Windows service
     /// pointing at <see cref="BinaryPath"/>. Unlike a <c>run_program sc.exe

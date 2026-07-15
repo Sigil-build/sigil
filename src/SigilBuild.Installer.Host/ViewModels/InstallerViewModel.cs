@@ -961,8 +961,9 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
 
     private void ApplyProgress(StepProgress p)
     {
-        // P2: lifecycle-hook lines report Total=0 (message-only) so they log
-        // without jerking the progress bar; only real step advances move it.
+        // Message-only rows (Total=0) — a P2 lifecycle-hook line or a P4 download
+        // percentage — update the log/current-item without jerking the overall bar;
+        // only real step advances (Total>0) move it.
         if (p.Total > 0)
         {
             InstallProgress = p.Fraction;

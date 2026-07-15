@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
-using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using SigilBuild.Wrapper.Engine;
 
 namespace SigilBuild.Installer.Host.Services;
 
@@ -26,24 +26,27 @@ public sealed record HttpOption(string Label, string Value);
 /// </remarks>
 public static class HttpOptionsLoader
 {
-    private static readonly HttpClient _http = new()
-    {
-        Timeout = TimeSpan.FromSeconds(10),
-    };
+    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
 
     /// <summary>
     /// GETs <paramref name="url"/>, parses the JSON body, and returns the
     /// option list. Throws on network/HTTP/parse errors — the caller (the
     /// Install Options view's attach handler) is expected to catch and log.
     /// </summary>
+    /// <remarks>
+    /// Uses the one shared <see cref="SigilHttpClient"/> (P4) — system proxy,
+    /// pooled connections — with a per-request 10 s timeout via a linked CTS.
+    /// </remarks>
     public static async Task<IReadOnlyList<HttpOption>> LoadAsync(
         string url, string itemsPath, string labelProperty, string valueProperty,
         CancellationToken ct)
     {
         InstallerLog.Info($"HttpOptionsLoader: GET {url}");
-        using var response = await _http.GetAsync(url, ct).ConfigureAwait(false);
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(RequestTimeout);
+        using var response = await SigilHttpClient.Shared.GetAsync(url, timeoutCts.Token).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
-        var json = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        var json = await response.Content.ReadAsStringAsync(timeoutCts.Token).ConfigureAwait(false);
         return ParseJson(json, itemsPath, labelProperty, valueProperty);
     }
 

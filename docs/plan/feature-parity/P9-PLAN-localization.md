@@ -239,7 +239,7 @@ git commit -m "feat(p9): catalog parser + generator project skeleton"
 
 **Files:**
 - Create: `src/SigilBuild.Localization.Generator/StringsEmitter.cs`
-- Modify: `src/SigilBuild.Localization.Generator/StringsGenerator.cs`
+- (StringsGenerator.cs is wired in Task 3, not here — leave it alone)
 - Create: `tests/SigilBuild.Localization.Generator.Tests/StringsEmitterTests.cs`
 
 **Interfaces:**
@@ -570,7 +570,7 @@ internal static class PseudoTransform
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `dotnet test tests/SigilBuild.Localization.Generator.Tests -c Release --filter StringsEmitterTests`
-Expected: PASS, 4 tests.
+Expected: PASS, 6 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -585,7 +585,7 @@ git commit -m "feat(p9): emit Lang enum + Strings accessors with per-language co
 
 **Files:**
 - Create: `src/SigilBuild.Localization.Generator/CatalogDiagnostics.cs`
-- Modify: `src/SigilBuild.Localization.Generator/StringsGenerator.cs`
+- Modify: `src/SigilBuild.Localization.Generator/StringsGenerator.cs` (wire the incremental generator here — Task 2 deliberately left it a skeleton)
 - Create: `tests/SigilBuild.Localization.Generator.Tests/CatalogDiagnosticsTests.cs`
 
 **Interfaces:**
@@ -1045,7 +1045,7 @@ Add to `src/SigilBuild.Wrapper.Core/SigilBuild.Wrapper.Core.csproj` (or the exis
 - [ ] **Step 5: Run test to verify it passes**
 
 Run: `dotnet test tests/SigilBuild.Wrapper.Tests -c Release --filter SessionLanguageTests`
-Expected: PASS, 4 tests.
+Expected: PASS, 6 tests.
 
 - [ ] **Step 6: Verify the generator actually ran**
 
@@ -1761,7 +1761,7 @@ public sealed record LocalizedText(IReadOnlyDictionary<string, string> Values)
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `dotnet test tests/SigilBuild.Core.Tests -c Release --filter LocalizedTextTests`
-Expected: PASS, 4 tests.
+Expected: PASS, 6 tests.
 
 - [ ] **Step 5: Retype the records**
 

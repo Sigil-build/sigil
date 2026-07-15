@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
+using SigilBuild.Wrapper.Core.Localization;
 
 namespace SigilBuild.Wrapper.Expressions;
 
@@ -44,10 +45,13 @@ internal static class Functions
             ["arch"] = _ => RuntimeInformation.ProcessArchitecture
                 .ToString().ToLowerInvariant(),
 
-            // CurrentUICulture.Name is "" under InvariantGlobalization=true
-            // but the function is still callable; tests assert non-empty for
-            // os_version() and arch() only.
-            ["locale"] = _ => CultureInfo.CurrentUICulture.Name,
+            // locale() reads the OS UI language (Win32), NOT CurrentUICulture — which is
+            // always "" under InvariantGlobalization=true. Returns the user's top
+            // preference; the full ordered list drives language resolution
+            // (Localization/LanguageResolver). Total: "" when unavailable.
+            // ADR-008 §1.1 amended 2026-07-15 — this is a behavior change, not only a
+            // source change: a `When` using locale() moves from always-"" to a real tag.
+            ["locale"] = _ => OsUiLanguage.Primary(),
 
             ["file_exists"] = a => File.Exists(ToStringOrNull(a[0])),
 

@@ -14,18 +14,20 @@ using SigilBuild.Wrapper.Expressions;
 
 namespace SigilBuild.Installer.Host.ViewModels;
 
-public enum InstallerStep { Welcome, License, InstallOptions, Options, Installing, Finish, Failed, Custom }
+public enum InstallerStep { Welcome, License, InstallOptions, Options, Installing, Finish, Failed, Custom, DowngradeBlocked }
 
 /// <summary>
 /// Process exit code surfaced by the installer, per the unified T2 command-line
 /// contract shared with the console wrapper: <c>0</c> ok, <c>1</c> step failure
-/// (rolled back), <c>2</c> user cancelled (rolled back).
+/// (rolled back), <c>2</c> user cancelled (rolled back), <c>3</c> downgrade blocked
+/// (P3 — mirrors <see cref="InstallSession.DowngradeBlockedExitCode"/>).
 /// </summary>
 public enum InstallerOutcomeCode
 {
-    Completed     = 0,
-    Failed        = 1,
-    UserCancelled = 2,
+    Completed        = 0,
+    Failed           = 1,
+    UserCancelled    = 2,
+    DowngradeBlocked = 3,
 }
 
 /// <summary>A single line in the Installing / Failed screen log.</summary>
@@ -145,6 +147,59 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     /// <c>ExistingInstallDetected</c>. Idempotent; safe to call before the flow renders.
     /// </summary>
     public void SetExistingInstall(bool detected) => ExistingInstallDetected = detected;
+
+    // P3 (gap G3): the version-aware classification for this run + the installed
+    // version, wired by the host from the session. Drives the "Upgrading from x.y.z"
+    // notice and — for a blocked downgrade — the dedicated notice screen.
+    private UpgradeAction _upgradeAction = UpgradeAction.Fresh;
+    private string? _installedVersion;
+
+    /// <summary>
+    /// The upgrade banner shown on the ready / progress screens during an upgrade
+    /// (or a forced downgrade) — empty otherwise. Reads the prior version and the
+    /// incoming <see cref="BrandTokens.AppVersion"/>.
+    /// </summary>
+    public string UpgradeNotice => _upgradeAction switch
+    {
+        UpgradeAction.Upgrade =>
+            $"Upgrading {Brand.AppName} from {_installedVersion} to {Brand.AppVersion}.",
+        UpgradeAction.DowngradeForced =>
+            $"Replacing {Brand.AppName} {_installedVersion} with the older version {Brand.AppVersion}.",
+        _ => string.Empty,
+    };
+
+    /// <summary>True when <see cref="UpgradeNotice"/> is non-empty (drives its visibility).</summary>
+    public bool HasUpgradeNotice => UpgradeNotice.Length > 0;
+
+    /// <summary>
+    /// The message shown on the <see cref="InstallerStep.DowngradeBlocked"/> notice
+    /// screen (P3): a newer version is installed and setup will not replace it.
+    /// </summary>
+    public string DowngradeBlockedMessage =>
+        $"A newer version ({_installedVersion}) of {Brand.AppName} is already installed. " +
+        $"Setup will not replace it with the older version {Brand.AppVersion}. " +
+        "Close this window, then uninstall the current version first if you really want to downgrade.";
+
+    /// <summary>
+    /// Wire the version-aware state (P3). Called by the host from the session's
+    /// <see cref="InstallSession.UpgradeAction"/> / <see cref="InstallSession.InstalledVersion"/>.
+    /// A blocked downgrade routes straight to the notice screen and sets the dedicated
+    /// exit code; an upgrade only surfaces the "Upgrading from x.y.z" banner.
+    /// </summary>
+    public void SetUpgradeState(UpgradeAction action, string? installedVersion)
+    {
+        _upgradeAction = action;
+        _installedVersion = installedVersion;
+        OnPropertyChanged(nameof(UpgradeNotice));
+        OnPropertyChanged(nameof(HasUpgradeNotice));
+        OnPropertyChanged(nameof(DowngradeBlockedMessage));
+
+        if (action == UpgradeAction.DowngradeBlocked)
+        {
+            OutcomeCode = InstallerOutcomeCode.DowngradeBlocked;
+            CurrentStep = InstallerStep.DowngradeBlocked;
+        }
+    }
 
     /// <summary>The declared custom screen currently shown (T9), or null off a custom screen.</summary>
     private CustomScreenViewModel? _currentCustomScreen;
@@ -316,8 +371,8 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
         // Terminal step (Finish/Failed) not in the linear flow: leave the cursor.
     }
 
-    public bool CanGoBack => _step is not InstallerStep.Welcome and not InstallerStep.Installing and not InstallerStep.Finish and not InstallerStep.Failed;
-    public bool CanGoNext => _step is not InstallerStep.Installing and not InstallerStep.Finish and not InstallerStep.Failed;
+    public bool CanGoBack => _step is not InstallerStep.Welcome and not InstallerStep.Installing and not InstallerStep.Finish and not InstallerStep.Failed and not InstallerStep.DowngradeBlocked;
+    public bool CanGoNext => _step is not InstallerStep.Installing and not InstallerStep.Finish and not InstallerStep.Failed and not InstallerStep.DowngradeBlocked;
 
     /// <summary>False only on the Finish screen — install is already done, nothing to cancel.</summary>
     public bool CanCancel => _step is not InstallerStep.Finish;
@@ -1000,6 +1055,9 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
 
         if (_step == InstallerStep.Failed)
             return true;    // already failed + rolled back — close, keep exit code 1
+
+        if (_step == InstallerStep.DowngradeBlocked)
+            return true;    // P3 block — close, keep the downgrade-blocked exit code (3)
 
         if (_step == InstallerStep.Installing && _engineCts is not null)
         {

@@ -34,17 +34,27 @@ public sealed class InstallSession
     private readonly ParsedCommandLine _parsed;
     private readonly InstallScope _scope;
     private readonly WrapperMode _mode;
+    private readonly UpgradePlan _plan;
 
     // P7: the install log for this run, opened lazily the first time a run path
     // executes when /LOG (or /LOG=path) was supplied. Null when logging was not
     // requested or the target could not be created (best-effort).
     private InstallLog? _log;
 
-    private InstallSession(WrapperBlob blob, ParsedCommandLine parsed, InstallScope scope)
+    /// <summary>
+    /// The dedicated non-zero exit code returned by the silent path when a newer
+    /// version is already installed and <c>/force-downgrade</c> was not supplied
+    /// (P3, gap G3). Distinct from 1 (step failure), 2 (cancelled), and 64 (usage).
+    /// The wizard maps the same value onto <c>InstallerOutcomeCode.DowngradeBlocked</c>.
+    /// </summary>
+    public const int DowngradeBlockedExitCode = 3;
+
+    private InstallSession(WrapperBlob blob, ParsedCommandLine parsed, InstallScope scope, UpgradePlan plan)
     {
         _blob = blob;
         _parsed = parsed;
         _scope = scope;
+        _plan = plan;
         _mode = ResolveEffectiveMode(parsed.Mode);
     }
 
@@ -137,8 +147,45 @@ public sealed class InstallSession
         ArgumentNullException.ThrowIfNull(args);
         var blob = WrapperBlob.LoadFromSelf();
         var parsed = CommandLineParser.Parse(args, blob.Parameters);
-        var scope = ScopeResolver.Resolve(blob.Scope, parsed.Scope);
-        return new InstallSession(blob, parsed, scope);
+        return Build(blob, parsed, DefaultStateResolver);
+    }
+
+    // Registry-backed installed-state probe (P3). Off Windows there is no ARP, so the
+    // run is always fresh. The un-stamped Empty blob is short-circuited in Build.
+    private static UpgradeState DefaultStateResolver(string appId, InstallScope tentativeScope)
+        => OperatingSystem.IsWindows()
+            ? InstalledStateResolver.Resolve(appId, tentativeScope)
+            : UpgradeState.None;
+
+    /// <summary>
+    /// Resolve the effective scope + version-aware plan (P3) from the blob, parsed CLI,
+    /// and an installed-state probe, then construct the session. Shared by
+    /// <see cref="Create"/> (real registry probe) and the test seams (injected state).
+    /// </summary>
+    private static InstallSession Build(
+        WrapperBlob blob,
+        ParsedCommandLine parsed,
+        Func<string, InstallScope, UpgradeState> stateResolver)
+    {
+        var tentativeScope = ScopeResolver.Resolve(blob.Scope, parsed.Scope);
+        var state = ReferenceEquals(blob, WrapperBlob.Empty)
+            ? UpgradeState.None
+            : stateResolver(blob.AppId, tentativeScope);
+
+        // The existing install's scope wins over an AUTO-resolved scope (manifest
+        // `scope: auto`, no explicit /allusers|/currentuser) so an upgrade re-targets
+        // exactly what was installed. A fixed manifest scope or an explicit scope flag
+        // is authoritative and is never overridden here.
+        var effectiveScope = tentativeScope;
+        if (state.Found
+            && blob.Scope == InstallScope.Auto
+            && parsed.Scope == ScopeOverride.None)
+        {
+            effectiveScope = state.FoundScope;
+        }
+
+        var plan = UpgradePlanner.Decide(state, blob.Version, parsed.ForceDowngrade);
+        return new InstallSession(blob, parsed, effectiveScope, plan);
     }
 
     /// <summary>
@@ -152,8 +199,20 @@ public sealed class InstallSession
     {
         ArgumentNullException.ThrowIfNull(blob);
         ArgumentNullException.ThrowIfNull(parsed);
-        var scope = ScopeResolver.Resolve(blob.Scope, parsed.Scope);
-        return new InstallSession(blob, parsed, scope);
+        return Build(blob, parsed, static (_, _) => UpgradeState.None);
+    }
+
+    /// <summary>
+    /// Test seam for the P3 version-aware paths: build a session with an INJECTED
+    /// installed state (no real registry probe), so a test can drive the fresh /
+    /// same / upgrade / downgrade decision and its scope-wins effect deterministically.
+    /// </summary>
+    internal static InstallSession ForTesting(WrapperBlob blob, ParsedCommandLine parsed, UpgradeState installedState)
+    {
+        ArgumentNullException.ThrowIfNull(blob);
+        ArgumentNullException.ThrowIfNull(parsed);
+        ArgumentNullException.ThrowIfNull(installedState);
+        return Build(blob, parsed, (_, _) => installedState);
     }
 
     /// <summary>
@@ -241,6 +300,15 @@ public sealed class InstallSession
 
             case WrapperMode.Install:
             default:
+                // P3: refuse a downgrade to an older version when a newer one is
+                // installed and /force-downgrade was not supplied — dedicated exit code,
+                // nothing installed (the journal is never opened).
+                if (_plan.Action == UpgradeAction.DowngradeBlocked)
+                {
+                    error.WriteLine(DowngradeBlockedMessage());
+                    return DowngradeBlockedExitCode;
+                }
+
                 var progress = new WriterProgress(output);
                 try
                 {
@@ -313,7 +381,10 @@ public sealed class InstallSession
             appId: _blob.AppId,
             manifestInstallDir: _blob.InstallDir,
             cliOverride: _parsed.InstallDir,
-            collected: null);
+            collected: null,
+            // P3: an upgrade pre-fills the prior install dir so the Destination screen
+            // defaults to the existing location (preserving user data).
+            priorInstallDir: PriorInstallDirDefault);
 
     /// <summary>
     /// True when the effective scope is <see cref="InstallScope.Auto"/>-derived and
@@ -342,6 +413,49 @@ public sealed class InstallSession
             }
             return UninstallStateStore.TryLoad(_blob.AppId, _scope) is not null;
         }
+    }
+
+    /// <summary>
+    /// The version-aware classification for this run (P3, gap G3): fresh / same /
+    /// upgrade / downgrade-blocked / downgrade-forced, resolved once at session start
+    /// from the scope-correct ARP entry vs the packed version.
+    /// </summary>
+    public UpgradeAction UpgradeAction => _plan.Action;
+
+    /// <summary>
+    /// The version currently installed (the prior ARP <c>DisplayVersion</c>), or
+    /// <c>""</c> when this is a fresh install. Surfaced by the wizard as
+    /// "Upgrading from x.y.z" and in the downgrade-block notice / message.
+    /// </summary>
+    public string InstalledVersion => _plan.InstalledVersion;
+
+    /// <summary>
+    /// True when a newer version is installed and <c>/force-downgrade</c> was not
+    /// supplied — the install is refused (silent: <see cref="DowngradeBlockedExitCode"/>;
+    /// wizard: notice screen).
+    /// </summary>
+    public bool IsDowngradeBlocked => _plan.Action == UpgradeAction.DowngradeBlocked;
+
+    /// <summary>
+    /// The prior install directory to honor as the default destination during an
+    /// upgrade / forced downgrade (P3) — the install lands in the existing location so
+    /// non-journaled user data is preserved. <c>null</c> for fresh / same installs,
+    /// and for a cross-scope re-install (the prior dir belongs to the OTHER scope, so
+    /// the new scope's own default is used instead), where the normal T13 precedence applies.
+    /// </summary>
+    private string? PriorInstallDirDefault =>
+        _plan.RemovesPriorVersion
+        && _plan.FoundScope == _scope       // same-scope upgrade only; a scope change uses the new scope's default
+        && !string.IsNullOrEmpty(_plan.PriorInstallDir)
+            ? _plan.PriorInstallDir
+            : null;
+
+    private string DowngradeBlockedMessage()
+    {
+        var name = string.IsNullOrWhiteSpace(_blob.DisplayName) ? _blob.AppId : _blob.DisplayName;
+        var target = string.IsNullOrWhiteSpace(_blob.Version) ? "this version" : _blob.Version!;
+        return $"A newer version ({_plan.InstalledVersion}) of {name} is already installed. " +
+               $"Installing the older version {target} is blocked. Pass /force-downgrade to override.";
     }
 
     public Task<InstallOutcome> RunInstallAsync(IProgress<StepProgress>? progress, CancellationToken ct = default)
@@ -412,13 +526,34 @@ public sealed class InstallSession
         // opened it already; the GUI path opens it here).
         EnsureLog();
 
-        // T10 re-install / upgrade idempotency: if a prior install of this AppId is
-        // already recorded (in the resolved scope), replay its recorded uninstall
-        // BEFORE the fresh install. This reverses the earlier PATH append, shortcut,
-        // and ARP row so the reinstall re-lays each exactly once — no duplication —
-        // and applies uniformly to both the /silent and wizard paths (v1:
-        // uninstall-then-install, per T10). No-op when no prior install exists.
-        await PerformReinstallCleanupAsync(ct).ConfigureAwait(false);
+        // P3 downgrade guard (defense-in-depth): the headless path already exits with
+        // DowngradeBlockedExitCode and the wizard routes to a notice screen instead of
+        // calling this — but never run a blocked downgrade if something reaches here.
+        if (_plan.Action == UpgradeAction.DowngradeBlocked)
+        {
+            return new InstallOutcome(false, DowngradeBlockedMessage());
+        }
+
+        // P3 version-aware pre-body phase (gap G3). For an UPGRADE (older installed) or a
+        // FORCED DOWNGRADE (newer installed + /force-downgrade), remove the prior version
+        // by running ITS uninstall.exe /S /Uninstall and require exit 0 — BEFORE opening
+        // the rollback journal or extracting the payload, so a failure here leaves NO
+        // partial install. Otherwise fall through to the T10 re-install cleanup: a no-op
+        // for a fresh install, and the unchanged uninstall-then-install repair path for
+        // the SAME version (replays the recorded uninstall so the reinstall re-lays each
+        // mutation exactly once — no duplicate PATH entries, shortcuts, or ARP rows).
+        if (_plan.RemovesPriorVersion)
+        {
+            var pre = await RunPriorUninstallAsync(progress, ct).ConfigureAwait(false);
+            if (!pre.Success)
+            {
+                return pre; // clear failure; journal never opened, no partial install.
+            }
+        }
+        else
+        {
+            await PerformReinstallCleanupAsync(ct).ConfigureAwait(false);
+        }
 
         PayloadExtraction? payload = null;
         try
@@ -431,7 +566,9 @@ public sealed class InstallSession
             }
 
             var ctx = StepContext.From(
-                _blob, _parsed, payloadRoot, _collectedValues, _scope, _collectedOptions, CollectedInstallDir);
+                _blob, _parsed, payloadRoot, _collectedValues, _scope, _collectedOptions, CollectedInstallDir,
+                // P3: an upgrade installs into the prior location (default destination).
+                priorInstallDir: PriorInstallDirDefault);
 
             // P7: hand the run's secrets to the log for redaction, and tee the
             // engine's progress (step + rollback lines) into the /LOG file.
@@ -525,6 +662,79 @@ public sealed class InstallSession
     }
 
     /// <summary>
+    /// P3 upgrade / forced-downgrade pre-body phase: run the PRIOR version's own
+    /// <c>uninstall.exe /S /Uninstall &lt;scope&gt;</c> and require exit code 0. The prior
+    /// uninstaller (not this build's <see cref="UninstallEngine"/>) is used because it owns
+    /// the prior version's rollback journal and knows how to reverse it. Runs before the
+    /// journal is opened or the payload extracted, so any failure — a missing uninstaller,
+    /// a spawn error, or a non-zero exit — aborts the run with NO partial install. Non-journaled
+    /// user data is untouched (uninstall only reverses what the prior install journaled).
+    /// Cancellation propagates as <see cref="OperationCanceledException"/>.
+    /// </summary>
+    private async Task<InstallOutcome> RunPriorUninstallAsync(IProgress<StepProgress>? progress, CancellationToken ct)
+    {
+        var exe = _plan.PriorUninstallExe;
+        var verb = _plan.Action == UpgradeAction.DowngradeForced ? "Removing newer version" : "Removing previous version";
+        // (0, 1) keeps the wizard progress bar at 0 (Total 0 would read as 1.0/complete)
+        // while the message shows; the real install's engine progress supersedes it.
+        progress?.Report(new StepProgress(0, 1, $"{verb} {_plan.InstalledVersion}…", false));
+
+        if (string.IsNullOrEmpty(exe) || !File.Exists(exe))
+        {
+            return new InstallOutcome(
+                false,
+                $"cannot upgrade: the previous version's uninstaller was not found at '{exe}'. No changes were made.");
+        }
+
+        // Remove the prior version in ITS OWN scope (where it physically lives), which
+        // can differ from the new effective scope on a cross-scope re-install (e.g.
+        // /allusers over a per-user install). Keying the flag off _scope would tell the
+        // per-user uninstaller to look in the machine hive and fail.
+        var scopeFlag = _plan.FoundScope == InstallScope.Machine ? "/allusers" : "/currentuser";
+        int exitCode;
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = exe,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            psi.ArgumentList.Add("/S");
+            psi.ArgumentList.Add("/Uninstall");
+            psi.ArgumentList.Add(scopeFlag);
+
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc is null)
+            {
+                return new InstallOutcome(
+                    false,
+                    $"cannot upgrade: could not start the previous version's uninstaller '{exe}'. No changes were made.");
+            }
+
+            await proc.WaitForExitAsync(ct).ConfigureAwait(false);
+            exitCode = proc.ExitCode;
+        }
+#pragma warning disable CA1031 // Surface any spawn/wait failure as a typed outcome; the install has not started.
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return new InstallOutcome(
+                false,
+                $"cannot upgrade: removing the previous version failed to run ({ex.Message}). No changes were made.");
+        }
+#pragma warning restore CA1031
+
+        if (exitCode != 0)
+        {
+            return new InstallOutcome(
+                false,
+                $"cannot upgrade: removing the previous version failed (uninstaller exit code {exitCode}). No changes were made.");
+        }
+
+        return new InstallOutcome(true, null);
+    }
+
+    /// <summary>
     /// Shared install-completion helper: on a successful install, snapshot the
     /// rollback journal to the state store and register the ARP entry so the
     /// app appears in Add/Remove Programs. Used by both the console and GUI
@@ -596,7 +806,9 @@ public sealed class InstallSession
             DisplayVersion: string.IsNullOrWhiteSpace(_blob.Version) ? "0.0.0" : _blob.Version,
             Publisher: string.IsNullOrWhiteSpace(_blob.Publisher) ? "Unknown" : _blob.Publisher,
             UninstallString: ArpRegistration.BuildUninstallString(uninstallerPath, _scope),
-            EstimatedSizeBytes: _blob.EstimatedSizeBytes),
+            EstimatedSizeBytes: _blob.EstimatedSizeBytes,
+            // P3: write InstallLocation so a later upgrade can recover the install dir.
+            InstallLocation: uninstallDir),
             _scope);
     }
 

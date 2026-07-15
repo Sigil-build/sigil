@@ -36,7 +36,8 @@ internal static class Functions
                 || (a[0] is string s && s.Length == 0)
                 || (a[0] is ICollection col && col.Count == 0),
 
-            ["version_gte"] = a => CompareVersion(ToStringOrNull(a[0]), ToStringOrNull(a[1])) >= 0,
+            ["version_gte"] = a => SigilBuild.Wrapper.Engine.VersionComparison
+                .Compare(ToStringOrNull(a[0]), ToStringOrNull(a[1])) >= 0,
 
             ["os_version"] = _ => Environment.OSVersion.Version.ToString(),
 
@@ -132,14 +133,4 @@ internal static class Functions
 
     private static string? ToStringOrNull(object? value) =>
         value is null ? null : Convert.ToString(value, CultureInfo.InvariantCulture);
-
-    private static int CompareVersion(string? a, string? b)
-    {
-        if (Version.TryParse(a, out var va) && Version.TryParse(b, out var vb))
-        {
-            return va.CompareTo(vb);
-        }
-
-        return string.CompareOrdinal(a, b);
-    }
 }

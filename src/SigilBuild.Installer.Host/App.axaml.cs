@@ -75,11 +75,18 @@ public partial class App : Application
                 // imply acceptance.
                 _vm.LoadLicense(InstallerLicenseLoader.LoadFromSelf());
 
-                // T10: surface the reinstall notice when a prior install of this app
-                // is already recorded in the resolved scope. The engine performs the
-                // v1 uninstall-then-install itself (idempotent); the wizard only tells
-                // the user what continuing will do.
-                _vm.SetExistingInstall(session.ExistingInstallDetected);
+                // T10: surface the reinstall notice when the SAME version is already
+                // installed (the engine performs uninstall-then-install itself). An
+                // upgrade / downgrade is a P3 case handled by SetUpgradeState below, so
+                // the plain reinstall notice is suppressed for those.
+                _vm.SetExistingInstall(
+                    session.ExistingInstallDetected && session.UpgradeAction == UpgradeAction.Same);
+
+                // P3 (gap G3): tell the wizard whether this run is an upgrade — show the
+                // "Upgrading from x.y.z" banner — or a blocked downgrade, which routes
+                // straight to the notice screen with the dedicated exit code. The prior
+                // install dir is already honored by ResolveDefaultInstallDir below.
+                _vm.SetUpgradeState(session.UpgradeAction, session.InstalledVersion);
 
                 // T13: seed the Destination screen from the session — the scope-aware
                 // default install dir (honoring /D= + the manifest install_dir), and

@@ -591,7 +591,7 @@ git commit -m "feat(p9): emit Lang enum + Strings accessors with per-language co
 **Interfaces:**
 - Produces: `CatalogValidator.Validate(IReadOnlyList<CatalogFile>) -> IReadOnlyList<CatalogProblem>`, where `CatalogProblem` has `string Id`, `string Message`, `string File`, `int Line`.
 
-Per spec §3.3:
+Per spec §3.3, extended by the Task 2 review (see below):
 
 | Id | Condition | Severity |
 |---|---|---|
@@ -600,6 +600,56 @@ Per spec §3.3:
 | `SIGLOC003` | Placeholder **set** differs between `en` and a translation | Error |
 | `SIGLOC004` | Duplicate key within one file | Error |
 | `SIGLOC005` | Malformed line | Error |
+| `SIGLOC006` | Two distinct keys collide on one generated method name | Error |
+| `SIGLOC007` | A placeholder is named for a C# keyword | Error |
+
+#### Emission suppression — the condition the Task 2 review attached
+
+**If any `Error`-severity problem is found, report the diagnostics and emit
+NOTHING** (skip `AddSource`, or emit an empty compilation unit).
+
+This is not cosmetic. Every Error above corresponds to generated code that
+would *also* fail to compile with an opaque error pointing at generated source:
+`SIGLOC004`/`SIGLOC006` → `CS0111` (duplicate member), `SIGLOC007` → `CS1041`
+(identifier expected, keyword given). If the generator reports the useful
+diagnostic *and then emits anyway*, the author sees both — and the opaque one
+is louder. Suppressing emission means the catalog diagnostic is the only thing
+they read.
+
+`SIGLOC002` is a Warning and must **not** suppress emission: a partial
+translation is legal and falls back to English by design.
+
+#### SIGLOC006 — why it exists
+
+`MethodName` splits keys on `.` **and** `_`, so `location.error.notAbsolute`
+and `location.error.not_absolute` both produce `LocationErrorNotAbsolute`. The
+emitter (Task 2) blindly writes both methods; nothing catches it. The emitter
+cannot own this check — it returns a `string` and has no diagnostic sink, so it
+could only throw (crashing the compiler) or silently dedupe (hiding an
+authoring error). It belongs here.
+
+Detect the collision on the **generated method name**, not on the key: that is
+the property that actually breaks.
+
+#### The `eq < 0` decision Task 1 deferred to you
+
+`CatalogParser`'s `key.Length == 0` / `"key is empty"` branch is currently
+**unreachable**. The guard `eq <= 0` conflates two cases: `eq == -1` (no `=` at
+all) and `eq == 0` (`=` at position 0 — an empty key). The line-level `Trim()`
+means `" = value"` becomes `"= value"`, so `eq == 0` and the empty-key branch
+never fires.
+
+The code is not dead; its guard is over-broad by one value. You own `SIGLOC005`'s
+message semantics, so you decide:
+
+- **Narrow to `eq < 0`** — the branch becomes reachable and `" = value"` gets the
+  better message (`"key is empty"` rather than `"expected 'key = value', got
+  '= value'"`). Preferred, unless you find a reason against it.
+- **Or delete the branch** if you judge one message sufficient.
+
+Either way, the existing test `Parse_RecordsMalformed_ForLineStartingWithEquals`
+pins today's behavior and must be updated to match your decision. State which
+you chose and why in your report.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -668,8 +718,44 @@ public class CatalogDiagnosticsTests
     {
         Validate("a = A\nb = B {x}\n", "a = А\nb = Б {x}\n").Should().BeEmpty();
     }
+
+    // SIGLOC006 — MethodName splits on '.' AND '_', so these two distinct keys
+    // both become LocationErrorNotAbsolute. The emitter would write two
+    // identical signatures -> CS0111 pointing at generated source.
+    [Fact]
+    public void KeysCollidingOnMethodName_IsError006()
+    {
+        Validate(
+            "location.error.notAbsolute = A\nlocation.error.not_absolute = B\n",
+            "location.error.notAbsolute = А\nlocation.error.not_absolute = Б\n")
+            .Should().Contain("SIGLOC006");
+    }
+
+    [Fact]
+    public void DistinctMethodNames_AreNotACollision()
+    {
+        Validate("nav.back = Back\nnav.next = Next\n", "nav.back = Назад\nnav.next = Далі\n")
+            .Should().NotContain("SIGLOC006");
+    }
+
+    // SIGLOC007 — {class} passes the placeholder regex but emits `string class` -> CS1041.
+    [Fact]
+    public void PlaceholderNamedForCSharpKeyword_IsError007()
+    {
+        Validate("x = a {class} b\n", "x = а {class} б\n").Should().Contain("SIGLOC007");
+    }
+
+    [Fact]
+    public void PlaceholderNamedLikeAKeywordButNotOne_IsFine()
+    {
+        Validate("x = a {className} b\n", "x = а {className} б\n").Should().NotContain("SIGLOC007");
+    }
 }
 ```
+
+For `SIGLOC007`, use Roslyn's own keyword table rather than hand-listing:
+`Microsoft.CodeAnalysis.CSharp.SyntaxFacts.GetKeywordKind(name) != SyntaxKind.None`
+(and consider `GetContextualKeywordKind`). Hand-maintained keyword lists rot.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -787,6 +873,8 @@ internal static class CatalogValidator
     public static readonly DiagnosticDescriptor Placeholders = Descriptor("SIGLOC003", DiagnosticSeverity.Error);
     public static readonly DiagnosticDescriptor Duplicate = Descriptor("SIGLOC004", DiagnosticSeverity.Error);
     public static readonly DiagnosticDescriptor Malformed = Descriptor("SIGLOC005", DiagnosticSeverity.Error);
+    public static readonly DiagnosticDescriptor Collision = Descriptor("SIGLOC006", DiagnosticSeverity.Error);
+    public static readonly DiagnosticDescriptor KeywordPlaceholder = Descriptor("SIGLOC007", DiagnosticSeverity.Error);
 
     public static DiagnosticDescriptor For(string id) => id switch
     {
@@ -794,7 +882,10 @@ internal static class CatalogValidator
         "SIGLOC002" => Missing,
         "SIGLOC003" => Placeholders,
         "SIGLOC004" => Duplicate,
-        _ => Malformed,
+        "SIGLOC005" => Malformed,
+        "SIGLOC006" => Collision,
+        "SIGLOC007" => KeywordPlaceholder,
+        _ => throw new System.ArgumentOutOfRangeException(nameof(id), id, "unknown catalog diagnostic id"),
     };
 
     private static DiagnosticDescriptor Descriptor(string id, DiagnosticSeverity severity) =>
@@ -844,12 +935,29 @@ public sealed class StringsGenerator : IIncrementalGenerator
                 .OrderBy(f => f.Lang, System.StringComparer.Ordinal)
                 .ToList();
 
-            foreach (var problem in CatalogValidator.Validate(files))
+            var problems = CatalogValidator.Validate(files);
+            var hasError = false;
+
+            foreach (var problem in problems)
             {
+                var descriptor = CatalogValidator.For(problem.Id);
+                hasError |= descriptor.DefaultSeverity == DiagnosticSeverity.Error;
+
                 spc.ReportDiagnostic(Diagnostic.Create(
-                    CatalogValidator.For(problem.Id),
+                    descriptor,
                     Location.None,
                     $"{problem.File}({problem.Line}): {problem.Message}"));
+            }
+
+            // Emission is SUPPRESSED on any Error. Every Error-severity problem
+            // corresponds to generated code that would also fail to compile with an
+            // opaque error pointing at generated source (SIGLOC004/006 -> CS0111,
+            // SIGLOC007 -> CS1041). Emitting anyway would show the author both, and
+            // the opaque one is louder. Warnings (SIGLOC002 — a partial translation,
+            // which is legal) must NOT suppress emission.
+            if (hasError)
+            {
+                return;
             }
 
             spc.AddSource("Strings.g.cs", SourceText.From(StringsEmitter.Emit(files), System.Text.Encoding.UTF8));

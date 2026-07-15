@@ -186,6 +186,9 @@ public sealed class InstallEngine
             : $"env {es.Name}={es.Value}",
         InstallStep.RunProgram rp => $"run {rp.Program}",
         InstallStep.HttpDownload hd => $"download {hd.Url} → {hd.Dest}",
+        InstallStep.IniWrite iw => $"ini {iw.Path} [{iw.Section}] {iw.Key}",
+        InstallStep.JsonEdit je => $"json {je.Path} {je.JsonPointer}",
+        InstallStep.XmlEdit xe => $"xml {xe.Path} {xe.Xpath}",
         _ => spec.Id,
     };
 

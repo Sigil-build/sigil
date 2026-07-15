@@ -133,6 +133,53 @@ public abstract record InstallStep(string Id, string? When, OnFailure OnFailure)
         : InstallStep(Id, When, OnFailure);
 
     /// <summary>
+    /// Config-file edit (P8, gap G9): set <see cref="Key"/> under <see cref="Section"/>
+    /// in an INI file, preserving all unrelated lines. Journaled — the whole prior
+    /// file (or its absence) is snapshotted for byte-exact rollback.
+    /// </summary>
+    public sealed record IniWrite(
+        string Id,
+        string Path,
+        string Section,
+        string Key,
+        string Value,
+        bool CreateIfMissing,
+        string? When,
+        OnFailure OnFailure)
+        : InstallStep(Id, When, OnFailure);
+
+    /// <summary>
+    /// Config-file edit (P8, gap G9): set the value at an RFC 6901 JSON
+    /// <see cref="JsonPointer"/> in a JSON file (System.Text.Json DOM), creating
+    /// intermediate objects as needed. Journaled for byte-exact rollback.
+    /// </summary>
+    public sealed record JsonEdit(
+        string Id,
+        string Path,
+        string JsonPointer,
+        string Value,
+        bool CreateIfMissing,
+        string? When,
+        OnFailure OnFailure)
+        : InstallStep(Id, When, OnFailure);
+
+    /// <summary>
+    /// Config-file edit (P8, gap G9): set the node (or <see cref="Attribute"/>)
+    /// selected by <see cref="Xpath"/> in an XML file. A simple absolute element
+    /// path is created when missing. Journaled for byte-exact rollback.
+    /// </summary>
+    public sealed record XmlEdit(
+        string Id,
+        string Path,
+        string Xpath,
+        string? Attribute,
+        string Value,
+        bool CreateIfMissing,
+        string? When,
+        OnFailure OnFailure)
+        : InstallStep(Id, When, OnFailure);
+
+    /// <summary>
     /// SHOULD-tier (post-MVP per the action catalog, promoted MUST-tier when
     /// the wrapper grew real installer support): create a Windows service
     /// pointing at <see cref="BinaryPath"/>. Unlike a <c>run_program sc.exe

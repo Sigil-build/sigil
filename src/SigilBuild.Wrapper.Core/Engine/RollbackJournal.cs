@@ -53,6 +53,11 @@ public sealed class RollbackJournal
                 case RollbackRecord.RestoreDeletedDirectory d:
                     TryDeleteDirectory(d.StashPath);
                     break;
+                case RollbackRecord.RestoreConfigFile { StashPath: { } cfgStash }:
+                    // P8: the prior-content stash of an ini/json/xml edit — reclaim
+                    // it on the success path (a config edit isn't reversed on uninstall).
+                    TryDeleteFile(cfgStash);
+                    break;
                 default:
                     break;
             }
@@ -131,6 +136,7 @@ public sealed class RollbackJournal
             : $"env - {r.Name}",
         RollbackRecord.RestoreDeletedFile r => $"restore {r.OriginalPath}",
         RollbackRecord.RestoreDeletedDirectory r => $"restore {r.OriginalPath}",
+        RollbackRecord.RestoreConfigFile r => $"restore {r.OriginalPath}",
         RollbackRecord.RemoveUninstaller r => $"delete {r.Path}",
         _ => "revert",
     };
@@ -428,6 +434,45 @@ public abstract record RollbackRecord
                 System.IO.Directory.CreateDirectory(destSub);
                 CopyDirectoryRecursive(dir, destSub);
             }
+        }
+    }
+
+    /// <summary>
+    /// Restores a config file (P8 <c>ini_write</c> / <c>json_edit</c> /
+    /// <c>xml_edit</c>) to its exact pre-edit state on a mid-install rollback. When
+    /// the file existed before the edit, its whole content was stashed to
+    /// <paramref name="StashPath"/> and rollback copies it back byte-for-byte; when
+    /// the file did NOT exist (a <c>create_if_missing</c> edit), <paramref name="StashPath"/>
+    /// is <c>null</c> and rollback deletes the file the edit created. The stash is
+    /// reclaimed by <see cref="DiscardTransientStashes"/> on a successful install,
+    /// so a committed config edit is not reverted at uninstall time.
+    /// </summary>
+    public sealed record RestoreConfigFile(string OriginalPath, string? StashPath) : RollbackRecord
+    {
+        public override System.Threading.Tasks.Task UndoAsync(System.Threading.CancellationToken ct)
+        {
+            if (StashPath is not null && System.IO.File.Exists(StashPath))
+            {
+                var dir = System.IO.Path.GetDirectoryName(OriginalPath);
+                if (!string.IsNullOrEmpty(dir))
+                {
+                    System.IO.Directory.CreateDirectory(dir);
+                }
+                System.IO.File.Copy(StashPath, OriginalPath, overwrite: true);
+#pragma warning disable CA1031 // Best-effort stash cleanup; a leftover temp file is harmless.
+                try { System.IO.File.Delete(StashPath); }
+                catch { /* best-effort */ }
+#pragma warning restore CA1031
+            }
+            else if (StashPath is null && System.IO.File.Exists(OriginalPath))
+            {
+                // The edit created this file; undo removes it.
+#pragma warning disable CA1031 // Best-effort undo; a leftover created file is preferable to a crash.
+                try { System.IO.File.Delete(OriginalPath); }
+                catch { /* best-effort */ }
+#pragma warning restore CA1031
+            }
+            return System.Threading.Tasks.Task.CompletedTask;
         }
     }
 

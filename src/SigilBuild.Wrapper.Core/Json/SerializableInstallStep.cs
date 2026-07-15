@@ -97,6 +97,17 @@ internal sealed record SerializableInstallStep
     public string? Sha256 { get; init; }
     public int? HttpRetries { get; init; }
 
+    // ini_write / json_edit / xml_edit (P8). Path (above) is shared.
+    public bool? CreateIfMissing { get; init; }
+    public string? Section { get; init; }
+    public string? IniKey { get; init; }
+    public string? IniValue { get; init; }
+    public string? Pointer { get; init; }
+    public string? JsonEditValue { get; init; }
+    public string? Xpath { get; init; }
+    public string? Attribute { get; init; }
+    public string? XmlValue { get; init; }
+
     // service_install
     public string? ServiceName { get; init; }
     public string? BinaryPath { get; init; }
@@ -217,6 +228,35 @@ internal static class SerializableInstallStepConverter
                 s.Sha256 ?? throw MissingField("http_download", "sha256", s.Id),
                 s.TimeoutSeconds,
                 s.HttpRetries,
+                s.When,
+                onFailure),
+
+            "ini_write" => new InstallStep.IniWrite(
+                s.Id,
+                s.Path ?? throw MissingField("ini_write", "path", s.Id),
+                s.Section ?? string.Empty,
+                s.IniKey ?? throw MissingField("ini_write", "key", s.Id),
+                s.IniValue ?? string.Empty,
+                s.CreateIfMissing ?? false,
+                s.When,
+                onFailure),
+
+            "json_edit" => new InstallStep.JsonEdit(
+                s.Id,
+                s.Path ?? throw MissingField("json_edit", "path", s.Id),
+                s.Pointer ?? throw MissingField("json_edit", "pointer", s.Id),
+                s.JsonEditValue ?? string.Empty,
+                s.CreateIfMissing ?? false,
+                s.When,
+                onFailure),
+
+            "xml_edit" => new InstallStep.XmlEdit(
+                s.Id,
+                s.Path ?? throw MissingField("xml_edit", "path", s.Id),
+                s.Xpath ?? throw MissingField("xml_edit", "xpath", s.Id),
+                s.Attribute,
+                s.XmlValue ?? string.Empty,
+                s.CreateIfMissing ?? false,
                 s.When,
                 onFailure),
 
@@ -375,6 +415,44 @@ internal static class SerializableInstallStepConverter
                 Sha256 = x.Sha256,
                 TimeoutSeconds = x.TimeoutSeconds,
                 HttpRetries = x.Retries,
+            },
+
+            InstallStep.IniWrite x => new SerializableInstallStep
+            {
+                Id = x.Id,
+                Type = "ini_write",
+                When = x.When,
+                OnFailure = onFailure,
+                Path = x.Path,
+                Section = x.Section,
+                IniKey = x.Key,
+                IniValue = x.Value,
+                CreateIfMissing = x.CreateIfMissing,
+            },
+
+            InstallStep.JsonEdit x => new SerializableInstallStep
+            {
+                Id = x.Id,
+                Type = "json_edit",
+                When = x.When,
+                OnFailure = onFailure,
+                Path = x.Path,
+                Pointer = x.JsonPointer,
+                JsonEditValue = x.Value,
+                CreateIfMissing = x.CreateIfMissing,
+            },
+
+            InstallStep.XmlEdit x => new SerializableInstallStep
+            {
+                Id = x.Id,
+                Type = "xml_edit",
+                When = x.When,
+                OnFailure = onFailure,
+                Path = x.Path,
+                Xpath = x.Xpath,
+                Attribute = x.Attribute,
+                XmlValue = x.Value,
+                CreateIfMissing = x.CreateIfMissing,
             },
 
             InstallStep.ServiceInstall x => new SerializableInstallStep

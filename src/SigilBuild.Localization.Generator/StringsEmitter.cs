@@ -123,7 +123,7 @@ internal static class StringsEmitter
                 if (close > i)
                 {
                     var name = value.Substring(i + 1, close - i - 1);
-                    if (name.Length > 0 && (char.IsLetter(name[0]) || name[0] == '_'))
+                    if (CatalogParser.IsPlaceholderName(name))
                     {
                         if (literal.Length > 0)
                         {
@@ -157,6 +157,7 @@ internal static class StringsEmitter
     {
         if (s.Length == 0) return s;
         var cleaned = s.Replace("-", string.Empty);
+        if (cleaned.Length == 0) return string.Empty;
         return char.ToUpper(cleaned[0], CultureInfo.InvariantCulture) + cleaned.Substring(1);
     }
 }

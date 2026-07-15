@@ -23,7 +23,15 @@ internal sealed class CatalogFile
 internal static class CatalogParser
 {
     private static readonly Regex PlaceholderPattern = new(@"\{([A-Za-z][A-Za-z0-9]*)\}", RegexOptions.Compiled);
+    private static readonly Regex PlaceholderNamePattern = new(@"^[A-Za-z][A-Za-z0-9]*$", RegexOptions.Compiled);
     private static readonly Regex FileNamePattern = new(@"^Strings\.([A-Za-z0-9-]+)\.txt$", RegexOptions.Compiled);
+
+    /// <summary>
+    /// The single definition of "is this a placeholder name". StringsEmitter must use this
+    /// (not its own copy) so that a <c>{...}</c> span the parser did not register as a
+    /// placeholder is never emitted as a bare identifier — that's a straight CS0103.
+    /// </summary>
+    public static bool IsPlaceholderName(string name) => PlaceholderNamePattern.IsMatch(name);
 
     public static CatalogFile Parse(string fileName, string text)
     {

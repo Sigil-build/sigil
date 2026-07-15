@@ -18,6 +18,13 @@ public static partial class Program
             return 0;
         }
 
+        if (args.Length == 1 && (args[0] == "/?" || args[0].Equals("/help", StringComparison.OrdinalIgnoreCase)))
+        {
+            AttachParentConsole();
+            Console.WriteLine(HelpText.Render());
+            return 0;
+        }
+
         // The one CommandLineParser + WrapperBlob load, shared with the console
         // wrapper. A usage/validation error (bad flag, undeclared parameter, or a
         // required parameter missing in silent mode) exits 64.

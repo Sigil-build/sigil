@@ -15,6 +15,12 @@ internal static class Program
             return 0;
         }
 
+        if (args.Length == 1 && (args[0] == "/?" || args[0].Equals("/help", StringComparison.OrdinalIgnoreCase)))
+        {
+            Console.WriteLine(HelpText.Render());
+            return 0;
+        }
+
         try
         {
             // The console shell is always headless; the Avalonia host shares the

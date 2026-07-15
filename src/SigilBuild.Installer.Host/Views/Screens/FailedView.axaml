@@ -7,6 +7,10 @@
     <TextBlock FontSize="20" FontWeight="SemiBold" Text="Installation failed" />
     <TextBlock Text="Setup could not complete. No changes were kept." Foreground="#4B5563" />
     <TextBlock Text="{Binding ErrorMessage}" Foreground="#B42318" TextWrapping="Wrap" />
+    <Button Content="Open log"
+            IsVisible="{Binding HasLog}"
+            Click="OnOpenLogClick"
+            HorizontalAlignment="Left" />
     <Border Background="#F9FAFB" BorderBrush="#E5E7EB" BorderThickness="1" CornerRadius="8"
             Height="160" Padding="12,8">
       <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">

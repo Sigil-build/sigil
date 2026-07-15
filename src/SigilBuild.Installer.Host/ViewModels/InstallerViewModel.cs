@@ -573,6 +573,56 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
         private set { _errorMessage = value; OnPropertyChanged(); }
     }
 
+    private string? _logFilePath;
+
+    /// <summary>
+    /// The <c>/LOG</c> file path for this run (P7), or null when logging was not
+    /// requested. Wired by the host from <see cref="InstallSession.LogFilePath"/>.
+    /// Drives the Failed screen's "Open log" affordance.
+    /// </summary>
+    public string? LogFilePath
+    {
+        get => _logFilePath;
+        set
+        {
+            if (_logFilePath != value)
+            {
+                _logFilePath = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(HasLog));
+            }
+        }
+    }
+
+    /// <summary>True when a log file was requested and exists on disk — gates the "Open log" button.</summary>
+    public bool HasLog => !string.IsNullOrEmpty(_logFilePath) && System.IO.File.Exists(_logFilePath);
+
+    /// <summary>
+    /// Open the install log in the OS default handler (P7). Best-effort: a failure
+    /// to launch the viewer must never crash the wizard. No-op when no log exists.
+    /// </summary>
+    public void OpenLog()
+    {
+        var path = _logFilePath;
+        if (string.IsNullOrEmpty(path) || !System.IO.File.Exists(path))
+        {
+            return;
+        }
+#pragma warning disable CA1031 // Best-effort shell-open; a failed launch must not crash the wizard.
+        try
+        {
+            using var _ = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path)
+            {
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception)
+        {
+            // swallow — opening the log is a convenience.
+        }
+#pragma warning restore CA1031
+    }
+
     /// <summary>
     /// Wire the real install driver (an <see cref="InstallSession"/>-backed
     /// delegate). When set, entering the Installing screen kicks off the engine.

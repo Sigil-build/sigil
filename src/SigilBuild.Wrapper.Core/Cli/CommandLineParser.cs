@@ -96,6 +96,20 @@ public sealed class ParsedCommandLine
     public IReadOnlyList<string> SecretKeys { get; init; } = Array.Empty<string>();
 
     /// <summary>
+    /// True when <c>/LOG</c> or <c>/LOG=path</c> was supplied — the run writes a
+    /// timestamped install log (P7). Applies to install, uninstall, and update
+    /// modes alike (the ARP <c>UninstallString</c> can carry <c>/LOG</c> too).
+    /// </summary>
+    public bool LogRequested { get; init; }
+
+    /// <summary>
+    /// Explicit log path from <c>/LOG=path</c>. <c>null</c> for bare <c>/LOG</c>
+    /// (the session then defaults to <c>%TEMP%\sigil-&lt;appid&gt;.log</c>) or when
+    /// logging was not requested.
+    /// </summary>
+    public string? LogPath { get; init; }
+
+    /// <summary>
     /// Re-renders the parsed args as a single space-joined string, with secret
     /// parameter values replaced by <c>***</c>. Suitable for logging without
     /// leaking license keys / passwords / tokens.
@@ -159,6 +173,17 @@ public sealed class ParsedCommandLine
             sb.Append(InstallDir);
         }
 
+        if (LogRequested)
+        {
+            Space();
+            sb.Append("/LOG");
+            if (LogPath is not null)
+            {
+                sb.Append('=');
+                sb.Append(LogPath);
+            }
+        }
+
         foreach (var kv in Values)
         {
             Space();
@@ -195,6 +220,8 @@ public sealed class ParsedCommandLine
 ///   <item><description><c>/Uninstall</c> — run the auto-derived uninstall sequence.</description></item>
 ///   <item><description><c>/allusers</c> / <c>/currentuser</c> — scope override (stored only; Task T12).</description></item>
 ///   <item><description><c>/D=path</c> — install-dir override (stored only; Task T13).</description></item>
+///   <item><description><c>/LOG</c> — write a timestamped install log to
+///   <c>%TEMP%\sigil-&lt;appid&gt;.log</c>; <c>/LOG=path</c> — write it to <c>path</c> (P7).</description></item>
 ///   <item><description><c>/P&lt;Name&gt;=&lt;Value&gt;</c> — override a declared parameter or a built-in option.</description></item>
 /// </list>
 /// Anything else is a <see cref="UsageException"/> — the parser is intentionally
@@ -247,6 +274,8 @@ public static class CommandLineParser
         var verySilent = false;
         var scope = ScopeOverride.None;
         string? installDir = null;
+        var logRequested = false;
+        string? logPath = null;
 
         foreach (var rawArg in args)
         {
@@ -258,7 +287,7 @@ public static class CommandLineParser
             if (rawArg[0] != '/')
             {
                 throw new UsageException(
-                    $"unexpected positional argument '{rawArg}': only /silent, /S, /verysilent, /Update, /Uninstall, /allusers, /currentuser, /D=path, and /PName=Value are accepted");
+                    $"unexpected positional argument '{rawArg}': only /silent, /S, /verysilent, /Update, /Uninstall, /allusers, /currentuser, /D=path, /LOG[=path], and /PName=Value are accepted");
             }
 
             // Strip the leading '/'.
@@ -312,6 +341,33 @@ public static class CommandLineParser
                 continue;
             }
 
+            // /LOG or /LOG=path — install log (P7). Bare /LOG defaults the path to
+            // %TEMP%\sigil-<appid>.log (resolved by the session, which knows the AppId).
+            if (body.Length >= 3 &&
+                (body[0] == 'L' || body[0] == 'l') &&
+                (body[1] == 'O' || body[1] == 'o') &&
+                (body[2] == 'G' || body[2] == 'g'))
+            {
+                if (body.Length == 3)
+                {
+                    logRequested = true;
+                    continue;
+                }
+                if (body[3] == '=')
+                {
+                    var p = body.Substring(4);
+                    if (p.Length == 0)
+                    {
+                        throw new UsageException($"'/LOG=' requires a path (offending token: '{rawArg}')");
+                    }
+                    logRequested = true;
+                    logPath = p;
+                    continue;
+                }
+                // Anything else (e.g. /LOGGING) is not /LOG — fall through to the
+                // unknown-flag error so the closed grammar stays closed.
+            }
+
             // /PName=Value — declared parameter or built-in option override.
             if (body.Length >= 1 && (body[0] == 'P' || body[0] == 'p'))
             {
@@ -320,7 +376,7 @@ public static class CommandLineParser
             }
 
             throw new UsageException(
-                $"unrecognized flag '{rawArg}': expected /silent, /S, /verysilent, /Update, /Uninstall, /allusers, /currentuser, /D=path, or /PName=Value");
+                $"unrecognized flag '{rawArg}': expected /silent, /S, /verysilent, /Update, /Uninstall, /allusers, /currentuser, /D=path, /LOG[=path], or /PName=Value");
         }
 
         var secretKeys = schema
@@ -355,6 +411,8 @@ public static class CommandLineParser
             InstallDir = installDir,
             Scope = scope,
             SecretKeys = secretKeys,
+            LogRequested = logRequested,
+            LogPath = logPath,
         };
     }
 

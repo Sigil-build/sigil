@@ -102,11 +102,15 @@ public partial class App : Application
                 // option checkbox states into option.* for the engine at install
                 // time (read lazily at call time). The collected destination path
                 // (T13) becomes the effective install dir → {install_dir}.
-                _vm.ConfigureInstallRunner((progress, ct) =>
+                _vm.ConfigureInstallRunner(async (progress, ct) =>
                 {
                     session.CollectedInstallDir = _vm.InstallPath;
-                    return session.RunInstallAsync(
+                    var outcome = await session.RunInstallAsync(
                         _vm.CollectedParameterValues, _vm.CollectedOptionValues, progress, ct);
+                    // P5: the reboot flag is only known after the run — copy it into the
+                    // VM before the Done screen renders (StartInstallAsync reads outcome next).
+                    _vm.SetRebootRequired(session.RebootRequired);
+                    return outcome;
                 });
 
                 // P7: surface the /LOG path so the Failed screen can offer "Open log".

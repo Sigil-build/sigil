@@ -46,4 +46,9 @@ public static class DiagnosticCodes
     // Emitted when a var expression is malformed or the vars form a reference
     // cycle. A cycle is fatal (Error) — there is no safe evaluation order.
     public const string InvalidInstallerVar = "SIG0270";
+
+    // SIG028x — installer.prerequisites: block (P5, gap G6)
+    // Emitted (Error) when a prerequisite is missing name/detect/source, or an
+    // https:// source omits the required sha256 integrity checksum.
+    public const string InvalidPrerequisite = "SIG0280";
 }

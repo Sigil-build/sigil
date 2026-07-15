@@ -49,6 +49,21 @@ public sealed class InstallSession
     /// </summary>
     public const int DowngradeBlockedExitCode = 3;
 
+    // P5: set when a prerequisite installer returned exit code 3010 during this run.
+    // Surfaced on the Done screen and as the silent success exit code 3010.
+    private bool _rebootRequired;
+
+    /// <summary>
+    /// True when a prerequisite (P5, gap G6) installed during this run reported
+    /// reboot-required (exit code 3010). The wizard's Done screen shows a reboot
+    /// notice and the silent path returns exit code 3010 (success-but-reboot). Only
+    /// meaningful after a successful <see cref="RunInstallAsync(IProgress{StepProgress}, CancellationToken)"/>.
+    /// </summary>
+    public bool RebootRequired => _rebootRequired;
+
+    /// <summary>The dedicated silent exit code for a successful install that needs a reboot (P5).</summary>
+    public const int RebootRequiredExitCode = 3010;
+
     private InstallSession(WrapperBlob blob, ParsedCommandLine parsed, InstallScope scope, UpgradePlan plan)
     {
         _blob = blob;
@@ -267,7 +282,8 @@ public sealed class InstallSession
     /// Run to completion without any UI. Routes by mode, echoing the engine's
     /// log lines to <paramref name="output"/>. Returns the process exit code:
     /// <c>0</c> ok, <c>1</c> step failure (rolled back), <c>2</c> cancelled
-    /// (rolled back), <c>64</c> unsupported mode.
+    /// (rolled back), <c>3010</c> success but a prerequisite needs a reboot (P5),
+    /// <c>64</c> unsupported mode.
     /// </summary>
     public async Task<int> RunHeadlessAsync(TextWriter output, TextWriter error, CancellationToken ct = default)
     {
@@ -322,7 +338,8 @@ public sealed class InstallSession
                         {
                             LaunchAppUnelevated();
                         }
-                        return 0;
+                        // P5: success-but-reboot-required → dedicated exit code 3010.
+                        return _rebootRequired ? RebootRequiredExitCode : 0;
                     }
                     if (outcome.Error is not null)
                     {
@@ -534,26 +551,6 @@ public sealed class InstallSession
             return new InstallOutcome(false, DowngradeBlockedMessage());
         }
 
-        // P3 version-aware pre-body phase (gap G3). For an UPGRADE (older installed) or a
-        // FORCED DOWNGRADE (newer installed + /force-downgrade), remove the prior version
-        // by running ITS uninstall.exe /S /Uninstall and require exit 0 — BEFORE opening
-        // the rollback journal or extracting the payload, so a failure here leaves NO
-        // partial install. Otherwise fall through to the T10 re-install cleanup: a no-op
-        // for a fresh install, and the unchanged uninstall-then-install repair path for
-        // the SAME version (replays the recorded uninstall so the reinstall re-lays each
-        // mutation exactly once — no duplicate PATH entries, shortcuts, or ARP rows).
-        if (_plan.RemovesPriorVersion)
-        {
-            var pre = await RunPriorUninstallAsync(progress, ct).ConfigureAwait(false);
-            if (!pre.Success)
-            {
-                return pre; // clear failure; journal never opened, no partial install.
-            }
-        }
-        else
-        {
-            await PerformReinstallCleanupAsync(ct).ConfigureAwait(false);
-        }
 
         PayloadExtraction? payload = null;
         try
@@ -574,6 +571,44 @@ public sealed class InstallSession
             // engine's progress (step + rollback lines) into the /LOG file.
             _log?.SetSecrets(ctx.SecretValues);
             var effectiveProgress = _log is null ? progress : new LoggingProgress(progress, _log);
+
+            // P5: prerequisites (detect → install → re-detect) run OUTSIDE and BEFORE
+            // the pre_install hooks AND before the journal opens — and BEFORE the T10
+            // re-install cleanup below, so a prerequisite failure aborts with the prior
+            // install still intact (no data loss). An accepted 3010 sets the session
+            // reboot flag (Done-screen notice + silent exit 3010). Prereqs are never journaled.
+            var prereq = await PrerequisiteRunner.RunAsync(
+                _blob.Prerequisites, ctx, _scope, effectiveProgress, ct).ConfigureAwait(false);
+            if (!prereq.Success)
+            {
+                _log?.WriteLine($"result: aborted before install — {ctx.Redact(prereq.Error ?? "prerequisite failed")}");
+                return new InstallOutcome(false, prereq.Error);
+            }
+            _rebootRequired = prereq.RebootRequired;
+
+            // Prior-version teardown. Ordering reconciles P3 and P5: it runs AFTER
+            // prerequisites succeed (P5 — a failed prereq must never tear down a
+            // working prior install) and BEFORE the journal opens (P3 — a teardown
+            // failure must leave NO partial install). Two shapes:
+            //  • P3 UPGRADE (older installed) or FORCED DOWNGRADE — remove the prior
+            //    version by running ITS uninstall.exe /S /Uninstall, requiring exit 0.
+            //  • Otherwise — the unchanged T10 re-install cleanup: a no-op for a fresh
+            //    install, and the uninstall-then-install repair path for the SAME
+            //    version (replays the recorded uninstall so the reinstall re-lays each
+            //    mutation exactly once — no duplicate PATH entries, shortcuts, ARP rows).
+            if (_plan.RemovesPriorVersion)
+            {
+                var priorRemoval = await RunPriorUninstallAsync(effectiveProgress, ct).ConfigureAwait(false);
+                if (!priorRemoval.Success)
+                {
+                    _log?.WriteLine($"result: aborted before install — {ctx.Redact(priorRemoval.Error ?? "prior uninstall failed")}");
+                    return priorRemoval; // journal never opened, no partial install.
+                }
+            }
+            else
+            {
+                await PerformReinstallCleanupAsync(ct).ConfigureAwait(false);
+            }
 
             // P2: pre_install hooks run OUTSIDE and BEFORE the journal opens. A hook
             // that fails (default on_failure: fail) aborts here — the InstallEngine,

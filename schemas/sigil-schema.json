@@ -119,6 +119,54 @@
         }
       ]
     },
+    "Prerequisite": {
+      "type": "object",
+      "description": "A single prerequisite unit (P5, gap G6): detect → acquire → run → re-detect. Not journaled; never rolled back.",
+      "required": ["name", "detect", "source"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human label shown on the wizard progress row and in the log ('Installing <name>…')."
+        },
+        "detect": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A `when`-grammar expression that is true when the prerequisite is ALREADY satisfied (typically a registry_read / file_version / registry_exists check). Evaluated before install (skip if true) and again after (fail if still false)."
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The installer to run when detect is false: a payload://… path (bundled in the package) or an https://… URL (downloaded at install time). Args may use {var.*} / {install_dir} tokens.",
+          "pattern": "^(payload://|https://).+"
+        },
+        "sha256": {
+          "type": "string",
+          "description": "SHA-256 integrity checksum (hex). REQUIRED for an https:// source (a download without it is refused, SIG0280); ignored for a payload:// source."
+        },
+        "args": {
+          "type": "array",
+          "description": "Arguments passed to the source installer (typically /quiet /norestart).",
+          "items": { "type": "string" }
+        },
+        "exit_codes_ok": {
+          "type": "array",
+          "description": "Exit codes treated as success; defaults to [0]. An accepted code of 3010 additionally flags reboot-required.",
+          "items": { "type": "integer" }
+        },
+        "scope_required": {
+          "type": "string",
+          "enum": ["allusers", "currentuser"],
+          "description": "Requires the install to run in this scope; a mismatch with the resolved scope is a diagnostic at session start. Omit to accept any scope."
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optional per-prerequisite run timeout, in seconds."
+        }
+      }
+    },
     "HookPhase": {
       "type": "array",
       "description": "An ordered list of lifecycle-hook steps (P2). Runs outside the rollback journal; each step is governed only by its own `on_failure` (no rollback obligations — see installer.hooks).",
@@ -470,6 +518,11 @@
               "items": { "type": "string" }
             }
           }
+        },
+        "prerequisites": {
+          "type": "array",
+          "description": "First-class prerequisite units (P5, gap G6) — the declarative equivalent of Burn's ExePackage + DetectCondition. Each runs BEFORE the transactional install body and the pre_install hooks (and before the rollback journal opens): its `detect` expression is evaluated (skip when already satisfied), otherwise the `source` installer is acquired and run, and `detect` is re-evaluated to confirm it took effect. WARNING: prerequisites are NEVER journaled and are NOT rolled back — a shared machine dependency (VC++ redist, .NET runtime) must not be undone. An exit code of 3010 flags reboot-required (Done-screen notice + silent exit code 3010).",
+          "items": { "$ref": "#/definitions/Prerequisite" }
         }
       }
     },

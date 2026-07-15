@@ -39,6 +39,8 @@ namespace SigilBuild.Wrapper.Json;
 [JsonSerializable(typeof(SerializableOptionComponent[]))]
 [JsonSerializable(typeof(SerializableVar))]
 [JsonSerializable(typeof(SerializableVar[]))]
+[JsonSerializable(typeof(SerializablePrerequisite))]
+[JsonSerializable(typeof(SerializablePrerequisite[]))]
 [JsonSerializable(typeof(InstallScope))]
 [JsonSerializable(typeof(System.Collections.Generic.Dictionary<string, string>))]
 [JsonSerializable(typeof(SerializableRollbackJournal))]

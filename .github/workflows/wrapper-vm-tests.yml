@@ -15,6 +15,7 @@
 #     × deleted-original-setup-exe uninstall         (T15)
 #     × double-install idempotency                   (T10)
 #     × version-aware upgrade / downgrade            (P3, gap G3)
+#     × prerequisite detect/install/3010/abort       (P5, gap G6)
 #
 # The publish-runtime step ALWAYS runs before any pack: the packager stamps the
 # AOT installer host, so it must be staged next to the integration-test assembly
@@ -49,6 +50,7 @@ jobs:
       SIGIL_VM_UNINSTALL_SURVIVE: "1"  # T15 uninstall after the original setup exe is deleted
       SIGIL_VM_DOUBLE_INSTALL: "1"     # T10 running the same Setup.exe twice never duplicates PATH/shortcut/ARP
       SIGIL_VM_UPGRADE: "1"            # P3 version-aware: v1→v2 upgrade (prior dir preserved), v2→v1 blocked (exit 3), /force-downgrade
+      SIGIL_VM_PREREQ: "1"             # P5 prerequisites: detect→install→3010 (exit 3010), skip-when-present, abort on bad exit
     steps:
       - uses: actions/checkout@v4
 

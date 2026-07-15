@@ -108,6 +108,13 @@ internal sealed record SerializableWrapperBlob
     public string? RunAfterInstallPath { get; init; }
     public string[]? RunAfterInstallArgs { get; init; }
 
+    /// <summary>
+    /// First-class prerequisite units (P5, gap G6) from <c>installer.prerequisites</c>,
+    /// in declaration order. Run before the journaled body (detect → install → re-detect).
+    /// An ordered array so the wire form is deterministic.
+    /// </summary>
+    public SerializablePrerequisite[] Prerequisites { get; init; } = Array.Empty<SerializablePrerequisite>();
+
     public static WrapperBlob ToWrapperBlob(SerializableWrapperBlob s)
     {
         ArgumentNullException.ThrowIfNull(s);
@@ -136,7 +143,9 @@ internal sealed record SerializableWrapperBlob
             HookPreUninstall:    ConvertSteps(s.HookPreUninstall),
             HookPostUninstall:   ConvertSteps(s.HookPostUninstall),
             RunAfterInstallPath: s.RunAfterInstallPath,
-            RunAfterInstallArgs: s.RunAfterInstallArgs);
+            RunAfterInstallArgs: s.RunAfterInstallArgs,
+            // P5: prerequisite units.
+            Prerequisites: ConvertPrerequisites(s.Prerequisites));
     }
 
     public static SerializableWrapperBlob FromWrapperBlob(WrapperBlob blob)
@@ -169,6 +178,8 @@ internal sealed record SerializableWrapperBlob
             HookPostUninstall   = SerializeSteps(blob.HookPostUninstall ?? Array.Empty<InstallStep>()),
             RunAfterInstallPath = blob.RunAfterInstallPath,
             RunAfterInstallArgs = blob.RunAfterInstallArgs is null ? null : ToStringArray(blob.RunAfterInstallArgs),
+            // P5: prerequisite units.
+            Prerequisites = SerializePrerequisites(blob.Prerequisites),
         };
     }
 
@@ -220,6 +231,28 @@ internal sealed record SerializableWrapperBlob
         for (var i = 0; i < vars.Count; i++)
         {
             result[i] = SerializableVar.FromVar(vars[i]);
+        }
+        return result;
+    }
+
+    private static InstallerPrerequisite[] ConvertPrerequisites(SerializablePrerequisite[] flat)
+    {
+        if (flat.Length == 0) return Array.Empty<InstallerPrerequisite>();
+        var result = new InstallerPrerequisite[flat.Length];
+        for (var i = 0; i < flat.Length; i++)
+        {
+            result[i] = SerializablePrerequisite.ToPrerequisite(flat[i]);
+        }
+        return result;
+    }
+
+    private static SerializablePrerequisite[] SerializePrerequisites(IReadOnlyList<InstallerPrerequisite>? prereqs)
+    {
+        if (prereqs is null || prereqs.Count == 0) return Array.Empty<SerializablePrerequisite>();
+        var result = new SerializablePrerequisite[prereqs.Count];
+        for (var i = 0; i < prereqs.Count; i++)
+        {
+            result[i] = SerializablePrerequisite.FromPrerequisite(prereqs[i]);
         }
         return result;
     }
@@ -459,6 +492,53 @@ internal sealed record SerializableVar
     {
         ArgumentNullException.ThrowIfNull(v);
         return new SerializableVar { Name = v.Name, Expression = v.Expression };
+    }
+}
+
+/// <summary>
+/// Flat, AOT-friendly wire DTO for a single prerequisite unit (P5, gap G6). Mirrors
+/// <see cref="InstallerPrerequisite"/> so the source-generated context can serialize
+/// it without reflection.
+/// </summary>
+internal sealed record SerializablePrerequisite
+{
+    public string Name { get; init; } = string.Empty;
+    public string Detect { get; init; } = string.Empty;
+    public string Source { get; init; } = string.Empty;
+    public string? Sha256 { get; init; }
+    public string[]? Args { get; init; }
+    public int[]? ExitCodesOk { get; init; }
+    public string? ScopeRequired { get; init; }
+    public int? TimeoutSeconds { get; init; }
+
+    public static InstallerPrerequisite ToPrerequisite(SerializablePrerequisite s)
+    {
+        ArgumentNullException.ThrowIfNull(s);
+        return new InstallerPrerequisite(
+            Name: s.Name,
+            Detect: s.Detect,
+            Source: s.Source,
+            Sha256: s.Sha256,
+            Args: s.Args,
+            ExitCodesOk: s.ExitCodesOk,
+            ScopeRequired: s.ScopeRequired,
+            TimeoutSeconds: s.TimeoutSeconds);
+    }
+
+    public static SerializablePrerequisite FromPrerequisite(InstallerPrerequisite p)
+    {
+        ArgumentNullException.ThrowIfNull(p);
+        return new SerializablePrerequisite
+        {
+            Name = p.Name,
+            Detect = p.Detect,
+            Source = p.Source,
+            Sha256 = p.Sha256,
+            Args = p.Args is null ? null : System.Linq.Enumerable.ToArray(p.Args),
+            ExitCodesOk = p.ExitCodesOk is null ? null : System.Linq.Enumerable.ToArray(p.ExitCodesOk),
+            ScopeRequired = p.ScopeRequired,
+            TimeoutSeconds = p.TimeoutSeconds,
+        };
     }
 }
 

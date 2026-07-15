@@ -10,5 +10,9 @@
     <CheckBox Content="{Binding LaunchLabel}"
               IsVisible="{Binding HasRunAfterInstall}"
               IsChecked="{Binding LaunchAfterInstall, Mode=TwoWay}" />
+    <!-- P5: reboot notice, shown when a prerequisite installer returned 3010. -->
+    <TextBlock Text="{Binding RebootNotice}"
+               IsVisible="{Binding RebootRequired}"
+               Foreground="#B45309" TextWrapping="Wrap" FontWeight="SemiBold" />
   </StackPanel>
 </UserControl>

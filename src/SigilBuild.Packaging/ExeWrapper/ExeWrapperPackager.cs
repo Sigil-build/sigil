@@ -218,7 +218,9 @@ public sealed class ExeWrapperPackager : IPackager
             HookPostUninstall: manifest.Installer?.Hooks?.PostUninstall,
             // P2 (gap G4): the Done-screen "Launch <App>" target.
             RunAfterInstallPath: manifest.Installer?.RunAfterInstall?.Path,
-            RunAfterInstallArgs: manifest.Installer?.RunAfterInstall?.Args);
+            RunAfterInstallArgs: manifest.Installer?.RunAfterInstall?.Args,
+            // P5 (gap G6): first-class prerequisite units, run before the journaled body.
+            Prerequisites: manifest.Installer?.Prerequisites);
 
         // T7: derive the full light/dark palette at pack time and carry it, plus
         // the base64 logo/hero bytes, inside the blob so the stamped exe renders

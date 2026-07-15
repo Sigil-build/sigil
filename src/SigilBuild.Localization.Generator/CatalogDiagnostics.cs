@@ -40,33 +40,36 @@ internal static class CatalogValidator
                     Line = group.Last().Line,
                 });
             }
-
-            // SIGLOC007 — a placeholder named for a reserved C# keyword compiles to
-            // `string class` (a parameter) or a bare `class` identifier expression,
-            // both CS1041. Contextual keywords (var, async, from, ...) are deliberately
-            // NOT flagged: they are legal identifiers, so blocking them would be a false
-            // positive with no matching compile failure.
-            foreach (var entry in file.Entries)
-            {
-                foreach (var placeholder in entry.Placeholders)
-                {
-                    if (SyntaxFacts.GetKeywordKind(placeholder) != SyntaxKind.None)
-                    {
-                        problems.Add(new CatalogProblem
-                        {
-                            Id = "SIGLOC007",
-                            Message = $"placeholder '{{{placeholder}}}' in key '{entry.Key}' is a C# keyword and cannot be used as an identifier",
-                            File = name,
-                            Line = entry.Line,
-                        });
-                    }
-                }
-            }
         }
 
         if (en is null)
         {
             return problems;
+        }
+
+        // SIGLOC007 — a placeholder named for a reserved C# keyword compiles to
+        // `string class` (a parameter) or a bare `class` identifier expression,
+        // both CS1041. Contextual keywords (var, async, from, ...) are deliberately
+        // NOT flagged: they are legal identifiers, so blocking them would be a false
+        // positive with no matching compile failure. Scoped to en.Entries only — like
+        // SIGLOC006, this must observe exactly what StringsEmitter.Emit iterates
+        // (en.Entries), so a translation reusing the same keyword-named placeholder
+        // as en does not produce a second, redundant diagnostic.
+        foreach (var entry in en.Entries)
+        {
+            foreach (var placeholder in entry.Placeholders)
+            {
+                if (SyntaxFacts.GetKeywordKind(placeholder) != SyntaxKind.None)
+                {
+                    problems.Add(new CatalogProblem
+                    {
+                        Id = "SIGLOC007",
+                        Message = $"placeholder '{{{placeholder}}}' in key '{entry.Key}' is a C# keyword and cannot be used as an identifier",
+                        File = "Strings.en.txt",
+                        Line = entry.Line,
+                    });
+                }
+            }
         }
 
         // SIGLOC006 — the emitted `Strings` class has exactly one method per en.Entries

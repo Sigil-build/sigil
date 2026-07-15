@@ -93,4 +93,14 @@ public class CatalogDiagnosticsTests
     {
         Validate("x = a {className} b\n", "x = а {className} б\n").Should().NotContain("SIGLOC007");
     }
+
+    // The scan is scoped to en.Entries only (matching SIGLOC006, and what
+    // StringsEmitter.Emit actually iterates). A translation reusing the same
+    // keyword-named placeholder as en must not produce a second, redundant SIGLOC007.
+    [Fact]
+    public void PlaceholderNamedForCSharpKeyword_ScopedToEnOnly_ReportsOnce()
+    {
+        Validate("x = a {class} b\n", "x = а {class} б\n")
+            .Count(id => id == "SIGLOC007").Should().Be(1);
+    }
 }

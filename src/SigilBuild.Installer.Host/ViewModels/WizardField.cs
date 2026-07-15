@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using SigilBuild.Core.Manifest;
 using SigilBuild.Installer.Host.Services;
+using SigilBuild.Wrapper.Core.Localization;
 
 namespace SigilBuild.Installer.Host.ViewModels;
 
@@ -88,6 +89,10 @@ public static class WidgetFactory
 /// </summary>
 public sealed class FieldViewModel : INotifyPropertyChanged
 {
+    // P9: the resolved chrome language for this session, captured once per field
+    // (Task 4 sets SessionLanguage before any UI is built).
+    private readonly Lang _lang = SessionLanguage.Current;
+
     public FieldViewModel(ParameterDefinition def, string? widgetOverride)
     {
         Definition = def ?? throw new ArgumentNullException(nameof(def));
@@ -269,7 +274,7 @@ public sealed class FieldViewModel : INotifyPropertyChanged
 
             if (DropdownOptions.Count == 0)
             {
-                OptionsError = "Couldn't load options.";
+                OptionsError = Strings.FieldOptionsLoadFailed(_lang);
             }
         }
         catch (OperationCanceledException)
@@ -281,7 +286,7 @@ public sealed class FieldViewModel : INotifyPropertyChanged
         {
             InstallerLog.Error($"LoadDynamicOptions '{ParamName}' failed", ex);
             DropdownOptions.Clear();
-            OptionsError = "Couldn't load options.";
+            OptionsError = Strings.FieldOptionsLoadFailed(_lang);
         }
 #pragma warning restore CA1031
         finally
@@ -321,7 +326,7 @@ public sealed class FieldViewModel : INotifyPropertyChanged
 
     /// <summary>The mask char for a secret TextBox — empty string reveals the value.</summary>
     public char PasswordChar => IsSecret && !RevealSecret ? '•' : '\0';
-    public string RevealLabel => RevealSecret ? "Hide" : "Show";
+    public string RevealLabel => RevealSecret ? Strings.FieldHide(_lang) : Strings.FieldShow(_lang);
 
     private string? _validationError;
     public string? ValidationError
@@ -361,13 +366,13 @@ public sealed class FieldViewModel : INotifyPropertyChanged
         var required = Definition.InstallTime && Definition.Default is null;
         if (IsTextLike && required && string.IsNullOrWhiteSpace(value))
         {
-            ValidationError = $"{Label} is required.";
+            ValidationError = Strings.FieldErrorRequired(_lang, Label);
             return false;
         }
 
         if ((IsRadio || IsDropdown) && required && string.IsNullOrEmpty(value))
         {
-            ValidationError = $"Choose a {Label}.";
+            ValidationError = Strings.FieldErrorChoose(_lang, Label);
             return false;
         }
 
@@ -390,7 +395,7 @@ public sealed class FieldViewModel : INotifyPropertyChanged
             }
             if (!member)
             {
-                ValidationError = $"'{value}' is not a valid choice.";
+                ValidationError = Strings.FieldErrorInvalidChoice(_lang, value);
                 return false;
             }
         }
@@ -400,17 +405,17 @@ public sealed class FieldViewModel : INotifyPropertyChanged
         {
             if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n))
             {
-                ValidationError = $"{Label} must be a whole number.";
+                ValidationError = Strings.FieldErrorNotInteger(_lang, Label);
                 return false;
             }
             if (Definition.Min is { } min && n < min)
             {
-                ValidationError = $"{Label} must be at least {min}.";
+                ValidationError = Strings.FieldErrorMin(_lang, Label, min.ToString(CultureInfo.InvariantCulture));
                 return false;
             }
             if (Definition.Max is { } max && n > max)
             {
-                ValidationError = $"{Label} must be at most {max}.";
+                ValidationError = Strings.FieldErrorMax(_lang, Label, max.ToString(CultureInfo.InvariantCulture));
                 return false;
             }
         }
@@ -431,7 +436,7 @@ public sealed class FieldViewModel : INotifyPropertyChanged
 #pragma warning restore CA1031
             if (!ok)
             {
-                ValidationError = $"{Label} is not in the expected format.";
+                ValidationError = Strings.FieldErrorPattern(_lang, Label);
                 return false;
             }
         }
@@ -453,13 +458,15 @@ public sealed class FieldViewModel : INotifyPropertyChanged
 public sealed class CustomScreenViewModel
 {
     public CustomScreenViewModel(
-        string id, string title, string? subtitle, string? when, IReadOnlyList<FieldViewModel> fields)
+        string id, string title, string? subtitle, string? when, IReadOnlyList<FieldViewModel> fields,
+        LocalizedText titleMap)
     {
         Id = id;
         Title = title;
         Subtitle = subtitle;
         When = when;
         Fields = fields;
+        TitleMap = titleMap ?? throw new ArgumentNullException(nameof(titleMap));
     }
 
     public string Id { get; }
@@ -467,6 +474,14 @@ public sealed class CustomScreenViewModel
     public string? Subtitle { get; }
     public string? When { get; }
     public IReadOnlyList<FieldViewModel> Fields { get; }
+
+    /// <summary>
+    /// The manifest's raw <c>{tag -&gt; text}</c> screen title (P9), kept alongside
+    /// the already-interpolated <see cref="Title"/> so the rail can resolve the
+    /// declared screen's title against the session language instead of falling
+    /// back to <c>rail.configure</c> — see <c>InstallerViewModel.RebuildRail</c>.
+    /// </summary>
+    public LocalizedText TitleMap { get; }
 
     /// <summary>Validate every field; returns true only when all pass (inline errors set on failures).</summary>
     public bool Validate()
@@ -496,7 +511,7 @@ public sealed class OptionItemViewModel : INotifyPropertyChanged
         ArgumentNullException.ThrowIfNull(component);
         Name = component.Name;
         IsLocked = component.Locked;
-        Label = LabelFor(component.Name);
+        Label = LabelFor(component.Name, SessionLanguage.Current);
         _isChecked = component.Default;
     }
 
@@ -528,12 +543,15 @@ public sealed class OptionItemViewModel : INotifyPropertyChanged
         }
     }
 
-    private static string LabelFor(string name) => name switch
+    // The four known built-in components get catalog keys. An unknown,
+    // author-supplied component name falls back to itself (P10's job to
+    // localize, not P9's) — deliberately kept, not a gap.
+    private static string LabelFor(string name, Lang lang) => name switch
     {
-        "desktop_shortcut" => "Create a desktop shortcut",
-        "start_menu" => "Add a Start menu shortcut",
-        "add_to_path" => "Add to PATH",
-        "file_associations" => "Register file associations",
+        "desktop_shortcut" => Strings.OptionsDesktopShortcut(lang),
+        "start_menu" => Strings.OptionsStartMenu(lang),
+        "add_to_path" => Strings.OptionsAddToPath(lang),
+        "file_associations" => Strings.OptionsFileAssociations(lang),
         _ => name,
     };
 

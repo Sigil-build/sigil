@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using SigilBuild.Core.Manifest;
 using SigilBuild.Installer.Host.Branding;
 using SigilBuild.Installer.Host.Services;
+using SigilBuild.Wrapper.Core.Localization;
 using SigilBuild.Wrapper.Engine;
 using SigilBuild.Wrapper.Expressions;
 
@@ -40,6 +41,10 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     private CancellationTokenSource? _engineCts;
     private Func<IProgress<StepProgress>, CancellationToken, Task<InstallOutcome>>? _installRunner;
 
+    // P9: the resolved chrome language for this session, captured once at
+    // construction (Task 4 sets SessionLanguage before any UI is built).
+    private readonly Lang _lang = SessionLanguage.Current;
+
     // T9 flow: an ordered list of wizard positions. Custom screens (declared over
     // parameters) are inserted before Installing. The flow is screen-list driven
     // rather than hardcoded so T14 (license) and later tasks can extend it.
@@ -70,10 +75,20 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
             System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData),
             "Programs",
             tokens.AppName);
+        // The default Done-screen launch caption, before ConfigureLaunch wires the
+        // real one (P9: routed through the same finish.launch_app key as the
+        // ConfigureLaunch fallback below — collapses the former duplicate literal).
+        _launchLabel = Strings.FinishLaunchApp(_lang, Brand.AppName);
         RebuildFlow();
     }
 
     public BrandTokens Brand { get; }
+
+    /// <summary>The Welcome screen's heading (P9): replaces WelcomeView.axaml's StringFormat.</summary>
+    public string WelcomeTitle => Strings.WelcomeTitle(_lang, Brand.AppName);
+
+    /// <summary>The Finish screen's heading (P9): replaces FinishView.axaml's StringFormat.</summary>
+    public string FinishTitle => Strings.FinishTitle(_lang, Brand.AppName);
 
     // http-options runtime wiring: a source-backed enum field fetches its dropdown
     // options when its custom screen becomes visible. The fetch is injectable so
@@ -139,7 +154,7 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     /// version is removed first), the v1 repair/reinstall behaviour (T10).
     /// </summary>
     public string ReinstallNotice => _existingInstallDetected
-        ? $"{Brand.AppName} is already installed. Continuing will reinstall it — the current version is removed first."
+        ? Strings.UpgradeReinstallNotice(_lang, Brand.AppName)
         : string.Empty;
 
     /// <summary>
@@ -233,9 +248,9 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     public string UpgradeNotice => _upgradeAction switch
     {
         UpgradeAction.Upgrade =>
-            $"Upgrading {Brand.AppName} from {_installedVersion} to {Brand.AppVersion}.",
+            Strings.UpgradeUpgrading(_lang, Brand.AppName, _installedVersion ?? string.Empty, Brand.AppVersion),
         UpgradeAction.DowngradeForced =>
-            $"Replacing {Brand.AppName} {_installedVersion} with the older version {Brand.AppVersion}.",
+            Strings.UpgradeReplacingNewer(_lang, Brand.AppName, _installedVersion ?? string.Empty, Brand.AppVersion),
         _ => string.Empty,
     };
 
@@ -247,9 +262,7 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     /// screen (P3): a newer version is installed and setup will not replace it.
     /// </summary>
     public string DowngradeBlockedMessage =>
-        $"A newer version ({_installedVersion}) of {Brand.AppName} is already installed. " +
-        $"Setup will not replace it with the older version {Brand.AppVersion}. " +
-        "Close this window, then uninstall the current version first if you really want to downgrade.";
+        Strings.DowngradeBody(_lang, _installedVersion ?? string.Empty, Brand.AppName, Brand.AppVersion);
 
     /// <summary>
     /// Wire the version-aware state (P3). Called by the host from the session's
@@ -310,7 +323,7 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
             }
             built.Add(new CustomScreenViewModel(
                 screen.Id, Interpolate(screen.Title.English) ?? screen.Title.English,
-                Interpolate(screen.Subtitle?.English), screen.When, fields));
+                Interpolate(screen.Subtitle?.English), screen.When, fields, screen.Title));
         }
 
         _customScreens = built;
@@ -474,7 +487,7 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     }
 
     private bool _hasRunAfterInstall;
-    private string _launchLabel = "Launch application";
+    private string _launchLabel; // set in the constructor, after Brand is assigned.
     private Action? _launchAction;
 
     /// <summary>
@@ -503,7 +516,7 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     public void ConfigureLaunch(bool hasRunAfterInstall, string launchLabel, Action launch)
     {
         HasRunAfterInstall = hasRunAfterInstall;
-        LaunchLabel = string.IsNullOrWhiteSpace(launchLabel) ? "Launch application" : launchLabel;
+        LaunchLabel = string.IsNullOrWhiteSpace(launchLabel) ? Strings.FinishLaunchApp(_lang, Brand.AppName) : launchLabel;
         _launchAction = launch;
     }
 
@@ -533,7 +546,7 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
 
     /// <summary>The Done-screen reboot notice, or empty when no reboot is needed (P5).</summary>
     public string RebootNotice => _rebootRequired
-        ? "A restart is required to finish setting up a prerequisite. Please restart your computer."
+        ? Strings.FinishRebootNotice(_lang)
         : string.Empty;
 
     /// <summary>Wire the post-install reboot flag (P5). Called by the host once the install runner completes.</summary>
@@ -672,22 +685,22 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
 
         if (string.IsNullOrWhiteSpace(path))
         {
-            InstallPathError = "Enter an install location.";
+            InstallPathError = Strings.LocationErrorEmpty(_lang);
             return false;
         }
         if (!System.IO.Path.IsPathFullyQualified(path))
         {
-            InstallPathError = "Enter an absolute path (for example C:\\Program Files\\App).";
+            InstallPathError = Strings.LocationErrorNotAbsolute(_lang);
             return false;
         }
         if (System.IO.File.Exists(path))
         {
-            InstallPathError = "That location is a file. Choose a folder.";
+            InstallPathError = Strings.LocationErrorIsFile(_lang);
             return false;
         }
         if (!IsWritableOrElevatable(path))
         {
-            InstallPathError = "You don't have permission to install there. Choose another folder.";
+            InstallPathError = Strings.LocationErrorDenied(_lang);
             return false;
         }
 
@@ -1021,16 +1034,44 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
 
             var label = node.Step switch
             {
-                InstallerStep.Welcome => "Welcome",
-                InstallerStep.License => "License",
-                InstallerStep.InstallOptions => "Location",
-                InstallerStep.Options => "Options",
-                InstallerStep.Installing => "Install",
-                InstallerStep.Custom => node.Screen?.Id ?? "Configure",
-                _ => node.Step.ToString(),
+                InstallerStep.Welcome => Strings.RailWelcome(_lang),
+                InstallerStep.License => Strings.RailLicense(_lang),
+                InstallerStep.InstallOptions => Strings.RailLocation(_lang),
+                InstallerStep.Options => Strings.RailOptions(_lang),
+                InstallerStep.Installing => Strings.RailInstall(_lang),
+                InstallerStep.Custom => ResolveCustomRailLabel(node.Screen),
+                InstallerStep.Finish => Strings.RailFinish(_lang),
+                InstallerStep.Failed => Strings.RailFailed(_lang),
+                InstallerStep.CloseApps => Strings.RailCloseApps(_lang),
+                InstallerStep.DowngradeBlocked => Strings.RailDowngradeBlocked(_lang),
+                _ => Strings.RailConfigure(_lang),
             };
             RailSteps.Add(new RailStep(label, isCurrent: i == _flowIndex, isDone: i < _flowIndex));
         }
+    }
+
+    /// <summary>
+    /// The rail label for a declared custom screen (P9): prefers the manifest's
+    /// own resolved title over the generic <c>rail.configure</c> fallback, so a
+    /// pack that declares "Database Setup" doesn't just show "Configure" on the
+    /// rail. Falls back to <c>rail.configure</c> when the manifest didn't declare
+    /// a usable title for the session's language (should not happen — SIG0290
+    /// requires an "en" entry — but a malformed manifest must not crash the rail).
+    /// Never renders the raw <see cref="CustomScreenViewModel.Id"/> or a C# enum
+    /// name — that was the leak this replaces.
+    /// </summary>
+    private string ResolveCustomRailLabel(CustomScreenViewModel? screen)
+    {
+        if (screen is null)
+        {
+            return Strings.RailConfigure(_lang);
+        }
+
+        var preferences = new[] { _lang.ToString().ToLowerInvariant() };
+        var tag = LanguageResolver.Match(preferences, new List<string>(screen.TitleMap.Values.Keys));
+        return screen.TitleMap.Values.TryGetValue(tag, out var text) && !string.IsNullOrWhiteSpace(text)
+            ? text
+            : Strings.RailConfigure(_lang);
     }
 
     /// <summary>

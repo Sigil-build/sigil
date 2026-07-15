@@ -151,7 +151,10 @@ public class CustomScreenTests
         vm.LoadScreens(screens, parameters);
 
         var labels = vm.RailSteps.Select(r => r.Label).ToList();
-        labels.Should().Contain("configure");
+        // P9: the rail shows the manifest's own resolved title ("Configure"), not
+        // the raw screen id ("configure") — see InstallerViewModel.RebuildRail.
+        labels.Should().Contain("Configure");
+        labels.Should().NotContain("configure", "the rail must never leak the raw screen id");
         labels.Should().NotContain("advanced_opts", "a screen whose when is false is absent from the rail");
         labels.Should().Contain("Install");
     }

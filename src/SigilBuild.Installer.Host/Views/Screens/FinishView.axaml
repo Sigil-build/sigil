@@ -6,7 +6,7 @@
              x:Class="SigilBuild.Installer.Host.Views.Screens.FinishView">
   <StackPanel Spacing="12" VerticalAlignment="Center">
     <TextBlock FontSize="22" FontWeight="Bold"
-               Text="{Binding Brand.AppName, StringFormat='{}{0} is installed'}" />
+               Text="{Binding FinishTitle}" />
     <TextBlock Text="{x:Static loc:S.FinishBody}" Foreground="#4B5563" />
     <CheckBox Content="{Binding LaunchLabel}"
               IsVisible="{Binding HasRunAfterInstall}"

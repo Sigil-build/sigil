@@ -22,7 +22,7 @@
           <TextBlock Text="{Binding Brand.Publisher}" Foreground="{DynamicResource RailMutedBrush}" FontSize="13" />
         </StackPanel>
         <TextBlock DockPanel.Dock="Bottom"
-                   Text="{Binding Brand.AppVersion, StringFormat='Version {0}'}"
+                   Text="{Binding VersionLine}"
                    Foreground="{DynamicResource RailMutedBrush}" FontSize="12" />
       </DockPanel>
     </Border>

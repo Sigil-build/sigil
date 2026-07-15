@@ -6,7 +6,7 @@
              x:Class="SigilBuild.Installer.Host.Views.Screens.WelcomeView">
   <StackPanel Spacing="16">
     <TextBlock x:Name="Heading" FontSize="24" FontWeight="Bold" TextWrapping="Wrap"
-               Text="{Binding Brand.AppName, StringFormat='Welcome to {0} setup'}" />
+               Text="{Binding WelcomeTitle}" />
     <TextBlock TextWrapping="Wrap" Foreground="#4B5563"
                Text="{x:Static loc:S.WelcomeBody}" />
     <!-- P3: upgrade banner ("Upgrading from x.y.z"), shown only during an upgrade. -->

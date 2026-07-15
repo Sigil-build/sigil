@@ -7,6 +7,7 @@ using SigilBuild.Installer.Host.Branding;
 using SigilBuild.Installer.Host.ViewModels;
 using SigilBuild.Installer.Host.Views;
 using SigilBuild.Wrapper.Cli;
+using SigilBuild.Wrapper.Core.Localization;
 using SigilBuild.Wrapper.Engine;
 
 namespace SigilBuild.Installer.Host;
@@ -163,8 +164,8 @@ public partial class App : Application
 
         return new BrandTokens
         {
-            AppName = brand.DisplayName ?? "Application",
-            Publisher = brand.Publisher ?? "Publisher",
+            AppName = brand.DisplayName ?? Strings.BrandAppFallback(SessionLanguage.Current),
+            Publisher = brand.Publisher ?? Strings.BrandPublisherFallback(SessionLanguage.Current),
             AppVersion = brand.Version ?? "1.0.0",
             PrimaryColor = light.TryGetValue("railBg", out var railBg) ? railBg : "#1F2937",
             AccentColor = light.TryGetValue("accent", out var accent) ? accent : "#3B82F6",

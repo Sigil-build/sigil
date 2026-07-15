@@ -244,6 +244,7 @@ git commit -m "feat(p9): catalog parser + generator project skeleton"
 - Produces: `StringsEmitter.Emit(IReadOnlyList<CatalogFile> files) -> string` (the generated C# source). Generated API:
   - `public enum Lang { En, Uk, Pseudo }`
   - `public static class Strings` — one method per key: `Strings.NavBack(Lang lang)`, `Strings.Upgrading(Lang lang, string appName, string fromVersion, string toVersion)`.
+  - `public static class ChromeCatalog` — `string[] Tags` and `Lang FromTag(string)`, both **emitted from the catalog filenames**. `LanguageResolver` (Task 7) consumes these rather than hardcoding a list, so adding `Strings.de.txt` wires a language end-to-end with no code edit — what ADR-008 §4's "content contributions" rule requires.
   - `public static class S` — one **property** per *argless* key, resolved against `SessionLanguage.Current` (Task 4), for XAML `{x:Static}`: `S.NavBack`. Keys with placeholders get no `S` property; they need an argument, so they go through a ViewModel property instead (design §7.1).
   - Method names are the key's dot/underscore segments PascalCased and concatenated: `nav.back` → `NavBack`, `location.error.not_absolute` → `LocationErrorNotAbsolute`.
 
@@ -312,8 +313,40 @@ public class StringsEmitterTests
         // NavNext has no Lang.Uk arm — it lands on the `_ =>` English default.
         src.Should().NotContain("Lang.Uk => \"Next\"");
     }
+
+    // ChromeCatalog is emitted from the catalog files so LanguageResolver never
+    // hardcodes a language list (ADR-008 §4: languages ship as content).
+    [Fact]
+    public void Emit_ChromeCatalog_ListsEveryCatalogTag()
+    {
+        var src = EmitFor("nav.back = Back\n", "nav.back = Назад\n");
+
+        src.Should().Contain("public static readonly string[] Tags = { \"en\", \"uk\" };");
+        src.Should().Contain("\"uk\" => Lang.Uk,");
+    }
+
+    // The regression this design prevents: a third catalog wires itself with no
+    // code edit. If this fails, adding a language silently half-works.
+    [Fact]
+    public void Emit_ThirdLanguage_AppearsInChromeCatalog_WithNoCodeChange()
+    {
+        var files = new[]
+        {
+            CatalogParser.Parse("Strings.en.txt", "nav.back = Back\n"),
+            CatalogParser.Parse("Strings.uk.txt", "nav.back = Назад\n"),
+            CatalogParser.Parse("Strings.de.txt", "nav.back = Zurück\n"),
+        };
+
+        var src = StringsEmitter.Emit(files);
+
+        src.Should().Contain("public enum Lang { En, De, Uk, Pseudo }");
+        src.Should().Contain("public static readonly string[] Tags = { \"en\", \"de\", \"uk\" };");
+        src.Should().Contain("\"de\" => Lang.De,");
+    }
 }
 ```
+
+Note the ordering in the last test: non-`en` languages are emitted in **ordinal** order (`de` before `uk`), because `Emit` sorts them — determinism matters, generated output must not depend on file-enumeration order. `en` always leads.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -387,6 +420,32 @@ internal static class StringsEmitter
             sb.AppendLine();
         }
 
+        sb.AppendLine("}");
+        sb.AppendLine();
+
+        // The tag map, emitted from the catalog files themselves. LanguageResolver
+        // consumes this instead of hardcoding a list, so adding Strings.de.txt wires
+        // the language end-to-end with no code edit — which is what ADR-008 §4's
+        // "languages ship as content contributions" rule actually requires.
+        sb.AppendLine("/// <summary>Chrome language tags, emitted from the catalog files. Never hand-edit.</summary>");
+        sb.AppendLine("public static class ChromeCatalog");
+        sb.AppendLine("{");
+        sb.Append("    public static readonly string[] Tags = { \"en\"");
+        foreach (var l in langs)
+        {
+            sb.Append(", \"").Append(l).Append('"');
+        }
+        sb.AppendLine(" };");
+        sb.AppendLine();
+        sb.AppendLine("    /// <summary>Maps a catalog tag to its Lang. Unknown tags fall back to English.</summary>");
+        sb.AppendLine("    public static Lang FromTag(string tag) => tag switch");
+        sb.AppendLine("    {");
+        foreach (var l in langs)
+        {
+            sb.AppendLine($"        \"{l}\" => Lang.{Pascal(l)},");
+        }
+        sb.AppendLine("        _ => Lang.En,");
+        sb.AppendLine("    };");
         sb.AppendLine("}");
         sb.AppendLine();
 
@@ -1542,18 +1601,18 @@ public static class LanguageResolver
     }
 
     /// <summary>
-    /// Matches against the chrome catalog's closed language set. Never returns
-    /// Lang.Pseudo: no catalog declares that tag and "pseudo" fails LanguageTag.
+    /// Matches against the chrome catalog's language set. Never returns Lang.Pseudo:
+    /// no catalog declares that tag and "pseudo" fails LanguageTag.IsValid.
     /// </summary>
+    /// <remarks>
+    /// Both the tag list and the mapping are GENERATED from Localization/Strings.*.txt
+    /// (ChromeCatalog). Nothing here is hand-maintained, so adding Strings.de.txt wires
+    /// the language end-to-end with no code edit — which is what ADR-008 §4's
+    /// "languages ship as content contributions" rule requires. A hardcoded list here
+    /// would make a new catalog file compile but stay unreachable, with no failing test.
+    /// </remarks>
     public static Lang MatchChrome(IReadOnlyList<string> preferences) =>
-        Match(preferences, ChromeTags) switch
-        {
-            "uk" => Lang.Uk,
-            _ => Lang.En,
-        };
-
-    /// <summary>Tags the shipped chrome catalog covers. Keep in sync with Localization/Strings.*.txt.</summary>
-    private static readonly string[] ChromeTags = { "en", "uk" };
+        ChromeCatalog.FromTag(Match(preferences, ChromeCatalog.Tags));
 
     private static string PrimarySubtag(string tag)
     {

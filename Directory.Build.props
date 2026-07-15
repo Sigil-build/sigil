@@ -16,6 +16,15 @@
     <PackageProjectUrl>https://sigil.build</PackageProjectUrl>
     <RepositoryUrl>https://github.com/Sigil-build/sigil</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+    <!-- Static graph restore is required so that ProjectReference metadata
+         (UndefineProperties/AdditionalProperties on the analyzer-only reference
+         to SigilBuild.Localization.Generator) is actually honored during
+         RESTORE, not just build. Legacy (non-graph) restore evaluates every
+         referenced project with the exact same global properties as the root
+         project, ignoring per-reference overrides, so a global property like
+         -p:PublishAot=true leaks into the netstandard2.0 generator project and
+         fails restore with NETSDK1207 before UndefineProperties ever applies. -->
+    <RestoreUseStaticGraphEvaluation>true</RestoreUseStaticGraphEvaluation>
   </PropertyGroup>
 
   <!--

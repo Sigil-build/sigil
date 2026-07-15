@@ -27,17 +27,29 @@ public sealed class Evaluator
     /// </summary>
     public bool EvaluateBool(string expression, IReadOnlyDictionary<string, object?> context)
     {
-        ArgumentNullException.ThrowIfNull(expression);
-        ArgumentNullException.ThrowIfNull(context);
-
-        var ast = Parser.Parse(expression);
-        var value = Evaluate(ast, context);
+        var value = EvaluateValue(expression, context);
         return value is bool b
             ? b
             : throw new ExpressionException(
                 string.Create(
                     CultureInfo.InvariantCulture,
                     $"expression did not evaluate to a boolean: {expression}"));
+    }
+
+    /// <summary>
+    /// Evaluate an expression to its raw value (string / long / bool / list).
+    /// Backs the <c>installer.vars</c> variable model (P1): a var's expression
+    /// is evaluated once at session start and the result exposed as
+    /// <c>var.&lt;name&gt;</c>. The same closed grammar, function table, and
+    /// identifier set as <see cref="EvaluateBool"/> apply.
+    /// </summary>
+    public object? EvaluateValue(string expression, IReadOnlyDictionary<string, object?> context)
+    {
+        ArgumentNullException.ThrowIfNull(expression);
+        ArgumentNullException.ThrowIfNull(context);
+
+        var ast = Parser.Parse(expression);
+        return Evaluate(ast, context);
     }
 
     private object? Evaluate(AstNode node, IReadOnlyDictionary<string, object?> ctx) =>

@@ -406,6 +406,15 @@
           "type": "array",
           "description": "Declared custom wizard screens over parameters (T9).",
           "items": { "$ref": "#/definitions/InstallerScreen" }
+        },
+        "vars": {
+          "type": "object",
+          "description": "Declarative variables (P1, gap G1): each entry is `name: <expression>` evaluated once at install-session start, in dependency order, and exposed as var.<name> in `when` expressions / screen-field defaults and as a {var.<name>} brace token in step paths and args. Expressions use the closed `when` grammar plus the read-only data-retrieval functions registry_read/env/file_version/installed_version; a var referencing a secret parameter inherits secretness. A reference cycle is a pack error (SIG0270).",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Expression producing the variable's value."
+          }
         }
       }
     },

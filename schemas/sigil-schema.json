@@ -523,6 +523,11 @@
           "type": "array",
           "description": "First-class prerequisite units (P5, gap G6) — the declarative equivalent of Burn's ExePackage + DetectCondition. Each runs BEFORE the transactional install body and the pre_install hooks (and before the rollback journal opens): its `detect` expression is evaluated (skip when already satisfied), otherwise the `source` installer is acquired and run, and `detect` is re-evaluated to confirm it took effect. WARNING: prerequisites are NEVER journaled and are NOT rolled back — a shared machine dependency (VC++ redist, .NET runtime) must not be undone. An exit code of 3010 flags reboot-required (Done-screen notice + silent exit code 3010).",
           "items": { "$ref": "#/definitions/Prerequisite" }
+        },
+        "app_mutex": {
+          "type": "array",
+          "description": "Named mutexes the application creates while it is running (P6, gap G7) — the Inno `AppMutex` equivalent. Before touching the install directory, setup opens each name; a mutex that opens means the app is running and the install/uninstall is blocked. This complements the Restart Manager sweep, which also finds processes holding files open in the install directory even when no mutex is declared. Blocked runs: the wizard shows a 'Close applications' screen; `/silent` exits with a dedicated code unless `/closeapps` is supplied. Use the exact name the app passes to CreateMutex, including any `Global\\` prefix.",
+          "items": { "type": "string", "minLength": 1 }
         }
       }
     },

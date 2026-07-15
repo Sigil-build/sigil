@@ -64,6 +64,24 @@ public sealed class InstallSession
     /// <summary>The dedicated silent exit code for a successful install that needs a reboot (P5).</summary>
     public const int RebootRequiredExitCode = 3010;
 
+    /// <summary>
+    /// The dedicated non-zero exit code returned by the silent path when running
+    /// applications hold the install directory open and <c>/closeapps</c> was not
+    /// supplied (P6, gap G7). The log names each blocker. Distinct from 1 (step
+    /// failure), 2 (cancelled), 3 (downgrade blocked), and 64 (usage).
+    /// </summary>
+    public const int FilesInUseExitCode = 4;
+
+    /// <summary>
+    /// The dedicated non-zero exit code returned when another setup instance for this
+    /// app+scope is already running (P6, gap G17). The first instance is unaffected.
+    /// </summary>
+    public const int AlreadyRunningExitCode = 5;
+
+    // P6: set when the files-in-use gate refused the run, so the headless path can
+    // map the generic failure onto FilesInUseExitCode.
+    private bool _blockedByFilesInUse;
+
     private InstallSession(WrapperBlob blob, ParsedCommandLine parsed, InstallScope scope, UpgradePlan plan)
     {
         _blob = blob;
@@ -345,7 +363,9 @@ public sealed class InstallSession
                     {
                         error.WriteLine(outcome.Error);
                     }
-                    return 1;
+                    // P6 (gap G7): running apps held the install dir and /closeapps was
+                    // not supplied — dedicated exit code, nothing was changed.
+                    return _blockedByFilesInUse ? FilesInUseExitCode : 1;
                 }
                 catch (OperationCanceledException)
                 {
@@ -571,6 +591,16 @@ public sealed class InstallSession
             // engine's progress (step + rollback lines) into the /LOG file.
             _log?.SetSecrets(ctx.SecretValues);
             var effectiveProgress = _log is null ? progress : new LoggingProgress(progress, _log);
+
+            // P6 (gap G7): files-in-use gate. The destination is now resolved, so scan
+            // the declared app mutexes + Restart Manager over it. Runs FIRST — before
+            // prerequisites download anything, before the prior version is torn down,
+            // and before the journal opens — so a blocked run changes nothing.
+            var blocked = CheckFilesInUse(ctx, ctx.InstallDir, effectiveProgress);
+            if (blocked is not null)
+            {
+                return blocked;
+            }
 
             // P5: prerequisites (detect → install → re-detect) run OUTSIDE and BEFORE
             // the pre_install hooks AND before the journal opens — and BEFORE the T10
@@ -853,6 +883,16 @@ public sealed class InstallSession
         var progress = _log is null ? null : new LoggingProgress(null, _log);
         var ctx = BuildUninstallContext();
 
+        // P6 (gap G7): uninstall.exe inherits the same parser, so it honors the same
+        // gate — a running app would block the journal replay from deleting its files.
+        // /closeapps closes them; otherwise refuse before anything is removed.
+        var blocked = CheckFilesInUse(ctx, ctx.InstallDir, progress);
+        if (blocked is not null)
+        {
+            error.WriteLine(blocked.Error);
+            return FilesInUseExitCode;
+        }
+
         // P2: pre_uninstall hooks run BEFORE the journal replays. A failure (default
         // on_failure: fail) aborts the uninstall.
         var preHook = await HookRunner.RunAsync(
@@ -937,6 +977,85 @@ public sealed class InstallSession
         _log?.WriteLine(result.Success ? "result: uninstall success" : $"result: uninstall failed — {result.Error}");
         return new InstallOutcome(result.Success, result.Error);
     }
+
+    // --- P6 (gaps G7/G17): files-in-use ---
+
+    /// <summary>
+    /// Scan for anything blocking this run (P6): a declared <c>installer.app_mutex</c>
+    /// that is held, or a process the Restart Manager reports holding a file open
+    /// under <paramref name="installDir"/> (defaults to the destination this run would
+    /// use). Empty means clear. Used by the wizard's "Close applications" screen and,
+    /// defensively, by the install path itself.
+    /// </summary>
+    public IReadOnlyList<AppBlocker> ScanBlockers(string? installDir = null)
+        => FilesInUse.Scan(_blob.AppMutex, installDir ?? EffectiveInstallDir());
+
+    /// <summary>
+    /// Ask the Restart Manager to gracefully close the applications holding the
+    /// install directory (P6) — the wizard's "Close for me" and the silent
+    /// <c>/closeapps</c> path. No restart is attempted and nothing is force-killed;
+    /// the caller re-scans to confirm the blockers are gone.
+    /// </summary>
+    public bool CloseBlockers(string? installDir = null)
+        => FilesInUse.CloseBlockers(installDir ?? EffectiveInstallDir());
+
+    /// <summary>The destination this run resolves to — the wizard's pick when made, else the computed default.</summary>
+    private string EffectiveInstallDir() => CollectedInstallDir ?? ResolveDefaultInstallDir();
+
+    /// <summary>
+    /// The files-in-use gate (P6, gap G7). Runs after the destination is known and
+    /// BEFORE prerequisites, the prior-version teardown, and the rollback journal — so
+    /// a blocked run changes nothing at all. With <c>/closeapps</c> the blockers are
+    /// closed via the Restart Manager and re-scanned; without it the run is refused
+    /// (headless maps this onto <see cref="FilesInUseExitCode"/>). A wizard run has
+    /// already cleared blockers on the Close-applications screen, so this is normally
+    /// a no-op there.
+    /// </summary>
+    private InstallOutcome? CheckFilesInUse(StepContext ctx, string? installDir, IProgress<StepProgress>? progress)
+    {
+        var blockers = FilesInUse.Scan(_blob.AppMutex, installDir);
+        if (blockers.Count == 0)
+        {
+            return null; // clear
+        }
+
+        if (_parsed.CloseApps)
+        {
+            Report(progress, ctx, $"close-apps: closing {blockers.Count} blocking application(s)…", isError: false);
+            FilesInUse.CloseBlockers(installDir);
+            blockers = FilesInUse.Scan(_blob.AppMutex, installDir);
+            if (blockers.Count == 0)
+            {
+                Report(progress, ctx, "close-apps: all blocking applications closed", isError: false);
+                return null;
+            }
+        }
+
+        _blockedByFilesInUse = true;
+        var message = BuildBlockerMessage(blockers);
+        foreach (var b in blockers)
+        {
+            Report(progress, ctx, $"blocked by: {b.Describe()}", isError: true);
+        }
+        _log?.WriteLine($"result: blocked — {message}");
+        return new InstallOutcome(false, message);
+    }
+
+    private static string BuildBlockerMessage(IReadOnlyList<AppBlocker> blockers)
+    {
+        var names = new List<string>(blockers.Count);
+        foreach (var b in blockers)
+        {
+            names.Add(b.Describe());
+        }
+        return
+            "these applications are using files this install needs and must be closed first: " +
+            string.Join(", ", names) +
+            " — close them and retry, or re-run with /closeapps";
+    }
+
+    private static void Report(IProgress<StepProgress>? progress, StepContext ctx, string message, bool isError)
+        => progress?.Report(new StepProgress(0, 0, ctx.Redact(message), isError));
 
     // --- P2 (gap G4): run-after-install launch ---
 

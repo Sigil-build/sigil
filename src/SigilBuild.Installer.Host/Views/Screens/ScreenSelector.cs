@@ -19,6 +19,7 @@ public sealed class ScreenSelector : IDataTemplate
             InstallerStep.Installing => new InstallingView(),
             InstallerStep.Failed => new FailedView(),
             InstallerStep.DowngradeBlocked => new DowngradeBlockedView(),
+            InstallerStep.CloseApps => new CloseAppsView(),
             InstallerStep.Finish => new FinishView(),
             InstallerStep.Custom => new CustomView(),
             _ => new TextBlock { Text = "(no view)" },

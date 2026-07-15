@@ -283,6 +283,25 @@ public class CommandLineParserTests
             .AuditSafeRendering().Should().Contain("/launch");
     }
 
+    // ── /closeapps files-in-use (P6) ──────────────────────────────────────────
+
+    [Theory]
+    [InlineData("/closeapps")]
+    [InlineData("/CLOSEAPPS")]
+    public void Closeapps_flag_is_parsed(string flag)
+        => CommandLineParser.Parse(new[] { "/silent", flag }, Array.Empty<ParameterDefinition>())
+            .CloseApps.Should().BeTrue();
+
+    [Fact]
+    public void No_closeapps_flag_means_false()
+        => CommandLineParser.Parse(new[] { "/silent" }, Array.Empty<ParameterDefinition>())
+            .CloseApps.Should().BeFalse();
+
+    [Fact]
+    public void Audit_safe_form_includes_closeapps()
+        => CommandLineParser.Parse(new[] { "/silent", "/closeapps" }, Array.Empty<ParameterDefinition>())
+            .AuditSafeRendering().Should().Contain("/closeapps");
+
     // ── Closed grammar rejects junk ───────────────────────────────────────────
 
     [Fact]

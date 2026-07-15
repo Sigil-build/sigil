@@ -124,6 +124,15 @@ public sealed class ParsedCommandLine
     public bool Launch { get; init; }
 
     /// <summary>
+    /// True when <c>/closeapps</c> was supplied (P6, gap G7). A headless run whose
+    /// install directory is held open by running applications closes them via the
+    /// Restart Manager instead of refusing; without it the run exits with
+    /// <c>InstallSession.FilesInUseExitCode</c>. The wizard uses the "Close
+    /// applications" screen instead.
+    /// </summary>
+    public bool CloseApps { get; init; }
+
+    /// <summary>
     /// Re-renders the parsed args as a single space-joined string, with secret
     /// parameter values replaced by <c>***</c>. Suitable for logging without
     /// leaking license keys / passwords / tokens.
@@ -210,6 +219,12 @@ public sealed class ParsedCommandLine
             sb.Append("/launch");
         }
 
+        if (CloseApps)
+        {
+            Space();
+            sb.Append("/closeapps");
+        }
+
         foreach (var kv in Values)
         {
             Space();
@@ -249,6 +264,9 @@ public sealed class ParsedCommandLine
 ///   <item><description><c>/D=path</c> — install-dir override (stored only; Task T13).</description></item>
 ///   <item><description><c>/LOG</c> — write a timestamped install log to
 ///   <c>%TEMP%\sigil-&lt;appid&gt;.log</c>; <c>/LOG=path</c> — write it to <c>path</c> (P7).</description></item>
+///   <item><description><c>/closeapps</c> — when the install directory is held open
+///   by running applications, close them via the Restart Manager instead of refusing
+///   the silent run (P6).</description></item>
 ///   <item><description><c>/launch</c> — after a silent install, start the
 ///   <c>run_after_install</c> target unelevated (P2). Ignored without <c>/silent</c>
 ///   (the wizard uses the Done-screen checkbox).</description></item>
@@ -308,6 +326,7 @@ public static class CommandLineParser
         var logRequested = false;
         string? logPath = null;
         var launch = false;
+        var closeApps = false;
 
         foreach (var rawArg in args)
         {
@@ -319,7 +338,7 @@ public static class CommandLineParser
             if (rawArg[0] != '/')
             {
                 throw new UsageException(
-                    $"unexpected positional argument '{rawArg}': only /silent, /S, /verysilent, /Update, /Uninstall, /allusers, /currentuser, /force-downgrade, /D=path, /LOG[=path], /launch, and /PName=Value are accepted");
+                    $"unexpected positional argument '{rawArg}': only /silent, /S, /verysilent, /Update, /Uninstall, /allusers, /currentuser, /force-downgrade, /closeapps, /D=path, /LOG[=path], /launch, and /PName=Value are accepted");
             }
 
             // Strip the leading '/'.
@@ -361,6 +380,11 @@ public static class CommandLineParser
             if (string.Equals(body, "launch", StringComparison.OrdinalIgnoreCase))
             {
                 launch = true;
+                continue;
+            }
+            if (string.Equals(body, "closeapps", StringComparison.OrdinalIgnoreCase))
+            {
+                closeApps = true;
                 continue;
             }
             if (string.Equals(body, "force-downgrade", StringComparison.OrdinalIgnoreCase))
@@ -418,7 +442,7 @@ public static class CommandLineParser
             }
 
             throw new UsageException(
-                $"unrecognized flag '{rawArg}': expected /silent, /S, /verysilent, /Update, /Uninstall, /allusers, /currentuser, /force-downgrade, /D=path, /LOG[=path], /launch, or /PName=Value");
+                $"unrecognized flag '{rawArg}': expected /silent, /S, /verysilent, /Update, /Uninstall, /allusers, /currentuser, /force-downgrade, /closeapps, /D=path, /LOG[=path], /launch, or /PName=Value");
         }
 
         var secretKeys = schema
@@ -457,6 +481,7 @@ public static class CommandLineParser
             LogRequested = logRequested,
             LogPath = logPath,
             Launch = launch,
+            CloseApps = closeApps,
         };
     }
 

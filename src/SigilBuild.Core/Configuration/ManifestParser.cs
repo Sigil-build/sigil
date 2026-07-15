@@ -200,7 +200,10 @@ public static class ManifestParser
             RunAfterInstall: ParseRunAfterInstall(GetMapping(node, "run_after_install")),
             // P5 (gap G6): first-class prerequisite units (detect → install → re-detect),
             // run before the journaled body. An https source without a sha256 is refused here.
-            Prerequisites: ParsePrerequisites(GetSequenceOfMappings(node, "prerequisites"), diagnostics, fileName));
+            Prerequisites: ParsePrerequisites(GetSequenceOfMappings(node, "prerequisites"), diagnostics, fileName),
+            // P6 (gap G7): named mutexes the running app holds; setup probes them
+            // before touching the install dir (Inno AppMutex equivalent).
+            AppMutex: GetSequence(node, "app_mutex"));
     }
 
     /// <summary>

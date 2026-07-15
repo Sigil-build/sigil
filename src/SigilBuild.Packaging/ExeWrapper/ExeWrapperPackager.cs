@@ -220,7 +220,9 @@ public sealed class ExeWrapperPackager : IPackager
             RunAfterInstallPath: manifest.Installer?.RunAfterInstall?.Path,
             RunAfterInstallArgs: manifest.Installer?.RunAfterInstall?.Args,
             // P5 (gap G6): first-class prerequisite units, run before the journaled body.
-            Prerequisites: manifest.Installer?.Prerequisites);
+            Prerequisites: manifest.Installer?.Prerequisites,
+            // P6 (gap G7): the declared app mutex names.
+            AppMutex: manifest.Installer?.AppMutex);
 
         // T7: derive the full light/dark palette at pack time and carry it, plus
         // the base64 logo/hero bytes, inside the blob so the stamped exe renders

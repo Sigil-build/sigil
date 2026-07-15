@@ -51,4 +51,12 @@ public static class DiagnosticCodes
     // Emitted (Error) when a prerequisite is missing name/detect/source, or an
     // https:// source omits the required sha256 integrity checksum.
     public const string InvalidPrerequisite = "SIG0280";
+
+    // SIG029x — localization (P9, gap G10)
+    // SIG0290 is FATAL: every runtime fallback bottoms out at `en`, so a map
+    // without it has no defined rendering. Pack diagnostics reach manifest
+    // authors, who do not build under this repo's TreatWarningsAsErrors — a
+    // warning here would genuinely ship blank strings.
+    public const string LocalizedTextMissingEnglish = "SIG0290";
+    public const string InvalidLanguageTag = "SIG0291";
 }

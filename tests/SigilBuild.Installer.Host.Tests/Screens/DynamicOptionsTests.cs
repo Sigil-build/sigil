@@ -24,7 +24,7 @@ public class DynamicOptionsTests
         string name, ParameterType type, object? def = null,
         IReadOnlyList<string>? enums = null, ParameterSource? source = null,
         bool installTime = true) =>
-        new(name, type, def, enums, installTime, Description: name,
+        new(name, type, def, enums, installTime, Description: LocalizedText.Plain(name),
             Pattern: null, Min: null, Max: null, Source: source);
 
     // ── Source forces a ComboBox, even with no static enum values ────────────
@@ -79,7 +79,7 @@ public class DynamicOptionsTests
         };
         var screens = new List<InstallerScreen>
         {
-            new("configure", "Configure", null, null, new List<ScreenField> { new("app", null) }),
+            new("configure", LocalizedText.Plain("Configure"), null, null, new List<ScreenField> { new("app", null) }),
         };
 
         var vm = new InstallerViewModel(new BrandTokens { AppName = "Acme" });

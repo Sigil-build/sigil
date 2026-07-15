@@ -151,7 +151,7 @@ public sealed class ConfigStepIntegrationTests
                 AppId: appId,
                 Parameters: new[]
                 {
-                    new ParameterDefinition("token", ParameterType.Secret, null, null, true, "k", null, null, null),
+                    new ParameterDefinition("token", ParameterType.Secret, null, null, true, LocalizedText.Plain("k"), null, null, null),
                 },
                 InstallSteps: new InstallStep[]
                 {

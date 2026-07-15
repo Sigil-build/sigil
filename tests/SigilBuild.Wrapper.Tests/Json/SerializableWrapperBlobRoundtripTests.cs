@@ -292,8 +292,8 @@ public class SerializableWrapperBlobRoundtripTests
                 new SerializableInstallerScreen
                 {
                     Id = "configure",
-                    Title = "Configure {app.name}",
-                    Subtitle = "Connect to your server and set preferences.",
+                    Title = new Dictionary<string, string> { ["en"] = "Configure {app.name}" },
+                    Subtitle = new Dictionary<string, string> { ["en"] = "Connect to your server and set preferences." },
                     When = "param.autostart == true",
                     Fields = new[]
                     {
@@ -307,8 +307,8 @@ public class SerializableWrapperBlobRoundtripTests
         back.Screens.Should().HaveCount(1);
         var screen = back.Screens[0];
         screen.Id.Should().Be("configure");
-        screen.Title.Should().Be("Configure {app.name}");
-        screen.Subtitle.Should().Be("Connect to your server and set preferences.");
+        screen.Title["en"].Should().Be("Configure {app.name}");
+        screen.Subtitle!["en"].Should().Be("Connect to your server and set preferences.");
         screen.When.Should().Be("param.autostart == true");
         screen.Fields.Should().HaveCount(2);
         screen.Fields[0].Param.Should().Be("server_address");
@@ -322,7 +322,7 @@ public class SerializableWrapperBlobRoundtripTests
     {
         var core = new InstallerScreen(
             Id: "configure",
-            Title: "Configure {app.name}",
+            Title: LocalizedText.Plain("Configure {app.name}"),
             Subtitle: null,
             When: "param.autostart == true",
             Fields: new[]
@@ -336,7 +336,7 @@ public class SerializableWrapperBlobRoundtripTests
             new SerializableWrapperBlob { Screens = new[] { wire } }).Screens[0]);
 
         back.Id.Should().Be(core.Id);
-        back.Title.Should().Be(core.Title);
+        back.Title.Values.Should().BeEquivalentTo(core.Title.Values);
         back.Subtitle.Should().BeNull();
         back.When.Should().Be(core.When);
         back.Fields.Should().HaveCount(2);
@@ -344,5 +344,32 @@ public class SerializableWrapperBlobRoundtripTests
         back.Fields[0].Widget.Should().BeNull();
         back.Fields[1].Param.Should().Be("channel");
         back.Fields[1].Widget.Should().Be("radio");
+    }
+
+    // ── LocalizedText (P9, gap G10): Title/Subtitle/Description carry a
+    //    Dictionary<string,string> on the wire; installer.language rides
+    //    alongside as a plain string. ──────────────────────────────────────────
+
+    [Fact]
+    public void Blob_RoundTrips_LocalizedFields()
+    {
+        var blob = new SerializableWrapperBlob
+        {
+            Screens = new[]
+            {
+                new SerializableInstallerScreen
+                {
+                    Id = "cfg",
+                    Title = new Dictionary<string, string> { ["en"] = "Configure", ["uk"] = "Налаштування" },
+                    Fields = Array.Empty<SerializableScreenField>(),
+                },
+            },
+            Language = "uk",
+        };
+
+        var back = RoundTrip(blob);
+
+        back.Screens[0].Title["uk"].Should().Be("Налаштування");
+        back.Language.Should().Be("uk");
     }
 }

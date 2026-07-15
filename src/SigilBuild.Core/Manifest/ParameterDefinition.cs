@@ -14,7 +14,7 @@ public sealed record ParameterDefinition(
     object? Default,
     IReadOnlyList<string>? EnumValues,
     bool InstallTime,
-    string? Description,
+    LocalizedText? Description,
     string? Pattern,
     int? Min,
     int? Max,

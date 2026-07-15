@@ -24,7 +24,7 @@ public sealed class SecretHygieneTests
     private const string Secret = "LK-9999-TOPSECRET";
 
     private static ParameterDefinition LicenseKey() =>
-        new("license_key", ParameterType.Secret, null, null, true, "License key", null, null, null);
+        new("license_key", ParameterType.Secret, null, null, true, LocalizedText.Plain("License key"), null, null, null);
 
     private static WrapperBlob BlobWith(params InstallStep[] steps) =>
         new(

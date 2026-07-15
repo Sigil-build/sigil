@@ -252,6 +252,11 @@ public sealed class ExeWrapperPackager : IPackager
             // pack stamps resources FIRST (invalidating any prior signature), then
             // `sigil sign` signs the finished Setup.exe LAST.
             SignDeclared = manifest.Sign is { Provider: not SignProvider.None },
+            // P9 (gap G10): the manifest's optional fixed installer language, carried
+            // like Screens/LicenseText above — a session-bootstrap concern read
+            // straight off SerializableWrapperBlob, not part of the in-memory
+            // WrapperBlob the engine steps operate on.
+            Language = manifest.Installer?.Language,
         };
 
         var json = System.Text.Json.JsonSerializer.Serialize(

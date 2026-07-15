@@ -65,11 +65,11 @@ public class ExeWrapperBlobBrandTests
         var parameters = new System.Collections.Generic.Dictionary<string, ParameterDefinition>
         {
             ["channel"] = new("channel", ParameterType.Enum, "stable",
-                new[] { "stable", "beta" }, true, "Update channel", null, null, null),
+                new[] { "stable", "beta" }, true, LocalizedText.Plain("Update channel"), null, null, null),
         };
         var screens = new System.Collections.Generic.List<InstallerScreen>
         {
-            new("configure", "Configure {app.name}", "sub", null,
+            new("configure", LocalizedText.Plain("Configure {app.name}"), LocalizedText.Plain("sub"), null,
                 new System.Collections.Generic.List<ScreenField> { new("channel", "radio") }),
         };
 
@@ -86,7 +86,7 @@ public class ExeWrapperBlobBrandTests
 
         s.Screens.Should().ContainSingle();
         s.Screens[0].Id.Should().Be("configure");
-        s.Screens[0].Title.Should().Be("Configure {app.name}");
+        s.Screens[0].Title["en"].Should().Be("Configure {app.name}");
         s.Screens[0].Fields.Should().ContainSingle();
         s.Screens[0].Fields[0].Param.Should().Be("channel");
         s.Screens[0].Fields[0].Widget.Should().Be("radio");

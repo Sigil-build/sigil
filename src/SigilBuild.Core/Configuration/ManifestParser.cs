@@ -203,7 +203,106 @@ public static class ManifestParser
             Prerequisites: ParsePrerequisites(GetSequenceOfMappings(node, "prerequisites"), diagnostics, fileName),
             // P6 (gap G7): named mutexes the running app holds; setup probes them
             // before touching the install dir (Inno AppMutex equivalent).
-            AppMutex: GetSequence(node, "app_mutex"));
+            AppMutex: GetSequence(node, "app_mutex"),
+            // P9 (gap G10): optional fixed installer language. Stored verbatim
+            // (schema is permissive); an invalid tag is diagnosed (SIG0291) but
+            // otherwise doesn't block the parse — the resolver chain simply
+            // won't match a value that fails LanguageTag.IsValid.
+            Language: ParseInstallerLanguage(node, diagnostics, fileName));
+    }
+
+    /// <summary>
+    /// Parse the manifest's <c>installer.language</c> scalar (P9, gap G10): the
+    /// first link in the language-preference chain (installer.language -&gt; /lang
+    /// -&gt; OS list -&gt; en). Emits <see cref="DiagnosticCodes.InvalidLanguageTag"/>
+    /// (SIG0291, Error) when present but not a valid BCP-47-subset tag per
+    /// <see cref="LanguageTag.IsValid"/> — the same rule the <c>/lang</c> flag uses.
+    /// </summary>
+    private static string? ParseInstallerLanguage(
+        YamlMappingNode node, List<Diagnostic> diagnostics, string fileName)
+    {
+        var raw = GetScalar(node, "language");
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        if (!LanguageTag.IsValid(raw))
+        {
+            diagnostics.Add(new Diagnostic(
+                DiagnosticSeverity.Error,
+                DiagnosticCodes.InvalidLanguageTag,
+                $"installer.language '{raw}' is not a valid language tag",
+                new SourceLocation(fileName, (int)node.Start.Line, (int)node.Start.Column),
+                "https://docs.sigil.build/diagnostics/SIG0291"));
+        }
+
+        return raw;
+    }
+
+    /// <summary>
+    /// Parse a manifest field that may be authored either as a plain string or as
+    /// a <c>{ en: ..., uk: ... }</c> map (P9, gap G10 — <see cref="LocalizedText"/>).
+    /// A plain string normalizes to <c>{"en": value}</c>. A map is carried
+    /// verbatim; each key is validated as a language tag
+    /// (<see cref="DiagnosticCodes.InvalidLanguageTag"/>, SIG0291) and the whole
+    /// map must contain an <c>en</c> entry
+    /// (<see cref="DiagnosticCodes.LocalizedTextMissingEnglish"/>, SIG0290 —
+    /// fatal, since every runtime fallback bottoms out at English). Returns
+    /// <c>null</c> when the key is absent.
+    /// </summary>
+    private static LocalizedText? ParseLocalizedText(
+        YamlMappingNode parent, string key, SourceLocation loc, List<Diagnostic> diagnostics)
+    {
+        if (!parent.Children.TryGetValue(new YamlScalarNode(key), out var node))
+        {
+            return null;
+        }
+
+        if (node is YamlScalarNode scalar)
+        {
+            return LocalizedText.Plain(scalar.Value ?? string.Empty);
+        }
+
+        if (node is not YamlMappingNode map)
+        {
+            return null;
+        }
+
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in map.Children)
+        {
+            if (kvp.Key is not YamlScalarNode tagNode || tagNode.Value is null)
+            {
+                continue;
+            }
+
+            var tag = tagNode.Value;
+            values[tag] = kvp.Value is YamlScalarNode textNode ? (textNode.Value ?? string.Empty) : string.Empty;
+
+            if (!LanguageTag.IsValid(tag))
+            {
+                diagnostics.Add(new Diagnostic(
+                    DiagnosticSeverity.Error,
+                    DiagnosticCodes.InvalidLanguageTag,
+                    $"'{key}' has an invalid language tag '{tag}'",
+                    loc,
+                    "https://docs.sigil.build/diagnostics/SIG0291"));
+            }
+        }
+
+        var localizedText = new LocalizedText(values);
+        if (!localizedText.HasEnglish)
+        {
+            diagnostics.Add(new Diagnostic(
+                DiagnosticSeverity.Error,
+                DiagnosticCodes.LocalizedTextMissingEnglish,
+                $"'{key}' is missing an 'en' entry — every runtime fallback bottoms out at English",
+                loc,
+                "https://docs.sigil.build/diagnostics/SIG0290"));
+        }
+
+        return localizedText;
     }
 
     /// <summary>
@@ -612,14 +711,20 @@ public static class ManifestParser
         {
             var loc = new SourceLocation(fileName, (int)node.Start.Line, (int)node.Start.Column);
             var id = GetScalar(node, "id") ?? string.Empty;
-            var title = GetScalar(node, "title") ?? string.Empty;
-            var subtitle = GetScalar(node, "subtitle");
+            var title = ParseLocalizedText(node, "title", loc, diagnostics) ?? LocalizedText.Plain(string.Empty);
+            var subtitle = ParseLocalizedText(node, "subtitle", loc, diagnostics);
             var when = GetScalar(node, "when");
 
-            ValidateInterpolationTokens(title, loc, diagnostics);
+            foreach (var value in title.Values.Values)
+            {
+                ValidateInterpolationTokens(value, loc, diagnostics);
+            }
             if (subtitle is not null)
             {
-                ValidateInterpolationTokens(subtitle, loc, diagnostics);
+                foreach (var value in subtitle.Values.Values)
+                {
+                    ValidateInterpolationTokens(value, loc, diagnostics);
+                }
             }
 
             if (!string.IsNullOrWhiteSpace(when))
@@ -815,7 +920,8 @@ public static class ManifestParser
 
             var values = GetSequence(value, "values");
             var installTime = GetBool(value, "install_time", defaultValue: false);
-            var description = GetScalar(value, "description");
+            var descriptionLoc = new SourceLocation(fileName, (int)keyNode.Start.Line, (int)keyNode.Start.Column);
+            var description = ParseLocalizedText(value, "description", descriptionLoc, diagnostics);
             var pattern = GetScalar(value, "pattern");
             var min = GetNullableInt(value, "min");
             var max = GetNullableInt(value, "max");

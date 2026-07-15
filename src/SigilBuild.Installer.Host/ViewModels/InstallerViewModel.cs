@@ -309,7 +309,8 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
                 }
             }
             built.Add(new CustomScreenViewModel(
-                screen.Id, Interpolate(screen.Title) ?? screen.Title, Interpolate(screen.Subtitle), screen.When, fields));
+                screen.Id, Interpolate(screen.Title.English) ?? screen.Title.English,
+                Interpolate(screen.Subtitle?.English), screen.When, fields));
         }
 
         _customScreens = built;

@@ -50,6 +50,11 @@ public sealed record InstallerBrand(
 /// dir, setup opens each name; a mutex that opens means the app is running and the
 /// install is blocked. Complements the Restart Manager sweep, which finds
 /// processes holding files open even when no mutex is declared.</param>
+/// <param name="Language">Optional fixed installer language tag (P9, gap G10)
+/// from <c>installer.language</c> — the first link in the language-preference
+/// chain (installer.language -&gt; /lang -&gt; OS list -&gt; en) resolved by the
+/// language resolver in SigilBuild.Wrapper.Core.Localization. <c>null</c> when
+/// the manifest doesn't fix a language, letting the OS/flag chain decide.</param>
 public sealed record InstallerSection(
     InstallerBrand? Brand,
     InstallerOptions? Options = null,
@@ -62,7 +67,8 @@ public sealed record InstallerSection(
     InstallerHooks? Hooks = null,
     RunAfterInstall? RunAfterInstall = null,
     IReadOnlyList<InstallerPrerequisite>? Prerequisites = null,
-    IReadOnlyList<string>? AppMutex = null);
+    IReadOnlyList<string>? AppMutex = null,
+    string? Language = null);
 
 /// <summary>
 /// A single declarative variable from <c>installer.vars</c> (P1): a name bound to

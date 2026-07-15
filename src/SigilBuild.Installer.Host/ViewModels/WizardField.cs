@@ -93,7 +93,7 @@ public sealed class FieldViewModel : INotifyPropertyChanged
         Definition = def ?? throw new ArgumentNullException(nameof(def));
         EnumOptions = def.EnumValues ?? Array.Empty<string>();
         Widget = WidgetFactory.Infer(def.Type, widgetOverride, EnumOptions.Count, def.Source is not null);
-        Label = string.IsNullOrWhiteSpace(def.Description) ? def.Name : def.Description!;
+        Label = string.IsNullOrWhiteSpace(def.Description?.English) ? def.Name : def.Description!.English;
 
         // Seed the dropdown's items. A static enum's items are (label == value ==
         // option); a source-backed dropdown starts empty and is populated on

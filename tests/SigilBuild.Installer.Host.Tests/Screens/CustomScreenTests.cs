@@ -20,7 +20,7 @@ public class CustomScreenTests
 {
     private static ParameterDefinition Param(
         string name, ParameterType type, object? def = null, IReadOnlyList<string>? enums = null) =>
-        new(name, type, def, enums, InstallTime: true, Description: name, Pattern: null, Min: null, Max: null);
+        new(name, type, def, enums, InstallTime: true, Description: LocalizedText.Plain(name), Pattern: null, Min: null, Max: null);
 
     // ── Widget inference table ──────────────────────────────────────────────
 
@@ -61,7 +61,7 @@ public class CustomScreenTests
         };
         var screens = new List<InstallerScreen>
         {
-            new("configure", "Configure {app.name}", "Set preferences.", null, new List<ScreenField>
+            new("configure", LocalizedText.Plain("Configure {app.name}"), LocalizedText.Plain("Set preferences."), null, new List<ScreenField>
             {
                 new("server_address", null),
                 new("license_key", null),
@@ -142,8 +142,8 @@ public class CustomScreenTests
         };
         var screens = new List<InstallerScreen>
         {
-            new("configure", "Configure", null, null, new List<ScreenField> { new("advanced", null) }),
-            new("advanced_opts", "Advanced", null, "param.advanced == true",
+            new("configure", LocalizedText.Plain("Configure"), null, null, new List<ScreenField> { new("advanced", null) }),
+            new("advanced_opts", LocalizedText.Plain("Advanced"), null, "param.advanced == true",
                 new List<ScreenField> { new("advanced", null) }),
         };
 

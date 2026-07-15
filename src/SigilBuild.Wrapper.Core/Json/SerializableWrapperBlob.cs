@@ -118,6 +118,16 @@ internal sealed record SerializableWrapperBlob
     /// <summary>P6 (gap G7): declared app mutex names probed before touching the install dir.</summary>
     public string[]? AppMutex { get; init; }
 
+    /// <summary>
+    /// P9 (gap G10): the manifest's optional <c>installer.language</c> fixed
+    /// language tag. <c>null</c> when the manifest doesn't fix a language, so the
+    /// session's language resolver falls through to <c>/lang</c> / the OS
+    /// preference list / <c>en</c>. A host-rendering / session-bootstrap concern
+    /// like <see cref="Screens"/> and <see cref="LicenseText"/> — not carried on
+    /// the in-memory <see cref="WrapperBlob"/>.
+    /// </summary>
+    public string? Language { get; init; }
+
     public static WrapperBlob ToWrapperBlob(SerializableWrapperBlob s)
     {
         ArgumentNullException.ThrowIfNull(s);
@@ -321,7 +331,7 @@ internal sealed record SerializableParameterDefinition
     public JsonElement? Default { get; init; }
     public string[]? EnumValues { get; init; }
     public bool InstallTime { get; init; }
-    public string? Description { get; init; }
+    public Dictionary<string, string>? Description { get; init; }
     public string? Pattern { get; init; }
     public int? Min { get; init; }
     public int? Max { get; init; }
@@ -335,7 +345,7 @@ internal sealed record SerializableParameterDefinition
             Default: JsonElementToObject(s.Default, s.Type),
             EnumValues: s.EnumValues,
             InstallTime: s.InstallTime,
-            Description: s.Description,
+            Description: s.Description is null ? null : new LocalizedText(s.Description),
             Pattern: s.Pattern,
             Min: s.Min,
             Max: s.Max);
@@ -351,7 +361,7 @@ internal sealed record SerializableParameterDefinition
             Default = ObjectToJsonElement(def.Default),
             EnumValues = ToArray(def.EnumValues),
             InstallTime = def.InstallTime,
-            Description = def.Description,
+            Description = def.Description is null ? null : new Dictionary<string, string>(def.Description.Values),
             Pattern = def.Pattern,
             Min = def.Min,
             Max = def.Max,
@@ -413,8 +423,8 @@ internal sealed record SerializableParameterDefinition
 internal sealed record SerializableInstallerScreen
 {
     public string Id { get; init; } = string.Empty;
-    public string Title { get; init; } = string.Empty;
-    public string? Subtitle { get; init; }
+    public Dictionary<string, string> Title { get; init; } = new();
+    public Dictionary<string, string>? Subtitle { get; init; }
     public string? When { get; init; }
     public SerializableScreenField[] Fields { get; init; } = Array.Empty<SerializableScreenField>();
 
@@ -429,8 +439,8 @@ internal sealed record SerializableInstallerScreen
 
         return new InstallerScreen(
             Id: s.Id,
-            Title: s.Title,
-            Subtitle: s.Subtitle,
+            Title: new LocalizedText(s.Title),
+            Subtitle: s.Subtitle is null ? null : new LocalizedText(s.Subtitle),
             When: s.When,
             Fields: fields);
     }
@@ -447,8 +457,8 @@ internal sealed record SerializableInstallerScreen
         return new SerializableInstallerScreen
         {
             Id = screen.Id,
-            Title = screen.Title,
-            Subtitle = screen.Subtitle,
+            Title = new Dictionary<string, string>(screen.Title.Values),
+            Subtitle = screen.Subtitle is null ? null : new Dictionary<string, string>(screen.Subtitle.Values),
             When = screen.When,
             Fields = fields,
         };

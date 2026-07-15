@@ -97,7 +97,7 @@ public class WrapperResourceWriterTests
                     Default: @"C:\Program Files\Example",
                     EnumValues: null,
                     InstallTime: true,
-                    Description: "Where to install",
+                    Description: LocalizedText.Plain("Where to install"),
                     Pattern: null,
                     Min: null,
                     Max: null),

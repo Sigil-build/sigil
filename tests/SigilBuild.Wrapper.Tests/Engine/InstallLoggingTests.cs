@@ -162,7 +162,7 @@ public sealed class InstallLoggingTests
             AppId: "com.acme.LogSecretTest",
             Parameters: new[]
             {
-                new ParameterDefinition("license_key", ParameterType.Secret, null, null, true, "k", null, null, null),
+                new ParameterDefinition("license_key", ParameterType.Secret, null, null, true, LocalizedText.Plain("k"), null, null, null),
             },
             InstallSteps: new InstallStep[]
             {

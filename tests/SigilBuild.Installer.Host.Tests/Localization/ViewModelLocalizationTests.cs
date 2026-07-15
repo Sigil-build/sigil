@@ -19,7 +19,12 @@ namespace SigilBuild.Installer.Host.Tests.Localization;
 [Collection("SessionLanguage")]
 public sealed class ViewModelLocalizationTests : IDisposable
 {
-    public void Dispose() => SessionLanguage.ResetForTesting();
+    // Restore the assembly-wide English default (set once by TestAppBuilder's
+    // ModuleInitializer) rather than nulling it out — a bare ResetForTesting()
+    // here would leave SessionLanguage unset for whichever test class the
+    // runner happens to order next, reintroducing the Debug-mode throw this
+    // class's own SetForTesting calls avoid for themselves.
+    public void Dispose() => SessionLanguage.SetForTesting(Lang.En);
 
     [Fact]
     public void InstallPathError_IsLocalized()

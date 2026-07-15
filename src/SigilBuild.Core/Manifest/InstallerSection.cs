@@ -45,6 +45,11 @@ public sealed record InstallerBrand(
 /// <c>installer.prerequisites</c> — detect-then-install dependency installers (VC++
 /// redist, .NET runtime) that run before the journaled body. See
 /// <see cref="InstallerPrerequisite"/>.</param>
+/// <param name="AppMutex">Named mutexes the application creates while running
+/// (P6, gap G7) — the Inno <c>AppMutex</c> equivalent. Before touching the install
+/// dir, setup opens each name; a mutex that opens means the app is running and the
+/// install is blocked. Complements the Restart Manager sweep, which finds
+/// processes holding files open even when no mutex is declared.</param>
 public sealed record InstallerSection(
     InstallerBrand? Brand,
     InstallerOptions? Options = null,
@@ -56,7 +61,8 @@ public sealed record InstallerSection(
     IReadOnlyList<InstallerVar>? Vars = null,
     InstallerHooks? Hooks = null,
     RunAfterInstall? RunAfterInstall = null,
-    IReadOnlyList<InstallerPrerequisite>? Prerequisites = null);
+    IReadOnlyList<InstallerPrerequisite>? Prerequisites = null,
+    IReadOnlyList<string>? AppMutex = null);
 
 /// <summary>
 /// A single declarative variable from <c>installer.vars</c> (P1): a name bound to

@@ -49,6 +49,30 @@ public static partial class Program
             return Elevation.RelaunchElevatedAndWait(args);
         }
 
+        // P6 (gap G17): single-instance guard. Taken AFTER the elevation branch — the
+        // un-elevated parent above never installs, so it must not hold the mutex while
+        // the elevated child (which does) tries to take it. Held for the whole run;
+        // the OS releases it if the process dies, so a crash never wedges the name.
+        using var instanceLock = SetupInstanceLock.TryAcquire(session.AppId, session.ResolvedScope);
+        if (instanceLock is null)
+        {
+            const string alreadyRunning =
+                "Setup is already running.\n\nAnother copy of this installer is in progress. " +
+                "Finish or close it, then try again.";
+            if (session.Silent)
+            {
+                AttachParentConsole();
+                Console.Error.WriteLine(
+                    "another setup for this application is already running — close it and try again.");
+            }
+            else if (OperatingSystem.IsWindows())
+            {
+                // A WinExe has no console, so the headed path needs a real notice.
+                _ = MessageBoxW(IntPtr.Zero, alreadyRunning, "Setup", MB_OK | MB_ICONINFORMATION);
+            }
+            return InstallSession.AlreadyRunningExitCode;
+        }
+
         // Headless whenever /silent or /verysilent is present (this includes the
         // ARP UninstallString's `/S /Uninstall`), or the unsupported /Update mode is
         // requested. An interactive uninstall (uninstall.exe double-clicked, no /S,
@@ -139,9 +163,17 @@ public static partial class Program
     }
 
     private const uint ATTACH_PARENT_PROCESS = 0xFFFFFFFF;
+    private const uint MB_OK = 0x0;
+    private const uint MB_ICONINFORMATION = 0x40;
 
     [SupportedOSPlatform("windows")]
     [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool AttachConsole(uint dwProcessId);
+
+    // P6 (gap G17): the friendly "already running" notice for the headed path — a
+    // plain MessageBox, since this fires before Avalonia is initialised.
+    [SupportedOSPlatform("windows")]
+    [LibraryImport("user32.dll", EntryPoint = "MessageBoxW", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial int MessageBoxW(IntPtr hWnd, string lpText, string lpCaption, uint uType);
 }

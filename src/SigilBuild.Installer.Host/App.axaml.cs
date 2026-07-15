@@ -116,6 +116,22 @@ public partial class App : Application
                 // P7: surface the /LOG path so the Failed screen can offer "Open log".
                 _vm.LogFilePath = session.LogFilePath;
 
+                // P6 (gap G7): wire the files-in-use probes so the wizard can gate on
+                // running applications before starting the engine, and offer to close
+                // them via the Restart Manager.
+                _vm.ConfigureBlockerProbe(
+                    scan: dir =>
+                    {
+                        var blockers = session.ScanBlockers(dir);
+                        var described = new List<string>(blockers.Count);
+                        foreach (var b in blockers)
+                        {
+                            described.Add(b.Describe());
+                        }
+                        return described;
+                    },
+                    close: dir => session.CloseBlockers(dir));
+
                 // P2 (gap G4): wire the Done-screen "Launch <App>" checkbox to the
                 // session's unelevated launch of installer.run_after_install.
                 _vm.ConfigureLaunch(

@@ -32,6 +32,17 @@ internal static class Program
                 return Elevation.RelaunchElevatedAndWait(args);
             }
 
+            // P6 (gap G17): single-instance guard. Taken AFTER the elevation branch —
+            // the un-elevated parent above never installs, so it must not hold the
+            // mutex while the elevated child (which does) tries to take it.
+            using var instanceLock = SetupInstanceLock.TryAcquire(session.AppId, session.ResolvedScope);
+            if (instanceLock is null)
+            {
+                Console.Error.WriteLine(
+                    "another setup for this application is already running — close it and try again.");
+                return InstallSession.AlreadyRunningExitCode;
+            }
+
             return await session.RunHeadlessAsync(Console.Out, Console.Error).ConfigureAwait(false);
         }
         catch (UsageException ex)

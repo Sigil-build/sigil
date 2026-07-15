@@ -14,7 +14,7 @@ using SigilBuild.Wrapper.Expressions;
 
 namespace SigilBuild.Installer.Host.ViewModels;
 
-public enum InstallerStep { Welcome, License, InstallOptions, Options, Installing, Finish, Failed, Custom, DowngradeBlocked }
+public enum InstallerStep { Welcome, License, InstallOptions, Options, Installing, Finish, Failed, Custom, DowngradeBlocked, CloseApps }
 
 /// <summary>
 /// Process exit code surfaced by the installer, per the unified T2 command-line
@@ -147,6 +147,77 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     /// <c>ExistingInstallDetected</c>. Idempotent; safe to call before the flow renders.
     /// </summary>
     public void SetExistingInstall(bool detected) => ExistingInstallDetected = detected;
+
+    // --- P6 (gap G7): close-running-applications gate ---
+
+    private Func<string?, IReadOnlyList<string>>? _blockerScan;
+    private Action<string?>? _blockerClose;
+
+    /// <summary>
+    /// The applications currently blocking the install, as shown on the
+    /// Close-applications screen. Refreshed by every scan.
+    /// </summary>
+    public ObservableCollection<string> Blockers { get; } = new();
+
+    /// <summary>True when the last scan found something blocking (drives the screen's list).</summary>
+    public bool HasBlockers => Blockers.Count > 0;
+
+    /// <summary>
+    /// Wire the files-in-use probes (P6). <paramref name="scan"/> returns the current
+    /// blocker descriptions for a destination; <paramref name="close"/> asks the
+    /// Restart Manager to close them. Left unwired in unit tests that drive the step
+    /// machine directly — then the gate is transparent (never blocks).
+    /// </summary>
+    public void ConfigureBlockerProbe(Func<string?, IReadOnlyList<string>> scan, Action<string?> close)
+    {
+        _blockerScan = scan;
+        _blockerClose = close;
+    }
+
+    /// <summary>
+    /// Re-scan for blockers against the chosen destination. Returns true when clear.
+    /// Refreshes <see cref="Blockers"/>. Unwired (unit tests / dev preview) → always clear.
+    /// </summary>
+    public bool RescanBlockers()
+    {
+        if (_blockerScan is null)
+        {
+            return true;
+        }
+
+        var found = _blockerScan(InstallPath);
+        Blockers.Clear();
+        foreach (var b in found)
+        {
+            Blockers.Add(b);
+        }
+        OnPropertyChanged(nameof(HasBlockers));
+        return Blockers.Count == 0;
+    }
+
+    /// <summary>
+    /// "Close for me" — ask the Restart Manager to close the blocking applications,
+    /// then re-scan. Advances into the install when that cleared them; otherwise the
+    /// screen stays put with the refreshed list (e.g. a declared app_mutex holder the
+    /// Restart Manager cannot close).
+    /// </summary>
+    public void CloseBlockingApps()
+    {
+        _blockerClose?.Invoke(InstallPath);
+        if (RescanBlockers())
+        {
+            GoToInstalling();
+        }
+    }
+
+    /// <summary>"Retry" — the user closed the apps themselves; re-scan and continue when clear.</summary>
+    public void RetryBlockers()
+    {
+        if (RescanBlockers())
+        {
+            GoToInstalling();
+        }
+    }
 
     // P3 (gap G3): the version-aware classification for this run + the installed
     // version, wired by the host from the session. Drives the "Upgrading from x.y.z"
@@ -373,6 +444,9 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
 
     public bool CanGoBack => _step is not InstallerStep.Welcome and not InstallerStep.Installing and not InstallerStep.Finish and not InstallerStep.Failed and not InstallerStep.DowngradeBlocked;
     public bool CanGoNext => _step is not InstallerStep.Installing and not InstallerStep.Finish and not InstallerStep.Failed and not InstallerStep.DowngradeBlocked;
+
+    /// <summary>True on the P6 Close-applications gate — drives its Retry / Close-for-me buttons.</summary>
+    public bool IsCloseAppsStep => _step == InstallerStep.CloseApps;
 
     /// <summary>False only on the Finish screen — install is already done, nothing to cancel.</summary>
     public bool CanCancel => _step is not InstallerStep.Finish;
@@ -770,6 +844,18 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
 
     public void Next()
     {
+        // P6 (gap G7): leaving the Close-applications screen means the user pressed
+        // Next after clearing blockers — re-scan and only advance when clear.
+        if (_step == InstallerStep.CloseApps)
+        {
+            if (!RescanBlockers())
+            {
+                return; // still blocked — stay on the screen with the refreshed list.
+            }
+            GoToInstalling();
+            return;
+        }
+
         // Destination gate (T13): a blank / relative / file / unwritable path shows
         // an inline error and blocks advancing off the destination screen.
         if (_flow[_flowIndex].Step == InstallerStep.InstallOptions && !ValidateDestination())
@@ -799,11 +885,37 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
             return;
         }
 
+        // P6 (gap G7): the last gate before the install starts. The destination is
+        // settled by now, so scan for running apps holding it; if any, divert to the
+        // Close-applications screen instead of starting the engine.
+        if (_flow[next].Step == InstallerStep.Installing && !RescanBlockers())
+        {
+            CurrentStep = InstallerStep.CloseApps;
+            return;
+        }
+
         MoveTo(next);
 
         if (_flow[_flowIndex].Step == InstallerStep.Installing)
         {
             InstallTask = StartInstallAsync();
+        }
+    }
+
+    /// <summary>
+    /// Advance from the Close-applications screen straight into the install (the
+    /// blockers are gone; the linear flow's next node is Installing).
+    /// </summary>
+    private void GoToInstalling()
+    {
+        for (var i = 0; i < _flow.Count; i++)
+        {
+            if (_flow[i].Step == InstallerStep.Installing)
+            {
+                MoveTo(i);
+                InstallTask = StartInstallAsync();
+                return;
+            }
         }
     }
 

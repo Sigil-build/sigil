@@ -63,7 +63,10 @@ internal sealed partial record WrapperBlob(
     // P5 (gap G6): first-class prerequisite units from installer.prerequisites, in
     // declaration order. Run before the journaled body (detect → install → re-detect).
     // Null/empty for a manifest declaring no prerequisites.
-    IReadOnlyList<InstallerPrerequisite>? Prerequisites = null)
+    IReadOnlyList<InstallerPrerequisite>? Prerequisites = null,
+    // P6 (gap G7): named mutexes the app holds while running. Setup probes these
+    // before touching the install dir; an openable mutex means "app is running".
+    IReadOnlyList<string>? AppMutex = null)
 {
     /// <summary>
     /// Empty sentinel blob: well-known <c>AppId</c> placeholder and zero-length

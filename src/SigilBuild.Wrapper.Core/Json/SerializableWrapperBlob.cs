@@ -115,6 +115,9 @@ internal sealed record SerializableWrapperBlob
     /// </summary>
     public SerializablePrerequisite[] Prerequisites { get; init; } = Array.Empty<SerializablePrerequisite>();
 
+    /// <summary>P6 (gap G7): declared app mutex names probed before touching the install dir.</summary>
+    public string[]? AppMutex { get; init; }
+
     public static WrapperBlob ToWrapperBlob(SerializableWrapperBlob s)
     {
         ArgumentNullException.ThrowIfNull(s);
@@ -145,7 +148,8 @@ internal sealed record SerializableWrapperBlob
             RunAfterInstallPath: s.RunAfterInstallPath,
             RunAfterInstallArgs: s.RunAfterInstallArgs,
             // P5: prerequisite units.
-            Prerequisites: ConvertPrerequisites(s.Prerequisites));
+            Prerequisites: ConvertPrerequisites(s.Prerequisites),
+            AppMutex: s.AppMutex);
     }
 
     public static SerializableWrapperBlob FromWrapperBlob(WrapperBlob blob)
@@ -180,6 +184,7 @@ internal sealed record SerializableWrapperBlob
             RunAfterInstallArgs = blob.RunAfterInstallArgs is null ? null : ToStringArray(blob.RunAfterInstallArgs),
             // P5: prerequisite units.
             Prerequisites = SerializePrerequisites(blob.Prerequisites),
+            AppMutex = blob.AppMutex is null ? null : ToStringArray(blob.AppMutex),
         };
     }
 

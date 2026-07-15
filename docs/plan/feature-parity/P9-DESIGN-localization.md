@@ -146,11 +146,17 @@ without turning it into an outage at install time.
 
 #### `Lang.Pseudo`
 
-`Lang.Pseudo` (§8.1) is **compiled into release binaries** but is `internal`,
-reachable only via `InternalsVisibleTo` from the test projects. **No valid
-language tag maps to it**: `pseudo` fails §6.2's `alpha{2,3}` primary-subtag
-grammar and is rejected as a usage error for free, and a well-formed
-`/lang=qps` finds no chrome and falls back to `en`.
+`Lang.Pseudo` (§8.1) is **compiled into release binaries**. It cannot be
+`internal` — `Lang` is public because the host's ViewModels call
+`Strings.X(lang)`, and an enum has no per-member visibility. What is internal is
+the **path to select it**: `S.SetLanguageForTesting(Lang.Pseudo)` is `internal`
+and reached only via `InternalsVisibleTo` from the test projects.
+
+So the guarantee is not "absent from the binary" but **unreachable from any
+input**: `LanguageResolver` never yields `Pseudo`, no catalog file declares that
+tag, `pseudo` fails §6.2's `alpha{2,3}` primary-subtag grammar and is rejected
+as a usage error for free, and a well-formed `/lang=qps` finds no chrome and
+falls back to `en`.
 
 Excluding it from release builds instead would require a `SIGIL_PSEUDOLOC`
 constant applied to the *host compilation* — a separate build configuration that

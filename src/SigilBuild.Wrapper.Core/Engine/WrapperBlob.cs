@@ -193,12 +193,17 @@ internal sealed partial record WrapperBlob(
     }
 
     /// <summary>
-    /// Read the embedded license text (T14) from the running exe's
-    /// <c>SIGIL_BLOB_V1</c> resource. Returns <c>null</c> for an un-stamped
-    /// runtime, a blob with no license, or an empty license. Kept separate from
-    /// <see cref="LoadFromSelf"/> because the in-memory <see cref="WrapperBlob"/>
-    /// record does not carry license text — it is a host-rendering concern
-    /// delivered via <see cref="SerializableWrapperBlob"/>.
+    /// Read the embedded license text (T14 / P9 gap G10) from the running exe's
+    /// <c>SIGIL_BLOB_V1</c> resource. The blob now carries a tag -&gt; text map
+    /// (one entry per manifest-declared language); this entry point resolves the
+    /// English fallback and returns a single string, matching the pre-P9 public
+    /// surface (<see cref="InstallerLicenseLoader"/>, <c>InstallerViewModel.LoadLicense</c>)
+    /// — full language-aware selection is wired by a later task alongside the
+    /// rest of the wizard's resolver-based rendering. Returns <c>null</c> for an
+    /// un-stamped runtime, a blob with no license, or a map with no readable
+    /// English entry. Kept separate from <see cref="LoadFromSelf"/> because the
+    /// in-memory <see cref="WrapperBlob"/> record does not carry license text —
+    /// it is a host-rendering concern delivered via <see cref="SerializableWrapperBlob"/>.
     /// </summary>
     internal static string? LoadLicenseFromSelf()
     {
@@ -208,7 +213,20 @@ internal sealed partial record WrapperBlob(
         var json = System.Text.Encoding.UTF8.GetString(bytes);
         var s = System.Text.Json.JsonSerializer.Deserialize(
             json, WrapperBlobJsonContext.Default.SerializableWrapperBlob);
-        return string.IsNullOrWhiteSpace(s?.LicenseText) ? null : s!.LicenseText;
+        if (s?.LicenseText is null)
+        {
+            return null;
+        }
+
+        foreach (var kv in s.LicenseText)
+        {
+            if (string.Equals(kv.Key, "en", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(kv.Value))
+            {
+                return kv.Value;
+            }
+        }
+
+        return null;
     }
 
     private const string BlobResourceName = "SIGIL_BLOB_V1";

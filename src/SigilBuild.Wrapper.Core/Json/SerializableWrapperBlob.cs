@@ -75,8 +75,15 @@ internal sealed record SerializableWrapperBlob
     /// <summary>Base64-encoded brand hero image bytes, if any.</summary>
     public string? HeroBase64 { get; init; }
 
-    /// <summary>Embedded license text (plain text / RTF-as-text v1), if any (T14).</summary>
-    public string? LicenseText { get; init; }
+    /// <summary>
+    /// Embedded license text (plain text / RTF-as-text v1), tag -&gt; file
+    /// contents (P9, gap G10). <c>null</c> when no readable entry survived pack
+    /// time (T14's original "no License screen" case). Each file is read at PACK
+    /// time (<c>ExeWrapperPackager.ReadLicenseText</c>) — this carries contents,
+    /// not paths. <c>Dictionary&lt;string,string&gt;</c> is already registered in
+    /// <see cref="WrapperBlobJsonContext"/>, so no new source-gen entry is needed.
+    /// </summary>
+    public Dictionary<string, string>? LicenseText { get; init; }
 
     /// <summary>Declared custom wizard screens (T9).</summary>
     public SerializableInstallerScreen[] Screens { get; init; }

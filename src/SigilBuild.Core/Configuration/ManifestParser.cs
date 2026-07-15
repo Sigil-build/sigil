@@ -154,6 +154,7 @@ public static class ManifestParser
         string fileName)
     {
         if (node is null) return null;
+        var loc = new SourceLocation(fileName, (int)node.Start.Line, (int)node.Start.Column);
         var brand = GetMapping(node, "brand");
         var screens = ParseScreens(
             GetSequenceOfMappings(node, "screens"), app, parameters, diagnostics, fileName);
@@ -169,11 +170,18 @@ public static class ManifestParser
             // each ENABLED component into its gated install step(s).
             Options: ParseOptions(GetMapping(node, "options")),
             Screens: screens,
-            // T14: capture the license path string only. The actual file read +
-            // embed happens at PACK time (ExeWrapperPackager.BuildBlobBytes), which
-            // can resolve it against the pack source dir and emit a diagnostic if
-            // the file is missing/unreadable/empty.
-            License: GetScalar(node, "license"),
+            // T14 / P9 (gap G10): capture the license path(s) only, as a
+            // LocalizedText — a plain string or a `{en: ..., uk: ...}` map of
+            // per-language file paths, through the same ParseLocalizedText path
+            // as title/subtitle/description. The actual file read + embed
+            // happens at PACK time (ExeWrapperPackager.ReadLicenseText), which
+            // resolves each path against the pack source dir and emits SIG0250
+            // (non-fatal, per entry) / SIG0290 (fatal, on the post-read map) —
+            // see design §5.3. Retyping this from `string?` closes a silent-null
+            // window: previously GetScalar returned null with zero diagnostic for
+            // any manifest that declared `license:` as a map, and the License
+            // screen would vanish without a trace.
+            License: ParseLocalizedText(node, "license", loc, diagnostics),
             // T12: install scope (user | machine | auto, default auto). The schema
             // enum is the hard gate; here we map the string leniently and emit a
             // non-fatal diagnostic on an unrecognized value, falling back to auto.
@@ -248,8 +256,11 @@ public static class ManifestParser
     /// (<see cref="DiagnosticCodes.InvalidLanguageTag"/>, SIG0291) and the whole
     /// map must contain an <c>en</c> entry
     /// (<see cref="DiagnosticCodes.LocalizedTextMissingEnglish"/>, SIG0290 —
-    /// fatal, since every runtime fallback bottoms out at English). Returns
-    /// <c>null</c> when the key is absent.
+    /// fatal, since every runtime fallback bottoms out at English). A per-language
+    /// value that isn't a plain scalar (e.g. a nested sequence) is diagnosed
+    /// (<see cref="DiagnosticCodes.LocalizedTextValueNotScalar"/>, SIG0292) rather
+    /// than silently collapsing to <c>""</c>. Returns <c>null</c> when the key is
+    /// absent.
     /// </summary>
     private static LocalizedText? ParseLocalizedText(
         YamlMappingNode parent, string key, SourceLocation loc, List<Diagnostic> diagnostics)
@@ -278,7 +289,24 @@ public static class ManifestParser
             }
 
             var tag = tagNode.Value;
-            values[tag] = kvp.Value is YamlScalarNode textNode ? (textNode.Value ?? string.Empty) : string.Empty;
+            if (kvp.Value is YamlScalarNode textNode)
+            {
+                values[tag] = textNode.Value ?? string.Empty;
+            }
+            else
+            {
+                // Silent-drop guard: a non-scalar value (e.g. a nested sequence
+                // or mapping under a language key) used to collapse to "" here
+                // with zero diagnostic — the same silent-blank-rendering shape
+                // SIG0290 exists to prevent, just one language key at a time.
+                values[tag] = string.Empty;
+                diagnostics.Add(new Diagnostic(
+                    DiagnosticSeverity.Error,
+                    DiagnosticCodes.LocalizedTextValueNotScalar,
+                    $"'{key}.{tag}' must be a plain string; found a non-scalar value instead",
+                    loc,
+                    "https://docs.sigil.build/diagnostics/SIG0292"));
+            }
 
             if (!LanguageTag.IsValid(tag))
             {

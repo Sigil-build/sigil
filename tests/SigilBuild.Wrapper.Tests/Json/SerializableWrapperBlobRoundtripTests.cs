@@ -276,10 +276,18 @@ public class SerializableWrapperBlobRoundtripTests
     [Fact]
     public void License_text_roundtrips()
     {
-        const string license = "Copyright (c) Acme.\nAll rights reserved.\n";
+        // P9 (gap G10): LicenseText is now a tag -> text map (one entry per
+        // manifest-declared language), read at pack time.
+        var license = new Dictionary<string, string>
+        {
+            ["en"] = "Copyright (c) Acme.\nAll rights reserved.\n",
+            ["uk"] = "Авторське право (c) Acme.\nУсі права захищені.\n",
+        };
         var back = RoundTrip(new SerializableWrapperBlob { LicenseText = license });
 
-        back.LicenseText.Should().Be(license);
+        back.LicenseText.Should().NotBeNull();
+        back.LicenseText!["en"].Should().Be(license["en"]);
+        back.LicenseText!["uk"].Should().Be(license["uk"]);
     }
 
     [Fact]

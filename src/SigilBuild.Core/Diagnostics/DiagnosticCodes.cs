@@ -59,4 +59,10 @@ public static class DiagnosticCodes
     // warning here would genuinely ship blank strings.
     public const string LocalizedTextMissingEnglish = "SIG0290";
     public const string InvalidLanguageTag = "SIG0291";
+
+    // SIG0292 — a LocalizedText map's per-language value is not a plain scalar
+    // (e.g. a nested sequence/mapping under a language key). Fatal for the same
+    // reason as SIG0290: the value silently collapses to "" otherwise, which is
+    // the same silent-blank-rendering failure shape one language key at a time.
+    public const string LocalizedTextValueNotScalar = "SIG0292";
 }

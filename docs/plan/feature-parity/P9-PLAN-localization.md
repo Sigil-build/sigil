@@ -2955,6 +2955,9 @@ git commit -m "feat(p9): route ViewModel + code-behind chrome through the catalo
 - Modify: `src/SigilBuild.Installer.Host/Program.cs`
 - Modify: `src/SigilBuild.Wrapper/Program.cs`
 - Modify: `src/SigilBuild.Wrapper.Core/Expressions/` (expression context seeding — `system.language`)
+- Modify: `src/SigilBuild.Wrapper.Core/Engine/WrapperBlob.cs:208` + `:380` (expose the license MAP — Step 3b)
+- Modify: `src/SigilBuild.Installer.Host/App.axaml.cs:76` (resolve the license map — Step 3b)
+- Modify: `src/SigilBuild.Wrapper.Core/Localization/SessionLanguage.cs` consumers (wire `OnUninitializedRead` to the install log — it is currently dead)
 - Create: `tests/SigilBuild.Wrapper.Tests/Localization/SessionResolutionTests.cs`
 
 **Interfaces:**
@@ -3029,6 +3032,42 @@ In both `Program.cs` entries, immediately after the blob loads and **before** an
 ```
 
 Seed `system.language` into the expression context wherever `system.*` is seeded today (`StepContext`), using the resolved chrome language's tag.
+
+- [ ] **Step 3b: Resolve the License map to the session language**
+
+Task 9 packs one license text per language into the blob's `LicenseText`
+(`Dictionary<string,string>`), but the host still reads **English only**:
+`WrapperBlob.LoadLicenseFromSelf()` returns `string?`, and
+`App.axaml.cs:76` does `_vm.LoadLicense(InstallerLicenseLoader.LoadFromSelf())`.
+
+Without this step the localized-license feature is **dead on arrival** — pack
+time would faithfully embed `uk: LICENSE.uk.txt` and the wizard would render
+English forever. Nothing else in the lane closes this.
+
+Expose the map and resolve it here, where the session language is known:
+
+```csharp
+    // WrapperBlob: expose the map, not just English.
+    internal static Dictionary<string, string>? LoadLicenseMapFromSelf();
+
+    // App.axaml.cs — resolve against the SAME preference list as the chrome.
+    var licenseMap = InstallerLicenseLoader.LoadMapFromSelf();
+    _vm.LoadLicense(licenseMap is null
+        ? null
+        : licenseMap[LanguageResolver.Match(preferences, licenseMap.Keys)]);
+```
+
+`Match` is total here for the same reason it is everywhere else: `SIG0290`
+(Task 9) makes an `en`-less license map a fatal pack-time error, so the `en`
+fallback always resolves.
+
+Keep `LoadLicenseFromSelf()`'s English-only surface only if something still
+needs it; if nothing does, remove it rather than leaving two ways to read the
+same field.
+
+**Test:** a blob with `{en: "EULA", uk: "Ліцензія"}` renders the Ukrainian text
+under `/lang=uk`, and the English text with no flag. Without this test the
+regression is invisible — the screen still renders, just always in English.
 
 - [ ] **Step 4: Migrate the 6 prose messages**
 

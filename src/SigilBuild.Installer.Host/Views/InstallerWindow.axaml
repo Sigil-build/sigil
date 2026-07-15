@@ -1,6 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:SigilBuild.Installer.Host.ViewModels"
+        xmlns:loc="clr-namespace:SigilBuild.Wrapper.Core.Localization;assembly=SigilBuild.Wrapper.Core"
         x:Class="SigilBuild.Installer.Host.Views.InstallerWindow"
         x:DataType="vm:InstallerViewModel"
         Title="{Binding Brand.AppName}"
@@ -53,9 +54,9 @@
     <!-- Footer -->
     <Border Grid.Row="1" Grid.Column="1" BorderBrush="{DynamicResource FrameBrush}" BorderThickness="0,1,0,0" Padding="16,8">
       <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right">
-        <Button Content="Back" IsEnabled="{Binding CanGoBack}" Click="OnBack" />
-        <Button Content="Next" IsEnabled="{Binding CanGoNext}" Click="OnNext" Background="{DynamicResource AccentBrush}" Foreground="White" />
-        <Button Content="Cancel" Click="OnCancel" />
+        <Button Content="{x:Static loc:S.NavBack}" IsEnabled="{Binding CanGoBack}" Click="OnBack" />
+        <Button Content="{x:Static loc:S.NavNext}" IsEnabled="{Binding CanGoNext}" Click="OnNext" Background="{DynamicResource AccentBrush}" Foreground="White" />
+        <Button Content="{x:Static loc:S.NavCancel}" Click="OnCancel" />
       </StackPanel>
     </Border>
 

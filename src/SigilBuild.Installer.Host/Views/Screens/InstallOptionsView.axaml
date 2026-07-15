@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:SigilBuild.Installer.Host.ViewModels"
+             xmlns:loc="clr-namespace:SigilBuild.Wrapper.Core.Localization;assembly=SigilBuild.Wrapper.Core"
              x:DataType="vm:InstallerViewModel"
              x:Class="SigilBuild.Installer.Host.Views.Screens.InstallOptionsView">
   <!-- Destination screen (T13): where the app installs. The collected path becomes
@@ -8,9 +9,9 @@
        swap the default path between %LocalAppData%\Programs and Program Files. -->
   <StackPanel Spacing="12">
     <TextBlock FontSize="20" FontWeight="SemiBold"
-               Foreground="{DynamicResource TextPriBrush}" Text="Choose install location" />
+               Foreground="{DynamicResource TextPriBrush}" Text="{x:Static loc:S.LocationTitle}" />
     <TextBlock Foreground="{DynamicResource TextMutBrush}" TextWrapping="Wrap"
-               Text="Where should the application be installed?" />
+               Text="{x:Static loc:S.LocationBody}" />
 
     <!-- P3: upgrade banner ("Upgrading from x.y.z") on the ready/destination screen. -->
     <TextBlock TextWrapping="Wrap" FontWeight="SemiBold"
@@ -21,7 +22,7 @@
     <Grid ColumnDefinitions="*,Auto">
       <TextBox Grid.Column="0" x:Name="InstallPath"
                Text="{Binding InstallPath, Mode=TwoWay}" />
-      <Button Grid.Column="1" x:Name="BrowseButton" Content="Browse…"
+      <Button Grid.Column="1" x:Name="BrowseButton" Content="{x:Static loc:S.NavBrowse}"
               Margin="8,0,0,0" Click="OnBrowse" />
     </Grid>
 
@@ -35,15 +36,15 @@
     <StackPanel Spacing="8" Margin="0,8,0,0" IsVisible="{Binding ScopeSelectable}">
       <RadioButton GroupName="scope" IsChecked="{Binding IsUserScope, Mode=TwoWay}">
         <StackPanel>
-          <TextBlock Text="Just for me (recommended)" FontWeight="SemiBold" />
-          <TextBlock Text="No administrator permission needed"
+          <TextBlock Text="{x:Static loc:S.LocationScopeUser}" FontWeight="SemiBold" />
+          <TextBlock Text="{x:Static loc:S.LocationScopeUserHint}"
                      Foreground="{DynamicResource TextMutBrush}" FontSize="12" />
         </StackPanel>
       </RadioButton>
       <RadioButton GroupName="scope" IsChecked="{Binding IsMachineScope, Mode=TwoWay}">
         <StackPanel>
-          <TextBlock Text="All users of this computer" FontWeight="SemiBold" />
-          <TextBlock Text="Installs to Program Files — Windows will ask for permission"
+          <TextBlock Text="{x:Static loc:S.LocationScopeMachine}" FontWeight="SemiBold" />
+          <TextBlock Text="{x:Static loc:S.LocationScopeMachineHint}"
                      Foreground="{DynamicResource TextMutBrush}" FontSize="12" />
         </StackPanel>
       </RadioButton>

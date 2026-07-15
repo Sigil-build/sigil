@@ -107,4 +107,39 @@ public class CatalogParserTests
 
         file.Entries[0].Placeholders.Should().BeEmpty();
     }
+
+    // The catalog .txt format has no way to express a line break other than this escape:
+    // a literal two-character `\n` in the source file becomes a real line-feed in Value.
+    [Fact]
+    public void Parse_InterpretsBackslashN_AsRealLineFeed()
+    {
+        var text = "already_running.body = Setup is already running.\\n\\nTry again.\n";
+
+        var file = CatalogParser.Parse("Strings.en.txt", text);
+
+        file.Entries[0].Value.Should().Be("Setup is already running.\n\nTry again.");
+    }
+
+    // An author who genuinely wants the two visible characters \n (not a line break) writes
+    // \\n in the catalog: the escaped backslash collapses to one literal backslash, then the
+    // following n is ordinary text — the result must NOT be a line-feed.
+    [Fact]
+    public void Parse_InterpretsDoubleBackslashN_AsLiteralBackslashAndN_NotLineFeed()
+    {
+        var text = "x = a \\\\n b\n";
+
+        var file = CatalogParser.Parse("Strings.en.txt", text);
+
+        file.Entries[0].Value.Should().Be("a \\n b");
+    }
+
+    [Fact]
+    public void Parse_ValueWithNoEscapes_IsUnchanged()
+    {
+        var text = "x = plain value with no escapes\n";
+
+        var file = CatalogParser.Parse("Strings.en.txt", text);
+
+        file.Entries[0].Value.Should().Be("plain value with no escapes");
+    }
 }

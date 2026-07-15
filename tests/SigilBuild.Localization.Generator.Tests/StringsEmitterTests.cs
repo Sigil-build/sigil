@@ -154,4 +154,19 @@ public class StringsEmitterTests
 
         src.Should().Contain("\"C:\\\\Temp\\\\ and a \\\"quote\\\"\"");
     }
+
+    // Regression for the already_running.body bug: CatalogParser turns the catalog's
+    // literal \n into a real line-feed, and Quote() must re-escape that line-feed back
+    // into the C# source escape \n (which the compiler turns back into a real newline at
+    // runtime) — not degrade it into a literal backslash-backslash-n.
+    [Fact]
+    public void Quote_RealLineFeedFromCatalog_EmitsCSharpNewlineEscape_NotDoubleBackslashN()
+    {
+        var src = EmitFor(
+            "body = Line one.\\n\\nLine two.\n",
+            "body = Рядок один.\\n\\nРядок два.\n");
+
+        src.Should().Contain("\"Line one.\\n\\nLine two.\"");
+        src.Should().NotContain("\\\\n");
+    }
 }

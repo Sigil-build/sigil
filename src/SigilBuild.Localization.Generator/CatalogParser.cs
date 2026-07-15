@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace SigilBuild.Localization.Generator;
@@ -56,7 +57,7 @@ internal static class CatalogParser
             }
 
             var key = line.Substring(0, eq).Trim();
-            var value = line.Substring(eq + 1).Trim();
+            var value = Unescape(line.Substring(eq + 1).Trim());
             if (key.Length == 0)
             {
                 malformed.Add(("key is empty", i + 1));
@@ -78,5 +79,35 @@ internal static class CatalogParser
             Entries = entries,
             Malformed = malformed,
         };
+    }
+
+    /// <summary>
+    /// Interprets the catalog's own escape syntax so <see cref="CatalogEntry.Value"/> holds
+    /// the real string the author meant. A literal two-character <c>\n</c> becomes a real
+    /// line-feed (the catalog .txt format has no other way to express a line break); a
+    /// literal <c>\\</c> becomes a single literal backslash, so an author who genuinely wants
+    /// the two characters <c>\n</c> to appear can write <c>\\n</c>. No other escapes exist —
+    /// YAGNI. StringsEmitter.Quote() then re-escapes a real line-feed back into the C# source
+    /// escape <c>\n</c>, and escapes backslashes first, so this round-trips without double-escaping.
+    /// </summary>
+    private static string Unescape(string value)
+    {
+        if (value.IndexOf('\\') < 0)
+        {
+            return value;
+        }
+
+        var sb = new StringBuilder(value.Length);
+        for (var i = 0; i < value.Length; i++)
+        {
+            if (value[i] == '\\' && i + 1 < value.Length && (value[i + 1] == 'n' || value[i + 1] == '\\'))
+            {
+                sb.Append(value[i + 1] == 'n' ? '\n' : '\\');
+                i++;
+                continue;
+            }
+            sb.Append(value[i]);
+        }
+        return sb.ToString();
     }
 }

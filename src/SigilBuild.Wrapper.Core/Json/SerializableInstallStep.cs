@@ -477,18 +477,18 @@ internal static class SerializableInstallStepConverter
 
     private static OnFailure ParseOnFailure(string raw) => raw switch
     {
-        "rollback" => Core.Manifest.OnFailure.Rollback,
-        "continue" => Core.Manifest.OnFailure.Continue,
-        "fail"     => Core.Manifest.OnFailure.Fail,
-        _          => Core.Manifest.OnFailure.Fail,
+        "rollback" => OnFailure.Rollback,
+        "continue" => OnFailure.Continue,
+        "fail"     => OnFailure.Fail,
+        _          => OnFailure.Fail,
     };
 
     private static string FormatOnFailure(OnFailure value) => value switch
     {
-        Core.Manifest.OnFailure.Rollback => "rollback",
-        Core.Manifest.OnFailure.Continue => "continue",
-        Core.Manifest.OnFailure.Fail     => "fail",
-        _                                => "fail",
+        OnFailure.Rollback => "rollback",
+        OnFailure.Continue => "continue",
+        OnFailure.Fail     => "fail",
+        _                  => "fail",
     };
 
     private static InvalidOperationException MissingField(string type, string field, string id) =>

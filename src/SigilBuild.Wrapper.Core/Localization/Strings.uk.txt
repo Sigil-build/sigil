@@ -1,0 +1,5 @@
+# Ukrainian (uk).
+# Reviewer: Yevhen Khudoliiv — native speaker, reviewed 2026-07-15.
+# ADR-008 §4: a language ships only with a named reviewer recorded here.
+
+nav.back = Назад

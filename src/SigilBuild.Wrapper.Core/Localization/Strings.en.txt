@@ -1,0 +1,8 @@
+# Baseline catalog. Every user-facing chrome string lives here; see
+# docs/plan/feature-parity/P9-DESIGN-localization.md §3.
+# Rule (§3.1): a count may appear in a value, but must never inflect the
+# sentence around it. "Applications to close: {count}" is allowed;
+# "{count} applications must be closed" is not.
+# Reviewer: n/a (source language)
+
+nav.back = Back

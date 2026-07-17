@@ -84,46 +84,5 @@ Options:
 
 ## Setup.exe runtime flags
 
-<!-- Hand-maintained: the table above is auto-generated from the `sigil` build
-     CLI (src/SigilBuild.Cli/). The produced Setup.exe is a separate binary
-     with its own flag parser (src/SigilBuild.Wrapper.Core/Cli/), not covered
-     by generate-cli-reference.ps1. This section documents that flag set and
-     is not touched by regeneration. -->
-
-Every `exe`-format installer Sigil packages understands these flags at
-install time (`Setup.exe [options]`):
-
-```
-/silent, /S        install without the wizard
-/verysilent        install with no UI and no progress
-/Uninstall         uninstall
-/allusers          install for all users (elevates)
-/currentuser       install for the current user only
-/D=<path>          install directory
-/LOG[=<path>]      write an install log
-/lang=<tag>        force the wizard language
-                   chrome ships in: en, uk
-                   manifest screens may supply any tag
-/launch            launch the app when finished
-/closeapps         close blocking applications automatically
-/force-downgrade   allow installing over a newer version
-/PName=Value       set a declared parameter
-/?, /help          show this help
-
-Exit codes: 0 ok, 1 failed (rolled back), 2 cancelled, 3 downgrade blocked,
-4 files in use, 5 already running, 64 usage error, 3010 reboot required.
-```
-
-Two are new with P9 localization:
-
-- **`/lang=<tag>`** — forces the wizard's chrome language for this run,
-  overridden by `installer.language` if the manifest sets one. An invalid tag
-  is a usage error (exit code 64). Full resolution order, the `LocalizedText`
-  manifest shape, and known limitations (no RTL layout, log stays English, no
-  language-selection dialog, invariant number/date formatting) are documented
-  in the [Localization guide](guides/localization.md).
-- **`/?`, `/help`** — prints the flag list above and exits. This screen is
-  deliberately **not** localized (an admin grepping docs for `/lang=` should
-  get the same English page every time); console/log output stays English
-  for the same supportability reason.
+Setup.exe runtime flags, including the `/lang` language-selection flag and `/?` help flag, are documented in the [Localization guide](guides/localization.md).
 

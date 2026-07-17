@@ -1,0 +1,51 @@
+# Task 16 (P9): end-to-end fixture for the uk chrome + uk-declared-screen path.
+# Sigil ships an en+uk chrome catalog (Task 12), and this manifest's own screen
+# text also carries an `uk` entry, so both surfaces resolve to Ukrainian under
+# /lang=uk. Contrast with localized-de/sigil.yaml, which supplies `de` screen
+# text that Sigil's chrome catalog does NOT ship, proving design §4.4:
+# chrome and manifest text match INDEPENDENTLY against the same preference list.
+spec: v1.0
+
+app:
+  id: com.example.localized
+  name: Localized
+  version: 1.0.0
+  publisher: Example
+
+build:
+  source: ./payload
+
+package:
+  formats: [exe]
+  architectures: [x64]
+
+installer:
+  license:
+    en: LICENSE.txt
+    uk: LICENSE.uk.txt
+  screens:
+    - id: configure
+      title:
+        en: Configure
+        uk: Налаштування
+      subtitle:
+        en: Set up your install
+        uk: Налаштуйте встановлення
+      fields:
+        - param: channel
+
+parameters:
+  channel:
+    type: enum
+    values: [stable, beta]
+    default: stable
+    install_time: true
+    description:
+      en: Update channel
+      uk: Канал оновлень
+
+install_steps:
+  - id: copy-app
+    type: file_copy
+    from: payload/**
+    to: "{install_dir}"

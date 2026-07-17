@@ -62,7 +62,11 @@ public partial class App : Application
                 // T9: load the declared custom screens (from the blob) + parameter
                 // schema (from the session) so the wizard renders the Configure-style
                 // forms and generates the rail from them.
-                _vm.LoadScreens(InstallerScreensLoader.LoadFromSelf(), session.Parameters);
+                // P9 design §4.4: thread the session's full language-preference list
+                // (the SAME list used below for the license map) so a declared screen's
+                // rail label resolves independently of the resolved chrome language —
+                // Sigil may ship no chrome catalog for a tag the manifest itself supplies.
+                _vm.LoadScreens(InstallerScreensLoader.LoadFromSelf(), session.Parameters, session.LanguagePreferences);
 
                 // T8: load the enabled built-in option components (from the session's
                 // blob). When ≥ 1 is present the Options screen + its rail entry appear

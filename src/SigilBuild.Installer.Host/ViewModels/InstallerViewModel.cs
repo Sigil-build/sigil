@@ -53,6 +53,17 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     private IReadOnlyList<CustomScreenViewModel> _customScreens = Array.Empty<CustomScreenViewModel>();
     private IReadOnlyList<ParameterDefinition> _parameters = Array.Empty<ParameterDefinition>();
 
+    // P9 design §4.4: the ORDERED preference list a declared screen's title map is
+    // matched against — the SAME list session.LanguagePreferences exposes for the
+    // license map (InstallerLicenseLoader.Resolve), not just the resolved chrome
+    // language. Chrome and manifest text must match INDEPENDENTLY: Sigil may ship
+    // no catalog for a tag the manifest itself declares (e.g. `de`), so the rail
+    // still has to be able to resolve to it even though _lang (chrome) fell back to
+    // `en`. Defaults to the single-element `[_lang]` list when the caller doesn't
+    // supply one (dev/preview runs, and every pre-P9-Step-16 LoadScreens call site),
+    // preserving prior behavior exactly.
+    private IReadOnlyList<string> _screenLanguagePreferences;
+
     // T14: the License screen (and its rail entry) appear IFF the blob carries
     // license text. Absent by default so an un-stamped/dev host and a manifest
     // with no `installer.license` skip the screen entirely.
@@ -79,6 +90,10 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
         // real one (P9: routed through the same finish.launch_app key as the
         // ConfigureLaunch fallback below — collapses the former duplicate literal).
         _launchLabel = Strings.FinishLaunchApp(_lang, Brand.AppName);
+        // Default until LoadScreens supplies the session's real preference list —
+        // matches _lang exactly, so a host that never calls LoadScreens (or calls
+        // the 2-arg overload) sees the pre-P9-Step-16 behavior unchanged.
+        _screenLanguagePreferences = new[] { _lang.ToString().ToLowerInvariant() };
         RebuildFlow();
     }
 
@@ -301,9 +316,18 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     /// the flow + rail. Called by the host once it has read them from the blob.
     /// </summary>
     public void LoadScreens(
-        IReadOnlyList<InstallerScreen> screens, IReadOnlyList<ParameterDefinition> parameters)
+        IReadOnlyList<InstallerScreen> screens, IReadOnlyList<ParameterDefinition> parameters,
+        IReadOnlyList<string>? languagePreferences = null)
     {
         _parameters = parameters ?? Array.Empty<ParameterDefinition>();
+        // P9 design §4.4: prefer the caller's full session preference list (the SAME
+        // one InstallerLicenseLoader.Resolve uses for the license map) over the
+        // single-tag chrome-only fallback, so a declared screen's title resolves
+        // independently of whether Sigil ships a chrome catalog for that tag.
+        if (languagePreferences is { Count: > 0 })
+        {
+            _screenLanguagePreferences = languagePreferences;
+        }
         var byName = new Dictionary<string, ParameterDefinition>(StringComparer.Ordinal);
         foreach (var p in _parameters)
         {
@@ -1069,8 +1093,7 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
             return Strings.RailConfigure(_lang);
         }
 
-        var preferences = new[] { _lang.ToString().ToLowerInvariant() };
-        var tag = LanguageResolver.Match(preferences, new List<string>(screen.TitleMap.Values.Keys));
+        var tag = LanguageResolver.Match(_screenLanguagePreferences, new List<string>(screen.TitleMap.Values.Keys));
         return screen.TitleMap.Values.TryGetValue(tag, out var text) && !string.IsNullOrWhiteSpace(text)
             ? text
             : Strings.RailConfigure(_lang);

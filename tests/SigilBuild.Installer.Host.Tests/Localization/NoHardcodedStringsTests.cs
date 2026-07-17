@@ -23,7 +23,7 @@ public class NoHardcodedStringsTests
     private static readonly string[] Attributes =
     {
         "Text", "Content", "Watermark", "ToolTip.Tip",
-        "AutomationProperties.Name", "AutomationProperties.HelpText",
+        "AutomationProperties.Name", "AutomationProperties.HelpText", "Title",
     };
 
     // Kept deliberately tiny; the size assertion below stops it becoming a loophole.

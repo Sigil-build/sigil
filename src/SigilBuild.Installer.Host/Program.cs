@@ -40,6 +40,23 @@ public static partial class Program
             return 64;
         }
 
+        // P9 (gap G10): resolve this session's chrome language now — installer.language
+        // (fixed) -> /lang -> the OS UI-language preference list -> en — and set
+        // SessionLanguage.Current. MUST run before ANY UI is constructed, including
+        // the elevated relaunch below (harmless: the elevated child re-resolves
+        // identically from the same blob + argv) and, further down, the pre-Avalonia
+        // single-instance MessageBoxW, itself a catalog string. The resolver depends
+        // only on the blob and Win32, never on Avalonia, so this ordering works.
+        session.ResolveSessionLanguage();
+        if (session.LanguageConflictNote is not null)
+        {
+            // Design §2.1: the manifest pin wins; the flag is ignored, not fatal
+            // (exit code stays 0). Also flushed into the /LOG sink (if requested)
+            // the first time it opens; this additionally records it in the
+            // wizard's always-on diagnostic log.
+            InstallerLog.Info(session.LanguageConflictNote);
+        }
+
         // T12 — self-elevation. This MUST run before any scope-requiring work
         // (payload extraction, HKLM/Program Files writes) and before the T18 GUI
         // native bootstrap below. The host manifest requests `asInvoker`, so a

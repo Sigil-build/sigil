@@ -332,9 +332,11 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
 
     /// <summary>
     /// Load the embedded license text (T14). Called by the host once it has read
-    /// it from the blob (<c>InstallerLicenseLoader.LoadFromSelf()</c>). When the
-    /// text is present the License screen + its rail entry appear (after the
-    /// destination screen, per decision 4); when null/blank they are absent.
+    /// the license MAP from the blob and resolved it against the session's
+    /// language preferences (P9 Step 3b — <c>InstallerLicenseLoader.LoadMapFromSelf()</c>
+    /// + <c>.Resolve(...)</c>). When the text is present the License screen + its
+    /// rail entry appear (after the destination screen, per decision 4); when
+    /// null/blank they are absent.
     /// Only the interactive wizard consults this — the headless <c>/silent</c>
     /// path never shows the License screen, so silent installs imply acceptance.
     /// </summary>

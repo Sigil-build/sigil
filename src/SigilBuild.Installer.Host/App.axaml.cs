@@ -69,12 +69,19 @@ public partial class App : Application
                 // (after license, per decision 4); when none, they are omitted.
                 _vm.LoadOptions(session.Options);
 
-                // T14: load the embedded license text (from the blob). When present
+                // T14 / P9 Step 3b: load the embedded license text MAP (from the blob)
+                // and resolve it against the SAME ordered preference list the chrome
+                // language used (session.LanguagePreferences), so a manifest packing
+                // uk: LICENSE.uk.txt actually renders Ukrainian under a Ukrainian
+                // session instead of English forever. Resolve is total here — SIG0290
+                // (Task 9) makes an en-less license map a fatal pack-time error, so
+                // this never silently returns null for a non-null map. When present
                 // the License screen + its rail entry appear (after destination, per
                 // decision 4) and gate Next on acceptance; when absent they are
                 // omitted. The /silent path never reaches here, so silent installs
                 // imply acceptance.
-                _vm.LoadLicense(InstallerLicenseLoader.LoadFromSelf());
+                var licenseMap = InstallerLicenseLoader.LoadMapFromSelf();
+                _vm.LoadLicense(InstallerLicenseLoader.Resolve(licenseMap, session.LanguagePreferences));
 
                 // T10: surface the reinstall notice when the SAME version is already
                 // installed (the engine performs uninstall-then-install itself). An

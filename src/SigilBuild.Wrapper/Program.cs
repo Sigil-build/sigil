@@ -27,6 +27,15 @@ internal static class Program
             // same InstallSession for its /silent path and its GUI wizard.
             var session = InstallSession.Create(args);
 
+            // P9 (gap G10): resolve this session's chrome language now — installer.language
+            // (fixed) -> /lang -> the OS UI-language preference list -> en. MUST
+            // run before any output is produced, mirroring the host's ordering
+            // exactly so both entry points resolve identically. Any conflict note
+            // is flushed into the /LOG sink (if requested) the first time it
+            // opens — this console entry point has no separate diagnostic log to
+            // additionally write it to.
+            session.ResolveSessionLanguage();
+
             // T12 — self-elevation. A resolved per-machine scope from a
             // non-elevated process relaunches self with the `runas` verb,
             // forwarding all args, and propagates the elevated child's exit code.

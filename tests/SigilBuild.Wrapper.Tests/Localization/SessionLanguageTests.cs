@@ -8,7 +8,14 @@ namespace SigilBuild.Wrapper.Tests.Localization;
 [Collection("SessionLanguage")] // static state: must not run in parallel
 public sealed class SessionLanguageTests : IDisposable
 {
-    public void Dispose() => SessionLanguage.ResetForTesting();
+    // Restore the assembly-wide English default (set once by
+    // TestAssemblySetup's ModuleInitializer) rather than nulling it out — a
+    // bare ResetForTesting() here would leave SessionLanguage unset for
+    // whichever test class the runner happens to run next, reintroducing the
+    // Debug-mode throw for production code (PrerequisiteRunner, InstallSession)
+    // that now reads SessionLanguage.Current without itself calling
+    // ResolveSessionLanguage first.
+    public void Dispose() => SessionLanguage.SetForTesting(Lang.En);
 
     [Fact]
     public void Current_BeforeSet_ThrowsInDebug()

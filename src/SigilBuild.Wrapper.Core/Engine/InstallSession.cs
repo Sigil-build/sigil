@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using SigilBuild.Core.Manifest;
 using SigilBuild.Wrapper.Cli;
+using SigilBuild.Wrapper.Core.Localization;
 
 namespace SigilBuild.Wrapper.Engine;
 
@@ -40,6 +41,12 @@ public sealed class InstallSession
     // executes when /LOG (or /LOG=path) was supplied. Null when logging was not
     // requested or the target could not be created (best-effort).
     private InstallLog? _log;
+
+    // P9 (gap G10): recorded by ResolveSessionLanguage when the manifest's fixed
+    // installer.language pin overrides a conflicting /lang flag. Flushed as a log
+    // line by EnsureLog the first time the /LOG sink opens (see the design note on
+    // ResolveSessionLanguage for why this is "logged", not fatal).
+    private string? _languageConflictNote;
 
     /// <summary>
     /// The dedicated non-zero exit code returned by the silent path when a newer
@@ -133,6 +140,10 @@ public sealed class InstallSession
         _log = InstallLog.TryOpen(ResolveLogPath());
         _log?.WriteLine(
             $"=== sigil {_mode.ToString().ToLowerInvariant()} log | app={_blob.AppId} | scope={_scope} | args=[{_parsed.AuditSafeRendering()}] ===");
+        if (_languageConflictNote is not null)
+        {
+            _log?.WriteLine(_languageConflictNote);
+        }
         return _log;
     }
 
@@ -182,6 +193,84 @@ public sealed class InstallSession
         var parsed = CommandLineParser.Parse(args, blob.Parameters);
         return Build(blob, parsed, DefaultStateResolver);
     }
+
+    /// <summary>
+    /// P9 (gap G10): resolve this session's chrome language — <c>installer.language</c>
+    /// (fixed, wins) -&gt; <c>/lang</c> -&gt; the OS UI-language preference list -&gt;
+    /// <c>en</c> — and set <see cref="SessionLanguage.Current"/>. Deliberately NOT
+    /// called from <see cref="Create"/>: both stamped entry points call this
+    /// exactly once, immediately after <c>Create</c> succeeds and BEFORE any UI is
+    /// constructed (including the pre-Avalonia single-instance <c>MessageBoxW</c>,
+    /// itself a catalog string) — the resolver depends only on the blob and Win32,
+    /// never on Avalonia, so this ordering is available. Kept out of <c>Create</c>
+    /// so the hundreds of engine tests that call it never mutate the process-wide
+    /// <see cref="SessionLanguage"/> singleton as a side effect.
+    /// </summary>
+    /// <remarks>
+    /// Design §2.1: a fixed manifest language beats a conflicting <c>/lang</c> —
+    /// the flag is IGNORED, not fatal (exit code stays 0). This deliberately does
+    /// NOT mirror T12's fixed-scope-vs-<c>/allusers</c> rule (exit 64): scope is a
+    /// trust/consequence boundary, language is a display preference, and failing
+    /// an install over a cosmetic preference would be hostile. The conflict, if
+    /// any, is recorded on <see cref="LanguageConflictNote"/> and flushed into the
+    /// <c>/LOG</c> sink the first time it opens (<see cref="EnsureLog"/>); the
+    /// entry point may also log it immediately through its own channel.
+    /// </remarks>
+    public Lang ResolveSessionLanguage()
+    {
+        // P9: SessionLanguage.OnUninitializedRead is the Release-mode safety net
+        // fired when something reads .Current before Set below has run (a
+        // startup-ordering bug — exactly what Task 13 hit). It is otherwise DEAD:
+        // nothing subscribes. Wire it here, at session start, to the SAME /LOG
+        // sink this session owns (EnsureLog) — the one place that owns both the
+        // log and the session-language singleton — so the fallback stops being
+        // silent. Idempotent: re-wiring on every call is harmless (no test/run
+        // constructs more than one session concurrently), and this keeps the
+        // hook alive for the lifetime of the static SessionLanguage type without
+        // a separate bootstrap step.
+        SessionLanguage.OnUninitializedRead = () => EnsureLog()?.WriteLine(
+            "language: SessionLanguage.Current read before resolution — falling back to en (startup-ordering bug)");
+
+        var manifestLanguage = InstallerLanguageLoader.LoadFromSelf();
+        var preferences = LanguageResolver.Preferences(manifestLanguage, _parsed.Lang, OsUiLanguage.Preferences());
+        _languagePreferences = preferences;
+        var chrome = LanguageResolver.MatchChrome(preferences);
+        SessionLanguage.Set(chrome);
+
+        if (manifestLanguage is not null && _parsed.Lang is not null
+            && !string.Equals(manifestLanguage, _parsed.Lang, StringComparison.OrdinalIgnoreCase))
+        {
+            _languageConflictNote =
+                $"language: manifest pin '{manifestLanguage}' overrides /lang={_parsed.Lang}";
+        }
+
+        return chrome;
+    }
+
+    // P9 (Step 3b): the ordered preference list ResolveSessionLanguage resolved
+    // the chrome language from — installer.language (fixed) -> /lang -> OS
+    // preferences -> en. Stashed so the license map (which is NOT part of the
+    // generated chrome catalog and therefore can't go through MatchChrome) is
+    // resolved against the EXACT SAME list, never a freshly recomputed one.
+    private IReadOnlyList<string>? _languagePreferences;
+
+    /// <summary>
+    /// The ordered language-preference list <see cref="ResolveSessionLanguage"/>
+    /// resolved (installer.language fixed -&gt; /lang -&gt; OS preferences -&gt; en).
+    /// Empty until <see cref="ResolveSessionLanguage"/> has run. Exposed so the
+    /// host can resolve the embedded license map (Step 3b) against the SAME list
+    /// the chrome language used, rather than recomputing it and risking drift.
+    /// </summary>
+    public IReadOnlyList<string> LanguagePreferences => _languagePreferences ?? Array.Empty<string>();
+
+    /// <summary>
+    /// The language-conflict note recorded by <see cref="ResolveSessionLanguage"/>
+    /// (a fixed manifest language overriding a conflicting <c>/lang</c>), or
+    /// <c>null</c> when none occurred. Also flushed into the <c>/LOG</c> sink by
+    /// <see cref="EnsureLog"/>; exposed so each entry point can additionally log
+    /// it through its own channel (e.g. the wizard's always-on diagnostic log).
+    /// </summary>
+    public string? LanguageConflictNote => _languageConflictNote;
 
     // Registry-backed installed-state probe (P3). Off Windows there is no ARP, so the
     // run is always fresh. The un-stamped Empty blob is short-circuited in Build.
@@ -325,8 +414,7 @@ public sealed class InstallSession
                 // Update is not implemented in this track. Say so explicitly and
                 // exit 64 rather than silently running the (always-empty)
                 // WrapperBlob.UpdateSteps and reporting success.
-                error.WriteLine(
-                    "/Update is not supported by this installer: update_steps run via the delta-update SDK, not the setup runtime.");
+                error.WriteLine(Strings.EngineUpdateUnsupported(SessionLanguage.Current));
                 return 64;
 
             case WrapperMode.Uninstall:
@@ -489,10 +577,12 @@ public sealed class InstallSession
 
     private string DowngradeBlockedMessage()
     {
-        var name = string.IsNullOrWhiteSpace(_blob.DisplayName) ? _blob.AppId : _blob.DisplayName;
+        var name = string.IsNullOrWhiteSpace(_blob.DisplayName) ? _blob.AppId : _blob.DisplayName!;
         var target = string.IsNullOrWhiteSpace(_blob.Version) ? "this version" : _blob.Version!;
-        return $"A newer version ({_plan.InstalledVersion}) of {name} is already installed. " +
-               $"Installing the older version {target} is blocked. Pass /force-downgrade to override.";
+        // P9: the same downgrade.body catalog key the wizard's notice screen uses
+        // (InstallerViewModel.cs) — one translated sentence for both surfaces
+        // rather than a second, silent-only literal.
+        return Strings.DowngradeBody(SessionLanguage.Current, _plan.InstalledVersion, name, target);
     }
 
     public Task<InstallOutcome> RunInstallAsync(IProgress<StepProgress>? progress, CancellationToken ct = default)
@@ -739,7 +829,9 @@ public sealed class InstallSession
     private async Task<InstallOutcome> RunPriorUninstallAsync(IProgress<StepProgress>? progress, CancellationToken ct)
     {
         var exe = _plan.PriorUninstallExe;
-        var verb = _plan.Action == UpgradeAction.DowngradeForced ? "Removing newer version" : "Removing previous version";
+        var verb = _plan.Action == UpgradeAction.DowngradeForced
+            ? Strings.EngineRemovingNewer(SessionLanguage.Current)
+            : Strings.EngineRemovingPrevious(SessionLanguage.Current);
         // (0, 1) keeps the wizard progress bar at 0 (Total 0 would read as 1.0/complete)
         // while the message shows; the real install's engine progress supersedes it.
         progress?.Report(new StepProgress(0, 1, $"{verb} {_plan.InstalledVersion}…", false));
@@ -1041,6 +1133,11 @@ public sealed class InstallSession
         return new InstallOutcome(false, message);
     }
 
+    // P9 design D2: NOT migrated. Lowercase-prefixed (not sentence-cased) — the
+    // same tell that marks every log-convention line in this file as staying
+    // English — and it names the CLI-only /closeapps flag, mirroring the
+    // "blocked by: ..." / "close-apps: ..." progress lines around its call site
+    // that are log convention for the same reason.
     private static string BuildBlockerMessage(IReadOnlyList<AppBlocker> blockers)
     {
         var names = new List<string>(blockers.Count);
@@ -1063,7 +1160,9 @@ public sealed class InstallSession
     public bool HasRunAfterInstall => !string.IsNullOrEmpty(_blob.RunAfterInstallPath);
 
     /// <summary>The Done-screen checkbox label, e.g. "Launch Acme Studio".</summary>
-    public string LaunchLabel => $"Launch {_blob.AppName ?? _blob.DisplayName ?? "application"}";
+    public string LaunchLabel =>
+        Strings.FinishLaunchApp(SessionLanguage.Current,
+            _blob.AppName ?? _blob.DisplayName ?? Strings.BrandAppFallback(SessionLanguage.Current));
 
     /// <summary>
     /// Start the <c>run_after_install</c> target UNELEVATED (P2, gap G4), resolving

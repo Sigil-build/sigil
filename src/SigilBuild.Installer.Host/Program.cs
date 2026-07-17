@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Avalonia;
 using SigilBuild.Wrapper.Cli;
+using SigilBuild.Wrapper.Core.Localization;
 using SigilBuild.Wrapper.Engine;
 
 namespace SigilBuild.Installer.Host;
@@ -80,9 +81,6 @@ public static partial class Program
         using var instanceLock = SetupInstanceLock.TryAcquire(session.AppId, session.ResolvedScope);
         if (instanceLock is null)
         {
-            const string alreadyRunning =
-                "Setup is already running.\n\nAnother copy of this installer is in progress. " +
-                "Finish or close it, then try again.";
             if (session.Silent)
             {
                 AttachParentConsole();
@@ -92,7 +90,14 @@ public static partial class Program
             else if (OperatingSystem.IsWindows())
             {
                 // A WinExe has no console, so the headed path needs a real notice.
-                _ = MessageBoxW(IntPtr.Zero, alreadyRunning, "Setup", MB_OK | MB_ICONINFORMATION);
+                // P9: catalog-driven — already_running.body / already_running.caption,
+                // resolved through the session language set above (before ANY UI,
+                // including this pre-Avalonia MessageBox).
+                _ = MessageBoxW(
+                    IntPtr.Zero,
+                    Strings.AlreadyRunningBody(SessionLanguage.Current),
+                    Strings.AlreadyRunningCaption(SessionLanguage.Current),
+                    MB_OK | MB_ICONINFORMATION);
             }
             return InstallSession.AlreadyRunningExitCode;
         }

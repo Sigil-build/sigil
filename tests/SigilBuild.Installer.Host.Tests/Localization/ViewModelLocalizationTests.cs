@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using FluentAssertions;
 using SigilBuild.Core.Manifest;
 using SigilBuild.Installer.Host.Branding;
@@ -55,6 +56,65 @@ public sealed class ViewModelLocalizationTests : IDisposable
 
         text.Should().StartWith("Уже встановлено новішу версію");
         text.Should().Contain("Acme");
+    }
+
+    /// <summary>
+    /// Critical 1 fix-round-1 regression: the pre-Avalonia single-instance
+    /// MessageBoxW in <c>Program.cs</c> must resolve its body/caption through the
+    /// catalog (<c>already_running.body</c> / <c>already_running.caption</c>) rather
+    /// than a hardcoded English literal. A Win32 MessageBoxW can't be driven from a
+    /// unit test, so this asserts the two things that ARE testable: the catalog
+    /// entries are real, distinct-per-language strings, and the source no longer
+    /// contains the old hardcoded literal but does call through <see cref="Strings"/>.
+    /// </summary>
+    [Fact]
+    public void AlreadyRunning_CatalogStrings_AreLocalizedPerLanguage()
+    {
+        var en = Strings.AlreadyRunningBody(Lang.En);
+        var uk = Strings.AlreadyRunningBody(Lang.Uk);
+        var enCaption = Strings.AlreadyRunningCaption(Lang.En);
+        var ukCaption = Strings.AlreadyRunningCaption(Lang.Uk);
+
+        en.Should().NotBeNullOrWhiteSpace();
+        uk.Should().NotBeNullOrWhiteSpace();
+        uk.Should().NotBe(en, "the Ukrainian catalog entry must actually differ from English");
+        ukCaption.Should().NotBe(enCaption);
+
+        // The \n escape support (fix(localization) commit) must still render a real
+        // paragraph break, not the literal two characters '\' 'n'.
+        en.Should().Contain("\n\n");
+    }
+
+    [Fact]
+    public void Program_HeadedAlreadyRunningPath_UsesTheCatalogNotAHardcodedLiteral()
+    {
+        var programCsPath = FindRepoFile(Path.Combine("src", "SigilBuild.Installer.Host", "Program.cs"));
+        var source = File.ReadAllText(programCsPath);
+
+        source.Should().NotContain(
+            "Setup is already running.",
+            "the headed MessageBox must no longer carry the hardcoded English literal");
+        source.Should().Contain("Strings.AlreadyRunningBody(SessionLanguage.Current)");
+        source.Should().Contain("Strings.AlreadyRunningCaption(SessionLanguage.Current)");
+    }
+
+    /// <summary>Walks up from the test output directory to the repo root (identified
+    /// by <c>Sigil.slnx</c>) and resolves a repo-relative path — robust to Debug vs
+    /// Release output layout differences.</summary>
+    private static string FindRepoFile(string repoRelativePath)
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && dir.GetFiles("Sigil.slnx").Length == 0)
+        {
+            dir = dir.Parent;
+        }
+
+        if (dir is null)
+        {
+            throw new InvalidOperationException("Could not locate repo root (Sigil.slnx) above " + AppContext.BaseDirectory);
+        }
+
+        return Path.Combine(dir.FullName, repoRelativePath);
     }
 
     [Fact]

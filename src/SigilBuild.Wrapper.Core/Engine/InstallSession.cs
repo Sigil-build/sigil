@@ -575,14 +575,19 @@ public sealed class InstallSession
             ? _plan.PriorInstallDir
             : null;
 
+    // P9 design D2: NOT migrated to the catalog. This feeds the console/silent path
+    // (RunHeadlessAsync's stderr) — the headless twin of the wizard's localized
+    // DowngradeBlocked notice screen (InstallerViewModel.cs, which correctly stays on
+    // Strings.DowngradeBody). It names the English CLI flag /force-downgrade, the same
+    // reason BuildBlockerMessage above stays English: a console/silent message that
+    // tells the operator which literal flag to pass must not be translated out from
+    // under them.
     private string DowngradeBlockedMessage()
     {
         var name = string.IsNullOrWhiteSpace(_blob.DisplayName) ? _blob.AppId : _blob.DisplayName!;
         var target = string.IsNullOrWhiteSpace(_blob.Version) ? "this version" : _blob.Version!;
-        // P9: the same downgrade.body catalog key the wizard's notice screen uses
-        // (InstallerViewModel.cs) — one translated sentence for both surfaces
-        // rather than a second, silent-only literal.
-        return Strings.DowngradeBody(SessionLanguage.Current, _plan.InstalledVersion, name, target);
+        return $"A newer version ({_plan.InstalledVersion}) of {name} is already installed. " +
+               $"Installing the older version {target} is blocked. Pass /force-downgrade to override.";
     }
 
     public Task<InstallOutcome> RunInstallAsync(IProgress<StepProgress>? progress, CancellationToken ct = default)

@@ -72,6 +72,27 @@ public sealed class UpgradeSessionTests
     }
 
     [Fact]
+    public async Task Downgrade_blocked_message_stays_english_and_names_the_override_flag()
+    {
+        // P9 design D2: the console/silent downgrade-blocked message is the headless
+        // twin of the wizard's localized DowngradeBlocked notice screen — it names the
+        // English CLI flag /force-downgrade, so (like BuildBlockerMessage) it must NOT
+        // be routed through the catalog. This pins the reverted English text and
+        // guards against re-introducing the localized (and instruction-losing)
+        // Strings.DowngradeBody call.
+        var session = Session(Blob("1.0.0"), Installed("2.0.0"), "/silent");
+
+        var output = new StringWriter();
+        var error = new StringWriter();
+        await session.RunHeadlessAsync(output, error);
+
+        var message = error.ToString();
+        message.Should().Contain("/force-downgrade", "the operator needs the literal flag name to override");
+        message.Should().Contain("A newer version (2.0.0)");
+        message.Should().Contain("Installing the older version 1.0.0 is blocked.");
+    }
+
+    [Fact]
     public void Force_downgrade_flag_turns_a_block_into_a_forced_downgrade()
     {
         var session = Session(Blob("1.0.0"), Installed("2.0.0"), "/silent", "/force-downgrade");

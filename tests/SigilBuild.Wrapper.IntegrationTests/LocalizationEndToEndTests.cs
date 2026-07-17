@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Xunit;
@@ -109,9 +111,59 @@ public class LocalizationEndToEndTests
         var ukFiles = ListRelativeFiles(ukDir);
         ukFiles.Should().BeEquivalentTo(enFiles, "the installed OUTCOME must not depend on /lang");
 
+        File.Exists(enLog).Should().BeTrue("/LOG was requested");
         File.Exists(ukLog).Should().BeTrue("/LOG was requested");
+        var enLogText = File.ReadAllText(enLog);
         var ukLogText = File.ReadAllText(ukLog);
-        ukLogText.Should().NotContain("Вилучення", "the log stays English for supportability");
+
+        // A NotContain-a-Ukrainian-word check is non-discriminating here: the only
+        // Ukrainian literal the engine ever writes ("Вилучення", InstallSession.cs
+        // ~838) comes from the upgrade/downgrade-removal path, which never fires on
+        // this fixture's fresh install (no prior version). It would pass just as
+        // happily if the whole log were localized. Instead, prove the actual design
+        // promise directly: the /lang=uk run and the plain run must produce the SAME
+        // log wording. The only parts that are *expected* to differ are the
+        // timestamp on every line and the header's args=[...] echo (which legitimately
+        // reflects each run's own /D, /LOG and /lang flags) — strip exactly those and
+        // require byte-for-byte equality of everything else.
+        var enBody = StripTimestampsAndArgsHeader(enLogText);
+        var ukBody = StripTimestampsAndArgsHeader(ukLogText);
+
+        // Sanity check the fixture actually exercises the happy path (so the
+        // comparison above isn't vacuously comparing two near-empty logs).
+        enLogText.Should().Contain("result: success", "the fresh install must complete");
+        ukLogText.Should().Contain("result: success", "the fresh install must complete");
+
+        ukBody.Should().Be(
+            enBody,
+            "the log wording must be identical regardless of /lang (design D2 - the log " +
+            "is the support surface and stays English) once timestamps and the args-echo " +
+            "header are stripped");
+    }
+
+    private static readonly Regex TimestampPrefix = new(@"^\[[^\]]*\]\s*", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Normalize a <c>/LOG</c> file's text for cross-run comparison: strip each
+    /// line's <c>[UTC-ISO8601]</c> timestamp (written by the engine's install-log
+    /// sink) and drop the header line entirely, since it echoes this run's own
+    /// command-line flags (<c>/D</c>, <c>/LOG</c>, <c>/lang</c>) — legitimate,
+    /// expected differences between the two runs, not a translation concern.
+    /// </summary>
+    private static string StripTimestampsAndArgsHeader(string logText)
+    {
+        var lines = logText.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        var sb = new StringBuilder();
+        foreach (var line in lines)
+        {
+            var stripped = TimestampPrefix.Replace(line, string.Empty);
+            if (stripped.StartsWith("=== sigil ", StringComparison.Ordinal))
+            {
+                continue;
+            }
+            sb.Append(stripped).Append('\n');
+        }
+        return sb.ToString();
     }
 
     /// <summary>

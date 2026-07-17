@@ -49,11 +49,11 @@ internal static class Functions
             // always "" under InvariantGlobalization=true. Returns the user's top
             // preference; the full ordered list drives language resolution
             // (Localization/LanguageResolver). Total: "" when unavailable.
-            // ADR-008 §1.1 to be amended by P9 Task 17 (not yet amended — see
-            // docs/architecture/adr-008-expression-policy.md §1.1, still "reads
-            // CurrentUICulture.Name" as of this commit). This is a behavior
-            // change, not only a source change: a `When` using locale() moves
-            // from always-"" to a real tag, which can flip conditions.
+            // ADR-008 §1.1 amended by P9 Task 17 (2026-07-15) — see
+            // docs/architecture/adr-008-expression-policy.md §1.1 and the
+            // amendment log. This was a behavior change, not only a source
+            // change: a `When` using locale() moved from always-"" to a real
+            // tag, which can flip conditions.
             ["locale"] = _ => OsUiLanguage.Primary(),
 
             ["file_exists"] = a => File.Exists(ToStringOrNull(a[0])),

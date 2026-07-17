@@ -94,7 +94,7 @@ would defeat Sigil's auditability, determinism, and AOT-safety guarantees.
 | `version_gte(a, b)` | `bool` | pure; `System.Version` compare, ordinal fallback |
 | `os_version()` | `string` | reads `Environment.OSVersion` (read-only OS state) |
 | `arch()` | `string` | reads `RuntimeInformation.ProcessArchitecture` |
-| `locale()` | `string` | reads `CurrentUICulture.Name` (`""` under InvariantGlobalization) |
+| `locale()` | `string` | reads the OS UI language via `GetUserPreferredUILanguages` (top preference; `""` when unavailable / non-Windows) |
 | `file_exists(path)` | `bool` | bounded read-only filesystem probe |
 | `registry_exists(hive, key, name)` | `bool` | bounded read-only registry probe (Windows-guarded) |
 
@@ -236,8 +236,13 @@ Decision for P9:
 - **Manifest-supplied translations** for declared screen text use a
   `{ en: ..., de: ... }` shape on the relevant fields, serialized through the
   closed schema/blob like every other declared value.
-- Ship English plus a small seed set (5–10 languages); a pseudo-localization
-  pass is the test that catches any hardcoded (untabled) string.
+- **A language ships only with a named reviewer** recorded in its catalog
+  file's provenance header. The initial set is English plus Ukrainian; further
+  languages are admitted under this rule as ordinary content contributions,
+  not as amendments. What protects users is review, not count — a
+  machine-translated language nobody has read is worse than an honest English
+  fallback. A pseudo-localization pass is the test that catches any hardcoded
+  (untabled) string.
 
 This is exactly the "revisit together with ADR-008" the `SigilBuild.Wrapper.csproj`
 comment points at: localization is enabled **without** relaxing
@@ -346,6 +351,7 @@ would require replacing this ADR wholesale, not extending it.
 | Date | Change | Justification |
 |------|--------|---------------|
 | 2026-07-13 | Initial policy: closed function/step catalogs, admission criteria (§1.2), P1 functions pre-admitted (§1.3), variable model (§2), transitive redaction (§3), localization stance (§4), packaging bounds + option (b) (§5), non-goals (§6). | P0 — write down the contract the four citation sites + packaging tests already assume. |
+| 2026-07-15 | §1.1: `locale()` re-pointed from `CurrentUICulture.Name` to `GetUserPreferredUILanguages`. §4: the "5–10 languages" seed count replaced by a standing named-reviewer rule; initial set en + uk. | P9/G10 — `locale()` returned `""` under `InvariantGlobalization`, so the documented language-resolution chain could not work. **This is a behavior change, not only a source change:** a `When` using `locale()` moves from an always-`""` result to a real tag, which can flip conditions. Practical risk is ~zero precisely because the function was useless, but it is recorded here rather than assumed. `InvariantGlobalization` stays on; no satellite assemblies; no `CultureInfo` is constructed. |
 
 *(Append one row per future function/step/localization change that widens the
 surface. Never rewrite prior rows.)*

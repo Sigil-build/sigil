@@ -50,6 +50,25 @@ The hook is a no-op if gitleaks is not on `PATH` — you'll get a friendly skip 
 - Commits follow [Conventional Commits](https://www.conventionalcommits.org/).
   Examples: `feat: add zip packager`, `fix: handle empty manifest`, `chore: bump xunit`.
 
+## AI agents & assisted contributions
+
+AI-assisted PRs are welcome. If you (or your agent) contribute with Claude Code,
+Codex, Cursor, Copilot or similar, point the tool at **[AGENTS.md](AGENTS.md)** —
+it is the canonical machine-readable guide (Native AOT rules, Windows-only test
+caveats, size budgets, schema/docs lockstep). Claude Code users additionally get
+project skills in `.claude/skills/` and advisory hooks in `.claude/settings.json`
+(they warn, never block).
+
+Two honesty rules for agent PRs:
+
+- Verify with **Release** builds (`dotnet build Sigil.slnx -c Release`) — the
+  AOT/trim analyzer does not run in Debug.
+- If your environment could not run the Windows-only tests, say so in the PR
+  description instead of implying a fully green suite. CI is the arbiter.
+
+The `pr-guards` workflow enforces conventional-commit PR titles, `dotnet format`,
+and schema/docs lockstep on every PR.
+
 ## PR checklist
 
 - [ ] Tests added / updated

@@ -1,0 +1,86 @@
+name: pr-guards
+
+# Agent/contributor guardrails. Deterministic checks that don't need the full
+# build matrix: conventional-commit PR titles, schema/docs lockstep, formatting.
+# Local tooling stays advisory; these jobs are the blocking layer (see AGENTS.md).
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-guards-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pr-title:
+    name: conventional-commit PR title
+    runs-on: ubuntu-latest
+    steps:
+      - name: check title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          pattern='^(feat|fix|docs|chore|refactor|perf|test|build|ci|style|revert)(\([a-z0-9./-]+\))?!?: .+'
+          if [[ "$TITLE" =~ $pattern ]]; then
+            echo "PR title OK: $TITLE"
+          else
+            echo "::error::PR title must follow Conventional Commits (https://www.conventionalcommits.org/)."
+            echo "::error::Got: '$TITLE'. Examples: 'feat: add zip packager', 'fix(wrapper): handle empty manifest'."
+            exit 1
+          fi
+
+  schema-lockstep:
+    name: schema / docs lockstep
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: verify lockstep surfaces
+        run: |
+          set -euo pipefail
+          base="origin/${{ github.base_ref }}"
+          changed=$(git diff --name-only "$base"...HEAD)
+          echo "changed files:"; echo "$changed"
+
+          if ! grep -qx 'schemas/sigil-schema.json' <<< "$changed"; then
+            echo "schema untouched — lockstep check not applicable."
+            exit 0
+          fi
+
+          missing=()
+          grep -q '^docs/manifest-reference\.md$' <<< "$changed" \
+            || missing+=("docs/manifest-reference.md")
+          grep -qE '^(examples/|tests/SigilBuild\.Schema\.Tests/)' <<< "$changed" \
+            || missing+=("examples/** or tests/SigilBuild.Schema.Tests/** (fixtures)")
+
+          if (( ${#missing[@]} )); then
+            echo "::error::schemas/sigil-schema.json changed without its lockstep surfaces:"
+            for m in "${missing[@]}"; do echo "::error::  missing change in $m"; done
+            echo "::error::See AGENTS.md ('Lockstep surfaces') and .claude/skills/schema-change/."
+            exit 1
+          fi
+          echo "lockstep OK."
+
+  format:
+    name: dotnet format
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: restore
+        run: dotnet restore Sigil.slnx
+
+      - name: verify formatting
+        run: dotnet format Sigil.slnx --verify-no-changes --no-restore

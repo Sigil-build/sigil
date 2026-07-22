@@ -7,6 +7,7 @@ using SigilBuild.Installer.Host.Branding;
 using SigilBuild.Installer.Host.ViewModels;
 using SigilBuild.Installer.Host.Views;
 using SigilBuild.Wrapper.Cli;
+using SigilBuild.Wrapper.Core.Localization;
 using SigilBuild.Wrapper.Engine;
 
 namespace SigilBuild.Installer.Host;
@@ -61,25 +62,43 @@ public partial class App : Application
                 // T9: load the declared custom screens (from the blob) + parameter
                 // schema (from the session) so the wizard renders the Configure-style
                 // forms and generates the rail from them.
-                _vm.LoadScreens(InstallerScreensLoader.LoadFromSelf(), session.Parameters);
+                // P9 design §4.4: thread the session's full language-preference list
+                // (the SAME list used below for the license map) so a declared screen's
+                // rail label resolves independently of the resolved chrome language —
+                // Sigil may ship no chrome catalog for a tag the manifest itself supplies.
+                _vm.LoadScreens(InstallerScreensLoader.LoadFromSelf(), session.Parameters, session.LanguagePreferences);
 
                 // T8: load the enabled built-in option components (from the session's
                 // blob). When ≥ 1 is present the Options screen + its rail entry appear
                 // (after license, per decision 4); when none, they are omitted.
                 _vm.LoadOptions(session.Options);
 
-                // T14: load the embedded license text (from the blob). When present
+                // T14 / P9 Step 3b: load the embedded license text MAP (from the blob)
+                // and resolve it against the SAME ordered preference list the chrome
+                // language used (session.LanguagePreferences), so a manifest packing
+                // uk: LICENSE.uk.txt actually renders Ukrainian under a Ukrainian
+                // session instead of English forever. Resolve is total here — SIG0290
+                // (Task 9) makes an en-less license map a fatal pack-time error, so
+                // this never silently returns null for a non-null map. When present
                 // the License screen + its rail entry appear (after destination, per
                 // decision 4) and gate Next on acceptance; when absent they are
                 // omitted. The /silent path never reaches here, so silent installs
                 // imply acceptance.
-                _vm.LoadLicense(InstallerLicenseLoader.LoadFromSelf());
+                var licenseMap = InstallerLicenseLoader.LoadMapFromSelf();
+                _vm.LoadLicense(InstallerLicenseLoader.Resolve(licenseMap, session.LanguagePreferences));
 
-                // T10: surface the reinstall notice when a prior install of this app
-                // is already recorded in the resolved scope. The engine performs the
-                // v1 uninstall-then-install itself (idempotent); the wizard only tells
-                // the user what continuing will do.
-                _vm.SetExistingInstall(session.ExistingInstallDetected);
+                // T10: surface the reinstall notice when the SAME version is already
+                // installed (the engine performs uninstall-then-install itself). An
+                // upgrade / downgrade is a P3 case handled by SetUpgradeState below, so
+                // the plain reinstall notice is suppressed for those.
+                _vm.SetExistingInstall(
+                    session.ExistingInstallDetected && session.UpgradeAction == UpgradeAction.Same);
+
+                // P3 (gap G3): tell the wizard whether this run is an upgrade — show the
+                // "Upgrading from x.y.z" banner — or a blocked downgrade, which routes
+                // straight to the notice screen with the dedicated exit code. The prior
+                // install dir is already honored by ResolveDefaultInstallDir below.
+                _vm.SetUpgradeState(session.UpgradeAction, session.InstalledVersion);
 
                 // T13: seed the Destination screen from the session — the scope-aware
                 // default install dir (honoring /D= + the manifest install_dir), and
@@ -95,12 +114,42 @@ public partial class App : Application
                 // option checkbox states into option.* for the engine at install
                 // time (read lazily at call time). The collected destination path
                 // (T13) becomes the effective install dir → {install_dir}.
-                _vm.ConfigureInstallRunner((progress, ct) =>
+                _vm.ConfigureInstallRunner(async (progress, ct) =>
                 {
                     session.CollectedInstallDir = _vm.InstallPath;
-                    return session.RunInstallAsync(
+                    var outcome = await session.RunInstallAsync(
                         _vm.CollectedParameterValues, _vm.CollectedOptionValues, progress, ct);
+                    // P5: the reboot flag is only known after the run — copy it into the
+                    // VM before the Done screen renders (StartInstallAsync reads outcome next).
+                    _vm.SetRebootRequired(session.RebootRequired);
+                    return outcome;
                 });
+
+                // P7: surface the /LOG path so the Failed screen can offer "Open log".
+                _vm.LogFilePath = session.LogFilePath;
+
+                // P6 (gap G7): wire the files-in-use probes so the wizard can gate on
+                // running applications before starting the engine, and offer to close
+                // them via the Restart Manager.
+                _vm.ConfigureBlockerProbe(
+                    scan: dir =>
+                    {
+                        var blockers = session.ScanBlockers(dir);
+                        var described = new List<string>(blockers.Count);
+                        foreach (var b in blockers)
+                        {
+                            described.Add(b.Describe());
+                        }
+                        return described;
+                    },
+                    close: dir => session.CloseBlockers(dir));
+
+                // P2 (gap G4): wire the Done-screen "Launch <App>" checkbox to the
+                // session's unelevated launch of installer.run_after_install.
+                _vm.ConfigureLaunch(
+                    session.HasRunAfterInstall,
+                    session.LaunchLabel,
+                    () => session.LaunchAppUnelevated());
             }
 
             desktop.MainWindow = new InstallerWindow
@@ -126,8 +175,8 @@ public partial class App : Application
 
         return new BrandTokens
         {
-            AppName = brand.DisplayName ?? "Application",
-            Publisher = brand.Publisher ?? "Publisher",
+            AppName = brand.DisplayName ?? Strings.BrandAppFallback(SessionLanguage.Current),
+            Publisher = brand.Publisher ?? Strings.BrandPublisherFallback(SessionLanguage.Current),
             AppVersion = brand.Version ?? "1.0.0",
             PrimaryColor = light.TryGetValue("railBg", out var railBg) ? railBg : "#1F2937",
             AccentColor = light.TryGetValue("accent", out var accent) ? accent : "#3B82F6",

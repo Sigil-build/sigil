@@ -9,23 +9,26 @@ using System.Threading.Tasks;
 using SigilBuild.Core.Manifest;
 using SigilBuild.Installer.Host.Branding;
 using SigilBuild.Installer.Host.Services;
+using SigilBuild.Wrapper.Core.Localization;
 using SigilBuild.Wrapper.Engine;
 using SigilBuild.Wrapper.Expressions;
 
 namespace SigilBuild.Installer.Host.ViewModels;
 
-public enum InstallerStep { Welcome, License, InstallOptions, Options, Installing, Finish, Failed, Custom }
+public enum InstallerStep { Welcome, License, InstallOptions, Options, Installing, Finish, Failed, Custom, DowngradeBlocked, CloseApps }
 
 /// <summary>
 /// Process exit code surfaced by the installer, per the unified T2 command-line
 /// contract shared with the console wrapper: <c>0</c> ok, <c>1</c> step failure
-/// (rolled back), <c>2</c> user cancelled (rolled back).
+/// (rolled back), <c>2</c> user cancelled (rolled back), <c>3</c> downgrade blocked
+/// (P3 — mirrors <see cref="InstallSession.DowngradeBlockedExitCode"/>).
 /// </summary>
 public enum InstallerOutcomeCode
 {
-    Completed     = 0,
-    Failed        = 1,
-    UserCancelled = 2,
+    Completed        = 0,
+    Failed           = 1,
+    UserCancelled    = 2,
+    DowngradeBlocked = 3,
 }
 
 /// <summary>A single line in the Installing / Failed screen log.</summary>
@@ -38,6 +41,10 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     private CancellationTokenSource? _engineCts;
     private Func<IProgress<StepProgress>, CancellationToken, Task<InstallOutcome>>? _installRunner;
 
+    // P9: the resolved chrome language for this session, captured once at
+    // construction (Task 4 sets SessionLanguage before any UI is built).
+    private readonly Lang _lang = SessionLanguage.Current;
+
     // T9 flow: an ordered list of wizard positions. Custom screens (declared over
     // parameters) are inserted before Installing. The flow is screen-list driven
     // rather than hardcoded so T14 (license) and later tasks can extend it.
@@ -45,6 +52,17 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     private int _flowIndex;
     private IReadOnlyList<CustomScreenViewModel> _customScreens = Array.Empty<CustomScreenViewModel>();
     private IReadOnlyList<ParameterDefinition> _parameters = Array.Empty<ParameterDefinition>();
+
+    // P9 design §4.4: the ORDERED preference list a declared screen's title map is
+    // matched against — the SAME list session.LanguagePreferences exposes for the
+    // license map (InstallerLicenseLoader.Resolve), not just the resolved chrome
+    // language. Chrome and manifest text must match INDEPENDENTLY: Sigil may ship
+    // no catalog for a tag the manifest itself declares (e.g. `de`), so the rail
+    // still has to be able to resolve to it even though _lang (chrome) fell back to
+    // `en`. Defaults to the single-element `[_lang]` list when the caller doesn't
+    // supply one (dev/preview runs, and every pre-P9-Step-16 LoadScreens call site),
+    // preserving prior behavior exactly.
+    private IReadOnlyList<string> _screenLanguagePreferences;
 
     // T14: the License screen (and its rail entry) appear IFF the blob carries
     // license text. Absent by default so an un-stamped/dev host and a manifest
@@ -68,10 +86,24 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
             System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData),
             "Programs",
             tokens.AppName);
+        // The default Done-screen launch caption, before ConfigureLaunch wires the
+        // real one (P9: routed through the same finish.launch_app key as the
+        // ConfigureLaunch fallback below — collapses the former duplicate literal).
+        _launchLabel = Strings.FinishLaunchApp(_lang, Brand.AppName);
+        // Default until LoadScreens supplies the session's real preference list —
+        // matches _lang exactly, so a host that never calls LoadScreens (or calls
+        // the 2-arg overload) sees the pre-P9-Step-16 behavior unchanged.
+        _screenLanguagePreferences = new[] { _lang.ToString().ToLowerInvariant() };
         RebuildFlow();
     }
 
     public BrandTokens Brand { get; }
+
+    /// <summary>The Welcome screen's heading (P9): replaces WelcomeView.axaml's StringFormat.</summary>
+    public string WelcomeTitle => Strings.WelcomeTitle(_lang, Brand.AppName);
+
+    /// <summary>The Finish screen's heading (P9): replaces FinishView.axaml's StringFormat.</summary>
+    public string FinishTitle => Strings.FinishTitle(_lang, Brand.AppName);
 
     // http-options runtime wiring: a source-backed enum field fetches its dropdown
     // options when its custom screen becomes visible. The fetch is injectable so
@@ -137,7 +169,7 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     /// version is removed first), the v1 repair/reinstall behaviour (T10).
     /// </summary>
     public string ReinstallNotice => _existingInstallDetected
-        ? $"{Brand.AppName} is already installed. Continuing will reinstall it — the current version is removed first."
+        ? Strings.UpgradeReinstallNotice(_lang, Brand.AppName)
         : string.Empty;
 
     /// <summary>
@@ -145,6 +177,128 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     /// <c>ExistingInstallDetected</c>. Idempotent; safe to call before the flow renders.
     /// </summary>
     public void SetExistingInstall(bool detected) => ExistingInstallDetected = detected;
+
+    // --- P6 (gap G7): close-running-applications gate ---
+
+    private Func<string?, IReadOnlyList<string>>? _blockerScan;
+    private Action<string?>? _blockerClose;
+
+    /// <summary>
+    /// The applications currently blocking the install, as shown on the
+    /// Close-applications screen. Refreshed by every scan.
+    /// </summary>
+    public ObservableCollection<string> Blockers { get; } = new();
+
+    /// <summary>True when the last scan found something blocking (drives the screen's list).</summary>
+    public bool HasBlockers => Blockers.Count > 0;
+
+    /// <summary>
+    /// Wire the files-in-use probes (P6). <paramref name="scan"/> returns the current
+    /// blocker descriptions for a destination; <paramref name="close"/> asks the
+    /// Restart Manager to close them. Left unwired in unit tests that drive the step
+    /// machine directly — then the gate is transparent (never blocks).
+    /// </summary>
+    public void ConfigureBlockerProbe(Func<string?, IReadOnlyList<string>> scan, Action<string?> close)
+    {
+        _blockerScan = scan;
+        _blockerClose = close;
+    }
+
+    /// <summary>
+    /// Re-scan for blockers against the chosen destination. Returns true when clear.
+    /// Refreshes <see cref="Blockers"/>. Unwired (unit tests / dev preview) → always clear.
+    /// </summary>
+    public bool RescanBlockers()
+    {
+        if (_blockerScan is null)
+        {
+            return true;
+        }
+
+        var found = _blockerScan(InstallPath);
+        Blockers.Clear();
+        foreach (var b in found)
+        {
+            Blockers.Add(b);
+        }
+        OnPropertyChanged(nameof(HasBlockers));
+        return Blockers.Count == 0;
+    }
+
+    /// <summary>
+    /// "Close for me" — ask the Restart Manager to close the blocking applications,
+    /// then re-scan. Advances into the install when that cleared them; otherwise the
+    /// screen stays put with the refreshed list (e.g. a declared app_mutex holder the
+    /// Restart Manager cannot close).
+    /// </summary>
+    public void CloseBlockingApps()
+    {
+        _blockerClose?.Invoke(InstallPath);
+        if (RescanBlockers())
+        {
+            GoToInstalling();
+        }
+    }
+
+    /// <summary>"Retry" — the user closed the apps themselves; re-scan and continue when clear.</summary>
+    public void RetryBlockers()
+    {
+        if (RescanBlockers())
+        {
+            GoToInstalling();
+        }
+    }
+
+    // P3 (gap G3): the version-aware classification for this run + the installed
+    // version, wired by the host from the session. Drives the "Upgrading from x.y.z"
+    // notice and — for a blocked downgrade — the dedicated notice screen.
+    private UpgradeAction _upgradeAction = UpgradeAction.Fresh;
+    private string? _installedVersion;
+
+    /// <summary>
+    /// The upgrade banner shown on the ready / progress screens during an upgrade
+    /// (or a forced downgrade) — empty otherwise. Reads the prior version and the
+    /// incoming <see cref="BrandTokens.AppVersion"/>.
+    /// </summary>
+    public string UpgradeNotice => _upgradeAction switch
+    {
+        UpgradeAction.Upgrade =>
+            Strings.UpgradeUpgrading(_lang, Brand.AppName, _installedVersion ?? string.Empty, Brand.AppVersion),
+        UpgradeAction.DowngradeForced =>
+            Strings.UpgradeReplacingNewer(_lang, Brand.AppName, _installedVersion ?? string.Empty, Brand.AppVersion),
+        _ => string.Empty,
+    };
+
+    /// <summary>True when <see cref="UpgradeNotice"/> is non-empty (drives its visibility).</summary>
+    public bool HasUpgradeNotice => UpgradeNotice.Length > 0;
+
+    /// <summary>
+    /// The message shown on the <see cref="InstallerStep.DowngradeBlocked"/> notice
+    /// screen (P3): a newer version is installed and setup will not replace it.
+    /// </summary>
+    public string DowngradeBlockedMessage =>
+        Strings.DowngradeBody(_lang, _installedVersion ?? string.Empty, Brand.AppName, Brand.AppVersion);
+
+    /// <summary>
+    /// Wire the version-aware state (P3). Called by the host from the session's
+    /// <see cref="InstallSession.UpgradeAction"/> / <see cref="InstallSession.InstalledVersion"/>.
+    /// A blocked downgrade routes straight to the notice screen and sets the dedicated
+    /// exit code; an upgrade only surfaces the "Upgrading from x.y.z" banner.
+    /// </summary>
+    public void SetUpgradeState(UpgradeAction action, string? installedVersion)
+    {
+        _upgradeAction = action;
+        _installedVersion = installedVersion;
+        OnPropertyChanged(nameof(UpgradeNotice));
+        OnPropertyChanged(nameof(HasUpgradeNotice));
+        OnPropertyChanged(nameof(DowngradeBlockedMessage));
+
+        if (action == UpgradeAction.DowngradeBlocked)
+        {
+            OutcomeCode = InstallerOutcomeCode.DowngradeBlocked;
+            CurrentStep = InstallerStep.DowngradeBlocked;
+        }
+    }
 
     /// <summary>The declared custom screen currently shown (T9), or null off a custom screen.</summary>
     private CustomScreenViewModel? _currentCustomScreen;
@@ -162,9 +316,18 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     /// the flow + rail. Called by the host once it has read them from the blob.
     /// </summary>
     public void LoadScreens(
-        IReadOnlyList<InstallerScreen> screens, IReadOnlyList<ParameterDefinition> parameters)
+        IReadOnlyList<InstallerScreen> screens, IReadOnlyList<ParameterDefinition> parameters,
+        IReadOnlyList<string>? languagePreferences = null)
     {
         _parameters = parameters ?? Array.Empty<ParameterDefinition>();
+        // P9 design §4.4: prefer the caller's full session preference list (the SAME
+        // one InstallerLicenseLoader.Resolve uses for the license map) over the
+        // single-tag chrome-only fallback, so a declared screen's title resolves
+        // independently of whether Sigil ships a chrome catalog for that tag.
+        if (languagePreferences is { Count: > 0 })
+        {
+            _screenLanguagePreferences = languagePreferences;
+        }
         var byName = new Dictionary<string, ParameterDefinition>(StringComparer.Ordinal);
         foreach (var p in _parameters)
         {
@@ -183,7 +346,8 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
                 }
             }
             built.Add(new CustomScreenViewModel(
-                screen.Id, Interpolate(screen.Title) ?? screen.Title, Interpolate(screen.Subtitle), screen.When, fields));
+                screen.Id, Interpolate(screen.Title.English) ?? screen.Title.English,
+                Interpolate(screen.Subtitle?.English), screen.When, fields, screen.Title));
         }
 
         _customScreens = built;
@@ -192,9 +356,11 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
 
     /// <summary>
     /// Load the embedded license text (T14). Called by the host once it has read
-    /// it from the blob (<c>InstallerLicenseLoader.LoadFromSelf()</c>). When the
-    /// text is present the License screen + its rail entry appear (after the
-    /// destination screen, per decision 4); when null/blank they are absent.
+    /// the license MAP from the blob and resolved it against the session's
+    /// language preferences (P9 Step 3b — <c>InstallerLicenseLoader.LoadMapFromSelf()</c>
+    /// + <c>.Resolve(...)</c>). When the text is present the License screen + its
+    /// rail entry appear (after the destination screen, per decision 4); when
+    /// null/blank they are absent.
     /// Only the interactive wizard consults this — the headless <c>/silent</c>
     /// path never shows the License screen, so silent installs imply acceptance.
     /// </summary>
@@ -316,8 +482,11 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
         // Terminal step (Finish/Failed) not in the linear flow: leave the cursor.
     }
 
-    public bool CanGoBack => _step is not InstallerStep.Welcome and not InstallerStep.Installing and not InstallerStep.Finish and not InstallerStep.Failed;
-    public bool CanGoNext => _step is not InstallerStep.Installing and not InstallerStep.Finish and not InstallerStep.Failed;
+    public bool CanGoBack => _step is not InstallerStep.Welcome and not InstallerStep.Installing and not InstallerStep.Finish and not InstallerStep.Failed and not InstallerStep.DowngradeBlocked;
+    public bool CanGoNext => _step is not InstallerStep.Installing and not InstallerStep.Finish and not InstallerStep.Failed and not InstallerStep.DowngradeBlocked;
+
+    /// <summary>True on the P6 Close-applications gate — drives its Retry / Close-for-me buttons.</summary>
+    public bool IsCloseAppsStep => _step == InstallerStep.CloseApps;
 
     /// <summary>False only on the Finish screen — install is already done, nothing to cancel.</summary>
     public bool CanCancel => _step is not InstallerStep.Finish;
@@ -341,6 +510,88 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     {
         get => _launchAfterInstall;
         set { if (_launchAfterInstall != value) { _launchAfterInstall = value; OnPropertyChanged(); } }
+    }
+
+    private bool _hasRunAfterInstall;
+    private string _launchLabel; // set in the constructor, after Brand is assigned.
+    private Action? _launchAction;
+
+    /// <summary>
+    /// True when the manifest declares <c>installer.run_after_install</c> (P2, gap
+    /// G4) — gates the Done screen's "Launch &lt;App&gt;" checkbox. When false the
+    /// checkbox is hidden and nothing is launched.
+    /// </summary>
+    public bool HasRunAfterInstall
+    {
+        get => _hasRunAfterInstall;
+        private set { if (_hasRunAfterInstall != value) { _hasRunAfterInstall = value; OnPropertyChanged(); } }
+    }
+
+    /// <summary>The Done-screen checkbox label, e.g. "Launch Acme Studio".</summary>
+    public string LaunchLabel
+    {
+        get => _launchLabel;
+        private set { if (_launchLabel != value) { _launchLabel = value; OnPropertyChanged(); } }
+    }
+
+    /// <summary>
+    /// Wire the run-after-install launch (P2). <paramref name="launch"/> starts the
+    /// app unelevated (an <see cref="InstallSession"/>-backed delegate). Left unwired
+    /// in unit/dev runs; then <see cref="LaunchIfRequested"/> is a no-op.
+    /// </summary>
+    public void ConfigureLaunch(bool hasRunAfterInstall, string launchLabel, Action launch)
+    {
+        HasRunAfterInstall = hasRunAfterInstall;
+        LaunchLabel = string.IsNullOrWhiteSpace(launchLabel) ? Strings.FinishLaunchApp(_lang, Brand.AppName) : launchLabel;
+        _launchAction = launch;
+    }
+
+    // P5 (gap G6): a prerequisite installed during this run reported reboot-required
+    // (exit 3010). The Done screen shows a notice; wired by the host after the install
+    // runner completes (the flag is only known post-install).
+    private bool _rebootRequired;
+
+    /// <summary>
+    /// True when a prerequisite required a reboot (P5). Gates the Done-screen reboot
+    /// notice. Set by the host from <see cref="InstallSession.RebootRequired"/> after
+    /// the install completes.
+    /// </summary>
+    public bool RebootRequired
+    {
+        get => _rebootRequired;
+        private set
+        {
+            if (_rebootRequired != value)
+            {
+                _rebootRequired = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(RebootNotice));
+            }
+        }
+    }
+
+    /// <summary>The Done-screen reboot notice, or empty when no reboot is needed (P5).</summary>
+    public string RebootNotice => _rebootRequired
+        ? Strings.FinishRebootNotice(_lang)
+        : string.Empty;
+
+    /// <summary>Wire the post-install reboot flag (P5). Called by the host once the install runner completes.</summary>
+    public void SetRebootRequired(bool rebootRequired) => RebootRequired = rebootRequired;
+
+    /// <summary>
+    /// Launch the app if the install completed and the (checked-by-default) "Launch
+    /// &lt;App&gt;" box is ticked. Invoked by the host when the wizard closes on the
+    /// Done screen. Idempotent-safe: no-op unless completed + checked + configured.
+    /// </summary>
+    public void LaunchIfRequested()
+    {
+        if (OutcomeCode == InstallerOutcomeCode.Completed
+            && HasRunAfterInstall
+            && LaunchAfterInstall
+            && _launchAction is not null)
+        {
+            _launchAction();
+        }
     }
 
     public string InstallPath
@@ -460,22 +711,22 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
 
         if (string.IsNullOrWhiteSpace(path))
         {
-            InstallPathError = "Enter an install location.";
+            InstallPathError = Strings.LocationErrorEmpty(_lang);
             return false;
         }
         if (!System.IO.Path.IsPathFullyQualified(path))
         {
-            InstallPathError = "Enter an absolute path (for example C:\\Program Files\\App).";
+            InstallPathError = Strings.LocationErrorNotAbsolute(_lang);
             return false;
         }
         if (System.IO.File.Exists(path))
         {
-            InstallPathError = "That location is a file. Choose a folder.";
+            InstallPathError = Strings.LocationErrorIsFile(_lang);
             return false;
         }
         if (!IsWritableOrElevatable(path))
         {
-            InstallPathError = "You don't have permission to install there. Choose another folder.";
+            InstallPathError = Strings.LocationErrorDenied(_lang);
             return false;
         }
 
@@ -573,6 +824,56 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
         private set { _errorMessage = value; OnPropertyChanged(); }
     }
 
+    private string? _logFilePath;
+
+    /// <summary>
+    /// The <c>/LOG</c> file path for this run (P7), or null when logging was not
+    /// requested. Wired by the host from <see cref="InstallSession.LogFilePath"/>.
+    /// Drives the Failed screen's "Open log" affordance.
+    /// </summary>
+    public string? LogFilePath
+    {
+        get => _logFilePath;
+        set
+        {
+            if (_logFilePath != value)
+            {
+                _logFilePath = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(HasLog));
+            }
+        }
+    }
+
+    /// <summary>True when a log file was requested and exists on disk — gates the "Open log" button.</summary>
+    public bool HasLog => !string.IsNullOrEmpty(_logFilePath) && System.IO.File.Exists(_logFilePath);
+
+    /// <summary>
+    /// Open the install log in the OS default handler (P7). Best-effort: a failure
+    /// to launch the viewer must never crash the wizard. No-op when no log exists.
+    /// </summary>
+    public void OpenLog()
+    {
+        var path = _logFilePath;
+        if (string.IsNullOrEmpty(path) || !System.IO.File.Exists(path))
+        {
+            return;
+        }
+#pragma warning disable CA1031 // Best-effort shell-open; a failed launch must not crash the wizard.
+        try
+        {
+            using var _ = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path)
+            {
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception)
+        {
+            // swallow — opening the log is a convenience.
+        }
+#pragma warning restore CA1031
+    }
+
     /// <summary>
     /// Wire the real install driver (an <see cref="InstallSession"/>-backed
     /// delegate). When set, entering the Installing screen kicks off the engine.
@@ -583,6 +884,18 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
 
     public void Next()
     {
+        // P6 (gap G7): leaving the Close-applications screen means the user pressed
+        // Next after clearing blockers — re-scan and only advance when clear.
+        if (_step == InstallerStep.CloseApps)
+        {
+            if (!RescanBlockers())
+            {
+                return; // still blocked — stay on the screen with the refreshed list.
+            }
+            GoToInstalling();
+            return;
+        }
+
         // Destination gate (T13): a blank / relative / file / unwritable path shows
         // an inline error and blocks advancing off the destination screen.
         if (_flow[_flowIndex].Step == InstallerStep.InstallOptions && !ValidateDestination())
@@ -612,11 +925,37 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
             return;
         }
 
+        // P6 (gap G7): the last gate before the install starts. The destination is
+        // settled by now, so scan for running apps holding it; if any, divert to the
+        // Close-applications screen instead of starting the engine.
+        if (_flow[next].Step == InstallerStep.Installing && !RescanBlockers())
+        {
+            CurrentStep = InstallerStep.CloseApps;
+            return;
+        }
+
         MoveTo(next);
 
         if (_flow[_flowIndex].Step == InstallerStep.Installing)
         {
             InstallTask = StartInstallAsync();
+        }
+    }
+
+    /// <summary>
+    /// Advance from the Close-applications screen straight into the install (the
+    /// blockers are gone; the linear flow's next node is Installing).
+    /// </summary>
+    private void GoToInstalling()
+    {
+        for (var i = 0; i < _flow.Count; i++)
+        {
+            if (_flow[i].Step == InstallerStep.Installing)
+            {
+                MoveTo(i);
+                InstallTask = StartInstallAsync();
+                return;
+            }
         }
     }
 
@@ -721,16 +1060,43 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
 
             var label = node.Step switch
             {
-                InstallerStep.Welcome => "Welcome",
-                InstallerStep.License => "License",
-                InstallerStep.InstallOptions => "Location",
-                InstallerStep.Options => "Options",
-                InstallerStep.Installing => "Install",
-                InstallerStep.Custom => node.Screen?.Id ?? "Configure",
-                _ => node.Step.ToString(),
+                InstallerStep.Welcome => Strings.RailWelcome(_lang),
+                InstallerStep.License => Strings.RailLicense(_lang),
+                InstallerStep.InstallOptions => Strings.RailLocation(_lang),
+                InstallerStep.Options => Strings.RailOptions(_lang),
+                InstallerStep.Installing => Strings.RailInstall(_lang),
+                InstallerStep.Custom => ResolveCustomRailLabel(node.Screen),
+                InstallerStep.Finish => Strings.RailFinish(_lang),
+                InstallerStep.Failed => Strings.RailFailed(_lang),
+                InstallerStep.CloseApps => Strings.RailCloseApps(_lang),
+                InstallerStep.DowngradeBlocked => Strings.RailDowngradeBlocked(_lang),
+                _ => Strings.RailConfigure(_lang),
             };
             RailSteps.Add(new RailStep(label, isCurrent: i == _flowIndex, isDone: i < _flowIndex));
         }
+    }
+
+    /// <summary>
+    /// The rail label for a declared custom screen (P9): prefers the manifest's
+    /// own resolved title over the generic <c>rail.configure</c> fallback, so a
+    /// pack that declares "Database Setup" doesn't just show "Configure" on the
+    /// rail. Falls back to <c>rail.configure</c> when the manifest didn't declare
+    /// a usable title for the session's language (should not happen — SIG0290
+    /// requires an "en" entry — but a malformed manifest must not crash the rail).
+    /// Never renders the raw <see cref="CustomScreenViewModel.Id"/> or a C# enum
+    /// name — that was the leak this replaces.
+    /// </summary>
+    private string ResolveCustomRailLabel(CustomScreenViewModel? screen)
+    {
+        if (screen is null)
+        {
+            return Strings.RailConfigure(_lang);
+        }
+
+        var tag = LanguageResolver.Match(_screenLanguagePreferences, new List<string>(screen.TitleMap.Values.Keys));
+        return screen.TitleMap.Values.TryGetValue(tag, out var text) && !string.IsNullOrWhiteSpace(text)
+            ? text
+            : Strings.RailConfigure(_lang);
     }
 
     /// <summary>
@@ -861,7 +1227,13 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
 
     private void ApplyProgress(StepProgress p)
     {
-        InstallProgress = p.Fraction;
+        // Message-only rows (Total=0) — a P4 download percentage, a P2 lifecycle-hook
+        // line, or a P5 prerequisite row — update the log / current-item without
+        // jerking the overall bar; only real step advances (Total>0) move it.
+        if (p.Total > 0)
+        {
+            InstallProgress = p.Fraction;
+        }
         if (p.Message is not null)
         {
             InstallCurrentItem = p.Message;
@@ -894,6 +1266,9 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
 
         if (_step == InstallerStep.Failed)
             return true;    // already failed + rolled back — close, keep exit code 1
+
+        if (_step == InstallerStep.DowngradeBlocked)
+            return true;    // P3 block — close, keep the downgrade-blocked exit code (3)
 
         if (_step == InstallerStep.Installing && _engineCts is not null)
         {

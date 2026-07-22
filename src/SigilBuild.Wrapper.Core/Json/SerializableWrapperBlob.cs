@@ -75,8 +75,15 @@ internal sealed record SerializableWrapperBlob
     /// <summary>Base64-encoded brand hero image bytes, if any.</summary>
     public string? HeroBase64 { get; init; }
 
-    /// <summary>Embedded license text (plain text / RTF-as-text v1), if any (T14).</summary>
-    public string? LicenseText { get; init; }
+    /// <summary>
+    /// Embedded license text (plain text / RTF-as-text v1), tag -&gt; file
+    /// contents (P9, gap G10). <c>null</c> when no readable entry survived pack
+    /// time (T14's original "no License screen" case). Each file is read at PACK
+    /// time (<c>ExeWrapperPackager.ReadLicenseText</c>) — this carries contents,
+    /// not paths. <c>Dictionary&lt;string,string&gt;</c> is already registered in
+    /// <see cref="WrapperBlobJsonContext"/>, so no new source-gen entry is needed.
+    /// </summary>
+    public Dictionary<string, string>? LicenseText { get; init; }
 
     /// <summary>Declared custom wizard screens (T9).</summary>
     public SerializableInstallerScreen[] Screens { get; init; }
@@ -88,6 +95,45 @@ internal sealed record SerializableWrapperBlob
     /// </summary>
     public SerializableOptionComponent[] Options { get; init; }
         = Array.Empty<SerializableOptionComponent>();
+
+    /// <summary>
+    /// Declarative variables from <c>installer.vars</c> (P1), in manifest
+    /// declaration order. The runtime evaluates each once at session start and
+    /// seeds <c>var.&lt;Name&gt;</c>. An ordered array (not a map) so the wire form
+    /// is deterministic and dependency order is reproducible.
+    /// </summary>
+    public SerializableVar[] Vars { get; init; } = Array.Empty<SerializableVar>();
+
+    // --- P2 lifecycle hooks (gap G2). Ordered step lists that run OUTSIDE the
+    //     rollback journal, around the transactional body. ---
+    public SerializableInstallStep[] HookPreInstall    { get; init; } = Array.Empty<SerializableInstallStep>();
+    public SerializableInstallStep[] HookPostInstall   { get; init; } = Array.Empty<SerializableInstallStep>();
+    public SerializableInstallStep[] HookPreUninstall  { get; init; } = Array.Empty<SerializableInstallStep>();
+    public SerializableInstallStep[] HookPostUninstall { get; init; } = Array.Empty<SerializableInstallStep>();
+
+    // --- P2 run-after-install (gap G4): the Done-screen "Launch <App>" target. ---
+    public string? RunAfterInstallPath { get; init; }
+    public string[]? RunAfterInstallArgs { get; init; }
+
+    /// <summary>
+    /// First-class prerequisite units (P5, gap G6) from <c>installer.prerequisites</c>,
+    /// in declaration order. Run before the journaled body (detect → install → re-detect).
+    /// An ordered array so the wire form is deterministic.
+    /// </summary>
+    public SerializablePrerequisite[] Prerequisites { get; init; } = Array.Empty<SerializablePrerequisite>();
+
+    /// <summary>P6 (gap G7): declared app mutex names probed before touching the install dir.</summary>
+    public string[]? AppMutex { get; init; }
+
+    /// <summary>
+    /// P9 (gap G10): the manifest's optional <c>installer.language</c> fixed
+    /// language tag. <c>null</c> when the manifest doesn't fix a language, so the
+    /// session's language resolver falls through to <c>/lang</c> / the OS
+    /// preference list / <c>en</c>. A host-rendering / session-bootstrap concern
+    /// like <see cref="Screens"/> and <see cref="LicenseText"/> — not carried on
+    /// the in-memory <see cref="WrapperBlob"/>.
+    /// </summary>
+    public string? Language { get; init; }
 
     public static WrapperBlob ToWrapperBlob(SerializableWrapperBlob s)
     {
@@ -101,6 +147,7 @@ internal sealed record SerializableWrapperBlob
             UpdateSteps:  ConvertSteps(s.UpdateSteps),
             Scope:        s.Scope,
             Options:      ConvertOptions(s.Options),
+            Vars:         ConvertVars(s.Vars),
             AppName:      s.AppName,
             InstallDir:   s.InstallDir,
             // T10: real ARP fields threaded into the in-memory blob so
@@ -109,7 +156,17 @@ internal sealed record SerializableWrapperBlob
             DisplayName:        s.DisplayName,
             Publisher:          s.Publisher,
             Version:            s.Version,
-            EstimatedSizeBytes: s.EstimatedSizeBytes ?? 0);
+            EstimatedSizeBytes: s.EstimatedSizeBytes ?? 0,
+            // P2: hooks + launch target.
+            HookPreInstall:      ConvertSteps(s.HookPreInstall),
+            HookPostInstall:     ConvertSteps(s.HookPostInstall),
+            HookPreUninstall:    ConvertSteps(s.HookPreUninstall),
+            HookPostUninstall:   ConvertSteps(s.HookPostUninstall),
+            RunAfterInstallPath: s.RunAfterInstallPath,
+            RunAfterInstallArgs: s.RunAfterInstallArgs,
+            // P5: prerequisite units.
+            Prerequisites: ConvertPrerequisites(s.Prerequisites),
+            AppMutex: s.AppMutex);
     }
 
     public static SerializableWrapperBlob FromWrapperBlob(WrapperBlob blob)
@@ -125,6 +182,7 @@ internal sealed record SerializableWrapperBlob
             UpdateSteps  = SerializeSteps(blob.UpdateSteps),
             Scope        = blob.Scope,
             Options      = SerializeOptions(blob.Options),
+            Vars         = SerializeVars(blob.Vars),
             AppName      = blob.AppName,
             InstallDir   = blob.InstallDir,
             // T10: carry the real ARP fields onto the wire DTO. A zero size is
@@ -134,7 +192,25 @@ internal sealed record SerializableWrapperBlob
             Publisher          = blob.Publisher,
             Version            = blob.Version,
             EstimatedSizeBytes = blob.EstimatedSizeBytes == 0 ? null : blob.EstimatedSizeBytes,
+            // P2: hooks + launch target.
+            HookPreInstall      = SerializeSteps(blob.HookPreInstall ?? Array.Empty<InstallStep>()),
+            HookPostInstall     = SerializeSteps(blob.HookPostInstall ?? Array.Empty<InstallStep>()),
+            HookPreUninstall    = SerializeSteps(blob.HookPreUninstall ?? Array.Empty<InstallStep>()),
+            HookPostUninstall   = SerializeSteps(blob.HookPostUninstall ?? Array.Empty<InstallStep>()),
+            RunAfterInstallPath = blob.RunAfterInstallPath,
+            RunAfterInstallArgs = blob.RunAfterInstallArgs is null ? null : ToStringArray(blob.RunAfterInstallArgs),
+            // P5: prerequisite units.
+            Prerequisites = SerializePrerequisites(blob.Prerequisites),
+            AppMutex = blob.AppMutex is null ? null : ToStringArray(blob.AppMutex),
         };
+    }
+
+    private static string[] ToStringArray(IReadOnlyList<string> list)
+    {
+        if (list is string[] arr) return arr;
+        var copy = new string[list.Count];
+        for (var i = 0; i < list.Count; i++) copy[i] = list[i];
+        return copy;
     }
 
     private static InstallerOptionComponent[] ConvertOptions(SerializableOptionComponent[] flat)
@@ -155,6 +231,50 @@ internal sealed record SerializableWrapperBlob
         for (var i = 0; i < options.Count; i++)
         {
             result[i] = SerializableOptionComponent.FromComponent(options[i]);
+        }
+        return result;
+    }
+
+    private static InstallerVar[] ConvertVars(SerializableVar[] flat)
+    {
+        if (flat.Length == 0) return Array.Empty<InstallerVar>();
+        var result = new InstallerVar[flat.Length];
+        for (var i = 0; i < flat.Length; i++)
+        {
+            result[i] = SerializableVar.ToVar(flat[i]);
+        }
+        return result;
+    }
+
+    private static SerializableVar[] SerializeVars(IReadOnlyList<InstallerVar>? vars)
+    {
+        if (vars is null || vars.Count == 0) return Array.Empty<SerializableVar>();
+        var result = new SerializableVar[vars.Count];
+        for (var i = 0; i < vars.Count; i++)
+        {
+            result[i] = SerializableVar.FromVar(vars[i]);
+        }
+        return result;
+    }
+
+    private static InstallerPrerequisite[] ConvertPrerequisites(SerializablePrerequisite[] flat)
+    {
+        if (flat.Length == 0) return Array.Empty<InstallerPrerequisite>();
+        var result = new InstallerPrerequisite[flat.Length];
+        for (var i = 0; i < flat.Length; i++)
+        {
+            result[i] = SerializablePrerequisite.ToPrerequisite(flat[i]);
+        }
+        return result;
+    }
+
+    private static SerializablePrerequisite[] SerializePrerequisites(IReadOnlyList<InstallerPrerequisite>? prereqs)
+    {
+        if (prereqs is null || prereqs.Count == 0) return Array.Empty<SerializablePrerequisite>();
+        var result = new SerializablePrerequisite[prereqs.Count];
+        for (var i = 0; i < prereqs.Count; i++)
+        {
+            result[i] = SerializablePrerequisite.FromPrerequisite(prereqs[i]);
         }
         return result;
     }
@@ -218,7 +338,7 @@ internal sealed record SerializableParameterDefinition
     public JsonElement? Default { get; init; }
     public string[]? EnumValues { get; init; }
     public bool InstallTime { get; init; }
-    public string? Description { get; init; }
+    public Dictionary<string, string>? Description { get; init; }
     public string? Pattern { get; init; }
     public int? Min { get; init; }
     public int? Max { get; init; }
@@ -232,7 +352,7 @@ internal sealed record SerializableParameterDefinition
             Default: JsonElementToObject(s.Default, s.Type),
             EnumValues: s.EnumValues,
             InstallTime: s.InstallTime,
-            Description: s.Description,
+            Description: s.Description is null ? null : new LocalizedText(s.Description),
             Pattern: s.Pattern,
             Min: s.Min,
             Max: s.Max);
@@ -248,7 +368,7 @@ internal sealed record SerializableParameterDefinition
             Default = ObjectToJsonElement(def.Default),
             EnumValues = ToArray(def.EnumValues),
             InstallTime = def.InstallTime,
-            Description = def.Description,
+            Description = def.Description is null ? null : new Dictionary<string, string>(def.Description.Values),
             Pattern = def.Pattern,
             Min = def.Min,
             Max = def.Max,
@@ -310,8 +430,8 @@ internal sealed record SerializableParameterDefinition
 internal sealed record SerializableInstallerScreen
 {
     public string Id { get; init; } = string.Empty;
-    public string Title { get; init; } = string.Empty;
-    public string? Subtitle { get; init; }
+    public Dictionary<string, string> Title { get; init; } = new();
+    public Dictionary<string, string>? Subtitle { get; init; }
     public string? When { get; init; }
     public SerializableScreenField[] Fields { get; init; } = Array.Empty<SerializableScreenField>();
 
@@ -326,8 +446,8 @@ internal sealed record SerializableInstallerScreen
 
         return new InstallerScreen(
             Id: s.Id,
-            Title: s.Title,
-            Subtitle: s.Subtitle,
+            Title: new LocalizedText(s.Title),
+            Subtitle: s.Subtitle is null ? null : new LocalizedText(s.Subtitle),
             When: s.When,
             Fields: fields);
     }
@@ -344,8 +464,8 @@ internal sealed record SerializableInstallerScreen
         return new SerializableInstallerScreen
         {
             Id = screen.Id,
-            Title = screen.Title,
-            Subtitle = screen.Subtitle,
+            Title = new Dictionary<string, string>(screen.Title.Values),
+            Subtitle = screen.Subtitle is null ? null : new Dictionary<string, string>(screen.Subtitle.Values),
             When = screen.When,
             Fields = fields,
         };
@@ -371,6 +491,76 @@ internal sealed record SerializableScreenField
     {
         ArgumentNullException.ThrowIfNull(field);
         return new SerializableScreenField { Param = field.Param, Widget = field.Widget };
+    }
+}
+
+/// <summary>
+/// Flat, AOT-friendly wire DTO for a single declarative variable (P1). Mirrors
+/// <see cref="InstallerVar"/> so the source-generated context can serialize it
+/// without reflection.
+/// </summary>
+internal sealed record SerializableVar
+{
+    public string Name { get; init; } = string.Empty;
+    public string Expression { get; init; } = string.Empty;
+
+    public static InstallerVar ToVar(SerializableVar s)
+    {
+        ArgumentNullException.ThrowIfNull(s);
+        return new InstallerVar(s.Name, s.Expression);
+    }
+
+    public static SerializableVar FromVar(InstallerVar v)
+    {
+        ArgumentNullException.ThrowIfNull(v);
+        return new SerializableVar { Name = v.Name, Expression = v.Expression };
+    }
+}
+
+/// <summary>
+/// Flat, AOT-friendly wire DTO for a single prerequisite unit (P5, gap G6). Mirrors
+/// <see cref="InstallerPrerequisite"/> so the source-generated context can serialize
+/// it without reflection.
+/// </summary>
+internal sealed record SerializablePrerequisite
+{
+    public string Name { get; init; } = string.Empty;
+    public string Detect { get; init; } = string.Empty;
+    public string Source { get; init; } = string.Empty;
+    public string? Sha256 { get; init; }
+    public string[]? Args { get; init; }
+    public int[]? ExitCodesOk { get; init; }
+    public string? ScopeRequired { get; init; }
+    public int? TimeoutSeconds { get; init; }
+
+    public static InstallerPrerequisite ToPrerequisite(SerializablePrerequisite s)
+    {
+        ArgumentNullException.ThrowIfNull(s);
+        return new InstallerPrerequisite(
+            Name: s.Name,
+            Detect: s.Detect,
+            Source: s.Source,
+            Sha256: s.Sha256,
+            Args: s.Args,
+            ExitCodesOk: s.ExitCodesOk,
+            ScopeRequired: s.ScopeRequired,
+            TimeoutSeconds: s.TimeoutSeconds);
+    }
+
+    public static SerializablePrerequisite FromPrerequisite(InstallerPrerequisite p)
+    {
+        ArgumentNullException.ThrowIfNull(p);
+        return new SerializablePrerequisite
+        {
+            Name = p.Name,
+            Detect = p.Detect,
+            Source = p.Source,
+            Sha256 = p.Sha256,
+            Args = p.Args is null ? null : System.Linq.Enumerable.ToArray(p.Args),
+            ExitCodesOk = p.ExitCodesOk is null ? null : System.Linq.Enumerable.ToArray(p.ExitCodesOk),
+            ScopeRequired = p.ScopeRequired,
+            TimeoutSeconds = p.TimeoutSeconds,
+        };
     }
 }
 

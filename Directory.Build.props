@@ -18,6 +18,25 @@
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 
+  <!-- Static graph restore is required so that ProjectReference metadata
+       (UndefineProperties/AdditionalProperties on the analyzer-only reference
+       to SigilBuild.Localization.Generator) is actually honored during
+       RESTORE, not just build. Legacy (non-graph) restore evaluates every
+       referenced project with the exact same global properties as the root
+       project, ignoring per-reference overrides, so a global property like
+       -p:PublishAot=true leaks into the netstandard2.0 generator project and
+       fails restore with NETSDK1207 before UndefineProperties ever applies.
+
+       The leak only happens when PublishAot is passed as a global property
+       (i.e. AOT-publish invocations, e.g. `-p:PublishAot=true`), so static-graph
+       restore is only needed on that path. Conditioning it here keeps ordinary
+       restores (plain `dotnet restore`, CI's non-AOT jobs, IDE restores) on
+       default restore semantics instead of changing evaluation for every
+       developer and CI restore unconditionally. -->
+  <PropertyGroup Condition="'$(PublishAot)' == 'true'">
+    <RestoreUseStaticGraphEvaluation>true</RestoreUseStaticGraphEvaluation>
+  </PropertyGroup>
+
   <!--
     AOT/trim regression guard: surface IL2xxx and AOT trim warnings on every
     Release build. Combined with TreatWarningsAsErrors=true above, any new

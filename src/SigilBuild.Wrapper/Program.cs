@@ -15,11 +15,26 @@ internal static class Program
             return 0;
         }
 
+        if (args.Length == 1 && (args[0] == "/?" || args[0].Equals("/help", StringComparison.OrdinalIgnoreCase)))
+        {
+            Console.WriteLine(HelpText.Render());
+            return 0;
+        }
+
         try
         {
             // The console shell is always headless; the Avalonia host shares the
             // same InstallSession for its /silent path and its GUI wizard.
             var session = InstallSession.Create(args);
+
+            // P9 (gap G10): resolve this session's chrome language now — installer.language
+            // (fixed) -> /lang -> the OS UI-language preference list -> en. MUST
+            // run before any output is produced, mirroring the host's ordering
+            // exactly so both entry points resolve identically. Any conflict note
+            // is flushed into the /LOG sink (if requested) the first time it
+            // opens — this console entry point has no separate diagnostic log to
+            // additionally write it to.
+            session.ResolveSessionLanguage();
 
             // T12 — self-elevation. A resolved per-machine scope from a
             // non-elevated process relaunches self with the `runas` verb,
@@ -30,6 +45,17 @@ internal static class Program
                 && session.Mode != WrapperMode.Update)
             {
                 return Elevation.RelaunchElevatedAndWait(args);
+            }
+
+            // P6 (gap G17): single-instance guard. Taken AFTER the elevation branch —
+            // the un-elevated parent above never installs, so it must not hold the
+            // mutex while the elevated child (which does) tries to take it.
+            using var instanceLock = SetupInstanceLock.TryAcquire(session.AppId, session.ResolvedScope);
+            if (instanceLock is null)
+            {
+                Console.Error.WriteLine(
+                    "another setup for this application is already running — close it and try again.");
+                return InstallSession.AlreadyRunningExitCode;
             }
 
             return await session.RunHeadlessAsync(Console.Out, Console.Error).ConfigureAwait(false);

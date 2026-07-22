@@ -20,6 +20,19 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\SigilBuild.Core\SigilBuild.Core.csproj" />
+    <!-- P9: the localization source generator (Tasks 1-3). Analyzer-only reference —
+         it contributes generated source at compile time and must not be shipped as a
+         runtime dependency. -->
+    <ProjectReference Include="..\SigilBuild.Localization.Generator\SigilBuild.Localization.Generator.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false"
+                      UndefineProperties="PublishAot;RuntimeIdentifier;SelfContained;PublishTrimmed;PublishReadyToRun;PublishSingleFile"
+                      AdditionalProperties="PublishAot=false" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Seed chrome-string catalogs. The generator only recognizes files matching
+         Strings.<tag>.txt (see StringsGenerator/CatalogParser). -->
+    <AdditionalFiles Include="Localization\Strings.*.txt" />
   </ItemGroup>
   <ItemGroup>
     <!-- T6: pure-managed zstd codec for the embedded payload container. No native
@@ -41,5 +54,6 @@
     <InternalsVisibleTo Include="SigilBuild.Packaging" />
     <InternalsVisibleTo Include="SigilBuild.Wrapper.Tests" />
     <InternalsVisibleTo Include="SigilBuild.Packaging.Tests" />
+    <InternalsVisibleTo Include="SigilBuild.Installer.Host.Tests" />
   </ItemGroup>
 </Project>

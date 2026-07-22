@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:SigilBuild.Installer.Host.ViewModels"
+             xmlns:loc="clr-namespace:SigilBuild.Wrapper.Core.Localization;assembly=SigilBuild.Wrapper.Core"
              x:DataType="vm:InstallerViewModel"
              x:Class="SigilBuild.Installer.Host.Views.Screens.OptionsView">
   <!-- Built-in configurable Options screen (T8): one checkbox per enabled
@@ -8,9 +9,9 @@
        checked states flow into option.* for the engine's step gating. -->
   <StackPanel Spacing="12">
     <TextBlock FontSize="20" FontWeight="SemiBold"
-               Foreground="{DynamicResource TextPriBrush}" Text="Options" />
+               Foreground="{DynamicResource TextPriBrush}" Text="{x:Static loc:S.OptionsTitle}" />
     <TextBlock Foreground="{DynamicResource TextMutBrush}" TextWrapping="Wrap"
-               Text="Choose what to set up during installation." />
+               Text="{x:Static loc:S.OptionsBody}" />
     <ItemsControl ItemsSource="{Binding OptionItems}">
       <ItemsControl.ItemTemplate>
         <DataTemplate x:DataType="vm:OptionItemViewModel">

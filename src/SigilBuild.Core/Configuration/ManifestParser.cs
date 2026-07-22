@@ -154,6 +154,7 @@ public static class ManifestParser
         string fileName)
     {
         if (node is null) return null;
+        var loc = new SourceLocation(fileName, (int)node.Start.Line, (int)node.Start.Column);
         var brand = GetMapping(node, "brand");
         var screens = ParseScreens(
             GetSequenceOfMappings(node, "screens"), app, parameters, diagnostics, fileName);
@@ -169,11 +170,18 @@ public static class ManifestParser
             // each ENABLED component into its gated install step(s).
             Options: ParseOptions(GetMapping(node, "options")),
             Screens: screens,
-            // T14: capture the license path string only. The actual file read +
-            // embed happens at PACK time (ExeWrapperPackager.BuildBlobBytes), which
-            // can resolve it against the pack source dir and emit a diagnostic if
-            // the file is missing/unreadable/empty.
-            License: GetScalar(node, "license"),
+            // T14 / P9 (gap G10): capture the license path(s) only, as a
+            // LocalizedText — a plain string or a `{en: ..., uk: ...}` map of
+            // per-language file paths, through the same ParseLocalizedText path
+            // as title/subtitle/description. The actual file read + embed
+            // happens at PACK time (ExeWrapperPackager.ReadLicenseText), which
+            // resolves each path against the pack source dir and emits SIG0250
+            // (non-fatal, per entry) / SIG0290 (fatal, on the post-read map) —
+            // see design §5.3. Retyping this from `string?` closes a silent-null
+            // window: previously GetScalar returned null with zero diagnostic for
+            // any manifest that declared `license:` as a map, and the License
+            // screen would vanish without a trace.
+            License: ParseLocalizedText(node, "license", loc, diagnostics),
             // T12: install scope (user | machine | auto, default auto). The schema
             // enum is the hard gate; here we map the string leniently and emit a
             // non-fatal diagnostic on an unrecognized value, falling back to auto.
@@ -187,7 +195,416 @@ public static class ManifestParser
                 : GetScalar(node, "install_dir"),
             // PR #8: optional custom installer-exe icon (.ico) path. Null falls
             // back to the bundled default installer icon at pack time.
-            Icon: GetScalar(node, "icon"));
+            Icon: GetScalar(node, "icon"),
+            // P1 (gap G1): declarative variables. Each is `name: <expression>`;
+            // evaluated once at install-session start, in dependency order,
+            // exposed as var.<name>. Cycles/malformed expressions are diagnosed
+            // here (SIG0270) so a broken manifest fails the pack.
+            Vars: ParseVars(GetMapping(node, "vars"), diagnostics, fileName),
+            // P2 (gap G2): lifecycle hooks that run OUTSIDE the rollback journal.
+            // Per-phase on_failure defaults: fail for pre_*, continue for post_*.
+            Hooks: ParseHooks(GetMapping(node, "hooks"), diagnostics, fileName),
+            // P2 (gap G4): the Done-screen "Launch <App>" target.
+            RunAfterInstall: ParseRunAfterInstall(GetMapping(node, "run_after_install")),
+            // P5 (gap G6): first-class prerequisite units (detect → install → re-detect),
+            // run before the journaled body. An https source without a sha256 is refused here.
+            Prerequisites: ParsePrerequisites(GetSequenceOfMappings(node, "prerequisites"), diagnostics, fileName),
+            // P6 (gap G7): named mutexes the running app holds; setup probes them
+            // before touching the install dir (Inno AppMutex equivalent).
+            AppMutex: GetSequence(node, "app_mutex"),
+            // P9 (gap G10): optional fixed installer language. Stored verbatim
+            // (schema is permissive); an invalid tag is diagnosed (SIG0291) but
+            // otherwise doesn't block the parse — the resolver chain simply
+            // won't match a value that fails LanguageTag.IsValid.
+            Language: ParseInstallerLanguage(node, diagnostics, fileName));
+    }
+
+    /// <summary>
+    /// Parse the manifest's <c>installer.language</c> scalar (P9, gap G10): the
+    /// first link in the language-preference chain (installer.language -&gt; /lang
+    /// -&gt; OS list -&gt; en). Emits <see cref="DiagnosticCodes.InvalidLanguageTag"/>
+    /// (SIG0291, Error) when present but not a valid BCP-47-subset tag per
+    /// <see cref="LanguageTag.IsValid"/> — the same rule the <c>/lang</c> flag uses.
+    /// </summary>
+    private static string? ParseInstallerLanguage(
+        YamlMappingNode node, List<Diagnostic> diagnostics, string fileName)
+    {
+        var raw = GetScalar(node, "language");
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        if (!LanguageTag.IsValid(raw))
+        {
+            diagnostics.Add(new Diagnostic(
+                DiagnosticSeverity.Error,
+                DiagnosticCodes.InvalidLanguageTag,
+                $"installer.language '{raw}' is not a valid language tag",
+                new SourceLocation(fileName, (int)node.Start.Line, (int)node.Start.Column),
+                "https://docs.sigil.build/diagnostics/SIG0291"));
+        }
+
+        return raw;
+    }
+
+    /// <summary>
+    /// Parse a manifest field that may be authored either as a plain string or as
+    /// a <c>{ en: ..., uk: ... }</c> map (P9, gap G10 — <see cref="LocalizedText"/>).
+    /// A plain string normalizes to <c>{"en": value}</c>. A map is carried
+    /// verbatim; each key is validated as a language tag
+    /// (<see cref="DiagnosticCodes.InvalidLanguageTag"/>, SIG0291) and the whole
+    /// map must contain an <c>en</c> entry
+    /// (<see cref="DiagnosticCodes.LocalizedTextMissingEnglish"/>, SIG0290 —
+    /// fatal, since every runtime fallback bottoms out at English). A per-language
+    /// value that isn't a plain scalar (e.g. a nested sequence) is diagnosed
+    /// (<see cref="DiagnosticCodes.LocalizedTextValueNotScalar"/>, SIG0292) rather
+    /// than silently collapsing to <c>""</c>. Returns <c>null</c> when the key is
+    /// absent.
+    /// </summary>
+    private static LocalizedText? ParseLocalizedText(
+        YamlMappingNode parent, string key, SourceLocation loc, List<Diagnostic> diagnostics)
+    {
+        if (!parent.Children.TryGetValue(new YamlScalarNode(key), out var node))
+        {
+            return null;
+        }
+
+        if (node is YamlScalarNode scalar)
+        {
+            return LocalizedText.Plain(scalar.Value ?? string.Empty);
+        }
+
+        if (node is not YamlMappingNode map)
+        {
+            return null;
+        }
+
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in map.Children)
+        {
+            if (kvp.Key is not YamlScalarNode tagNode || tagNode.Value is null)
+            {
+                continue;
+            }
+
+            var tag = tagNode.Value;
+            if (kvp.Value is YamlScalarNode textNode)
+            {
+                values[tag] = textNode.Value ?? string.Empty;
+            }
+            else
+            {
+                // Silent-drop guard: a non-scalar value (e.g. a nested sequence
+                // or mapping under a language key) used to collapse to "" here
+                // with zero diagnostic — the same silent-blank-rendering shape
+                // SIG0290 exists to prevent, just one language key at a time.
+                values[tag] = string.Empty;
+                diagnostics.Add(new Diagnostic(
+                    DiagnosticSeverity.Error,
+                    DiagnosticCodes.LocalizedTextValueNotScalar,
+                    $"'{key}.{tag}' must be a plain string; found a non-scalar value instead",
+                    loc,
+                    "https://docs.sigil.build/diagnostics/SIG0292"));
+            }
+
+            if (!LanguageTag.IsValid(tag))
+            {
+                diagnostics.Add(new Diagnostic(
+                    DiagnosticSeverity.Error,
+                    DiagnosticCodes.InvalidLanguageTag,
+                    $"'{key}' has an invalid language tag '{tag}'",
+                    loc,
+                    "https://docs.sigil.build/diagnostics/SIG0291"));
+            }
+        }
+
+        var localizedText = new LocalizedText(values);
+        if (!localizedText.HasEnglish)
+        {
+            diagnostics.Add(new Diagnostic(
+                DiagnosticSeverity.Error,
+                DiagnosticCodes.LocalizedTextMissingEnglish,
+                $"'{key}' is missing an 'en' entry — every runtime fallback bottoms out at English",
+                loc,
+                "https://docs.sigil.build/diagnostics/SIG0290"));
+        }
+
+        return localizedText;
+    }
+
+    /// <summary>
+    /// Parse the <c>installer.prerequisites</c> block (P5, gap G6). Each entry needs a
+    /// <c>name</c>, a <c>detect</c> expression, and a <c>source</c> (<c>payload://</c> or
+    /// <c>https://</c>); an <c>https://</c> source additionally requires a <c>sha256</c>
+    /// integrity checksum (a download without one is refused — SIG0280). Optional
+    /// <c>args</c>, <c>exit_codes_ok</c> (default <c>[0]</c>), <c>scope_required</c>
+    /// (<c>allusers</c>|<c>currentuser</c>), and <c>timeout_seconds</c>. A malformed entry
+    /// is diagnosed and skipped; returns <c>null</c> when nothing usable is declared.
+    /// </summary>
+    private static List<InstallerPrerequisite>? ParsePrerequisites(
+        List<YamlMappingNode>? nodes, List<Diagnostic> diagnostics, string fileName)
+    {
+        if (nodes is null || nodes.Count == 0) return null;
+
+        var list = new List<InstallerPrerequisite>(nodes.Count);
+        foreach (var node in nodes)
+        {
+            var loc = new SourceLocation(fileName, (int)node.Start.Line, (int)node.Start.Column);
+            var name = GetScalar(node, "name");
+            var detect = GetScalar(node, "detect");
+            var source = GetScalar(node, "source");
+            var sha256 = GetScalar(node, "sha256");
+
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                AddPrereqError(diagnostics, loc, "installer.prerequisites entry is missing a 'name'");
+                continue;
+            }
+            if (string.IsNullOrWhiteSpace(detect))
+            {
+                AddPrereqError(diagnostics, loc, $"installer.prerequisites '{name}' is missing a 'detect' expression");
+                continue;
+            }
+            // Structural check on the detect expression (balanced parens/brackets,
+            // terminated string literals) — the same gross-malformation gate as
+            // installer.vars. The full grammar is checked by the engine at install time.
+            if (!TryValidateVarStructure(detect, out var detectReason))
+            {
+                AddPrereqError(diagnostics, loc, $"installer.prerequisites '{name}' detect expression is invalid ({detectReason}): '{detect}'");
+                continue;
+            }
+            if (string.IsNullOrWhiteSpace(source))
+            {
+                AddPrereqError(diagnostics, loc, $"installer.prerequisites '{name}' is missing a 'source' (payload:// or https://)");
+                continue;
+            }
+
+            var isHttps = source.StartsWith("https://", System.StringComparison.OrdinalIgnoreCase);
+            var isPayload = source.StartsWith("payload://", System.StringComparison.OrdinalIgnoreCase);
+            if (source.StartsWith("http://", System.StringComparison.OrdinalIgnoreCase))
+            {
+                AddPrereqError(diagnostics, loc, $"installer.prerequisites '{name}' source must be https:// (got '{source}')");
+                continue;
+            }
+            if (!isHttps && !isPayload)
+            {
+                AddPrereqError(diagnostics, loc, $"installer.prerequisites '{name}' source must be a payload:// or https:// URL (got '{source}')");
+                continue;
+            }
+            // sha256 REQUIRED for https (a download without an integrity check is refused);
+            // ignored for payload:// where integrity comes from the signed package.
+            if (isHttps && string.IsNullOrWhiteSpace(sha256))
+            {
+                AddPrereqError(diagnostics, loc, $"installer.prerequisites '{name}' has an https:// source and must declare a 'sha256' — a download without an integrity checksum is refused");
+                continue;
+            }
+
+            string? scopeRequired = null;
+            var rawScope = GetScalar(node, "scope_required");
+            if (!string.IsNullOrWhiteSpace(rawScope))
+            {
+                var norm = rawScope.Trim().ToLowerInvariant();
+                if (norm is "allusers" or "currentuser")
+                {
+                    scopeRequired = norm;
+                }
+                else
+                {
+                    AddPrereqError(diagnostics, loc, $"installer.prerequisites '{name}' scope_required must be 'allusers' or 'currentuser' (got '{rawScope}')");
+                    continue;
+                }
+            }
+
+            list.Add(new InstallerPrerequisite(
+                Name: name,
+                Detect: detect,
+                Source: source,
+                Sha256: string.IsNullOrWhiteSpace(sha256) ? null : sha256,
+                Args: GetSequence(node, "args"),
+                ExitCodesOk: GetIntSequence(node, "exit_codes_ok"),
+                ScopeRequired: scopeRequired,
+                TimeoutSeconds: GetNullableInt(node, "timeout_seconds")));
+        }
+
+        return list.Count == 0 ? null : list;
+    }
+
+    private static void AddPrereqError(List<Diagnostic> diagnostics, SourceLocation loc, string message)
+        => diagnostics.Add(new Diagnostic(
+            DiagnosticSeverity.Error,
+            DiagnosticCodes.InvalidPrerequisite,
+            message,
+            loc,
+            "https://docs.sigil.build/diagnostics/SIG0280"));
+
+    /// <summary>
+    /// Parse the <c>installer.hooks</c> block (P2). Each phase reuses the ordinary
+    /// step parser but with a phase-specific default <c>on_failure</c>: <c>fail</c>
+    /// for the pre_* phases (a failed pre-hook aborts before the journal opens /
+    /// before the uninstall replays) and <c>continue</c> for the post_* phases (the
+    /// install is committed and cannot be rolled back). Returns <c>null</c> when the
+    /// block declares no phase.
+    /// </summary>
+    private static InstallerHooks? ParseHooks(
+        YamlMappingNode? node, List<Diagnostic> diagnostics, string fileName)
+    {
+        if (node is null) return null;
+
+        var pre   = ParseInstallSteps(GetSequenceOfMappings(node, "pre_install"),   diagnostics, fileName, OnFailure.Fail);
+        var post  = ParseInstallSteps(GetSequenceOfMappings(node, "post_install"),  diagnostics, fileName, OnFailure.Continue);
+        var preU  = ParseInstallSteps(GetSequenceOfMappings(node, "pre_uninstall"), diagnostics, fileName, OnFailure.Fail);
+        var postU = ParseInstallSteps(GetSequenceOfMappings(node, "post_uninstall"),diagnostics, fileName, OnFailure.Continue);
+
+        if (pre is null && post is null && preU is null && postU is null)
+        {
+            return null;
+        }
+        return new InstallerHooks(pre, post, preU, postU);
+    }
+
+    /// <summary>
+    /// Parse the <c>installer.run_after_install</c> block (P2): a required
+    /// <c>path</c> and optional <c>args</c>. Returns <c>null</c> when absent or the
+    /// path is blank (the Done screen then shows no launch checkbox).
+    /// </summary>
+    private static RunAfterInstall? ParseRunAfterInstall(YamlMappingNode? node)
+    {
+        if (node is null) return null;
+        var path = GetScalar(node, "path");
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+        return new RunAfterInstall(path, GetSequence(node, "args"));
+    }
+
+    /// <summary>
+    /// Parse the manifest's <c>installer.vars</c> block (P1). Each entry is
+    /// <c>name: &lt;expression&gt;</c>. Emits <see cref="DiagnosticCodes.InvalidInstallerVar"/>
+    /// (SIG0270, Error) for a non-scalar/empty value, a grossly malformed
+    /// expression, or a reference cycle among the vars. Declaration order is
+    /// preserved (deterministic packaging); dependency order is resolved later by
+    /// <see cref="InstallerVarGraph"/>. Returns <c>null</c> when the block is
+    /// absent or declares nothing usable.
+    /// </summary>
+    private static List<InstallerVar>? ParseVars(
+        YamlMappingNode? node, List<Diagnostic> diagnostics, string fileName)
+    {
+        if (node is null) return null;
+
+        var list = new List<InstallerVar>(node.Children.Count);
+        foreach (var kvp in node.Children)
+        {
+            if (kvp.Key is not YamlScalarNode keyNode) continue;
+            var name = keyNode.Value ?? string.Empty;
+            var loc = new SourceLocation(fileName, (int)keyNode.Start.Line, (int)keyNode.Start.Column);
+
+            if (string.IsNullOrWhiteSpace(name)) continue;
+
+            if (kvp.Value is not YamlScalarNode exprNode || string.IsNullOrWhiteSpace(exprNode.Value))
+            {
+                diagnostics.Add(new Diagnostic(
+                    DiagnosticSeverity.Error,
+                    DiagnosticCodes.InvalidInstallerVar,
+                    $"installer.vars '{name}' must be a non-empty expression string",
+                    loc,
+                    "https://docs.sigil.build/diagnostics/SIG0270"));
+                continue;
+            }
+
+            var expr = exprNode.Value;
+            if (!TryValidateVarStructure(expr, out var reason))
+            {
+                diagnostics.Add(new Diagnostic(
+                    DiagnosticSeverity.Error,
+                    DiagnosticCodes.InvalidInstallerVar,
+                    $"installer.vars '{name}' expression is invalid ({reason}): '{expr}'",
+                    loc,
+                    "https://docs.sigil.build/diagnostics/SIG0270"));
+                continue;
+            }
+
+            list.Add(new InstallerVar(name, expr));
+        }
+
+        if (list.Count == 0) return null;
+
+        // Structural cycle check (name-based). A cycle has no safe evaluation
+        // order, so it is fatal — the pack fails rather than emitting a blob that
+        // would loop at install time.
+        try
+        {
+            InstallerVarGraph.TopologicalOrder(list);
+        }
+        catch (InstallerVarCycleException ex)
+        {
+            diagnostics.Add(new Diagnostic(
+                DiagnosticSeverity.Error,
+                DiagnosticCodes.InvalidInstallerVar,
+                $"installer.vars form a reference cycle: {string.Join(" -> ", ex.Cycle)}",
+                new SourceLocation(fileName, (int)node.Start.Line, (int)node.Start.Column),
+                "https://docs.sigil.build/diagnostics/SIG0270"));
+        }
+
+        return list;
+    }
+
+    /// <summary>
+    /// Gross-malformation check for a <c>installer.vars</c> expression: balanced
+    /// parentheses/brackets, terminated string literals (single OR double quoted,
+    /// matching the lexer), and non-empty. Unlike the screen <c>when</c> validator
+    /// this does NOT restrict the character set outside strings — registry/file
+    /// paths carry backslashes, colons, and spaces inside string literals, and the
+    /// full grammar is checked at install time by the Wrapper.Core engine.
+    /// </summary>
+    private static bool TryValidateVarStructure(string expr, out string? reason)
+    {
+        var depthParen = 0;
+        var depthBracket = 0;
+        var sawContent = false;
+        var i = 0;
+        var n = expr.Length;
+        while (i < n)
+        {
+            var c = expr[i];
+            if (c is '\'' or '"')
+            {
+                sawContent = true;
+                var quote = c;
+                i++;
+                while (i < n && expr[i] != quote) i++;
+                if (i >= n) { reason = "unterminated string literal"; return false; }
+                i++; // consume closing quote
+                continue;
+            }
+
+            switch (c)
+            {
+                case '(': depthParen++; break;
+                case ')':
+                    depthParen--;
+                    if (depthParen < 0) { reason = "unbalanced parentheses"; return false; }
+                    break;
+                case '[': depthBracket++; break;
+                case ']':
+                    depthBracket--;
+                    if (depthBracket < 0) { reason = "unbalanced brackets"; return false; }
+                    break;
+                default:
+                    if (!char.IsWhiteSpace(c)) sawContent = true;
+                    break;
+            }
+
+            i++;
+        }
+
+        if (depthParen != 0) { reason = "unbalanced parentheses"; return false; }
+        if (depthBracket != 0) { reason = "unbalanced brackets"; return false; }
+        if (!sawContent) { reason = "empty expression"; return false; }
+
+        reason = null;
+        return true;
     }
 
     /// <summary>
@@ -322,14 +739,20 @@ public static class ManifestParser
         {
             var loc = new SourceLocation(fileName, (int)node.Start.Line, (int)node.Start.Column);
             var id = GetScalar(node, "id") ?? string.Empty;
-            var title = GetScalar(node, "title") ?? string.Empty;
-            var subtitle = GetScalar(node, "subtitle");
+            var title = ParseLocalizedText(node, "title", loc, diagnostics) ?? LocalizedText.Plain(string.Empty);
+            var subtitle = ParseLocalizedText(node, "subtitle", loc, diagnostics);
             var when = GetScalar(node, "when");
 
-            ValidateInterpolationTokens(title, loc, diagnostics);
+            foreach (var value in title.Values.Values)
+            {
+                ValidateInterpolationTokens(value, loc, diagnostics);
+            }
             if (subtitle is not null)
             {
-                ValidateInterpolationTokens(subtitle, loc, diagnostics);
+                foreach (var value in subtitle.Values.Values)
+                {
+                    ValidateInterpolationTokens(value, loc, diagnostics);
+                }
             }
 
             if (!string.IsNullOrWhiteSpace(when))
@@ -525,7 +948,8 @@ public static class ManifestParser
 
             var values = GetSequence(value, "values");
             var installTime = GetBool(value, "install_time", defaultValue: false);
-            var description = GetScalar(value, "description");
+            var descriptionLoc = new SourceLocation(fileName, (int)keyNode.Start.Line, (int)keyNode.Start.Column);
+            var description = ParseLocalizedText(value, "description", descriptionLoc, diagnostics);
             var pattern = GetScalar(value, "pattern");
             var min = GetNullableInt(value, "min");
             var max = GetNullableInt(value, "max");
@@ -584,22 +1008,28 @@ public static class ManifestParser
     private static readonly string[] ShortcutCreateFields      = { "id", "type", "when", "on_failure", "target", "location", "name", "args", "working_dir", "icon", "description" };
     private static readonly string[] EnvSetFields              = { "id", "type", "when", "on_failure", "name", "value", "scope", "action", "separator" };
     private static readonly string[] RunProgramFields          = { "id", "type", "when", "on_failure", "program", "args", "wait", "cwd", "expected_exit_codes", "timeout_seconds" };
+    private static readonly string[] HttpDownloadFields        = { "id", "type", "when", "on_failure", "url", "dest", "sha256", "timeout_seconds", "retries" };
+    private static readonly string[] IniWriteFields            = { "id", "type", "when", "on_failure", "path", "section", "key", "value", "create_if_missing" };
+    private static readonly string[] JsonEditFields           = { "id", "type", "when", "on_failure", "path", "pointer", "value", "create_if_missing" };
+    private static readonly string[] XmlEditFields            = { "id", "type", "when", "on_failure", "path", "xpath", "attribute", "value", "create_if_missing" };
 
     private static List<InstallStep>? ParseInstallSteps(
-        List<YamlMappingNode>? nodes, List<Diagnostic> diagnostics, string fileName)
+        List<YamlMappingNode>? nodes, List<Diagnostic> diagnostics, string fileName,
+        OnFailure defaultOnFailure = OnFailure.Fail)
     {
         if (nodes is null) return null;
         var list = new List<InstallStep>(nodes.Count);
         foreach (var node in nodes)
         {
-            var step = ParseInstallStep(node, diagnostics, fileName);
+            var step = ParseInstallStep(node, diagnostics, fileName, defaultOnFailure);
             if (step is not null) list.Add(step);
         }
         return list;
     }
 
     private static InstallStep? ParseInstallStep(
-        YamlMappingNode node, List<Diagnostic> diagnostics, string fileName)
+        YamlMappingNode node, List<Diagnostic> diagnostics, string fileName,
+        OnFailure defaultOnFailure = OnFailure.Fail)
     {
         var loc = new SourceLocation(fileName, (int)node.Start.Line, (int)node.Start.Column);
         var id = GetScalar(node, "id");
@@ -628,7 +1058,11 @@ public static class ManifestParser
         }
 
         var when = GetScalar(node, "when");
-        var onFailure = ParseOnFailure(GetScalar(node, "on_failure"));
+        // An absent on_failure uses the caller's phase default (Fail for the
+        // journaled bodies; per-phase for P2 lifecycle hooks). An explicit value
+        // is always honored.
+        var onFailureRaw = GetScalar(node, "on_failure");
+        var onFailure = onFailureRaw is null ? defaultOnFailure : ParseOnFailure(onFailureRaw);
 
         return typeStr switch
         {
@@ -642,6 +1076,10 @@ public static class ManifestParser
             "shortcut_create"       => BuildShortcutCreate(node, id!, when, onFailure, diagnostics, loc),
             "env_set"               => BuildEnvSet(node, id!, when, onFailure, diagnostics, loc),
             "run_program"           => BuildRunProgram(node, id!, when, onFailure, diagnostics, loc),
+            "http_download"         => BuildHttpDownload(node, id!, when, onFailure, diagnostics, loc),
+            "ini_write"             => BuildIniWrite(node, id!, when, onFailure, diagnostics, loc),
+            "json_edit"             => BuildJsonEdit(node, id!, when, onFailure, diagnostics, loc),
+            "xml_edit"              => BuildXmlEdit(node, id!, when, onFailure, diagnostics, loc),
             "service_install"       => BuildServiceInstall(node, id!, when, onFailure, diagnostics, loc),
             _ => ReportUnknownStepType(id!, typeStr!, loc, diagnostics),
         };
@@ -835,6 +1273,91 @@ public static class ManifestParser
         var timeoutSeconds = GetNullableInt(node, "timeout_seconds");
         ReportUnknownStepFields(node, id, "run_program", RunProgramFields, loc, diagnostics);
         return new InstallStep.RunProgram(id, program, args, wait, cwd, expectedExitCodes, timeoutSeconds, when, onFailure);
+    }
+
+    private static InstallStep.HttpDownload? BuildHttpDownload(
+        YamlMappingNode node, string id, string? when, OnFailure onFailure,
+        List<Diagnostic> diagnostics, SourceLocation loc)
+    {
+        var url = GetScalar(node, "url");
+        var dest = GetScalar(node, "dest");
+        var sha256 = GetScalar(node, "sha256");
+        if (url  is null) { ReportMissingField(id, "http_download", "url",  loc, diagnostics); return null; }
+        if (dest is null) { ReportMissingField(id, "http_download", "dest", loc, diagnostics); return null; }
+
+        // sha256 is REQUIRED — refuse to pack a download without an integrity check.
+        if (string.IsNullOrWhiteSpace(sha256))
+        {
+            diagnostics.Add(new Diagnostic(
+                DiagnosticSeverity.Error,
+                DiagnosticCodes.HttpDownloadChecksumRequired,
+                $"http_download step '{id}' must declare a 'sha256' — a download without an integrity checksum is refused",
+                loc,
+                "https://docs.sigil.build/diagnostics/SIG0236"));
+            return null;
+        }
+
+        // HTTPS only. A literal http:// URL is rejected at pack time; a URL built
+        // from {var.*}/{install_dir} tokens is additionally re-checked at run time.
+        if (url.StartsWith("http://", System.StringComparison.OrdinalIgnoreCase))
+        {
+            diagnostics.Add(new Diagnostic(
+                DiagnosticSeverity.Error,
+                DiagnosticCodes.HttpDownloadInsecureUrl,
+                $"http_download step '{id}' url must be https:// (got '{url}')",
+                loc,
+                "https://docs.sigil.build/diagnostics/SIG0235"));
+            return null;
+        }
+
+        var timeoutSeconds = GetNullableInt(node, "timeout_seconds");
+        var retries = GetNullableInt(node, "retries");
+        ReportUnknownStepFields(node, id, "http_download", HttpDownloadFields, loc, diagnostics);
+        return new InstallStep.HttpDownload(id, url, dest, sha256, timeoutSeconds, retries, when, onFailure);
+    }
+
+    private static InstallStep.IniWrite? BuildIniWrite(
+        YamlMappingNode node, string id, string? when, OnFailure onFailure,
+        List<Diagnostic> diagnostics, SourceLocation loc)
+    {
+        var path = GetScalar(node, "path");
+        var key = GetScalar(node, "key");
+        if (path is null) { ReportMissingField(id, "ini_write", "path", loc, diagnostics); return null; }
+        if (key  is null) { ReportMissingField(id, "ini_write", "key",  loc, diagnostics); return null; }
+        var section = GetScalar(node, "section") ?? string.Empty;
+        var value = GetScalar(node, "value") ?? string.Empty;
+        var createIfMissing = GetBool(node, "create_if_missing", defaultValue: false);
+        ReportUnknownStepFields(node, id, "ini_write", IniWriteFields, loc, diagnostics);
+        return new InstallStep.IniWrite(id, path, section, key, value, createIfMissing, when, onFailure);
+    }
+
+    private static InstallStep.JsonEdit? BuildJsonEdit(
+        YamlMappingNode node, string id, string? when, OnFailure onFailure,
+        List<Diagnostic> diagnostics, SourceLocation loc)
+    {
+        var path = GetScalar(node, "path");
+        var pointer = GetScalar(node, "pointer");
+        if (path    is null) { ReportMissingField(id, "json_edit", "path",    loc, diagnostics); return null; }
+        if (pointer is null) { ReportMissingField(id, "json_edit", "pointer", loc, diagnostics); return null; }
+        var value = GetScalar(node, "value") ?? string.Empty;
+        var createIfMissing = GetBool(node, "create_if_missing", defaultValue: false);
+        ReportUnknownStepFields(node, id, "json_edit", JsonEditFields, loc, diagnostics);
+        return new InstallStep.JsonEdit(id, path, pointer, value, createIfMissing, when, onFailure);
+    }
+
+    private static InstallStep.XmlEdit? BuildXmlEdit(
+        YamlMappingNode node, string id, string? when, OnFailure onFailure,
+        List<Diagnostic> diagnostics, SourceLocation loc)
+    {
+        var path = GetScalar(node, "path");
+        var xpath = GetScalar(node, "xpath");
+        if (path  is null) { ReportMissingField(id, "xml_edit", "path",  loc, diagnostics); return null; }
+        if (xpath is null) { ReportMissingField(id, "xml_edit", "xpath", loc, diagnostics); return null; }
+        var attribute = GetScalar(node, "attribute");
+        var value = GetScalar(node, "value") ?? string.Empty;
+        var createIfMissing = GetBool(node, "create_if_missing", defaultValue: false);
+        ReportUnknownStepFields(node, id, "xml_edit", XmlEditFields, loc, diagnostics);
+        return new InstallStep.XmlEdit(id, path, xpath, attribute, value, createIfMissing, when, onFailure);
     }
 
     private static void ReportMissingField(

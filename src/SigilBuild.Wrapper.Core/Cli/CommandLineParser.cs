@@ -92,8 +92,53 @@ public sealed class ParsedCommandLine
     /// <summary>Scope override from <c>/allusers</c> / <c>/currentuser</c>. Stored only (Task T12).</summary>
     public ScopeOverride Scope { get; init; } = ScopeOverride.None;
 
+    /// <summary>
+    /// True when <c>/force-downgrade</c> was supplied (P3): install an older version
+    /// over an installed newer one instead of blocking. Ignored for fresh / same /
+    /// upgrade runs.
+    /// </summary>
+    public bool ForceDowngrade { get; init; }
+
     /// <summary>Names (canonical casing) of the parameters whose schema type is <see cref="ParameterType.Secret"/>.</summary>
     public IReadOnlyList<string> SecretKeys { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// True when <c>/LOG</c> or <c>/LOG=path</c> was supplied — the run writes a
+    /// timestamped install log (P7). Applies to install, uninstall, and update
+    /// modes alike (the ARP <c>UninstallString</c> can carry <c>/LOG</c> too).
+    /// </summary>
+    public bool LogRequested { get; init; }
+
+    /// <summary>
+    /// Explicit log path from <c>/LOG=path</c>. <c>null</c> for bare <c>/LOG</c>
+    /// (the session then defaults to <c>%TEMP%\sigil-&lt;appid&gt;.log</c>) or when
+    /// logging was not requested.
+    /// </summary>
+    public string? LogPath { get; init; }
+
+    /// <summary>
+    /// True when <c>/launch</c> was supplied (P2, gap G4). A headless
+    /// (<c>/silent</c>) install starts the <c>run_after_install</c> target only when
+    /// this is set; the interactive wizard uses the Done-screen checkbox instead.
+    /// </summary>
+    public bool Launch { get; init; }
+
+    /// <summary>
+    /// True when <c>/closeapps</c> was supplied (P6, gap G7). A headless run whose
+    /// install directory is held open by running applications closes them via the
+    /// Restart Manager instead of refusing; without it the run exits with
+    /// <c>InstallSession.FilesInUseExitCode</c>. The wizard uses the "Close
+    /// applications" screen instead.
+    /// </summary>
+    public bool CloseApps { get; init; }
+
+    /// <summary>
+    /// Requested wizard language from /lang=&lt;tag&gt;. A fixed installer.language
+    /// overrides this (design §2.1) — language is a display preference, so a
+    /// conflict is logged and ignored rather than being a usage error like
+    /// T12's fixed-scope vs /allusers.
+    /// </summary>
+    public string? Lang { get; init; }
 
     /// <summary>
     /// Re-renders the parsed args as a single space-joined string, with secret
@@ -152,11 +197,46 @@ public sealed class ParsedCommandLine
                 break;
         }
 
+        if (ForceDowngrade)
+        {
+            Space();
+            sb.Append("/force-downgrade");
+        }
+
         if (InstallDir is not null)
         {
             Space();
             sb.Append("/D=");
             sb.Append(InstallDir);
+        }
+
+        if (LogRequested)
+        {
+            Space();
+            sb.Append("/LOG");
+            if (LogPath is not null)
+            {
+                sb.Append('=');
+                sb.Append(LogPath);
+            }
+        }
+
+        if (Launch)
+        {
+            Space();
+            sb.Append("/launch");
+        }
+
+        if (CloseApps)
+        {
+            Space();
+            sb.Append("/closeapps");
+        }
+
+        if (Lang is not null)
+        {
+            Space();
+            sb.Append("/lang=").Append(Lang);
         }
 
         foreach (var kv in Values)
@@ -194,7 +274,19 @@ public sealed class ParsedCommandLine
 ///   <item><description><c>/Update</c> — run <c>update_steps</c> instead of <c>install_steps</c>.</description></item>
 ///   <item><description><c>/Uninstall</c> — run the auto-derived uninstall sequence.</description></item>
 ///   <item><description><c>/allusers</c> / <c>/currentuser</c> — scope override (stored only; Task T12).</description></item>
+///   <item><description><c>/force-downgrade</c> — install an older version over an installed newer one (P3).</description></item>
 ///   <item><description><c>/D=path</c> — install-dir override (stored only; Task T13).</description></item>
+///   <item><description><c>/LOG</c> — write a timestamped install log to
+///   <c>%TEMP%\sigil-&lt;appid&gt;.log</c>; <c>/LOG=path</c> — write it to <c>path</c> (P7).</description></item>
+///   <item><description><c>/closeapps</c> — when the install directory is held open
+///   by running applications, close them via the Restart Manager instead of refusing
+///   the silent run (P6).</description></item>
+///   <item><description><c>/launch</c> — after a silent install, start the
+///   <c>run_after_install</c> target unelevated (P2). Ignored without <c>/silent</c>
+///   (the wizard uses the Done-screen checkbox).</description></item>
+///   <item><description><c>/lang=tag</c> — request wizard language (P10). <c>tag</c> is a
+///   language tag like <c>en</c>, <c>uk</c>, or <c>pt-BR</c>.</description></item>
+///   <item><description><c>/?</c> (alias <c>/help</c>) — show help text.</description></item>
 ///   <item><description><c>/P&lt;Name&gt;=&lt;Value&gt;</c> — override a declared parameter or a built-in option.</description></item>
 /// </list>
 /// Anything else is a <see cref="UsageException"/> — the parser is intentionally
@@ -246,7 +338,13 @@ public static class CommandLineParser
         var silent = false;
         var verySilent = false;
         var scope = ScopeOverride.None;
+        var forceDowngrade = false;
         string? installDir = null;
+        var logRequested = false;
+        string? logPath = null;
+        var launch = false;
+        var closeApps = false;
+        string? lang = null;
 
         foreach (var rawArg in args)
         {
@@ -258,7 +356,7 @@ public static class CommandLineParser
             if (rawArg[0] != '/')
             {
                 throw new UsageException(
-                    $"unexpected positional argument '{rawArg}': only /silent, /S, /verysilent, /Update, /Uninstall, /allusers, /currentuser, /D=path, and /PName=Value are accepted");
+                    $"unexpected positional argument '{rawArg}': only /silent, /S, /verysilent, /Update, /Uninstall, /allusers, /currentuser, /force-downgrade, /closeapps, /D=path, /LOG[=path], /lang=tag, /launch, and /PName=Value are accepted");
             }
 
             // Strip the leading '/'.
@@ -297,6 +395,21 @@ public static class CommandLineParser
                 scope = ScopeOverride.CurrentUser;
                 continue;
             }
+            if (string.Equals(body, "launch", StringComparison.OrdinalIgnoreCase))
+            {
+                launch = true;
+                continue;
+            }
+            if (string.Equals(body, "closeapps", StringComparison.OrdinalIgnoreCase))
+            {
+                closeApps = true;
+                continue;
+            }
+            if (string.Equals(body, "force-downgrade", StringComparison.OrdinalIgnoreCase))
+            {
+                forceDowngrade = true;
+                continue;
+            }
 
             // /D=path — install-dir override (parse + store only).
             if (body.Length >= 2 &&
@@ -312,6 +425,60 @@ public static class CommandLineParser
                 continue;
             }
 
+            // /LOG or /LOG=path — install log (P7). Bare /LOG defaults the path to
+            // %TEMP%\sigil-<appid>.log (resolved by the session, which knows the AppId).
+            if (body.Length >= 3 &&
+                (body[0] == 'L' || body[0] == 'l') &&
+                (body[1] == 'O' || body[1] == 'o') &&
+                (body[2] == 'G' || body[2] == 'g'))
+            {
+                if (body.Length == 3)
+                {
+                    logRequested = true;
+                    continue;
+                }
+                if (body[3] == '=')
+                {
+                    var p = body.Substring(4);
+                    if (p.Length == 0)
+                    {
+                        throw new UsageException($"'/LOG=' requires a path (offending token: '{rawArg}')");
+                    }
+                    logRequested = true;
+                    logPath = p;
+                    continue;
+                }
+                // Anything else (e.g. /LOGGING) is not /LOG — fall through to the
+                // unknown-flag error so the closed grammar stays closed.
+            }
+
+            // /lang=<tag> — prefix form, like /D=. No collision: /launch is matched by
+            // string.Equals above, and the /LOG branch tests body[1] == 'O'/'o'.
+            if (body.Length >= 5
+                && body[4] == '='
+                && (body[0] is 'l' or 'L')
+                && (body[1] is 'a' or 'A')
+                && (body[2] is 'n' or 'N')
+                && (body[3] is 'g' or 'G'))
+            {
+                var tag = body.Substring(5);
+                if (tag.Length == 0)
+                {
+                    throw new UsageException(
+                        $"'/lang=' requires a language tag (offending token: '{rawArg}')");
+                }
+
+                if (!LanguageTag.IsValid(tag))
+                {
+                    throw new UsageException(
+                        $"'{tag}' is not a valid language tag (offending token: '{rawArg}'). " +
+                        "Expected a tag like en, uk, or pt-BR.");
+                }
+
+                lang = tag;
+                continue;
+            }
+
             // /PName=Value — declared parameter or built-in option override.
             if (body.Length >= 1 && (body[0] == 'P' || body[0] == 'p'))
             {
@@ -320,7 +487,7 @@ public static class CommandLineParser
             }
 
             throw new UsageException(
-                $"unrecognized flag '{rawArg}': expected /silent, /S, /verysilent, /Update, /Uninstall, /allusers, /currentuser, /D=path, or /PName=Value");
+                $"unrecognized flag '{rawArg}': expected /silent, /S, /verysilent, /Update, /Uninstall, /allusers, /currentuser, /force-downgrade, /closeapps, /D=path, /LOG[=path], /lang=tag, /launch, or /PName=Value");
         }
 
         var secretKeys = schema
@@ -354,7 +521,13 @@ public static class CommandLineParser
             Options = options,
             InstallDir = installDir,
             Scope = scope,
+            ForceDowngrade = forceDowngrade,
             SecretKeys = secretKeys,
+            LogRequested = logRequested,
+            LogPath = logPath,
+            Launch = launch,
+            CloseApps = closeApps,
+            Lang = lang,
         };
     }
 

@@ -71,6 +71,10 @@ public sealed class InstallEngine
             ? null
             : new ProgressReporter(progress, preInstall.Count + installList.Count + postInstall.Count);
 
+        // P4: let a long-running step (http_download) stream intra-step rows to the
+        // same progress channel (wizard + /LOG) without moving the overall bar.
+        ctx.ProgressSink = progress;
+
         var journal = new RollbackJournal();
         try
         {
@@ -83,15 +87,20 @@ public sealed class InstallEngine
         catch (StepFailureException ex)
         {
             // Redact in case a step surfaced a resolved secret in its error text.
+            // ex.Message already names the failing step ("step '<id>' failed: …").
             reporter?.ReportMessage($"error: {ctx.Redact(ex.Message)}", isError: true);
             reporter?.ReportMessage("rollback: reverting changes", isError: true);
-            await journal.UndoAsync(ct).ConfigureAwait(false);
+            // Stream each reversal (P7): passing `progress` makes UndoAsync emit a
+            // per-record line (delete / rmdir / path - / reg -) so the rollback
+            // trail lands in the /LOG file and the wizard log pane, not just the
+            // summary line above.
+            await journal.UndoAsync(ct, progress).ConfigureAwait(false);
             return EngineResult.Failed(journal, ex.Message);
         }
         catch (System.OperationCanceledException)
         {
             reporter?.ReportMessage("rollback: reverting changes", isError: true);
-            await journal.UndoAsync(CancellationToken.None).ConfigureAwait(false);
+            await journal.UndoAsync(CancellationToken.None, progress).ConfigureAwait(false);
             throw;
         }
     }
@@ -176,6 +185,10 @@ public sealed class InstallEngine
             ? $"path + {es.Value}"
             : $"env {es.Name}={es.Value}",
         InstallStep.RunProgram rp => $"run {rp.Program}",
+        InstallStep.HttpDownload hd => $"download {hd.Url} → {hd.Dest}",
+        InstallStep.IniWrite iw => $"ini {iw.Path} [{iw.Section}] {iw.Key}",
+        InstallStep.JsonEdit je => $"json {je.Path} {je.JsonPointer}",
+        InstallStep.XmlEdit xe => $"xml {xe.Path} {xe.Xpath}",
         _ => spec.Id,
     };
 

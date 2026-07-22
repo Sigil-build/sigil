@@ -30,7 +30,7 @@ public sealed class ScreenParamFlowTests
             UpdateSteps: Array.Empty<InstallStep>());
 
     private static ParameterDefinition Autostart() =>
-        new("autostart", ParameterType.Bool, true, null, false, "Start when I sign in", null, null, null);
+        new("autostart", ParameterType.Bool, true, null, false, LocalizedText.Plain("Start when I sign in"), null, null, null);
 
     [Fact]
     public void Default_value_is_exposed_under_both_param_and_parameters_namespaces()

@@ -1,0 +1,33 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:SigilBuild.Installer.Host.ViewModels"
+             xmlns:loc="clr-namespace:SigilBuild.Wrapper.Core.Localization;assembly=SigilBuild.Wrapper.Core"
+             x:DataType="vm:InstallerViewModel"
+             x:Class="SigilBuild.Installer.Host.Views.Screens.CloseAppsView">
+  <StackPanel Spacing="14" VerticalAlignment="Center">
+    <TextBlock FontSize="20" FontWeight="SemiBold" Text="{x:Static loc:S.CloseAppsTitle}" />
+    <TextBlock Foreground="#4B5563" TextWrapping="Wrap"
+               Text="{x:Static loc:S.CloseAppsBody}" />
+
+    <Border Background="#F9FAFB" BorderBrush="#E5E7EB" BorderThickness="1" CornerRadius="8"
+            Height="150" Padding="12,8">
+      <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <ItemsControl ItemsSource="{Binding Blockers}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <TextBlock Text="{Binding}" Foreground="#374151" FontSize="12" Margin="0,3" TextWrapping="NoWrap" />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </ScrollViewer>
+    </Border>
+
+    <StackPanel Orientation="Horizontal" Spacing="10">
+      <Button Content="{x:Static loc:S.NavRetry}" Click="OnRetry" />
+      <Button Content="{x:Static loc:S.CloseAppsCloseForMe}" Click="OnCloseForMe"
+              Background="{DynamicResource AccentBrush}" Foreground="White" />
+    </StackPanel>
+    <TextBlock Foreground="#6B7280" FontSize="11" TextWrapping="Wrap"
+               Text="{x:Static loc:S.CloseAppsCloseForMeHint}" />
+  </StackPanel>
+</UserControl>

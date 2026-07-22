@@ -1,20 +1,21 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:SigilBuild.Wrapper.Core.Localization;assembly=SigilBuild.Wrapper.Core"
         x:Class="SigilBuild.Installer.Host.Views.CancelConfirmDialog"
-        Title="Cancel Installation"
+        Title="{x:Static loc:S.CancelTitle}"
         Width="360" Height="180"
         CanResize="False"
         WindowStartupLocation="CenterOwner"
         WindowDecorations="BorderOnly">
 
   <StackPanel Margin="24" Spacing="20">
-    <TextBlock Text="Cancel Installation"
+    <TextBlock Text="{x:Static loc:S.CancelTitle}"
                FontSize="16" FontWeight="SemiBold" />
-    <TextBlock Text="Cancel now? Files already copied will be removed during rollback."
+    <TextBlock Text="{x:Static loc:S.CancelBody}"
                TextWrapping="Wrap" Foreground="#374151" />
     <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right">
-      <Button Name="YesButton" Content="Yes, cancel" Click="OnYes" />
-      <Button Name="NoButton"  Content="Continue installing" Click="OnNo"
+      <Button Name="YesButton" Content="{x:Static loc:S.CancelConfirm}" Click="OnYes" />
+      <Button Name="NoButton"  Content="{x:Static loc:S.CancelResume}" Click="OnNo"
               Background="{DynamicResource AccentBrush}" Foreground="White" />
     </StackPanel>
   </StackPanel>

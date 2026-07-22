@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Text.Json;
@@ -27,6 +28,47 @@ public class SerializableWrapperBlobRoundtripTests
             WrapperBlobJsonContext.Default.SerializableWrapperBlob);
         back.Should().NotBeNull();
         return back!;
+    }
+
+    [Fact]
+    public void Prerequisites_roundtrip_through_the_blob()
+    {
+        // P5: full WrapperBlob → DTO → JSON (source-gen) → DTO → WrapperBlob.
+        var blob = new WrapperBlob(
+            AppId: "com.x",
+            Parameters: Array.Empty<ParameterDefinition>(),
+            InstallSteps: Array.Empty<InstallStep>(),
+            PreInstall: Array.Empty<InstallStep>(),
+            PostInstall: Array.Empty<InstallStep>(),
+            UpdateSteps: Array.Empty<InstallStep>(),
+            Prerequisites: new[]
+            {
+                new InstallerPrerequisite(
+                    "VC++ 2015-2022", "registry_exists('HKLM','k','v')", "https://x/vc.exe",
+                    Sha256: "abc", Args: new[] { "/install", "/quiet" }, ExitCodesOk: new[] { 0, 3010 },
+                    ScopeRequired: "allusers", TimeoutSeconds: 120),
+                new InstallerPrerequisite(
+                    ".NET 8", "file_exists('c:/dotnet')", "payload://prereq/dotnet.exe"),
+            });
+
+        var back = SerializableWrapperBlob.ToWrapperBlob(
+            RoundTrip(SerializableWrapperBlob.FromWrapperBlob(blob)));
+
+        back.Prerequisites.Should().HaveCount(2);
+        var vc = back.Prerequisites![0];
+        vc.Name.Should().Be("VC++ 2015-2022");
+        vc.Source.Should().Be("https://x/vc.exe");
+        vc.Sha256.Should().Be("abc");
+        vc.Args.Should().Equal("/install", "/quiet");
+        vc.ExitCodesOk.Should().Equal(0, 3010);
+        vc.ScopeRequired.Should().Be("allusers");
+        vc.TimeoutSeconds.Should().Be(120);
+
+        var net = back.Prerequisites[1];
+        net.Source.Should().Be("payload://prereq/dotnet.exe");
+        net.Sha256.Should().BeNull();
+        net.Args.Should().BeNull();
+        net.ExitCodesOk.Should().BeNull();
     }
 
     [Fact]
@@ -132,6 +174,77 @@ public class SerializableWrapperBlobRoundtripTests
     }
 
     [Fact]
+    public void Installer_vars_roundtrip_in_declaration_order()
+    {
+        // P1: installer.vars survive WrapperBlob -> Serializable -> wire ->
+        // Serializable -> WrapperBlob, preserving declaration order and expressions.
+        var blob = new WrapperBlob(
+            AppId: "com.acme.Studio",
+            Parameters: System.Array.Empty<ParameterDefinition>(),
+            InstallSteps: System.Array.Empty<InstallStep>(),
+            PreInstall: System.Array.Empty<InstallStep>(),
+            PostInstall: System.Array.Empty<InstallStep>(),
+            UpdateSteps: System.Array.Empty<InstallStep>(),
+            Vars: new[]
+            {
+                new InstallerVar("old_path", "registry_read('HKLM', 'Software\\Acme', 'Path')"),
+                new InstallerVar("is_upgrade", "installed_version(app.id) != ''"),
+            });
+
+        var wire = RoundTrip(SerializableWrapperBlob.FromWrapperBlob(blob));
+        wire.Vars.Should().HaveCount(2);
+        wire.Vars[0].Name.Should().Be("old_path");
+        wire.Vars[0].Expression.Should().Be(@"registry_read('HKLM', 'Software\Acme', 'Path')");
+        wire.Vars[1].Name.Should().Be("is_upgrade");
+
+        var reconstructed = SerializableWrapperBlob.ToWrapperBlob(wire);
+        reconstructed.Vars.Should().NotBeNull();
+        reconstructed.Vars!.Should().HaveCount(2);
+        reconstructed.Vars![0].Name.Should().Be("old_path");
+        reconstructed.Vars![1].Expression.Should().Contain("installed_version");
+    }
+
+    [Fact]
+    public void No_vars_roundtrips_to_empty()
+    {
+        RoundTrip(new SerializableWrapperBlob()).Vars.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Lifecycle_hooks_and_run_after_install_roundtrip()
+    {
+        // P2: hooks + launch target survive WrapperBlob -> Serializable -> wire ->
+        // Serializable -> WrapperBlob.
+        InstallStep Run(string id) => new InstallStep.RunProgram(
+            id, id + ".exe", System.Array.Empty<string>(), Wait: true, Cwd: null,
+            ExpectedExitCodes: new[] { 0 }, TimeoutSeconds: null, When: null, OnFailure: OnFailure.Continue);
+
+        var blob = new WrapperBlob(
+            AppId: "com.acme.Studio",
+            Parameters: System.Array.Empty<ParameterDefinition>(),
+            InstallSteps: System.Array.Empty<InstallStep>(),
+            PreInstall: System.Array.Empty<InstallStep>(),
+            PostInstall: System.Array.Empty<InstallStep>(),
+            UpdateSteps: System.Array.Empty<InstallStep>(),
+            HookPreInstall: new[] { Run("pre") },
+            HookPostInstall: new[] { Run("post") },
+            HookPreUninstall: new[] { Run("preu") },
+            HookPostUninstall: new[] { Run("postu") },
+            RunAfterInstallPath: "{install_dir}/App.exe",
+            RunAfterInstallArgs: new[] { "--first-run" });
+
+        var reconstructed = SerializableWrapperBlob.ToWrapperBlob(
+            RoundTrip(SerializableWrapperBlob.FromWrapperBlob(blob)));
+
+        reconstructed.HookPreInstall.Should().ContainSingle();
+        reconstructed.HookPostInstall.Should().ContainSingle();
+        reconstructed.HookPreUninstall.Should().ContainSingle();
+        reconstructed.HookPostUninstall.Should().ContainSingle();
+        reconstructed.RunAfterInstallPath.Should().Be("{install_dir}/App.exe");
+        reconstructed.RunAfterInstallArgs.Should().Equal("--first-run");
+    }
+
+    [Fact]
     public void Brand_token_maps_and_assets_roundtrip()
     {
         var back = RoundTrip(new SerializableWrapperBlob
@@ -163,10 +276,18 @@ public class SerializableWrapperBlobRoundtripTests
     [Fact]
     public void License_text_roundtrips()
     {
-        const string license = "Copyright (c) Acme.\nAll rights reserved.\n";
+        // P9 (gap G10): LicenseText is now a tag -> text map (one entry per
+        // manifest-declared language), read at pack time.
+        var license = new Dictionary<string, string>
+        {
+            ["en"] = "Copyright (c) Acme.\nAll rights reserved.\n",
+            ["uk"] = "Авторське право (c) Acme.\nУсі права захищені.\n",
+        };
         var back = RoundTrip(new SerializableWrapperBlob { LicenseText = license });
 
-        back.LicenseText.Should().Be(license);
+        back.LicenseText.Should().NotBeNull();
+        back.LicenseText!["en"].Should().Be(license["en"]);
+        back.LicenseText!["uk"].Should().Be(license["uk"]);
     }
 
     [Fact]
@@ -179,8 +300,8 @@ public class SerializableWrapperBlobRoundtripTests
                 new SerializableInstallerScreen
                 {
                     Id = "configure",
-                    Title = "Configure {app.name}",
-                    Subtitle = "Connect to your server and set preferences.",
+                    Title = new Dictionary<string, string> { ["en"] = "Configure {app.name}" },
+                    Subtitle = new Dictionary<string, string> { ["en"] = "Connect to your server and set preferences." },
                     When = "param.autostart == true",
                     Fields = new[]
                     {
@@ -194,8 +315,8 @@ public class SerializableWrapperBlobRoundtripTests
         back.Screens.Should().HaveCount(1);
         var screen = back.Screens[0];
         screen.Id.Should().Be("configure");
-        screen.Title.Should().Be("Configure {app.name}");
-        screen.Subtitle.Should().Be("Connect to your server and set preferences.");
+        screen.Title["en"].Should().Be("Configure {app.name}");
+        screen.Subtitle!["en"].Should().Be("Connect to your server and set preferences.");
         screen.When.Should().Be("param.autostart == true");
         screen.Fields.Should().HaveCount(2);
         screen.Fields[0].Param.Should().Be("server_address");
@@ -209,7 +330,7 @@ public class SerializableWrapperBlobRoundtripTests
     {
         var core = new InstallerScreen(
             Id: "configure",
-            Title: "Configure {app.name}",
+            Title: LocalizedText.Plain("Configure {app.name}"),
             Subtitle: null,
             When: "param.autostart == true",
             Fields: new[]
@@ -223,7 +344,7 @@ public class SerializableWrapperBlobRoundtripTests
             new SerializableWrapperBlob { Screens = new[] { wire } }).Screens[0]);
 
         back.Id.Should().Be(core.Id);
-        back.Title.Should().Be(core.Title);
+        back.Title.Values.Should().BeEquivalentTo(core.Title.Values);
         back.Subtitle.Should().BeNull();
         back.When.Should().Be(core.When);
         back.Fields.Should().HaveCount(2);
@@ -231,5 +352,32 @@ public class SerializableWrapperBlobRoundtripTests
         back.Fields[0].Widget.Should().BeNull();
         back.Fields[1].Param.Should().Be("channel");
         back.Fields[1].Widget.Should().Be("radio");
+    }
+
+    // ── LocalizedText (P9, gap G10): Title/Subtitle/Description carry a
+    //    Dictionary<string,string> on the wire; installer.language rides
+    //    alongside as a plain string. ──────────────────────────────────────────
+
+    [Fact]
+    public void Blob_RoundTrips_LocalizedFields()
+    {
+        var blob = new SerializableWrapperBlob
+        {
+            Screens = new[]
+            {
+                new SerializableInstallerScreen
+                {
+                    Id = "cfg",
+                    Title = new Dictionary<string, string> { ["en"] = "Configure", ["uk"] = "Налаштування" },
+                    Fields = Array.Empty<SerializableScreenField>(),
+                },
+            },
+            Language = "uk",
+        };
+
+        var back = RoundTrip(blob);
+
+        back.Screens[0].Title["uk"].Should().Be("Налаштування");
+        back.Language.Should().Be("uk");
     }
 }

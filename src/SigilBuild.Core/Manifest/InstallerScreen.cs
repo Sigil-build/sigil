@@ -15,8 +15,8 @@ namespace SigilBuild.Core.Manifest;
 /// <param name="Fields">Ordered fields rendered on the screen.</param>
 public sealed record InstallerScreen(
     string Id,
-    string Title,
-    string? Subtitle,
+    LocalizedText Title,
+    LocalizedText? Subtitle,
     string? When,
     IReadOnlyList<ScreenField> Fields);
 

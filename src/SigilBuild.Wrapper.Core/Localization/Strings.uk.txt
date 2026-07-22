@@ -1,0 +1,122 @@
+# src/SigilBuild.Wrapper.Core/Localization/Strings.uk.txt
+# Ukrainian (uk).
+# Reviewer: Yevhen Khudoliiv — native speaker, reviewed 2026-07-15.
+# ADR-008 §4: a language ships only with a named reviewer recorded here.
+
+# --- navigation / chrome ---
+nav.back = Назад
+nav.next = Далі
+nav.cancel = Скасувати
+nav.close = Закрити
+nav.retry = Повторити
+nav.browse = Огляд…
+
+# --- rail labels ---
+rail.welcome = Вітаємо
+rail.license = Ліцензія
+rail.location = Розташування
+rail.options = Параметри
+rail.install = Встановлення
+rail.configure = Налаштування
+rail.finish = Готово
+rail.failed = Помилка
+rail.close_apps = Закрити програми
+rail.downgrade_blocked = Заблоковано
+
+# --- welcome ---
+welcome.title = Ласкаво просимо до встановлення {appName}
+welcome.body = Цей майстер допоможе вам виконати встановлення. Натисніть «Далі», щоб продовжити.
+
+# --- license ---
+license.title = Ліцензійна угода
+license.accept = Я приймаю умови
+
+# --- install location ---
+location.title = Виберіть розташування для встановлення
+location.body = Куди слід встановити програму?
+location.scope.user = Лише для мене (рекомендовано)
+location.scope.user_hint = Права адміністратора не потрібні
+location.scope.machine = Для всіх користувачів цього комп'ютера
+location.scope.machine_hint = Встановлюється до Program Files — Windows запитає дозвіл
+
+# --- install location validation ---
+location.error.empty = Укажіть розташування для встановлення.
+location.error.not_absolute = Укажіть абсолютний шлях (наприклад, C:\Program Files\App).
+location.error.is_file = Це розташування є файлом. Виберіть папку.
+location.error.denied = У вас немає дозволу на встановлення в цю папку. Виберіть іншу.
+
+# --- options ---
+options.title = Параметри
+options.body = Виберіть, що налаштувати під час встановлення.
+options.desktop_shortcut = Створити ярлик на робочому столі
+options.start_menu = Додати ярлик у меню «Пуск»
+options.add_to_path = Додати до PATH
+options.file_associations = Зареєструвати асоціації файлів
+
+# --- installing / finish ---
+installing.title = Встановлення…
+finish.title = {appName} встановлено
+finish.body = Тепер ви можете запустити програму з меню «Пуск».
+finish.launch_app = Запустити {appName}
+finish.reboot_notice = Щоб завершити налаштування необхідного компонента, потрібно перезавантажити комп'ютер.
+
+# --- failed ---
+failed.title = Помилка встановлення
+failed.body = Не вдалося завершити встановлення. Жодних змін не збережено.
+failed.open_log = Відкрити журнал
+
+# --- cancel dialog ---
+cancel.title = Скасувати встановлення
+cancel.body = Скасувати зараз? Уже скопійовані файли буде вилучено під час відкату.
+cancel.confirm = Так, скасувати
+cancel.resume = Продовжити встановлення
+
+# --- close apps ---
+close_apps.title = Закрийте ці програми, щоб продовжити
+close_apps.body = Програмі встановлення потрібно оновити файли, які використовують ці програми. Закрийте їх і натисніть «Повторити» або дозвольте закрити їх автоматично.
+close_apps.close_for_me = Закрити за мене
+close_apps.close_for_me_hint = «Закрити за мене» просить кожну програму завершити роботу штатно — незбережені дані не втрачаються. Програми не запускаються повторно.
+
+# --- upgrade / downgrade ---
+upgrade.reinstall_notice = {appName} уже встановлено. Продовження перевстановить програму — поточну версію буде вилучено першою.
+upgrade.upgrading = Оновлення {appName} з версії {fromVersion} до {toVersion}.
+upgrade.replacing_newer = Заміна {appName} {fromVersion} на старішу версію {toVersion}.
+downgrade.title = Уже встановлено новішу версію
+downgrade.body = Уже встановлено новішу версію ({installedVersion}) програми {appName}. Програма встановлення не замінить її старішою версією {incomingVersion}. Закрийте це вікно, а потім спочатку вилучіть поточну версію, якщо ви справді хочете перейти на старішу.
+
+# --- uninstall ---
+uninstall.version = Версія {version}
+uninstall.title = Вилучити {appName}
+uninstall.body = Це вилучить {appName}, її запис у меню «Пуск», ярлик на робочому столі та запис у PATH. Ваші документи не буде змінено.
+uninstall.action = Вилучити
+uninstall.progress = Вилучення…
+uninstall.done = {appName} вилучено
+uninstall.failed = Помилка вилучення
+uninstall.failed_body = Деякі компоненти могло бути не вилучено. Ви можете спробувати ще раз через «Програми та засоби».
+
+# --- fields ---
+field.show = Показати
+field.hide = Приховати
+field.options_loading = Завантаження параметрів…
+field.options_load_failed = Не вдалося завантажити параметри.
+field.error.required = Поле «{label}» є обов'язковим.
+field.error.choose = Виберіть значення для «{label}».
+field.error.invalid_choice = «{value}» не є припустимим варіантом.
+field.error.not_integer = Поле «{label}» має бути цілим числом.
+field.error.min = Значення поля «{label}» має бути не менше {min}.
+field.error.max = Значення поля «{label}» має бути не більше {max}.
+field.error.pattern = Поле «{label}» має неправильний формат.
+
+# --- single instance (pre-Avalonia MessageBox) ---
+already_running.caption = Програма встановлення
+already_running.body = Програму встановлення вже запущено.\n\nІнша копія цієї програми встановлення вже виконується. Завершіть або закрийте її, а потім спробуйте ще раз.
+
+# --- brand fallbacks (un-stamped build) ---
+brand.app_fallback = Програма
+brand.publisher_fallback = Видавець
+
+# --- engine prose ---
+engine.removing_previous = Вилучення попередньої версії
+engine.removing_newer = Вилучення новішої версії
+engine.installing_prerequisite = Встановлення {name}…
+engine.update_unsupported = /Update не підтримується цією програмою встановлення: update_steps виконуються через SDK дельта-оновлень, а не через середовище встановлення.

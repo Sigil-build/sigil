@@ -101,4 +101,61 @@ public class ParametersSchemaTests
         diagnostics.Where(d => d.Code == DiagnosticCodes.ParameterValidationFailure)
             .Should().BeEmpty();
     }
+
+    // ── LocalizedText (P9, gap G10): parameter `description` normalizes/carries
+    //    {en, uk, ...} the same way installer.screens title/subtitle do. ──────
+
+    [Fact]
+    public void PlainStringDescription_NormalizesToEnglish()
+    {
+        var yaml = $$"""
+            {{ValidPrelude}}
+            parameters:
+              p:
+                type: string
+                description: "Server address"
+            """;
+
+        var result = ManifestParser.Parse(yaml, "<inline>");
+
+        result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Should().BeEmpty();
+        result.Manifest!.Parameters!["p"].Description!.Values["en"].Should().Be("Server address");
+    }
+
+    [Fact]
+    public void MapDescription_WithoutEnglish_EmitsSig0290_AsError()
+    {
+        var yaml = $$"""
+            {{ValidPrelude}}
+            parameters:
+              p:
+                type: string
+                description:
+                  uk: Адреса сервера
+            """;
+
+        var result = ManifestParser.Parse(yaml, "<inline>");
+
+        result.Diagnostics.Should().Contain(d =>
+            d.Code == DiagnosticCodes.LocalizedTextMissingEnglish && d.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    public void MapDescription_WithEnglish_IsAccepted()
+    {
+        var yaml = $$"""
+            {{ValidPrelude}}
+            parameters:
+              p:
+                type: string
+                description:
+                  en: Server address
+                  uk: Адреса сервера
+            """;
+
+        var result = ManifestParser.Parse(yaml, "<inline>");
+
+        result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Should().BeEmpty();
+        result.Manifest!.Parameters!["p"].Description!.Values.Should().HaveCount(2);
+    }
 }

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using SigilBuild.Wrapper.Core.Localization;
 
 namespace SigilBuild.Installer.Host.Branding;
 
@@ -11,9 +12,9 @@ namespace SigilBuild.Installer.Host.Branding;
 /// </summary>
 public sealed class BrandTokens
 {
-    public string AppName { get; init; } = "Application";
+    public string AppName { get; init; } = Strings.BrandAppFallback(SessionLanguage.Current);
     public string AppVersion { get; init; } = "1.0.0";
-    public string Publisher { get; init; } = "Publisher";
+    public string Publisher { get; init; } = Strings.BrandPublisherFallback(SessionLanguage.Current);
     public string PrimaryColor { get; init; } = "#1F2937";
     public string AccentColor { get; init; } = "#3B82F6";
     public string LogoFile { get; init; } = "default-logo.png";

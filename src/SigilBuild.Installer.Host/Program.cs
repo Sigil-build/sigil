@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Avalonia;
 using SigilBuild.Wrapper.Cli;
+using SigilBuild.Wrapper.Core.Localization;
 using SigilBuild.Wrapper.Engine;
 
 namespace SigilBuild.Installer.Host;
@@ -15,6 +16,13 @@ public static partial class Program
         if (args.Length == 1 && args[0] == "--version")
         {
             Console.WriteLine("SigilBuild.Installer.Host runtime (placeholder)");
+            return 0;
+        }
+
+        if (args.Length == 1 && (args[0] == "/?" || args[0].Equals("/help", StringComparison.OrdinalIgnoreCase)))
+        {
+            AttachParentConsole();
+            Console.WriteLine(HelpText.Render());
             return 0;
         }
 
@@ -33,6 +41,23 @@ public static partial class Program
             return 64;
         }
 
+        // P9 (gap G10): resolve this session's chrome language now — installer.language
+        // (fixed) -> /lang -> the OS UI-language preference list -> en — and set
+        // SessionLanguage.Current. MUST run before ANY UI is constructed, including
+        // the elevated relaunch below (harmless: the elevated child re-resolves
+        // identically from the same blob + argv) and, further down, the pre-Avalonia
+        // single-instance MessageBoxW, itself a catalog string. The resolver depends
+        // only on the blob and Win32, never on Avalonia, so this ordering works.
+        session.ResolveSessionLanguage();
+        if (session.LanguageConflictNote is not null)
+        {
+            // Design §2.1: the manifest pin wins; the flag is ignored, not fatal
+            // (exit code stays 0). Also flushed into the /LOG sink (if requested)
+            // the first time it opens; this additionally records it in the
+            // wizard's always-on diagnostic log.
+            InstallerLog.Info(session.LanguageConflictNote);
+        }
+
         // T12 — self-elevation. This MUST run before any scope-requiring work
         // (payload extraction, HKLM/Program Files writes) and before the T18 GUI
         // native bootstrap below. The host manifest requests `asInvoker`, so a
@@ -47,6 +72,34 @@ public static partial class Program
         {
             AttachParentConsole();
             return Elevation.RelaunchElevatedAndWait(args);
+        }
+
+        // P6 (gap G17): single-instance guard. Taken AFTER the elevation branch — the
+        // un-elevated parent above never installs, so it must not hold the mutex while
+        // the elevated child (which does) tries to take it. Held for the whole run;
+        // the OS releases it if the process dies, so a crash never wedges the name.
+        using var instanceLock = SetupInstanceLock.TryAcquire(session.AppId, session.ResolvedScope);
+        if (instanceLock is null)
+        {
+            if (session.Silent)
+            {
+                AttachParentConsole();
+                Console.Error.WriteLine(
+                    "another setup for this application is already running — close it and try again.");
+            }
+            else if (OperatingSystem.IsWindows())
+            {
+                // A WinExe has no console, so the headed path needs a real notice.
+                // P9: catalog-driven — already_running.body / already_running.caption,
+                // resolved through the session language set above (before ANY UI,
+                // including this pre-Avalonia MessageBox).
+                _ = MessageBoxW(
+                    IntPtr.Zero,
+                    Strings.AlreadyRunningBody(SessionLanguage.Current),
+                    Strings.AlreadyRunningCaption(SessionLanguage.Current),
+                    MB_OK | MB_ICONINFORMATION);
+            }
+            return InstallSession.AlreadyRunningExitCode;
         }
 
         // Headless whenever /silent or /verysilent is present (this includes the
@@ -139,9 +192,17 @@ public static partial class Program
     }
 
     private const uint ATTACH_PARENT_PROCESS = 0xFFFFFFFF;
+    private const uint MB_OK = 0x0;
+    private const uint MB_ICONINFORMATION = 0x40;
 
     [SupportedOSPlatform("windows")]
     [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool AttachConsole(uint dwProcessId);
+
+    // P6 (gap G17): the friendly "already running" notice for the headed path — a
+    // plain MessageBox, since this fires before Avalonia is initialised.
+    [SupportedOSPlatform("windows")]
+    [LibraryImport("user32.dll", EntryPoint = "MessageBoxW", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial int MessageBoxW(IntPtr hWnd, string lpText, string lpCaption, uint uType);
 }

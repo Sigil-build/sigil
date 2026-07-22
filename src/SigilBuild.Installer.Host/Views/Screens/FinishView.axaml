@@ -1,12 +1,19 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:SigilBuild.Installer.Host.ViewModels"
+             xmlns:loc="clr-namespace:SigilBuild.Wrapper.Core.Localization;assembly=SigilBuild.Wrapper.Core"
              x:DataType="vm:InstallerViewModel"
              x:Class="SigilBuild.Installer.Host.Views.Screens.FinishView">
   <StackPanel Spacing="12" VerticalAlignment="Center">
     <TextBlock FontSize="22" FontWeight="Bold"
-               Text="{Binding Brand.AppName, StringFormat='{}{0} is installed'}" />
-    <TextBlock Text="You can now launch the application from the Start menu." Foreground="#4B5563" />
-    <CheckBox Content="Launch now" IsChecked="{Binding LaunchAfterInstall, Mode=TwoWay}" />
+               Text="{Binding FinishTitle}" />
+    <TextBlock Text="{x:Static loc:S.FinishBody}" Foreground="#4B5563" />
+    <CheckBox Content="{Binding LaunchLabel}"
+              IsVisible="{Binding HasRunAfterInstall}"
+              IsChecked="{Binding LaunchAfterInstall, Mode=TwoWay}" />
+    <!-- P5: reboot notice, shown when a prerequisite installer returned 3010. -->
+    <TextBlock Text="{Binding RebootNotice}"
+               IsVisible="{Binding RebootRequired}"
+               Foreground="#B45309" TextWrapping="Wrap" FontWeight="SemiBold" />
   </StackPanel>
 </UserControl>

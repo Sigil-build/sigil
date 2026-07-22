@@ -1,0 +1,42 @@
+# Task 16 (P9): the asymmetry fixture (design §4.4's crux). Sigil ships NO `de`
+# chrome catalog (only en + uk — Task 12), but this manifest's own declared
+# screen supplies `de` text. Under /lang=de the declared screen must render in
+# German while the chrome (nav buttons, rail built-ins) falls back to English,
+# because the chrome language and the manifest's screen-text language resolve
+# INDEPENDENTLY against the same preference list, never against each other.
+spec: v1.0
+
+app:
+  id: com.example.localizedde
+  name: LocalizedDe
+  version: 1.0.0
+  publisher: Example
+
+build:
+  source: ./payload
+
+package:
+  formats: [exe]
+  architectures: [x64]
+
+installer:
+  screens:
+    - id: configure
+      title:
+        en: Configure
+        de: Konfigurieren
+      fields:
+        - param: channel
+
+parameters:
+  channel:
+    type: enum
+    values: [stable, beta]
+    default: stable
+    install_time: true
+
+install_steps:
+  - id: copy-app
+    type: file_copy
+    from: payload/**
+    to: "{install_dir}"

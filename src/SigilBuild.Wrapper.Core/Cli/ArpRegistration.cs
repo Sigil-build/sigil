@@ -42,13 +42,18 @@ internal static class ArpRegistration
     /// <param name="UninstallString">Full command line the OS runs on "Uninstall".</param>
     /// <param name="EstimatedSizeBytes">Total install footprint in bytes;
     /// the OS converts to KB when displaying the size column.</param>
+    /// <param name="InstallLocation">The resolved install directory, written as the
+    /// standard ARP <c>InstallLocation</c> value. Read back by
+    /// <see cref="SigilBuild.Wrapper.Engine.InstalledStateResolver"/> to resolve the
+    /// prior install dir for a P3 upgrade. Empty → the value is not written.</param>
     public sealed record Entry(
         string AppId,
         string DisplayName,
         string DisplayVersion,
         string Publisher,
         string UninstallString,
-        long EstimatedSizeBytes);
+        long EstimatedSizeBytes,
+        string InstallLocation = "");
 
     /// <summary>
     /// Create or update the ARP key for <paramref name="entry"/> in the
@@ -67,6 +72,12 @@ internal static class ArpRegistration
         key.SetValue("DisplayVersion",  entry.DisplayVersion);
         key.SetValue("Publisher",       entry.Publisher);
         key.SetValue("UninstallString", entry.UninstallString);
+        // Standard ARP InstallLocation — surfaces the install dir to Windows and lets
+        // a later P3 upgrade recover the prior install directory (InstalledStateResolver).
+        if (!string.IsNullOrEmpty(entry.InstallLocation))
+        {
+            key.SetValue("InstallLocation", entry.InstallLocation);
+        }
         // EstimatedSize is documented as a DWORD in KB.
         var sizeKb = (int)Math.Min(int.MaxValue, Math.Max(0, entry.EstimatedSizeBytes / 1024));
         key.SetValue("EstimatedSize",   sizeKb, RegistryValueKind.DWord);

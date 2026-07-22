@@ -2,6 +2,7 @@ namespace SigilBuild.Wrapper.Engine;
 
 using SigilBuild.Core.Manifest;
 using SigilBuild.Wrapper.Cli;
+using SigilBuild.Wrapper.Core.Localization;
 
 /// <summary>
 /// Immutable view over the resolved environment for a single install run.
@@ -49,6 +50,15 @@ public sealed class StepContext
 
     public static StepContext Empty { get; } =
         new StepContext(new System.Collections.Generic.Dictionary<string, object?>());
+
+    /// <summary>
+    /// Optional sink a long-running step (P4 <c>http_download</c>) uses to emit
+    /// intra-step progress rows (download percentage / retry notices). Set by
+    /// <see cref="InstallEngine"/> to the run's progress channel, so the rows reach
+    /// the wizard progress screen and the /LOG file. Message-only rows report
+    /// <c>Total = 0</c> so they never move the overall progress bar.
+    /// </summary>
+    internal System.IProgress<StepProgress>? ProgressSink { get; set; }
 
     /// <summary>
     /// The resolved per-scope layout for this run (T12): install root, ARP hive,
@@ -127,7 +137,8 @@ public sealed class StepContext
         System.Collections.Generic.IReadOnlyDictionary<string, string>? collected = null,
         InstallScope scope = InstallScope.User,
         System.Collections.Generic.IReadOnlyDictionary<string, bool>? collectedOptions = null,
-        string? collectedInstallDir = null)
+        string? collectedInstallDir = null,
+        string? priorInstallDir = null)
     {
         System.ArgumentNullException.ThrowIfNull(blob);
         System.ArgumentNullException.ThrowIfNull(parsed);
@@ -136,18 +147,23 @@ public sealed class StepContext
 
         // T13: resolve the effective install dir once, up front, so the
         // {install_dir} token expands to a concrete directory in every step path
-        // and expression. Precedence: wizard-collected → /D= → manifest override →
-        // default (<scope root>\<App.Name>).
+        // and expression. Precedence: wizard-collected → /D= → prior install dir
+        // (P3 upgrade) → manifest override → default (<scope root>\<App.Name>).
         var installDir = InstallDirResolver.Resolve(
             scope: layout.Scope,
             appName: blob.AppName,
             appId: blob.AppId,
             manifestInstallDir: blob.InstallDir,
             cliOverride: parsed.InstallDir,
-            collected: collectedInstallDir);
+            collected: collectedInstallDir,
+            priorInstallDir: priorInstallDir);
 
         var dict = new System.Collections.Generic.Dictionary<string, object?>(System.StringComparer.Ordinal);
         var secrets = new System.Collections.Generic.List<string>();
+        // Secret identifier keys (param.<name> / parameters.<name> of a Secret
+        // parameter) so P1 vars can inherit secretness (ADR-008 §3). VarResolver
+        // extends this with any tainted var.<name>.
+        var secretIds = new System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal);
 
         // Materialise parameter values. Precedence: GUI-collected (wizard) →
         // CLI /P override → schema default → null. Both the canonical
@@ -173,9 +189,16 @@ public sealed class StepContext
             dict["parameters." + def.Name] = value;
             dict["param." + def.Name] = value;
 
-            if (def.Type == ParameterType.Secret && value is string sv && sv.Length > 0)
+            if (def.Type == ParameterType.Secret)
             {
-                secrets.Add(sv);
+                // Mark the identifier secret regardless of the current value so a
+                // var referencing an unset secret param is still tainted.
+                secretIds.Add("param." + def.Name);
+                secretIds.Add("parameters." + def.Name);
+                if (value is string sv && sv.Length > 0)
+                {
+                    secrets.Add(sv);
+                }
             }
         }
 
@@ -193,6 +216,21 @@ public sealed class StepContext
         dict["system.os"] = System.Environment.OSVersion.Version.ToString();
         dict["system.arch"] = System.Runtime.InteropServices.RuntimeInformation
                                   .ProcessArchitecture.ToString().ToLowerInvariant();
+        // P9 (gap G10): the resolved CHROME language's tag, not the top OS
+        // preference — design §4.3: with OS prefs [de-DE, uk-UA] and en+uk
+        // chrome, system.language reads "uk" because that's what the UI
+        // actually renders, not "de". Mirrors the established
+        // `_lang.ToString().ToLowerInvariant()` pattern (InstallerViewModel);
+        // never CultureInfo. Real entry points resolve SessionLanguage once at
+        // session start, before any StepContext is built here. Guarded on
+        // IsSet (rather than reading .Current directly) so the hundreds of
+        // engine tests that build a StepContext without ever calling
+        // ResolveSessionLanguage keep working under a Debug test run — this is
+        // a convenience expression value, not UI construction, so it degrades
+        // quietly to the same "en" the Release-mode fallback would give,
+        // without tripping SessionLanguage.Current's DEBUG throw guard.
+        dict["system.language"] = (SessionLanguage.IsSet ? SessionLanguage.Current : Lang.En)
+            .ToString().ToLowerInvariant();
 
         // Env context (only the well-known PATH for now; full env exposure is policy-deferred).
         dict["env.PATH"] = System.Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
@@ -242,6 +280,12 @@ public sealed class StepContext
                 dict["option." + opt.Name] = value;
             }
         }
+
+        // P1: evaluate installer.vars once, now that every base identifier is
+        // seeded. Each result is exposed as var.<name> (usable in `when`, screen
+        // defaults, and {var.<name>} brace tokens). Secret-derived vars inherit
+        // secretness and land in `secrets` for redaction.
+        VarResolver.Populate(blob.Vars, dict, new Expressions.Evaluator(), secretIds, secrets);
 
         return new StepContext(dict, payloadRoot, secrets, layout.Scope, installDir, blob.AppName, blob.AppId);
     }
@@ -340,7 +384,53 @@ public sealed class StepContext
             result = result.Replace("{app.name}", _appName, System.StringComparison.Ordinal);
         }
         result = result.Replace("{app.id}", _appId, System.StringComparison.Ordinal);
+        result = ReplaceVarTokens(result);
         return result;
+    }
+
+    /// <summary>
+    /// Expand <c>{var.&lt;name&gt;}</c> brace tokens (P1) against the evaluated
+    /// <c>installer.vars</c> seeded in the context. A token whose var was not
+    /// declared is left literal (mirroring the unknown-brace-token behaviour of the
+    /// fixed tokens). This is the cross-step data-flow channel: a step
+    /// <c>to: "{var.old_path}/app.txt"</c> lands under a directory read from the
+    /// registry at session start.
+    /// </summary>
+    private string ReplaceVarTokens(string text)
+    {
+        const string prefix = "{var.";
+        if (text.IndexOf(prefix, System.StringComparison.Ordinal) < 0)
+        {
+            return text;
+        }
+
+        var sb = new System.Text.StringBuilder(text.Length);
+        var i = 0;
+        while (i < text.Length)
+        {
+            if (text[i] == '{'
+                && string.CompareOrdinal(text, i, prefix, 0, prefix.Length) == 0)
+            {
+                var end = text.IndexOf('}', i + 1);
+                if (end > i)
+                {
+                    // token is the identifier without braces, e.g. "var.old_path"
+                    var token = text.Substring(i + 1, end - i - 1);
+                    if (_values.TryGetValue(token, out var v))
+                    {
+                        sb.Append(v?.ToString() ?? string.Empty);
+                        i = end + 1;
+                        continue;
+                    }
+                }
+                // Unknown var or unterminated brace — leave the '{' literal.
+            }
+
+            sb.Append(text[i]);
+            i++;
+        }
+
+        return sb.ToString();
     }
 
     /// <summary>

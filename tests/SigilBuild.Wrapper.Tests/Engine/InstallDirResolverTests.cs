@@ -84,6 +84,46 @@ public sealed class InstallDirResolverTests
         resolved.Should().Be(Path.GetFullPath(wizard));
     }
 
+    // ── Prior install dir (P3 upgrade) precedence ─────────────────────────────
+
+    [Fact]
+    public void Prior_install_dir_wins_over_manifest_and_default()
+    {
+        var prior = Path.Combine("D:", "Existing", "Acme");
+        var resolved = InstallDirResolver.Resolve(
+            InstallScope.User, appName: "Acme Studio", appId: "com.acme.Studio",
+            manifestInstallDir: "{scope_root}/Acme Studio", cliOverride: null,
+            collected: null, priorInstallDir: prior);
+
+        resolved.Should().Be(Path.GetFullPath(prior));
+    }
+
+    [Fact]
+    public void Explicit_D_override_wins_over_prior_install_dir()
+    {
+        var prior = Path.Combine("D:", "Existing", "Acme");
+        var cli = Path.Combine("C:", "Chosen");
+        var resolved = InstallDirResolver.Resolve(
+            InstallScope.User, appName: "Acme", appId: "id",
+            manifestInstallDir: null, cliOverride: cli,
+            collected: null, priorInstallDir: prior);
+
+        resolved.Should().Be(Path.GetFullPath(cli));
+    }
+
+    [Fact]
+    public void Collected_wizard_path_wins_over_prior_install_dir()
+    {
+        var prior = Path.Combine("D:", "Existing", "Acme");
+        var wizard = Path.Combine("C:", "FromWizard");
+        var resolved = InstallDirResolver.Resolve(
+            InstallScope.User, appName: "Acme", appId: "id",
+            manifestInstallDir: null, cliOverride: null,
+            collected: wizard, priorInstallDir: prior);
+
+        resolved.Should().Be(Path.GetFullPath(wizard));
+    }
+
     [Fact]
     public void Blank_app_name_falls_back_to_app_id()
     {

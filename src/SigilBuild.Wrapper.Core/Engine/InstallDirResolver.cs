@@ -16,6 +16,8 @@ using SigilBuild.Core.Manifest;
 /// <list type="number">
 ///   <item><description>the wizard-collected destination path (GUI), then</description></item>
 ///   <item><description><c>/D=path</c> (silent + GUI prefill), then</description></item>
+///   <item><description>the prior install directory during an upgrade (P3 — preserve
+///   the existing location / user data), then</description></item>
 ///   <item><description><c>installer.install_dir</c> (manifest override), then</description></item>
 ///   <item><description>the default <c>&lt;scope root&gt;\&lt;App.Name&gt;</c>.</description></item>
 /// </list>
@@ -45,16 +47,23 @@ public static class InstallDirResolver
     /// <param name="manifestInstallDir">The <c>installer.install_dir</c> override, or null.</param>
     /// <param name="cliOverride">The parsed <c>/D=path</c> value, or null.</param>
     /// <param name="collected">The wizard-collected destination path, or null.</param>
+    /// <param name="priorInstallDir">
+    /// The prior version's install directory during an upgrade / forced downgrade (P3),
+    /// or null. Wins over the manifest default and the scope-root default so an upgrade
+    /// lands in the existing location (preserving user data), but loses to an explicit
+    /// <c>/D=</c> or wizard-collected path. Absolute — carries no <c>{...}</c> tokens.
+    /// </param>
     public static string Resolve(
         InstallScope scope,
         string? appName,
         string appId,
         string? manifestInstallDir,
         string? cliOverride,
-        string? collected = null)
+        string? collected = null,
+        string? priorInstallDir = null)
     {
         var scopeRoot = ScopeLayout.For(scope).InstallRoot;
-        var template = FirstNonBlank(collected, cliOverride, manifestInstallDir) ?? DefaultTemplate;
+        var template = FirstNonBlank(collected, cliOverride, priorInstallDir, manifestInstallDir) ?? DefaultTemplate;
         var resolved = SubstituteDirTokens(template, scopeRoot, appName, appId);
         return Canonicalize(resolved);
     }

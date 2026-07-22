@@ -122,6 +122,31 @@ public class CommandLineParserTests
         parsed.Scope.Should().Be(expected);
     }
 
+    // ── /force-downgrade (P3) ─────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("/force-downgrade")]
+    [InlineData("/FORCE-DOWNGRADE")]
+    public void Force_downgrade_flag_is_stored(string flag)
+    {
+        var parsed = CommandLineParser.Parse(new[] { flag }, Array.Empty<ParameterDefinition>());
+        parsed.ForceDowngrade.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Force_downgrade_defaults_false()
+    {
+        var parsed = CommandLineParser.Parse(new[] { "/silent" }, Array.Empty<ParameterDefinition>());
+        parsed.ForceDowngrade.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Force_downgrade_appears_in_audit_rendering()
+    {
+        var parsed = CommandLineParser.Parse(new[] { "/silent", "/force-downgrade" }, Array.Empty<ParameterDefinition>());
+        parsed.AuditSafeRendering().Should().Contain("/force-downgrade");
+    }
+
     // ── Mode flags ────────────────────────────────────────────────────────────
 
     [Fact]
@@ -177,6 +202,105 @@ public class CommandLineParserTests
         audit.Should().NotContain("KEY12345");
         audit.Should().Contain("/PLicense=***");
     }
+
+    // ── /LOG install logging (P7) ─────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("/LOG")]
+    [InlineData("/log")]
+    public void Bare_LOG_requests_logging_with_default_path(string flag)
+    {
+        var parsed = CommandLineParser.Parse(new[] { flag }, Array.Empty<ParameterDefinition>());
+        parsed.LogRequested.Should().BeTrue();
+        parsed.LogPath.Should().BeNull("a bare /LOG defers to the session's default %TEMP% path");
+    }
+
+    [Theory]
+    [InlineData("/LOG=C:\\Temp\\setup.log", @"C:\Temp\setup.log")]
+    [InlineData("/log=out.log", "out.log")]
+    public void LOG_with_path_captures_explicit_path(string flag, string expected)
+    {
+        var parsed = CommandLineParser.Parse(new[] { flag }, Array.Empty<ParameterDefinition>());
+        parsed.LogRequested.Should().BeTrue();
+        parsed.LogPath.Should().Be(expected);
+    }
+
+    [Fact]
+    public void LOG_equals_without_path_is_usage_error()
+    {
+        var act = () => CommandLineParser.Parse(new[] { "/LOG=" }, Array.Empty<ParameterDefinition>());
+        act.Should().Throw<UsageException>();
+    }
+
+    [Fact]
+    public void LOG_prefixed_junk_is_still_rejected()
+    {
+        // /LOGGING is NOT /LOG — the closed grammar rejects it (exit 64).
+        var act = () => CommandLineParser.Parse(new[] { "/LOGGING" }, Array.Empty<ParameterDefinition>());
+        act.Should().Throw<UsageException>();
+    }
+
+    [Fact]
+    public void No_LOG_flag_means_logging_not_requested()
+    {
+        var parsed = CommandLineParser.Parse(new[] { "/silent" }, Array.Empty<ParameterDefinition>());
+        parsed.LogRequested.Should().BeFalse();
+        parsed.LogPath.Should().BeNull();
+    }
+
+    [Fact]
+    public void Audit_safe_form_includes_LOG_flag()
+    {
+        var withPath = CommandLineParser.Parse(new[] { "/LOG=x.log" }, Array.Empty<ParameterDefinition>());
+        withPath.AuditSafeRendering().Should().Contain("/LOG=x.log");
+
+        var bare = CommandLineParser.Parse(new[] { "/silent", "/LOG" }, Array.Empty<ParameterDefinition>());
+        bare.AuditSafeRendering().Should().Contain("/LOG");
+    }
+
+    // ── /launch run-after-install (P2) ────────────────────────────────────────
+
+    [Theory]
+    [InlineData("/launch")]
+    [InlineData("/LAUNCH")]
+    public void Launch_flag_is_parsed(string flag)
+    {
+        var parsed = CommandLineParser.Parse(new[] { "/silent", flag }, Array.Empty<ParameterDefinition>());
+        parsed.Launch.Should().BeTrue();
+    }
+
+    [Fact]
+    public void No_launch_flag_means_launch_false()
+    {
+        CommandLineParser.Parse(new[] { "/silent" }, Array.Empty<ParameterDefinition>())
+            .Launch.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Audit_safe_form_includes_launch()
+    {
+        CommandLineParser.Parse(new[] { "/silent", "/launch" }, Array.Empty<ParameterDefinition>())
+            .AuditSafeRendering().Should().Contain("/launch");
+    }
+
+    // ── /closeapps files-in-use (P6) ──────────────────────────────────────────
+
+    [Theory]
+    [InlineData("/closeapps")]
+    [InlineData("/CLOSEAPPS")]
+    public void Closeapps_flag_is_parsed(string flag)
+        => CommandLineParser.Parse(new[] { "/silent", flag }, Array.Empty<ParameterDefinition>())
+            .CloseApps.Should().BeTrue();
+
+    [Fact]
+    public void No_closeapps_flag_means_false()
+        => CommandLineParser.Parse(new[] { "/silent" }, Array.Empty<ParameterDefinition>())
+            .CloseApps.Should().BeFalse();
+
+    [Fact]
+    public void Audit_safe_form_includes_closeapps()
+        => CommandLineParser.Parse(new[] { "/silent", "/closeapps" }, Array.Empty<ParameterDefinition>())
+            .AuditSafeRendering().Should().Contain("/closeapps");
 
     // ── Closed grammar rejects junk ───────────────────────────────────────────
 

@@ -97,6 +97,56 @@ public class CommandLineParserTests
         parsed.Options["add_to_path"].Should().Be("true");
     }
 
+    // ── P10 (gap G11): namespaced custom-component overrides ──────────────────
+
+    [Fact]
+    public void Namespaced_custom_option_override_is_stored_under_the_option_key()
+    {
+        var parsed = CommandLineParser.Parse(
+            new[] { "/S", "/Poption.sample_data=false" },
+            Array.Empty<ParameterDefinition>(),
+            customOptions: new[] { "sample_data" });
+
+        parsed.Options["option.sample_data"].Should().Be("false");
+    }
+
+    [Fact]
+    public void Namespaced_custom_option_avoids_collision_with_a_same_named_parameter()
+    {
+        // A parameter and a custom component may share a name; the bare form binds
+        // the parameter, the namespaced form binds the component.
+        var schema = new[] { Param("sample_data", ParameterType.String, @default: "x") };
+        var parsed = CommandLineParser.Parse(
+            new[] { "/Psample_data=paramval", "/Poption.sample_data=true" },
+            schema,
+            customOptions: new[] { "sample_data" });
+
+        parsed.Values["sample_data"].Should().Be("paramval");
+        parsed.Options["option.sample_data"].Should().Be("true");
+    }
+
+    [Fact]
+    public void Unknown_namespaced_custom_option_is_rejected()
+    {
+        var act = () => CommandLineParser.Parse(
+            new[] { "/Poption.not_declared=true" },
+            Array.Empty<ParameterDefinition>(),
+            customOptions: new[] { "sample_data" });
+
+        act.Should().Throw<UsageException>().WithMessage("*not_declared*");
+    }
+
+    [Fact]
+    public void Namespaced_custom_option_round_trips_through_audit_rendering()
+    {
+        var parsed = CommandLineParser.Parse(
+            new[] { "/silent", "/Poption.sample_data=false" },
+            Array.Empty<ParameterDefinition>(),
+            customOptions: new[] { "sample_data" });
+
+        parsed.AuditSafeRendering().Should().Contain("/Poption.sample_data=false");
+    }
+
     // ── /D install-dir + scope flags (parse + store only) ─────────────────────
 
     [Fact]

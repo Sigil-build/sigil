@@ -288,6 +288,9 @@ public sealed class ParsedCommandLine
 ///   language tag like <c>en</c>, <c>uk</c>, or <c>pt-BR</c>.</description></item>
 ///   <item><description><c>/?</c> (alias <c>/help</c>) — show help text.</description></item>
 ///   <item><description><c>/P&lt;Name&gt;=&lt;Value&gt;</c> — override a declared parameter or a built-in option.</description></item>
+///   <item><description><c>/Poption.&lt;Name&gt;=true|false</c> — override an app-defined custom
+///   component (P10). Namespaced under <c>option.</c> so a component and a declared
+///   parameter may share a name without ambiguity.</description></item>
 /// </list>
 /// Anything else is a <see cref="UsageException"/> — the parser is intentionally
 /// closed so silent typos never reach the step engine.
@@ -315,10 +318,20 @@ public static class CommandLineParser
     /// install mode — a required parameter (no default) left unset.
     /// </exception>
     /// <exception cref="ArgumentException">The schema itself is malformed (duplicate names).</exception>
-    public static ParsedCommandLine Parse(IReadOnlyList<string> args, IReadOnlyList<ParameterDefinition> schema)
+    public static ParsedCommandLine Parse(
+        IReadOnlyList<string> args,
+        IReadOnlyList<ParameterDefinition> schema,
+        IReadOnlyCollection<string>? customOptions = null)
     {
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(schema);
+
+        // P10 (gap G11): the app-defined custom component names accepted in the
+        // namespaced `/Poption.<name>=value` form. Empty when the blob declares no
+        // custom component (a bare token that isn't a param or built-in still errors).
+        var customSet = customOptions is null
+            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(customOptions, StringComparer.OrdinalIgnoreCase);
 
         // Build a case-insensitive lookup over the schema, validating uniqueness.
         var byName = new Dictionary<string, ParameterDefinition>(StringComparer.OrdinalIgnoreCase);
@@ -480,9 +493,10 @@ public static class CommandLineParser
             }
 
             // /PName=Value — declared parameter or built-in option override.
+            // /Poption.Name=Value — namespaced app-defined custom component (P10).
             if (body.Length >= 1 && (body[0] == 'P' || body[0] == 'p'))
             {
-                ParsePValue(rawArg, body.Substring(1), byName, values, options);
+                ParsePValue(rawArg, body.Substring(1), byName, values, options, customSet);
                 continue;
             }
 
@@ -531,12 +545,20 @@ public static class CommandLineParser
         };
     }
 
+    // P10: the namespace prefix for app-defined custom component overrides —
+    // `/Poption.<name>=value`. Namespacing keeps a custom component name from
+    // colliding with a same-named declared parameter (`/P<name>` still binds the
+    // parameter). The stored key keeps the full `option.<name>` so the audit
+    // rendering re-emits the exact token and StepContext resolves the same key.
+    private const string CustomOptionPrefix = "option.";
+
     private static void ParsePValue(
         string rawArg,
         string nameEqValue,
         Dictionary<string, ParameterDefinition> byName,
         Dictionary<string, string> values,
-        Dictionary<string, string> options)
+        Dictionary<string, string> options,
+        HashSet<string> customOptions)
     {
         var eq = nameEqValue.IndexOf('=', StringComparison.Ordinal);
         if (eq <= 0)
@@ -547,6 +569,23 @@ public static class CommandLineParser
 
         var inputName = nameEqValue.Substring(0, eq);
         var value = nameEqValue.Substring(eq + 1);
+
+        // Namespaced custom-component override: /Poption.<name>=value (P10). Checked
+        // before the parameter table so a component and a param can share a name.
+        if (inputName.StartsWith(CustomOptionPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            var bare = inputName.Substring(CustomOptionPrefix.Length);
+            if (bare.Length == 0 || !customOptions.Contains(bare))
+            {
+                throw new UsageException(
+                    $"'{inputName}' is not a declared custom component (offending token: '{rawArg}')");
+            }
+
+            // Store under the full namespaced key so AuditSafeRendering re-emits the
+            // exact `/Poption.<name>` token and StepContext looks it up the same way.
+            options[CustomOptionPrefix + bare] = value;
+            return;
+        }
 
         if (byName.TryGetValue(inputName, out var def))
         {

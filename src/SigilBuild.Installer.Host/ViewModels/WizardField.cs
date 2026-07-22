@@ -506,12 +506,23 @@ public sealed class CustomScreenViewModel
 /// </summary>
 public sealed class OptionItemViewModel : INotifyPropertyChanged
 {
-    public OptionItemViewModel(InstallerOptionComponent component)
+    public OptionItemViewModel(
+        InstallerOptionComponent component, IReadOnlyList<string>? preferences = null)
     {
         ArgumentNullException.ThrowIfNull(component);
         Name = component.Name;
         IsLocked = component.Locked;
-        Label = LabelFor(component.Name, SessionLanguage.Current);
+        // P10 (gap G11): a custom component carries its own localizable label /
+        // description in the blob; a built-in resolves its caption from the wizard
+        // string catalog. Resolve the custom text against the SAME preference list
+        // the declared screens use (App wires session.LanguagePreferences), falling
+        // back to the resolved chrome language.
+        Label = component.Custom && component.Label is not null
+            ? Resolve(component.Label, preferences)
+            : LabelFor(component.Name, SessionLanguage.Current);
+        Description = component.Custom && component.Description is not null
+            ? Resolve(component.Description, preferences)
+            : null;
         _isChecked = component.Default;
     }
 
@@ -520,6 +531,12 @@ public sealed class OptionItemViewModel : INotifyPropertyChanged
 
     /// <summary>The human-readable checkbox caption.</summary>
     public string Label { get; }
+
+    /// <summary>P10: optional secondary caption for a custom component; <c>null</c> for a built-in or a component with no description.</summary>
+    public string? Description { get; }
+
+    /// <summary>P10: whether this component has a non-empty <see cref="Description"/> to render.</summary>
+    public bool HasDescription => !string.IsNullOrEmpty(Description);
 
     /// <summary>True for a <c>locked</c> component: rendered disabled, always applied at its default.</summary>
     public bool IsLocked { get; }
@@ -543,9 +560,9 @@ public sealed class OptionItemViewModel : INotifyPropertyChanged
         }
     }
 
-    // The four known built-in components get catalog keys. An unknown,
-    // author-supplied component name falls back to itself (P10's job to
-    // localize, not P9's) — deliberately kept, not a gap.
+    // The four known built-in components get catalog keys. A custom component is
+    // localized from its own manifest-supplied label (P10, gap G11); any other
+    // unknown name falls back to itself.
     private static string LabelFor(string name, Lang lang) => name switch
     {
         "desktop_shortcut" => Strings.OptionsDesktopShortcut(lang),
@@ -554,6 +571,21 @@ public sealed class OptionItemViewModel : INotifyPropertyChanged
         "file_associations" => Strings.OptionsFileAssociations(lang),
         _ => name,
     };
+
+    /// <summary>
+    /// Resolve a custom component's localizable text (P10) against the ordered
+    /// language-preference list the wizard resolved (installer.language -&gt; /lang
+    /// -&gt; OS list -&gt; en), falling back to the resolved chrome language when no
+    /// list was supplied. Mirrors how declared screen titles resolve.
+    /// </summary>
+    private static string Resolve(LocalizedText text, IReadOnlyList<string>? preferences)
+    {
+        var prefs = preferences is { Count: > 0 }
+            ? preferences
+            : new[] { SessionLanguage.Current.ToString().ToLowerInvariant() };
+        var tag = LanguageResolver.Match(prefs, new List<string>(text.Values.Keys));
+        return text.Values.TryGetValue(tag, out var value) ? value : text.English;
+    }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 

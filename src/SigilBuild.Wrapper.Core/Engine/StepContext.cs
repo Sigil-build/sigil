@@ -259,6 +259,22 @@ public sealed class StepContext
         {
             foreach (var opt in options)
             {
+                // P10 (gap G11): a custom component with a `when` gate that evaluates
+                // false is not applicable to this run — its option resolves off
+                // (hiding the row in the wizard and skipping any step it gates),
+                // regardless of default / checkbox / CLI. A malformed/erroring `when`
+                // fails open (applicable), matching the wizard's fail-open row policy.
+                if (opt.Custom && !string.IsNullOrWhiteSpace(opt.When) && !EvaluateGate(opt.When!, dict))
+                {
+                    dict["option." + opt.Name] = false;
+                    continue;
+                }
+
+                // A custom component's CLI override is namespaced under `option.<name>`
+                // (so it never collides with a same-named parameter); a built-in's is
+                // the bare `<name>`. Both live in parsed.Options keyed exactly as typed.
+                var cliKey = opt.Custom ? "option." + opt.Name : opt.Name;
+
                 bool value;
                 if (opt.Locked)
                 {
@@ -268,7 +284,7 @@ public sealed class StepContext
                 {
                     value = g;
                 }
-                else if (parsed.Options.TryGetValue(opt.Name, out var cli) && bool.TryParse(cli, out var cliB))
+                else if (parsed.Options.TryGetValue(cliKey, out var cli) && bool.TryParse(cli, out var cliB))
                 {
                     value = cliB;
                 }
@@ -288,6 +304,29 @@ public sealed class StepContext
         VarResolver.Populate(blob.Vars, dict, new Expressions.Evaluator(), secretIds, secrets);
 
         return new StepContext(dict, payloadRoot, secrets, layout.Scope, installDir, blob.AppName, blob.AppId);
+    }
+
+    /// <summary>
+    /// Evaluate a custom component's applicability <c>when</c> (P10) against the
+    /// base identifiers seeded so far. Runs before <c>installer.vars</c> are
+    /// populated, so a component's <c>when</c> may reference <c>param.*</c> /
+    /// <c>scope</c> / <c>system.*</c> / prior <c>option.*</c> but not <c>var.*</c>
+    /// (a v1 limitation). Fails open (applicable) on a malformed / erroring
+    /// expression, matching the wizard's fail-open row-visibility policy.
+    /// </summary>
+    private static bool EvaluateGate(
+        string expression, System.Collections.Generic.IReadOnlyDictionary<string, object?> values)
+    {
+        try
+        {
+            return new Expressions.Evaluator().EvaluateBool(expression, values);
+        }
+#pragma warning disable CA1031 // Fail-open: a bad `when` must not hide the component or crash the run.
+        catch (System.Exception)
+        {
+            return true;
+        }
+#pragma warning restore CA1031
     }
 
     /// <summary>

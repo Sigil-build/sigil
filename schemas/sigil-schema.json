@@ -131,6 +131,41 @@
         }
       ]
     },
+    "CustomComponent": {
+      "type": "object",
+      "description": "An app-defined custom option component (P10, gap G11) — the declarative equivalent of an Inno Setup [Tasks] entry. Generates no install step of its own; it surfaces as a checkbox that seeds option.<name> in the expression engine, which the author references from the `when` of the steps they want it to gate. Overridden on the CLI via the namespaced /Poption.<name>=true|false form.",
+      "required": ["name", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "description": "The component key — a bare identifier, unique among components and not colliding with a built-in component or a declared parameter (SIG0300). Referenced as option.<name> in step `when` clauses."
+        },
+        "label": {
+          "$ref": "#/definitions/LocalizedText",
+          "description": "The checkbox caption (localizable — a plain string or an { en: ..., de: ... } map)."
+        },
+        "description": {
+          "$ref": "#/definitions/LocalizedText",
+          "description": "Optional secondary caption shown under the checkbox (localizable)."
+        },
+        "default": {
+          "type": "boolean",
+          "default": false,
+          "description": "The checkbox's initial (checked) state."
+        },
+        "locked": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true the row renders disabled and is always applied at its default; a CLI override is ignored (logged)."
+        },
+        "when": {
+          "type": "string",
+          "description": "Optional applicability gate (a `when`-grammar expression). When it evaluates false the row is hidden and option.<name> resolves to false. May reference param.* / scope / system.* but not var.* (v1)."
+        }
+      }
+    },
     "Prerequisite": {
       "type": "object",
       "description": "A single prerequisite unit (P5, gap G6): detect → acquire → run → re-detect. Not journaled; never rolled back.",
@@ -479,13 +514,18 @@
         },
         "options": {
           "type": "object",
-          "description": "Built-in configurable installer components (T8).",
+          "description": "Built-in configurable installer components (T8) plus app-defined custom components (P10, gap G11).",
           "additionalProperties": false,
           "properties": {
             "desktop_shortcut": { "$ref": "#/definitions/InstallerOption" },
             "start_menu": { "$ref": "#/definitions/InstallerOption" },
             "add_to_path": { "$ref": "#/definitions/InstallerOption" },
-            "file_associations": { "$ref": "#/definitions/FileAssociationOption" }
+            "file_associations": { "$ref": "#/definitions/FileAssociationOption" },
+            "components": {
+              "type": "array",
+              "description": "App-defined custom components (P10, gap G11) — the Inno [Tasks] equivalent. Each generates NO install step of its own; it exists only as option.<name> in the expression engine, gating arbitrary steps / step groups via their `when`. Rendered as checkboxes on the Options screen after the built-ins, in declared order.",
+              "items": { "$ref": "#/definitions/CustomComponent" }
+            }
           }
         },
         "screens": {

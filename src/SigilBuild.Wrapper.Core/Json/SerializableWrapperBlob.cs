@@ -575,15 +575,37 @@ internal sealed record SerializableOptionComponent
     public bool Default { get; init; }
     public bool Locked { get; init; }
 
+    // P10 (gap G11): app-defined custom components. Custom marks the entry as one
+    // (built-ins leave it false); Label/Description carry the localizable captions
+    // (tag -> text); When is the optional applicability gate. All default to
+    // absent, so a built-in component round-trips to the same three-field shape.
+    public bool Custom { get; init; }
+    public Dictionary<string, string>? Label { get; init; }
+    public Dictionary<string, string>? Description { get; init; }
+    public string? When { get; init; }
+
     public static InstallerOptionComponent ToComponent(SerializableOptionComponent s)
     {
         ArgumentNullException.ThrowIfNull(s);
-        return new InstallerOptionComponent(s.Name, s.Default, s.Locked);
+        return new InstallerOptionComponent(
+            s.Name, s.Default, s.Locked, s.Custom,
+            s.Label is null ? null : new LocalizedText(s.Label),
+            s.Description is null ? null : new LocalizedText(s.Description),
+            s.When);
     }
 
     public static SerializableOptionComponent FromComponent(InstallerOptionComponent c)
     {
         ArgumentNullException.ThrowIfNull(c);
-        return new SerializableOptionComponent { Name = c.Name, Default = c.Default, Locked = c.Locked };
+        return new SerializableOptionComponent
+        {
+            Name = c.Name,
+            Default = c.Default,
+            Locked = c.Locked,
+            Custom = c.Custom,
+            Label = c.Label is null ? null : new Dictionary<string, string>(c.Label.Values),
+            Description = c.Description is null ? null : new Dictionary<string, string>(c.Description.Values),
+            When = c.When,
+        };
     }
 }

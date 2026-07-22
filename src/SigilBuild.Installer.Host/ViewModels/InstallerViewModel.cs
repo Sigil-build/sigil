@@ -390,15 +390,58 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     /// render disabled (always applied). Only the interactive wizard consults this —
     /// the headless <c>/silent</c> path resolves options to their manifest defaults.
     /// </summary>
-    public void LoadOptions(IReadOnlyList<InstallerOptionComponent> options)
+    public void LoadOptions(
+        IReadOnlyList<InstallerOptionComponent> options,
+        IReadOnlyList<string>? preferences = null)
     {
+        // P10 (gap G11): custom components carry their own localizable label, so
+        // resolve against the same preference list the declared screens use
+        // (LoadScreens set _screenLanguagePreferences before the host calls this).
+        var prefs = preferences is { Count: > 0 } ? preferences : _screenLanguagePreferences;
+
         OptionItems.Clear();
         foreach (var component in options ?? Array.Empty<InstallerOptionComponent>())
         {
-            OptionItems.Add(new OptionItemViewModel(component));
+            // P10: a custom component with a `when` that evaluates false is not
+            // applicable to this run — its row is hidden (and the engine seeds
+            // option.<name> = false to match). Built-ins and gate-less customs
+            // always render. A malformed / erroring `when` fails open (row shown).
+            if (component.Custom && !string.IsNullOrWhiteSpace(component.When)
+                && !EvaluateOptionWhen(component.When!))
+            {
+                continue;
+            }
+            OptionItems.Add(new OptionItemViewModel(component, prefs));
         }
         _hasOptions = OptionItems.Count > 0;
         RebuildFlow();
+    }
+
+    /// <summary>
+    /// Evaluate a custom component's applicability <c>when</c> (P10) for row
+    /// visibility, against the current parameter values plus each component's
+    /// default <c>option.*</c> value. Fails open (row shown) on a malformed /
+    /// erroring expression, matching the declared-screen <c>when</c> policy. This is
+    /// a best-effort UI gate at Options-screen time; the engine's
+    /// <c>StepContext.From</c> is the authoritative gate for the generated steps.
+    /// </summary>
+    private bool EvaluateOptionWhen(string expression)
+    {
+        var ctx = BuildExpressionContext();
+        foreach (var item in OptionItems)
+        {
+            ctx["option." + item.Name] = item.IsChecked;
+        }
+        try
+        {
+            return new Evaluator().EvaluateBool(expression, ctx);
+        }
+#pragma warning disable CA1031 // Fail-open: a bad `when` must not hide the row or crash the wizard.
+        catch (Exception)
+        {
+            return true;
+        }
+#pragma warning restore CA1031
     }
 
     /// <summary>

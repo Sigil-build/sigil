@@ -107,6 +107,54 @@ public class ExeWrapperOptionStepTests
     }
 
     [Fact]
+    public void Custom_component_is_carried_but_generates_no_step()
+    {
+        var manifest = ManifestWith(new InstallerOptions(
+            DesktopShortcut: new InstallerOption(Enabled: true, Default: true),
+            Components: new[]
+            {
+                new CustomComponent(
+                    "sample_data", LocalizedText.Plain("Install sample data"),
+                    Default: true, Locked: false,
+                    Description: LocalizedText.Plain("Copies a starter project"),
+                    When: "param.edition == 'pro'"),
+            }));
+
+        var s = Deserialize(ExeWrapperPackager.BuildBlobBytes(manifest, string.Empty));
+
+        // The custom component travels in the blob, flagged Custom, after the built-in.
+        var comp = s.Options.Single(o => o.Name == "sample_data");
+        comp.Custom.Should().BeTrue();
+        comp.Default.Should().BeTrue();
+        comp.Label!["en"].Should().Be("Install sample data");
+        comp.Description!["en"].Should().Be("Copies a starter project");
+        comp.When.Should().Be("param.edition == 'pro'");
+
+        // It generates NO install step of its own — no step is gated on it.
+        s.InstallSteps.Should().NotContain(step => step.When == "option.sample_data");
+
+        // Declared order: built-ins first, then customs.
+        s.Options.Select(o => o.Name).Should().Equal("desktop_shortcut", "sample_data");
+    }
+
+    [Fact]
+    public void Custom_components_only_still_carry_in_the_blob()
+    {
+        var manifest = ManifestWith(new InstallerOptions(
+            Components: new[]
+            {
+                new CustomComponent("alpha", LocalizedText.Plain("Alpha")),
+                new CustomComponent("bravo", LocalizedText.Plain("Bravo"), Default: true),
+            }));
+
+        var s = Deserialize(ExeWrapperPackager.BuildBlobBytes(manifest, string.Empty));
+
+        s.Options.Select(o => o.Name).Should().Equal("alpha", "bravo");
+        s.Options.Should().OnlyContain(o => o.Custom);
+        s.InstallSteps.Should().NotContain(step => step.When != null && step.When.StartsWith("option."));
+    }
+
+    [Fact]
     public void No_options_block_generates_no_option_steps()
     {
         var manifest = new SigilManifest(

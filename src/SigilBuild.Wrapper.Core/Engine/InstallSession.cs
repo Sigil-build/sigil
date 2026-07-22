@@ -190,8 +190,62 @@ public sealed class InstallSession
     {
         ArgumentNullException.ThrowIfNull(args);
         var blob = WrapperBlob.LoadFromSelf();
-        var parsed = CommandLineParser.Parse(args, blob.Parameters);
+        var parsed = CommandLineParser.Parse(args, blob.Parameters, CustomOptionNames(blob));
         return Build(blob, parsed, DefaultStateResolver);
+    }
+
+    /// <summary>
+    /// P10 (gap G11): write a log line for each locked component that a CLI
+    /// <c>/P</c> override tried to change — the override is ignored (the component
+    /// stays at its default), so the author gets told rather than silently confused.
+    /// The override key is the bare <c>&lt;name&gt;</c> for a built-in and the
+    /// namespaced <c>option.&lt;name&gt;</c> for a custom component (mirroring how the
+    /// CLI parser stores it).
+    /// </summary>
+    private void WarnIgnoredLockedOverrides()
+    {
+        if (_blob.Options is null || _parsed.Options.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var opt in _blob.Options)
+        {
+            if (!opt.Locked)
+            {
+                continue;
+            }
+
+            var cliKey = opt.Custom ? "option." + opt.Name : opt.Name;
+            if (_parsed.Options.ContainsKey(cliKey))
+            {
+                _log?.WriteLine(
+                    $"option '{opt.Name}': locked — ignoring override attempt (stays at default {opt.Default})");
+            }
+        }
+    }
+
+    /// <summary>
+    /// P10 (gap G11): the declared app-defined custom component names, handed to the
+    /// CLI parser so the namespaced <c>/Poption.&lt;name&gt;=value</c> form validates
+    /// against the closed set. <c>null</c> when the blob declares no custom component.
+    /// </summary>
+    private static List<string>? CustomOptionNames(WrapperBlob blob)
+    {
+        if (blob.Options is null)
+        {
+            return null;
+        }
+
+        var names = new List<string>();
+        foreach (var opt in blob.Options)
+        {
+            if (opt.Custom)
+            {
+                names.Add(opt.Name);
+            }
+        }
+        return names.Count == 0 ? null : names;
     }
 
     /// <summary>
@@ -657,6 +711,11 @@ public sealed class InstallSession
         // P7: ensure the /LOG sink is open (idempotent — the headless path may have
         // opened it already; the GUI path opens it here).
         EnsureLog();
+
+        // P10 (gap G11): a locked component is always applied at its default, so a
+        // CLI override for it is silently ineffective — surface that in the log
+        // rather than letting the author wonder why /P had no effect.
+        WarnIgnoredLockedOverrides();
 
         // P3 downgrade guard (defense-in-depth): the headless path already exits with
         // DowngradeBlockedExitCode and the wizard routes to a notice screen instead of

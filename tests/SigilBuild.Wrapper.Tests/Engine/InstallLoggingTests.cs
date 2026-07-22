@@ -149,6 +149,43 @@ public sealed class InstallLoggingTests
         log.Should().Contain("exit code: 1");
     }
 
+    // ── P10 (gap G11): a locked component ignores an override, and logs it ────
+
+    [Fact]
+    public async Task Locked_component_override_attempt_is_ignored_and_logged()
+    {
+        using var tmp = new TempDir();
+        var logPath = Path.Combine(tmp.Path, "locked.log");
+        var gatedDir = Path.Combine(tmp.Path, "gated");
+
+        var blob = new WrapperBlob(
+            AppId: "com.acme.LockedOptionTest",
+            Parameters: Array.Empty<ParameterDefinition>(),
+            InstallSteps: new InstallStep[]
+            {
+                // Gated on a LOCKED option whose default is true → the step must run
+                // even though the CLI tried to force the option off.
+                new InstallStep.DirectoryCreate(
+                    "mk", gatedDir, When: "option.add_to_path", OnFailure.Fail),
+            },
+            PreInstall: Array.Empty<InstallStep>(),
+            PostInstall: Array.Empty<InstallStep>(),
+            UpdateSteps: Array.Empty<InstallStep>(),
+            Options: new[] { new InstallerOptionComponent("add_to_path", Default: true, Locked: true) });
+
+        var parsed = CommandLineParser.Parse(
+            new[] { "/silent", "/Padd_to_path=false", $"/LOG={logPath}" }, blob.Parameters);
+        var session = InstallSession.ForTesting(blob, parsed);
+
+        var code = await session.RunHeadlessAsync(new StringWriter(), new StringWriter());
+
+        code.Should().Be(0);
+        Directory.Exists(gatedDir).Should().BeTrue("a locked component stays at its default (on) despite the override");
+        var log = File.ReadAllText(logPath);
+        log.Should().Contain("add_to_path", "the ignored override is logged by component name");
+        log.Should().Contain("locked", "the log states the override was ignored because the component is locked");
+    }
+
     // ── Secret redaction reaches the log file even via a resolved error path ──
 
     [Fact]

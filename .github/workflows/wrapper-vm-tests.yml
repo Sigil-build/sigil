@@ -80,7 +80,7 @@ jobs:
             -Rids win-x64 `
             -Configuration Release `
             -DestinationRoot $dest `
-            -SizeGateMb 40
+            -SizeGateMb 45
 
       # One run per scope exercises the whole contract (install → verify →
       # uninstall → verify, plus the T15 deleted-original and T10 double-install

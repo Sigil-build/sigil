@@ -80,9 +80,3 @@ Options:
   -?, -h, --help                    Show help and usage information
 ```
 
----
-
-## Setup.exe runtime flags
-
-Setup.exe runtime flags, including the `/lang` language-selection flag and `/?` help flag, are documented in the [Localization guide](guides/localization.md).
-

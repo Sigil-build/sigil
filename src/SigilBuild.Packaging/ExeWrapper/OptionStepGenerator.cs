@@ -136,6 +136,23 @@ internal static class OptionStepGenerator
             }
         }
 
+        // P10 (gap G11): app-defined custom components. They generate NO step of
+        // their own — a custom component exists only as `option.<name>` in the
+        // expression engine, gating steps the author wrote (via their `when`). They
+        // are appended AFTER the built-ins, in declared order, so the Options screen
+        // renders them last and the blob stays deterministic.
+        foreach (var custom in options.Components ?? Array.Empty<CustomComponent>())
+        {
+            components.Add(new InstallerOptionComponent(
+                Name: custom.Name,
+                Default: custom.Default,
+                Locked: custom.Locked,
+                Custom: true,
+                Label: custom.Label,
+                Description: custom.Description,
+                When: custom.When));
+        }
+
         return (steps, components);
     }
 

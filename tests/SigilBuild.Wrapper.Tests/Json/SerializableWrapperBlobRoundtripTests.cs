@@ -211,6 +211,49 @@ public class SerializableWrapperBlobRoundtripTests
     }
 
     [Fact]
+    public void Custom_and_builtin_option_components_roundtrip_through_the_blob()
+    {
+        // P10: a built-in and a custom component survive
+        // WrapperBlob -> DTO -> JSON (source-gen) -> DTO -> WrapperBlob, preserving
+        // the custom flag, localized label/description, and the `when` gate.
+        var blob = new WrapperBlob(
+            AppId: "com.acme.Studio",
+            Parameters: Array.Empty<ParameterDefinition>(),
+            InstallSteps: Array.Empty<InstallStep>(),
+            PreInstall: Array.Empty<InstallStep>(),
+            PostInstall: Array.Empty<InstallStep>(),
+            UpdateSteps: Array.Empty<InstallStep>(),
+            Options: new[]
+            {
+                new InstallerOptionComponent("desktop_shortcut", Default: true, Locked: false),
+                new InstallerOptionComponent(
+                    "sample_data", Default: true, Locked: false, Custom: true,
+                    Label: new LocalizedText(new Dictionary<string, string> { ["en"] = "Sample data", ["de"] = "Beispieldaten" }),
+                    Description: LocalizedText.Plain("Copies a starter project"),
+                    When: "param.edition == 'pro'"),
+            });
+
+        var reconstructed = SerializableWrapperBlob.ToWrapperBlob(
+            RoundTrip(SerializableWrapperBlob.FromWrapperBlob(blob)));
+
+        reconstructed.Options.Should().NotBeNull();
+        reconstructed.Options!.Should().HaveCount(2);
+
+        var builtin = reconstructed.Options![0];
+        builtin.Name.Should().Be("desktop_shortcut");
+        builtin.Custom.Should().BeFalse();
+        builtin.Label.Should().BeNull("a built-in carries no label in the blob");
+
+        var custom = reconstructed.Options![1];
+        custom.Name.Should().Be("sample_data");
+        custom.Custom.Should().BeTrue();
+        custom.Label!.Values["en"].Should().Be("Sample data");
+        custom.Label.Values["de"].Should().Be("Beispieldaten");
+        custom.Description!.English.Should().Be("Copies a starter project");
+        custom.When.Should().Be("param.edition == 'pro'");
+    }
+
+    [Fact]
     public void Lifecycle_hooks_and_run_after_install_roundtrip()
     {
         // P2: hooks + launch target survive WrapperBlob -> Serializable -> wire ->

@@ -118,7 +118,7 @@ Source: `schemas/sigil-schema.json` (JSON Schema, draft-07).
 | `install_dir` | string | - | - | Optional install-dir override; may reference {app.*} / {scope_root} tokens (T13). |
 | `license` | LocalizedText | - | - | _(undocumented)_ |
 | `language` | string | - | - | Optional fixed installer language tag (P9, gap G10) — the first link in the language-preference chain (installer.language -> /lang -> OS list -> en). An invalid tag is diagnosed (SIG0291). |
-| `options` | object | - | - | Built-in configurable installer components (T8). |
+| `options` | object | - | - | Built-in configurable installer components (T8) plus app-defined custom components (P10, gap G11). |
 | `screens` | array | - | - | Declared custom wizard screens over parameters (T9). |
 | `vars` | object | - | - | Declarative variables (P1, gap G1): each entry is `name: <expression>` evaluated once at install-session start, in dependency order, and exposed as var.<name> in `when` expressions / screen-field defaults and as a {var.<name>} brace token in step paths and args. Expressions use the closed `when` grammar plus the read-only data-retrieval functions registry_read/env/file_version/installed_version; a var referencing a secret parameter inherits secretness. A reference cycle is a pack error (SIG0270). |
 | `hooks` | object | - | - | Lifecycle hooks (P2, gap G2). Each phase is an ordered list of ordinary step records (typically run_program) that run OUTSIDE the rollback journal. WARNING: hooks have NO rollback obligations — their side effects are never recorded and never undone. A hook is governed only by its own `on_failure`: `fail` aborts the operation (the default for pre_install/pre_uninstall — the run stops before the journal opens / before the uninstall replays); `continue` logs and proceeds (the default for post_install/post_uninstall — the install is already committed and cannot be rolled back). Hook args may use {var.*} / {install_dir} tokens. |
@@ -145,6 +145,7 @@ Source: `schemas/sigil-schema.json` (JSON Schema, draft-07).
 | `start_menu` | InstallerOption | - | - | _(undocumented)_ |
 | `add_to_path` | InstallerOption | - | - | _(undocumented)_ |
 | `file_associations` | FileAssociationOption | - | - | _(undocumented)_ |
+| `components` | array | - | - | App-defined custom components (P10, gap G11) — the Inno [Tasks] equivalent. Each generates NO install step of its own; it exists only as option.<name> in the expression engine, gating arbitrary steps / step groups via their `when`. Rendered as checkboxes on the Options screen after the built-ins, in declared order. |
 
 ## `installer.hooks`
 
@@ -210,6 +211,17 @@ Built-in configurable installer component: shorthand boolean or an object.
 ## Definition: `FileAssociationOption`
 
 file_associations component: shorthand boolean or an object with extensions.
+
+## Definition: `CustomComponent`
+
+| Property | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `name` | string | yes | - | The component key — a bare identifier, unique among components and not colliding with a built-in component or a declared parameter (SIG0300). Referenced as option.<name> in step `when` clauses. |
+| `label` | LocalizedText | yes | - | The checkbox caption (localizable — a plain string or an { en: ..., de: ... } map). |
+| `description` | LocalizedText | - | - | Optional secondary caption shown under the checkbox (localizable). |
+| `default` | boolean | - | `False` | The checkbox's initial (checked) state. |
+| `locked` | boolean | - | `False` | When true the row renders disabled and is always applied at its default; a CLI override is ignored (logged). |
+| `when` | string | - | - | Optional applicability gate (a `when`-grammar expression). When it evaluates false the row is hidden and option.<name> resolves to false. May reference param.* / scope / system.* but not var.* (v1). |
 
 ## Definition: `Prerequisite`
 

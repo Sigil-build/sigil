@@ -60,6 +60,12 @@ public static class DiagnosticCodes
     public const string LocalizedTextMissingEnglish = "SIG0290";
     public const string InvalidLanguageTag = "SIG0291";
 
+    // SIG0300 — installer.options.components: block (P10, gap G11, custom components)
+    // Emitted (Error) when a custom component's name is not a bare identifier,
+    // collides with a built-in component or a declared parameter, duplicates
+    // another custom component, or the component omits its required label.
+    public const string InvalidCustomComponent = "SIG0300";
+
     // SIG0292 — a LocalizedText map's per-language value is not a plain scalar
     // (e.g. a nested sequence/mapping under a language key). Fatal for the same
     // reason as SIG0290: the value silently collapses to "" otherwise, which is

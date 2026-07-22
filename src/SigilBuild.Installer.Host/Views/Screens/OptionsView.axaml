@@ -15,10 +15,18 @@
     <ItemsControl ItemsSource="{Binding OptionItems}">
       <ItemsControl.ItemTemplate>
         <DataTemplate x:DataType="vm:OptionItemViewModel">
-          <CheckBox Margin="0,4"
-                    Content="{Binding Label}"
-                    IsChecked="{Binding IsChecked, Mode=TwoWay}"
-                    IsEnabled="{Binding IsEnabled}" />
+          <!-- P10 (gap G11): built-ins + app-defined custom components share this
+               row. A custom component may carry an optional description, shown
+               under the checkbox caption when present. -->
+          <StackPanel Margin="0,4">
+            <CheckBox Content="{Binding Label}"
+                      IsChecked="{Binding IsChecked, Mode=TwoWay}"
+                      IsEnabled="{Binding IsEnabled}" />
+            <TextBlock Margin="28,0,0,0" FontSize="12" TextWrapping="Wrap"
+                       Foreground="{DynamicResource TextMutBrush}"
+                       IsVisible="{Binding HasDescription}"
+                       Text="{Binding Description}" />
+          </StackPanel>
         </DataTemplate>
       </ItemsControl.ItemTemplate>
     </ItemsControl>

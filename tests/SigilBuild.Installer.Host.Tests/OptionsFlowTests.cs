@@ -84,6 +84,85 @@ public sealed class OptionsFlowTests
         collected["add_to_path"].Should().BeTrue();
     }
 
+    // ── P10 (gap G11): app-defined custom components ─────────────────────────
+
+    private static InstallerOptionComponent CustomComp(
+        string name, LocalizedText label, bool @default = false, bool locked = false,
+        LocalizedText? description = null, string? when = null) =>
+        new(name, @default, locked, Custom: true, Label: label, Description: description, When: when);
+
+    [Fact]
+    public void Custom_component_renders_after_builtins_with_its_label()
+    {
+        var vm = new InstallerViewModel(new BrandTokens());
+        vm.LoadOptions(new[]
+        {
+            new InstallerOptionComponent("desktop_shortcut", Default: true, Locked: false),
+            CustomComp("sample_data", LocalizedText.Plain("Install sample data"), @default: true),
+        });
+
+        vm.OptionItems.Select(o => o.Name).Should().Equal("desktop_shortcut", "sample_data");
+        var custom = vm.OptionItems.Single(o => o.Name == "sample_data");
+        custom.Label.Should().Be("Install sample data");
+        custom.IsChecked.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Custom_component_label_resolves_to_the_session_language_preference()
+    {
+        var vm = new InstallerViewModel(new BrandTokens());
+        var label = new LocalizedText(new System.Collections.Generic.Dictionary<string, string>
+        {
+            ["en"] = "Sample data",
+            ["de"] = "Beispieldaten",
+        });
+
+        vm.LoadOptions(new[] { CustomComp("sample_data", label) }, new[] { "de", "en" });
+
+        vm.OptionItems.Single().Label.Should().Be("Beispieldaten");
+    }
+
+    [Fact]
+    public void Custom_component_exposes_its_description()
+    {
+        var vm = new InstallerViewModel(new BrandTokens());
+        vm.LoadOptions(new[]
+        {
+            CustomComp("sample_data", LocalizedText.Plain("Sample data"),
+                description: LocalizedText.Plain("Copies a starter project")),
+        });
+
+        var custom = vm.OptionItems.Single();
+        custom.Description.Should().Be("Copies a starter project");
+        custom.HasDescription.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Custom_component_with_a_false_when_is_hidden()
+    {
+        var vm = new InstallerViewModel(new BrandTokens());
+        vm.LoadOptions(new[]
+        {
+            CustomComp("pro_stuff", LocalizedText.Plain("Pro extras"), when: "false"),
+            CustomComp("always", LocalizedText.Plain("Always")),
+        });
+
+        vm.OptionItems.Select(o => o.Name).Should().Equal(new[] { "always" },
+            "a component whose `when` is false is not applicable and its row is hidden");
+    }
+
+    [Fact]
+    public void Custom_component_with_a_true_when_is_shown()
+    {
+        var vm = new InstallerViewModel(new BrandTokens());
+        vm.LoadOptions(new[]
+        {
+            CustomComp("pro_stuff", LocalizedText.Plain("Pro extras"), when: "true"),
+        });
+
+        vm.OptionItems.Should().ContainSingle(o => o.Name == "pro_stuff");
+    }
+
     [Fact]
     public void Options_sits_after_license_in_the_rail()
     {

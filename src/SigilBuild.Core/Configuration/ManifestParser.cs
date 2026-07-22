@@ -168,7 +168,7 @@ public static class ManifestParser
             // add_to_path, file_associations). Each is a shorthand true/false or an
             // object { enabled, default, locked, ...component keys }. Pack time turns
             // each ENABLED component into its gated install step(s).
-            Options: ParseOptions(GetMapping(node, "options")),
+            Options: ParseOptions(GetMapping(node, "options"), parameters, diagnostics, fileName),
             Screens: screens,
             // T14 / P9 (gap G10): capture the license path(s) only, as a
             // LocalizedText — a plain string or a `{en: ..., uk: ...}` map of
@@ -651,7 +651,11 @@ public static class ManifestParser
     /// built-in default: not declared, so nothing is generated). Returns
     /// <c>null</c> when the block is absent or declares no component.
     /// </summary>
-    private static InstallerOptions? ParseOptions(YamlMappingNode? node)
+    private static InstallerOptions? ParseOptions(
+        YamlMappingNode? node,
+        IReadOnlyDictionary<string, ParameterDefinition>? parameters,
+        List<Diagnostic> diagnostics,
+        string fileName)
     {
         if (node is null) return null;
 
@@ -659,13 +663,121 @@ public static class ManifestParser
         var startMenu = ParseBoolOption(node, "start_menu");
         var addToPath = ParseBoolOption(node, "add_to_path");
         var fileAssoc = ParseFileAssociationOption(node, "file_associations");
+        var components = ParseCustomComponents(
+            GetSequenceOfMappings(node, "components"), parameters, diagnostics, fileName);
 
-        if (desktop is null && startMenu is null && addToPath is null && fileAssoc is null)
+        if (desktop is null && startMenu is null && addToPath is null && fileAssoc is null
+            && components is null)
         {
             return null;
         }
 
-        return new InstallerOptions(desktop, startMenu, addToPath, fileAssoc);
+        return new InstallerOptions(desktop, startMenu, addToPath, fileAssoc, components);
+    }
+
+    // The four built-in component keys — reserved: a custom component may not
+    // reuse one (its own generated step would collide with the built-in's gate).
+    private static readonly HashSet<string> BuiltInComponentNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "desktop_shortcut", "start_menu", "add_to_path", "file_associations",
+    };
+
+    /// <summary>
+    /// Parse the <c>installer.options.components[]</c> sequence (P10, gap G11) —
+    /// app-defined custom components. Each entry is
+    /// <c>{ name, label, description?, default?, locked?, when? }</c>. Emits
+    /// <see cref="DiagnosticCodes.InvalidCustomComponent"/> (SIG0300, Error) for a
+    /// name that is not a bare identifier, collides with a built-in component or a
+    /// declared parameter, duplicates another custom component, or a component that
+    /// omits its required <c>label</c>. Declaration order is preserved. Returns
+    /// <c>null</c> when the sequence is absent or yields nothing usable.
+    /// </summary>
+    private static List<CustomComponent>? ParseCustomComponents(
+        List<YamlMappingNode>? nodes,
+        IReadOnlyDictionary<string, ParameterDefinition>? parameters,
+        List<Diagnostic> diagnostics,
+        string fileName)
+    {
+        if (nodes is null) return null;
+
+        var list = new List<CustomComponent>(nodes.Count);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var node in nodes)
+        {
+            var loc = new SourceLocation(fileName, (int)node.Start.Line, (int)node.Start.Column);
+            var name = GetScalar(node, "name") ?? string.Empty;
+
+            void Invalid(string message) => diagnostics.Add(new Diagnostic(
+                DiagnosticSeverity.Error,
+                DiagnosticCodes.InvalidCustomComponent,
+                message,
+                loc,
+                "https://docs.sigil.build/diagnostics/SIG0300"));
+
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                Invalid("installer.options.components[] entry is missing a 'name'");
+                continue;
+            }
+
+            var valid = true;
+            if (!IsBareIdentifier(name))
+            {
+                Invalid($"custom component name '{name}' must be a bare identifier ([A-Za-z_][A-Za-z0-9_]*)");
+                valid = false;
+            }
+            if (BuiltInComponentNames.Contains(name))
+            {
+                Invalid($"custom component name '{name}' collides with a built-in component");
+                valid = false;
+            }
+            if (parameters is not null && parameters.ContainsKey(name))
+            {
+                Invalid($"custom component name '{name}' collides with a declared parameter");
+                valid = false;
+            }
+            if (!seen.Add(name))
+            {
+                Invalid($"custom component name '{name}' is declared more than once");
+                valid = false;
+            }
+
+            var label = ParseLocalizedText(node, "label", loc, diagnostics);
+            if (label is null)
+            {
+                Invalid($"custom component '{name}' requires a 'label'");
+                valid = false;
+            }
+
+            if (!valid || label is null)
+            {
+                continue;
+            }
+
+            var description = ParseLocalizedText(node, "description", loc, diagnostics);
+            var when = GetScalar(node, "when");
+            list.Add(new CustomComponent(
+                Name: name,
+                Label: label,
+                Default: GetBool(node, "default", defaultValue: false),
+                Locked: GetBool(node, "locked", defaultValue: false),
+                Description: description,
+                When: string.IsNullOrWhiteSpace(when) ? null : when));
+        }
+
+        return list.Count == 0 ? null : list;
+    }
+
+    /// <summary>A bare (dot-free) identifier as the expression lexer accepts one: <c>[A-Za-z_][A-Za-z0-9_]*</c>.</summary>
+    private static bool IsBareIdentifier(string s)
+    {
+        if (s.Length == 0) return false;
+        if (!(char.IsAsciiLetter(s[0]) || s[0] == '_')) return false;
+        for (var i = 1; i < s.Length; i++)
+        {
+            if (!(char.IsAsciiLetterOrDigit(s[i]) || s[i] == '_')) return false;
+        }
+        return true;
     }
 
     /// <summary>

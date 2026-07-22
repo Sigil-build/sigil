@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Avalonia;
 using SigilBuild.Wrapper.Cli;
+using SigilBuild.Wrapper.Core.Localization;
 using SigilBuild.Wrapper.Engine;
 
 namespace SigilBuild.Installer.Host;
@@ -15,6 +16,13 @@ public static partial class Program
         if (args.Length == 1 && args[0] == "--version")
         {
             Console.WriteLine("SigilBuild.Installer.Host runtime (placeholder)");
+            return 0;
+        }
+
+        if (args.Length == 1 && (args[0] == "/?" || args[0].Equals("/help", StringComparison.OrdinalIgnoreCase)))
+        {
+            AttachParentConsole();
+            Console.WriteLine(HelpText.Render());
             return 0;
         }
 
@@ -31,6 +39,23 @@ public static partial class Program
             AttachParentConsole();
             Console.Error.WriteLine($"usage error: {ex.Message}");
             return 64;
+        }
+
+        // P9 (gap G10): resolve this session's chrome language now — installer.language
+        // (fixed) -> /lang -> the OS UI-language preference list -> en — and set
+        // SessionLanguage.Current. MUST run before ANY UI is constructed, including
+        // the elevated relaunch below (harmless: the elevated child re-resolves
+        // identically from the same blob + argv) and, further down, the pre-Avalonia
+        // single-instance MessageBoxW, itself a catalog string. The resolver depends
+        // only on the blob and Win32, never on Avalonia, so this ordering works.
+        session.ResolveSessionLanguage();
+        if (session.LanguageConflictNote is not null)
+        {
+            // Design §2.1: the manifest pin wins; the flag is ignored, not fatal
+            // (exit code stays 0). Also flushed into the /LOG sink (if requested)
+            // the first time it opens; this additionally records it in the
+            // wizard's always-on diagnostic log.
+            InstallerLog.Info(session.LanguageConflictNote);
         }
 
         // T12 — self-elevation. This MUST run before any scope-requiring work
@@ -56,9 +81,6 @@ public static partial class Program
         using var instanceLock = SetupInstanceLock.TryAcquire(session.AppId, session.ResolvedScope);
         if (instanceLock is null)
         {
-            const string alreadyRunning =
-                "Setup is already running.\n\nAnother copy of this installer is in progress. " +
-                "Finish or close it, then try again.";
             if (session.Silent)
             {
                 AttachParentConsole();
@@ -68,7 +90,14 @@ public static partial class Program
             else if (OperatingSystem.IsWindows())
             {
                 // A WinExe has no console, so the headed path needs a real notice.
-                _ = MessageBoxW(IntPtr.Zero, alreadyRunning, "Setup", MB_OK | MB_ICONINFORMATION);
+                // P9: catalog-driven — already_running.body / already_running.caption,
+                // resolved through the session language set above (before ANY UI,
+                // including this pre-Avalonia MessageBox).
+                _ = MessageBoxW(
+                    IntPtr.Zero,
+                    Strings.AlreadyRunningBody(SessionLanguage.Current),
+                    Strings.AlreadyRunningCaption(SessionLanguage.Current),
+                    MB_OK | MB_ICONINFORMATION);
             }
             return InstallSession.AlreadyRunningExitCode;
         }

@@ -1,6 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:SigilBuild.Installer.Host.ViewModels"
+        xmlns:loc="clr-namespace:SigilBuild.Wrapper.Core.Localization;assembly=SigilBuild.Wrapper.Core"
         x:Class="SigilBuild.Installer.Host.Views.UninstallWindow"
         x:DataType="vm:UninstallViewModel"
         Title="{Binding Brand.AppName}"
@@ -21,7 +22,7 @@
           <TextBlock Text="{Binding Brand.Publisher}" Foreground="{DynamicResource RailMutedBrush}" FontSize="13" />
         </StackPanel>
         <TextBlock DockPanel.Dock="Bottom"
-                   Text="{Binding Brand.AppVersion, StringFormat='Version {0}'}"
+                   Text="{Binding VersionLine}"
                    Foreground="{DynamicResource RailMutedBrush}" FontSize="12" />
       </DockPanel>
     </Border>
@@ -37,7 +38,7 @@
 
       <!-- Progress -->
       <StackPanel Spacing="16" VerticalAlignment="Center" IsVisible="{Binding IsProgress}">
-        <TextBlock FontSize="20" FontWeight="SemiBold" Text="Uninstalling…" />
+        <TextBlock FontSize="20" FontWeight="SemiBold" Text="{x:Static loc:S.UninstallProgress}" />
         <ProgressBar Maximum="1" Value="{Binding UninstallProgress}" Foreground="{DynamicResource AccentBrush}" />
         <TextBlock Text="{Binding UninstallCurrentItem}" Foreground="{DynamicResource TextMutBrush}" />
         <Border Background="{DynamicResource LogBgBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
@@ -77,9 +78,9 @@
 
       <!-- Failed -->
       <StackPanel Spacing="12" VerticalAlignment="Center" IsVisible="{Binding IsFailed}">
-        <TextBlock FontSize="20" FontWeight="SemiBold" Text="Uninstall failed" />
+        <TextBlock FontSize="20" FontWeight="SemiBold" Text="{x:Static loc:S.UninstallFailed}" />
         <TextBlock Text="{Binding ErrorMessage}" Foreground="{DynamicResource DangerTextBrush}" TextWrapping="Wrap" />
-        <TextBlock Text="Some components may not have been removed. You can try again from Add or Remove Programs."
+        <TextBlock Text="{x:Static loc:S.UninstallFailedBody}"
                    Foreground="{DynamicResource TextSecBrush}" TextWrapping="Wrap" />
       </StackPanel>
     </Panel>
@@ -88,11 +89,11 @@
     <Border Grid.Row="1" Grid.Column="1" BorderBrush="{DynamicResource FrameBrush}" BorderThickness="0,1,0,0" Padding="16,8">
       <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right">
         <!-- Confirm footer -->
-        <Button Content="Cancel" Click="OnCancelConfirm" IsVisible="{Binding IsConfirm}" />
-        <Button Content="Uninstall" Click="OnUninstall" IsVisible="{Binding IsConfirm}"
+        <Button Content="{x:Static loc:S.NavCancel}" Click="OnCancelConfirm" IsVisible="{Binding IsConfirm}" />
+        <Button Content="{x:Static loc:S.UninstallAction}" Click="OnUninstall" IsVisible="{Binding IsConfirm}"
                 Background="{DynamicResource DangerTextBrush}" Foreground="White" />
         <!-- Terminal footer -->
-        <Button Content="Close" Click="OnClose" IsVisible="{Binding IsFinished}"
+        <Button Content="{x:Static loc:S.NavClose}" Click="OnClose" IsVisible="{Binding IsFinished}"
                 Background="{DynamicResource AccentBrush}" Foreground="White" />
       </StackPanel>
     </Border>

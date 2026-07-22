@@ -193,14 +193,18 @@ internal sealed partial record WrapperBlob(
     }
 
     /// <summary>
-    /// Read the embedded license text (T14) from the running exe's
-    /// <c>SIGIL_BLOB_V1</c> resource. Returns <c>null</c> for an un-stamped
-    /// runtime, a blob with no license, or an empty license. Kept separate from
+    /// Read the embedded license text MAP (T14 / P9 gap G10) from the running
+    /// exe's <c>SIGIL_BLOB_V1</c> resource — tag -&gt; text, one entry per
+    /// manifest-declared language. Returns <c>null</c> for an un-stamped runtime
+    /// or a blob with no license. The host resolves the session language's entry
+    /// against this map (<see cref="InstallerLicenseLoader.Resolve"/>) — <c>en</c>
+    /// is guaranteed present because SIG0290 (Task 9) makes an <c>en</c>-less
+    /// license map a fatal pack-time error. Kept separate from
     /// <see cref="LoadFromSelf"/> because the in-memory <see cref="WrapperBlob"/>
     /// record does not carry license text — it is a host-rendering concern
     /// delivered via <see cref="SerializableWrapperBlob"/>.
     /// </summary>
-    internal static string? LoadLicenseFromSelf()
+    internal static Dictionary<string, string>? LoadLicenseMapFromSelf()
     {
         var bytes = TryReadResource(BlobResourceName);
         if (bytes is null) return null;
@@ -208,7 +212,28 @@ internal sealed partial record WrapperBlob(
         var json = System.Text.Encoding.UTF8.GetString(bytes);
         var s = System.Text.Json.JsonSerializer.Deserialize(
             json, WrapperBlobJsonContext.Default.SerializableWrapperBlob);
-        return string.IsNullOrWhiteSpace(s?.LicenseText) ? null : s!.LicenseText;
+        return s?.LicenseText;
+    }
+
+    /// <summary>
+    /// Read the manifest's fixed <c>installer.language</c> tag (P9 gap G10) from
+    /// the running exe's <c>SIGIL_BLOB_V1</c> resource, or <c>null</c> for an
+    /// un-stamped runtime or a manifest that doesn't fix a language. Read
+    /// separately from <see cref="LoadFromSelf"/> for the same reason as
+    /// <see cref="LoadLicenseMapFromSelf"/>: it is a session-bootstrap concern,
+    /// not carried on the in-memory <see cref="WrapperBlob"/> record. Consumed by
+    /// both stamped entry points at session start, before
+    /// <see cref="SigilBuild.Wrapper.Core.Localization.SessionLanguage.Set"/> runs.
+    /// </summary>
+    internal static string? LoadLanguageFromSelf()
+    {
+        var bytes = TryReadResource(BlobResourceName);
+        if (bytes is null) return null;
+
+        var json = System.Text.Encoding.UTF8.GetString(bytes);
+        var s = System.Text.Json.JsonSerializer.Deserialize(
+            json, WrapperBlobJsonContext.Default.SerializableWrapperBlob);
+        return s?.Language;
     }
 
     private const string BlobResourceName = "SIGIL_BLOB_V1";
@@ -356,10 +381,54 @@ public static class InstallerScreensLoader
 public static class InstallerLicenseLoader
 {
     /// <summary>
-    /// Read the embedded license text from the running exe's
-    /// <c>SIGIL_BLOB_V1</c> resource, or <c>null</c> when none is present.
+    /// Read the embedded license text MAP (tag -&gt; text) from the running
+    /// exe's <c>SIGIL_BLOB_V1</c> resource, or <c>null</c> when none is present
+    /// (P9 gap G10). The host resolves this against the session's preference
+    /// list via <see cref="Resolve"/> — reading only the English entry is no
+    /// longer the public surface; a manifest packing <c>uk: LICENSE.uk.txt</c>
+    /// would otherwise render English forever regardless of the resolved chrome
+    /// language.
     /// </summary>
-    public static string? LoadFromSelf() => WrapperBlob.LoadLicenseFromSelf();
+    public static IReadOnlyDictionary<string, string>? LoadMapFromSelf() => WrapperBlob.LoadLicenseMapFromSelf();
+
+    /// <summary>
+    /// Resolve <paramref name="map"/> against the SAME ordered preference list the
+    /// chrome language used (<c>installer.language</c> fixed -&gt; <c>/lang</c> -&gt;
+    /// OS preferences -&gt; <c>en</c>). Total: <see cref="LanguageResolver.Match"/>
+    /// always finds <c>en</c> because Task 9's SIG0290 makes an <c>en</c>-less
+    /// license map a fatal pack-time error, so this never returns <c>null</c> for
+    /// a non-null <paramref name="map"/>.
+    /// </summary>
+    public static string? Resolve(IReadOnlyDictionary<string, string>? map, IReadOnlyList<string> preferences)
+    {
+        if (map is null)
+        {
+            return null;
+        }
+
+        var keys = new List<string>(map.Keys);
+        return map[SigilBuild.Wrapper.Core.Localization.LanguageResolver.Match(preferences, keys)];
+    }
+}
+
+/// <summary>
+/// Public entry point for BOTH stamped entry points (the console
+/// <c>SigilBuild.Wrapper</c> and the Avalonia <c>SigilBuild.Installer.Host</c>) to
+/// read the manifest's fixed <c>installer.language</c> tag (P9 gap G10) from the
+/// running exe's blob without depending on the engine's internal wire DTOs. Read
+/// at session start, before <see cref="SigilBuild.Wrapper.Core.Localization.SessionLanguage.Set"/>
+/// runs and before any UI is constructed. Parallels <see cref="InstallerLicenseLoader"/> /
+/// <see cref="InstallerBrandLoader"/>.
+/// </summary>
+public static class InstallerLanguageLoader
+{
+    /// <summary>
+    /// Read the manifest's fixed language tag from the running exe's
+    /// <c>SIGIL_BLOB_V1</c> resource, or <c>null</c> for an un-stamped runtime or
+    /// a manifest that doesn't fix a language (the session resolver then falls
+    /// through to <c>/lang</c> / the OS preference list / <c>en</c>).
+    /// </summary>
+    public static string? LoadFromSelf() => WrapperBlob.LoadLanguageFromSelf();
 }
 
 /// <summary>

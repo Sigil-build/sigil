@@ -7,6 +7,18 @@
   "required": ["spec", "app", "build"],
   "additionalProperties": false,
   "definitions": {
+    "LocalizedText": {
+      "description": "Either a plain string (treated as English) or a { \"en\": ..., \"uk\": ... } map. An `en` entry is required (SIG0290).",
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "type": "string" },
+          "propertyNames": { "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$" }
+        }
+      ]
+    },
     "Parameters": {
       "type": "object",
       "description": "Install-time / pack-time parameter declarations consumed by the wrapper installer (Sprint 5c).",
@@ -22,7 +34,7 @@
           "default": {},
           "values": { "type": "array", "items": { "type": "string" } },
           "install_time": { "type": "boolean", "default": false },
-          "description": { "type": "string" },
+          "description": { "$ref": "#/definitions/LocalizedText" },
           "pattern": { "type": "string" },
           "min": { "type": "integer" },
           "max": { "type": "integer" },
@@ -200,8 +212,8 @@
       "additionalProperties": false,
       "properties": {
         "id": { "type": "string", "minLength": 1 },
-        "title": { "type": "string", "minLength": 1 },
-        "subtitle": { "type": "string" },
+        "title": { "$ref": "#/definitions/LocalizedText" },
+        "subtitle": { "$ref": "#/definitions/LocalizedText" },
         "when": { "type": "string" },
         "fields": {
           "type": "array",
@@ -460,10 +472,10 @@
           "description": "Optional install-dir override; may reference {app.*} / {scope_root} tokens (T13).",
           "minLength": 1
         },
-        "license": {
+        "license": { "$ref": "#/definitions/LocalizedText" },
+        "language": {
           "type": "string",
-          "description": "License file path or inline text; shows the License screen (T14).",
-          "minLength": 1
+          "description": "Optional fixed installer language tag (P9, gap G10) — the first link in the language-preference chain (installer.language -> /lang -> OS list -> en). An invalid tag is diagnosed (SIG0291)."
         },
         "options": {
           "type": "object",
@@ -546,7 +558,7 @@
           "default": {},
           "values": { "type": "array", "items": { "type": "string" } },
           "install_time": { "type": "boolean", "default": false },
-          "description": { "type": "string" },
+          "description": { "$ref": "#/definitions/LocalizedText" },
           "pattern": { "type": "string" },
           "min": { "type": "integer" },
           "max": { "type": "integer" },

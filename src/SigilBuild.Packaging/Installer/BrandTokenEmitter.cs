@@ -239,7 +239,7 @@ public static class BrandTokenEmitter
                     writer.WriteString("name", kv.Key);
                     writer.WriteString("type", param.Type.ToString().ToLowerInvariant());
                     writer.WriteBoolean("installTime", param.InstallTime);
-                    if (param.Description is not null) writer.WriteString("description", param.Description);
+                    if (param.Description is not null) writer.WriteString("description", param.Description.English);
                     if (param.EnumValues is not null)
                     {
                         writer.WritePropertyName("values");

@@ -1,0 +1,131 @@
+# src/SigilBuild.Wrapper.Core/Localization/Strings.en.txt
+# Baseline catalog — the source of truth for every user-facing chrome string.
+# See docs/plan/feature-parity/P9-DESIGN-localization.md §3.
+#
+# RULE (§3.1): a count may appear in a value, but must never inflect the
+# sentence around it. "Applications to close: {count}" is allowed;
+# "{count} applications must be closed" is not — uk has three plural forms and
+# concatenation cannot select between them.
+#
+# NOT in this catalog: log output, journal lines, developer exception messages,
+# per-step failure detail (design D2), and CLI help (design D3).
+#
+# Reviewer: n/a (source language)
+
+# --- navigation / chrome ---
+nav.back = Back
+nav.next = Next
+nav.cancel = Cancel
+nav.close = Close
+nav.retry = Retry
+nav.browse = Browse…
+
+# --- rail labels ---
+rail.welcome = Welcome
+rail.license = License
+rail.location = Location
+rail.options = Options
+rail.install = Install
+rail.configure = Configure
+rail.finish = Finish
+rail.failed = Failed
+rail.close_apps = Close apps
+rail.downgrade_blocked = Blocked
+
+# --- welcome ---
+welcome.title = Welcome to {appName} setup
+welcome.body = This wizard will guide you through installation. Click Next to continue.
+
+# --- license ---
+license.title = License agreement
+license.accept = I accept the terms
+
+# --- install location ---
+location.title = Choose install location
+location.body = Where should the application be installed?
+location.scope.user = Just for me (recommended)
+location.scope.user_hint = No administrator permission needed
+location.scope.machine = All users of this computer
+location.scope.machine_hint = Installs to Program Files — Windows will ask for permission
+
+# --- install location validation ---
+location.error.empty = Enter an install location.
+location.error.not_absolute = Enter an absolute path (for example C:\Program Files\App).
+location.error.is_file = That location is a file. Choose a folder.
+location.error.denied = You don't have permission to install there. Choose another folder.
+
+# --- options ---
+options.title = Options
+options.body = Choose what to set up during installation.
+options.desktop_shortcut = Create a desktop shortcut
+options.start_menu = Add a Start menu shortcut
+options.add_to_path = Add to PATH
+options.file_associations = Register file associations
+
+# --- installing / finish ---
+installing.title = Installing…
+finish.title = {appName} is installed
+finish.body = You can now launch the application from the Start menu.
+finish.launch_app = Launch {appName}
+finish.reboot_notice = A restart is required to finish setting up a prerequisite. Please restart your computer.
+
+# --- failed ---
+failed.title = Installation failed
+failed.body = Setup could not complete. No changes were kept.
+failed.open_log = Open log
+
+# --- cancel dialog ---
+cancel.title = Cancel Installation
+cancel.body = Cancel now? Files already copied will be removed during rollback.
+cancel.confirm = Yes, cancel
+cancel.resume = Continue installing
+
+# --- close apps ---
+close_apps.title = Close these applications to continue
+close_apps.body = Setup needs to update files that these applications are using. Close them and choose Retry, or let Setup close them for you.
+close_apps.close_for_me = Close for me
+close_apps.close_for_me_hint = Close for me asks each application to shut down normally — unsaved work is not discarded. Applications are not restarted afterwards.
+
+# --- upgrade / downgrade ---
+upgrade.reinstall_notice = {appName} is already installed. Continuing will reinstall it — the current version is removed first.
+upgrade.upgrading = Upgrading {appName} from {fromVersion} to {toVersion}.
+upgrade.replacing_newer = Replacing {appName} {fromVersion} with the older version {toVersion}.
+downgrade.title = A newer version is already installed
+downgrade.body = A newer version ({installedVersion}) of {appName} is already installed. Setup will not replace it with the older version {incomingVersion}. Close this window, then uninstall the current version first if you really want to downgrade.
+
+# --- uninstall ---
+uninstall.version = Version {version}
+uninstall.title = Uninstall {appName}
+uninstall.body = This removes {appName}, its Start-menu entry, desktop shortcut, and PATH entry. Your documents are not affected.
+uninstall.action = Uninstall
+uninstall.progress = Uninstalling…
+uninstall.done = {appName} was removed
+uninstall.failed = Uninstall failed
+uninstall.failed_body = Some components may not have been removed. You can try again from Add or Remove Programs.
+
+# --- fields ---
+field.show = Show
+field.hide = Hide
+field.options_loading = Loading options…
+field.options_load_failed = Couldn't load options.
+field.error.required = {label} is required.
+field.error.choose = Choose a {label}.
+field.error.invalid_choice = '{value}' is not a valid choice.
+field.error.not_integer = {label} must be a whole number.
+field.error.min = {label} must be at least {min}.
+field.error.max = {label} must be at most {max}.
+field.error.pattern = {label} is not in the expected format.
+
+# --- single instance (pre-Avalonia MessageBox) ---
+already_running.caption = Setup
+already_running.body = Setup is already running.\n\nAnother copy of this installer is in progress. Finish or close it, then try again.
+
+# --- brand fallbacks (un-stamped build) ---
+brand.app_fallback = Application
+brand.publisher_fallback = Publisher
+
+# --- engine prose (design D2 — prose only; step failure detail stays English) ---
+engine.removing_previous = Removing previous version
+engine.removing_newer = Removing newer version
+engine.installing_prerequisite = Installing {name}…
+engine.update_unsupported = /Update is not supported by this installer: update_steps run via the delta-update SDK, not the setup runtime.

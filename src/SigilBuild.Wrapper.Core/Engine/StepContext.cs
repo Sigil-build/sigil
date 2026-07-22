@@ -2,6 +2,7 @@ namespace SigilBuild.Wrapper.Engine;
 
 using SigilBuild.Core.Manifest;
 using SigilBuild.Wrapper.Cli;
+using SigilBuild.Wrapper.Core.Localization;
 
 /// <summary>
 /// Immutable view over the resolved environment for a single install run.
@@ -215,6 +216,21 @@ public sealed class StepContext
         dict["system.os"] = System.Environment.OSVersion.Version.ToString();
         dict["system.arch"] = System.Runtime.InteropServices.RuntimeInformation
                                   .ProcessArchitecture.ToString().ToLowerInvariant();
+        // P9 (gap G10): the resolved CHROME language's tag, not the top OS
+        // preference — design §4.3: with OS prefs [de-DE, uk-UA] and en+uk
+        // chrome, system.language reads "uk" because that's what the UI
+        // actually renders, not "de". Mirrors the established
+        // `_lang.ToString().ToLowerInvariant()` pattern (InstallerViewModel);
+        // never CultureInfo. Real entry points resolve SessionLanguage once at
+        // session start, before any StepContext is built here. Guarded on
+        // IsSet (rather than reading .Current directly) so the hundreds of
+        // engine tests that build a StepContext without ever calling
+        // ResolveSessionLanguage keep working under a Debug test run — this is
+        // a convenience expression value, not UI construction, so it degrades
+        // quietly to the same "en" the Release-mode fallback would give,
+        // without tripping SessionLanguage.Current's DEBUG throw guard.
+        dict["system.language"] = (SessionLanguage.IsSet ? SessionLanguage.Current : Lang.En)
+            .ToString().ToLowerInvariant();
 
         // Env context (only the well-known PATH for now; full env exposure is policy-deferred).
         dict["env.PATH"] = System.Environment.GetEnvironmentVariable("PATH") ?? string.Empty;

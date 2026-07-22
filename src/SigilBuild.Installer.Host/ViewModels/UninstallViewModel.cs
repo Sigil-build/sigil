@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using SigilBuild.Installer.Host.Branding;
+using SigilBuild.Wrapper.Core.Localization;
 using SigilBuild.Wrapper.Engine;
 
 namespace SigilBuild.Installer.Host.ViewModels;
@@ -24,6 +25,10 @@ public sealed class UninstallViewModel : INotifyPropertyChanged
     private Func<IProgress<StepProgress>, CancellationToken, Task<InstallOutcome>>? _runner;
     private CancellationTokenSource? _cts;
     private UninstallStep _step = UninstallStep.Confirm;
+
+    // P9: the resolved chrome language for this session, captured once at
+    // construction (Task 4 sets SessionLanguage before any UI is built).
+    private readonly Lang _lang = SessionLanguage.Current;
 
     public UninstallViewModel(BrandTokens tokens)
     {
@@ -69,12 +74,14 @@ public sealed class UninstallViewModel : INotifyPropertyChanged
     public bool IsFinished => _step is UninstallStep.Done or UninstallStep.Failed;
 
     /// <summary>The confirm-screen body copy (design brief wording).</summary>
-    public string ConfirmMessage =>
-        $"This removes {Brand.AppName}, its Start-menu entry, desktop shortcut, and PATH entry. Your documents are not affected.";
+    public string ConfirmMessage => Strings.UninstallBody(_lang, Brand.AppName);
 
-    public string ConfirmTitle => $"Uninstall {Brand.AppName}";
+    public string ConfirmTitle => Strings.UninstallTitle(_lang, Brand.AppName);
 
-    public string DoneMessage => $"{Brand.AppName} was removed";
+    public string DoneMessage => Strings.UninstallDone(_lang, Brand.AppName);
+
+    /// <summary>The rail's version line (P9): replaces UninstallWindow.axaml's StringFormat.</summary>
+    public string VersionLine => Strings.UninstallVersion(_lang, Brand.AppVersion);
 
     private double _progress;
     public double UninstallProgress

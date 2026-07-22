@@ -9,6 +9,7 @@
     <Project Path="src/SigilBuild.Core/SigilBuild.Core.csproj" />
     <Project Path="src/SigilBuild.Installer.BrandGenerator/SigilBuild.Installer.BrandGenerator.csproj" />
     <Project Path="src/SigilBuild.Installer.Host/SigilBuild.Installer.Host.csproj" />
+    <Project Path="src/SigilBuild.Localization.Generator/SigilBuild.Localization.Generator.csproj" />
     <Project Path="src/SigilBuild.Packaging/SigilBuild.Packaging.csproj" />
     <Project Path="src/SigilBuild.Signing/SigilBuild.Signing.csproj" />
     <Project Path="src/SigilBuild.Wrapper/SigilBuild.Wrapper.csproj" />
@@ -19,6 +20,7 @@
     <Project Path="tests/SigilBuild.Core.Tests/SigilBuild.Core.Tests.csproj" />
     <Project Path="tests/SigilBuild.Installer.BrandGenerator.Tests/SigilBuild.Installer.BrandGenerator.Tests.csproj" />
     <Project Path="tests/SigilBuild.Installer.Host.Tests/SigilBuild.Installer.Host.Tests.csproj" />
+    <Project Path="tests/SigilBuild.Localization.Generator.Tests/SigilBuild.Localization.Generator.Tests.csproj" />
     <Project Path="tests/SigilBuild.Packaging.IntegrationTests/SigilBuild.Packaging.IntegrationTests.csproj" />
     <Project Path="tests/SigilBuild.Packaging.Tests/SigilBuild.Packaging.Tests.csproj" />
     <Project Path="tests/SigilBuild.Schema.Tests/SigilBuild.Schema.Tests.csproj" />

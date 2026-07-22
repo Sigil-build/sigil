@@ -7,6 +7,7 @@ using SigilBuild.Installer.Host.Branding;
 using SigilBuild.Installer.Host.ViewModels;
 using SigilBuild.Installer.Host.Views;
 using SigilBuild.Wrapper.Cli;
+using SigilBuild.Wrapper.Core.Localization;
 using SigilBuild.Wrapper.Engine;
 
 namespace SigilBuild.Installer.Host;
@@ -61,19 +62,30 @@ public partial class App : Application
                 // T9: load the declared custom screens (from the blob) + parameter
                 // schema (from the session) so the wizard renders the Configure-style
                 // forms and generates the rail from them.
-                _vm.LoadScreens(InstallerScreensLoader.LoadFromSelf(), session.Parameters);
+                // P9 design §4.4: thread the session's full language-preference list
+                // (the SAME list used below for the license map) so a declared screen's
+                // rail label resolves independently of the resolved chrome language —
+                // Sigil may ship no chrome catalog for a tag the manifest itself supplies.
+                _vm.LoadScreens(InstallerScreensLoader.LoadFromSelf(), session.Parameters, session.LanguagePreferences);
 
                 // T8: load the enabled built-in option components (from the session's
                 // blob). When ≥ 1 is present the Options screen + its rail entry appear
                 // (after license, per decision 4); when none, they are omitted.
                 _vm.LoadOptions(session.Options);
 
-                // T14: load the embedded license text (from the blob). When present
+                // T14 / P9 Step 3b: load the embedded license text MAP (from the blob)
+                // and resolve it against the SAME ordered preference list the chrome
+                // language used (session.LanguagePreferences), so a manifest packing
+                // uk: LICENSE.uk.txt actually renders Ukrainian under a Ukrainian
+                // session instead of English forever. Resolve is total here — SIG0290
+                // (Task 9) makes an en-less license map a fatal pack-time error, so
+                // this never silently returns null for a non-null map. When present
                 // the License screen + its rail entry appear (after destination, per
                 // decision 4) and gate Next on acceptance; when absent they are
                 // omitted. The /silent path never reaches here, so silent installs
                 // imply acceptance.
-                _vm.LoadLicense(InstallerLicenseLoader.LoadFromSelf());
+                var licenseMap = InstallerLicenseLoader.LoadMapFromSelf();
+                _vm.LoadLicense(InstallerLicenseLoader.Resolve(licenseMap, session.LanguagePreferences));
 
                 // T10: surface the reinstall notice when the SAME version is already
                 // installed (the engine performs uninstall-then-install itself). An
@@ -163,8 +175,8 @@ public partial class App : Application
 
         return new BrandTokens
         {
-            AppName = brand.DisplayName ?? "Application",
-            Publisher = brand.Publisher ?? "Publisher",
+            AppName = brand.DisplayName ?? Strings.BrandAppFallback(SessionLanguage.Current),
+            Publisher = brand.Publisher ?? Strings.BrandPublisherFallback(SessionLanguage.Current),
             AppVersion = brand.Version ?? "1.0.0",
             PrimaryColor = light.TryGetValue("railBg", out var railBg) ? railBg : "#1F2937",
             AccentColor = light.TryGetValue("accent", out var accent) ? accent : "#3B82F6",

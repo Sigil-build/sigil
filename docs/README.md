@@ -31,6 +31,7 @@ not sure which output format you need.
 - [Packaging formats](guides/packaging-formats.md) — MSIX vs ZIP vs EXE-wrapper.
 - [Signing](guides/signing.md) — local PFX or Azure Trusted Signing.
 - [Conditional installs](guides/conditional-installs.md) — `when:` expressions and rollback.
+- [Localization](guides/localization.md) — `installer.language`, `/lang`, the `LocalizedText` shape, and known limitations.
 
 ## Concepts
 

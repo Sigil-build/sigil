@@ -94,7 +94,7 @@ would defeat Sigil's auditability, determinism, and AOT-safety guarantees.
 | `version_gte(a, b)` | `bool` | pure; `System.Version` compare, ordinal fallback |
 | `os_version()` | `string` | reads `Environment.OSVersion` (read-only OS state) |
 | `arch()` | `string` | reads `RuntimeInformation.ProcessArchitecture` |
-| `locale()` | `string` | reads `CurrentUICulture.Name` (`""` under InvariantGlobalization) |
+| `locale()` | `string` | reads the OS UI language via `GetUserPreferredUILanguages` (top preference; `""` when unavailable / non-Windows) |
 | `file_exists(path)` | `bool` | bounded read-only filesystem probe |
 | `registry_exists(hive, key, name)` | `bool` | bounded read-only registry probe (Windows-guarded) |
 
@@ -236,8 +236,13 @@ Decision for P9:
 - **Manifest-supplied translations** for declared screen text use a
   `{ en: ..., de: ... }` shape on the relevant fields, serialized through the
   closed schema/blob like every other declared value.
-- Ship English plus a small seed set (5–10 languages); a pseudo-localization
-  pass is the test that catches any hardcoded (untabled) string.
+- **A language ships only with a named reviewer** recorded in its catalog
+  file's provenance header. The initial set is English plus Ukrainian; further
+  languages are admitted under this rule as ordinary content contributions,
+  not as amendments. What protects users is review, not count — a
+  machine-translated language nobody has read is worse than an honest English
+  fallback. A pseudo-localization pass is the test that catches any hardcoded
+  (untabled) string.
 
 This is exactly the "revisit together with ADR-008" the `SigilBuild.Wrapper.csproj`
 comment points at: localization is enabled **without** relaxing
@@ -287,8 +292,12 @@ Two reconciliation options were considered:
 - **(b)** **Split the measurement into two independent components** —
   **adopted**:
   1. **Bundled AOT runtime** (host exe + raw native deps) — the legitimately
-     large part, governed separately by the **host size gate** (T3, ~40 MB
-     footprint) in `scripts/publish-installer-runtime.ps1`.
+     large part, governed separately by the **host size gate** in
+     `scripts/publish-installer-runtime.ps1`. Re-pinned **40 → 45 MB** by P9
+     (measured win-x64 footprint ~42 MB; see the 2026-07-15 amendment). This gate
+     is on the *runtime it bundles*, decoupled from the 5 MB wrapper-overhead cap
+     below — a feature adding legitimate weight to the host (localization here)
+     re-pins this consciously and does not touch the 5 MB cap.
   2. **Wrapper-code / packaging overhead** — everything the packager *adds* on
      top: the stamped `SIGIL_BLOB_V1`, the compressed-payload framing, and PE
      resource-table alignment. **This** is what ADR-008's **5 MB cap** governs,
@@ -346,6 +355,7 @@ would require replacing this ADR wholesale, not extending it.
 | Date | Change | Justification |
 |------|--------|---------------|
 | 2026-07-13 | Initial policy: closed function/step catalogs, admission criteria (§1.2), P1 functions pre-admitted (§1.3), variable model (§2), transitive redaction (§3), localization stance (§4), packaging bounds + option (b) (§5), non-goals (§6). | P0 — write down the contract the four citation sites + packaging tests already assume. |
+| 2026-07-15 | §1.1: `locale()` re-pointed from `CurrentUICulture.Name` to `GetUserPreferredUILanguages`. §4: the "5–10 languages" seed count replaced by a standing named-reviewer rule; initial set en + uk. §5.2: host size gate re-pinned **40 → 45 MB**. | P9/G10 — `locale()` returned `""` under `InvariantGlobalization`, so the documented language-resolution chain could not work. **This is a behavior change, not only a source change:** a `When` using `locale()` moves from an always-`""` result to a real tag, which can flip conditions. Practical risk is ~zero precisely because the function was useless, but it is recorded here rather than assumed. `InvariantGlobalization` stays on; no satellite assemblies; no `CultureInfo` is constructed. **Size gate:** localization added ~2.26 MB to the win-x64 host (→ ~42 MB); `main` was already at 39.8 MB against the old 40 MB gate (0.2 MB headroom), so this is the P13-anticipated "globalization adds weight — re-pin consciously" case, not profligacy. Verified no ICU/globalization data was pulled in (InvariantGlobalization intact, all `CultureInfo` uses are the `InvariantCulture` singleton). New gate carries ~3 MB headroom. |
 
 *(Append one row per future function/step/localization change that widens the
 surface. Never rewrite prior rows.)*

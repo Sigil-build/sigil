@@ -4,6 +4,7 @@ using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
 using SigilBuild.Installer.Host.ViewModels;
+using SigilBuild.Wrapper.Core.Localization;
 
 namespace SigilBuild.Installer.Host.Views.Screens;
 
@@ -34,7 +35,7 @@ public partial class InstallOptionsView : UserControl
         try
         {
             var folders = await top.StorageProvider.OpenFolderPickerAsync(
-                new FolderPickerOpenOptions { AllowMultiple = false, Title = "Choose install location" });
+                new FolderPickerOpenOptions { AllowMultiple = false, Title = Strings.LocationTitle(SessionLanguage.Current) });
             if (folders.Count > 0)
             {
                 vm.InstallPath = folders[0].Path.LocalPath;

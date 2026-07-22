@@ -1,0 +1,51 @@
+# Task 16 (P9): localized-uk plus a FIXED installer.language pin. Proves design
+# §2.1: a manifest that fixes its chrome language wins over a conflicting /lang
+# flag — the flag is IGNORED (logged), never fatal. Exit code stays 0; this is a
+# display-preference conflict, not the trust boundary T12's fixed-scope-vs-
+# /allusers check guards (that one exits 64).
+spec: v1.0
+
+app:
+  id: com.example.localizedukfixed
+  name: LocalizedUkFixed
+  version: 1.0.0
+  publisher: Example
+
+build:
+  source: ./payload
+
+package:
+  formats: [exe]
+  architectures: [x64]
+
+installer:
+  language: en
+  license:
+    en: LICENSE.txt
+    uk: LICENSE.uk.txt
+  screens:
+    - id: configure
+      title:
+        en: Configure
+        uk: Налаштування
+      subtitle:
+        en: Set up your install
+        uk: Налаштуйте встановлення
+      fields:
+        - param: channel
+
+parameters:
+  channel:
+    type: enum
+    values: [stable, beta]
+    default: stable
+    install_time: true
+    description:
+      en: Update channel
+      uk: Канал оновлень
+
+install_steps:
+  - id: copy-app
+    type: file_copy
+    from: payload/**
+    to: "{install_dir}"

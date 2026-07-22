@@ -22,8 +22,11 @@ public sealed record InstallerBrand(
 /// <param name="Brand">Brand colors + assets (T7).</param>
 /// <param name="Options">Built-in configurable components (T8).</param>
 /// <param name="Screens">Declared custom wizard screens (T9).</param>
-/// <param name="License">License file path or inline text; shows the License
-/// screen when present (T14).</param>
+/// <param name="License">License file path (or, per-language, a map of tag to
+/// file path); shows the License screen when present (T14). A plain string
+/// normalizes to <c>{"en": path}</c> (P9, gap G10 — <see cref="LocalizedText"/>);
+/// each declared file is read into text at PACK time
+/// (<c>ExeWrapperPackager.ReadLicenseText</c>), never at parse time.</param>
 /// <param name="Scope">Install scope; defaults to <see cref="InstallScope.Auto"/> (T12).</param>
 /// <param name="InstallDir">Optional install-dir override; may reference
 /// <c>{app.*}</c> / <c>{scope_root}</c> tokens (T13).</param>
@@ -50,11 +53,16 @@ public sealed record InstallerBrand(
 /// dir, setup opens each name; a mutex that opens means the app is running and the
 /// install is blocked. Complements the Restart Manager sweep, which finds
 /// processes holding files open even when no mutex is declared.</param>
+/// <param name="Language">Optional fixed installer language tag (P9, gap G10)
+/// from <c>installer.language</c> — the first link in the language-preference
+/// chain (installer.language -&gt; /lang -&gt; OS list -&gt; en) resolved by the
+/// language resolver in SigilBuild.Wrapper.Core.Localization. <c>null</c> when
+/// the manifest doesn't fix a language, letting the OS/flag chain decide.</param>
 public sealed record InstallerSection(
     InstallerBrand? Brand,
     InstallerOptions? Options = null,
     IReadOnlyList<InstallerScreen>? Screens = null,
-    string? License = null,
+    LocalizedText? License = null,
     InstallScope Scope = InstallScope.Auto,
     string? InstallDir = null,
     string? Icon = null,
@@ -62,7 +70,8 @@ public sealed record InstallerSection(
     InstallerHooks? Hooks = null,
     RunAfterInstall? RunAfterInstall = null,
     IReadOnlyList<InstallerPrerequisite>? Prerequisites = null,
-    IReadOnlyList<string>? AppMutex = null);
+    IReadOnlyList<string>? AppMutex = null,
+    string? Language = null);
 
 /// <summary>
 /// A single declarative variable from <c>installer.vars</c> (P1): a name bound to

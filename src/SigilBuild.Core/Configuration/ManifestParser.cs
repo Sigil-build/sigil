@@ -154,6 +154,7 @@ public static class ManifestParser
         string fileName)
     {
         if (node is null) return null;
+        var loc = new SourceLocation(fileName, (int)node.Start.Line, (int)node.Start.Column);
         var brand = GetMapping(node, "brand");
         var screens = ParseScreens(
             GetSequenceOfMappings(node, "screens"), app, parameters, diagnostics, fileName);
@@ -169,11 +170,18 @@ public static class ManifestParser
             // each ENABLED component into its gated install step(s).
             Options: ParseOptions(GetMapping(node, "options")),
             Screens: screens,
-            // T14: capture the license path string only. The actual file read +
-            // embed happens at PACK time (ExeWrapperPackager.BuildBlobBytes), which
-            // can resolve it against the pack source dir and emit a diagnostic if
-            // the file is missing/unreadable/empty.
-            License: GetScalar(node, "license"),
+            // T14 / P9 (gap G10): capture the license path(s) only, as a
+            // LocalizedText — a plain string or a `{en: ..., uk: ...}` map of
+            // per-language file paths, through the same ParseLocalizedText path
+            // as title/subtitle/description. The actual file read + embed
+            // happens at PACK time (ExeWrapperPackager.ReadLicenseText), which
+            // resolves each path against the pack source dir and emits SIG0250
+            // (non-fatal, per entry) / SIG0290 (fatal, on the post-read map) —
+            // see design §5.3. Retyping this from `string?` closes a silent-null
+            // window: previously GetScalar returned null with zero diagnostic for
+            // any manifest that declared `license:` as a map, and the License
+            // screen would vanish without a trace.
+            License: ParseLocalizedText(node, "license", loc, diagnostics),
             // T12: install scope (user | machine | auto, default auto). The schema
             // enum is the hard gate; here we map the string leniently and emit a
             // non-fatal diagnostic on an unrecognized value, falling back to auto.
@@ -203,7 +211,126 @@ public static class ManifestParser
             Prerequisites: ParsePrerequisites(GetSequenceOfMappings(node, "prerequisites"), diagnostics, fileName),
             // P6 (gap G7): named mutexes the running app holds; setup probes them
             // before touching the install dir (Inno AppMutex equivalent).
-            AppMutex: GetSequence(node, "app_mutex"));
+            AppMutex: GetSequence(node, "app_mutex"),
+            // P9 (gap G10): optional fixed installer language. Stored verbatim
+            // (schema is permissive); an invalid tag is diagnosed (SIG0291) but
+            // otherwise doesn't block the parse — the resolver chain simply
+            // won't match a value that fails LanguageTag.IsValid.
+            Language: ParseInstallerLanguage(node, diagnostics, fileName));
+    }
+
+    /// <summary>
+    /// Parse the manifest's <c>installer.language</c> scalar (P9, gap G10): the
+    /// first link in the language-preference chain (installer.language -&gt; /lang
+    /// -&gt; OS list -&gt; en). Emits <see cref="DiagnosticCodes.InvalidLanguageTag"/>
+    /// (SIG0291, Error) when present but not a valid BCP-47-subset tag per
+    /// <see cref="LanguageTag.IsValid"/> — the same rule the <c>/lang</c> flag uses.
+    /// </summary>
+    private static string? ParseInstallerLanguage(
+        YamlMappingNode node, List<Diagnostic> diagnostics, string fileName)
+    {
+        var raw = GetScalar(node, "language");
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        if (!LanguageTag.IsValid(raw))
+        {
+            diagnostics.Add(new Diagnostic(
+                DiagnosticSeverity.Error,
+                DiagnosticCodes.InvalidLanguageTag,
+                $"installer.language '{raw}' is not a valid language tag",
+                new SourceLocation(fileName, (int)node.Start.Line, (int)node.Start.Column),
+                "https://docs.sigil.build/diagnostics/SIG0291"));
+        }
+
+        return raw;
+    }
+
+    /// <summary>
+    /// Parse a manifest field that may be authored either as a plain string or as
+    /// a <c>{ en: ..., uk: ... }</c> map (P9, gap G10 — <see cref="LocalizedText"/>).
+    /// A plain string normalizes to <c>{"en": value}</c>. A map is carried
+    /// verbatim; each key is validated as a language tag
+    /// (<see cref="DiagnosticCodes.InvalidLanguageTag"/>, SIG0291) and the whole
+    /// map must contain an <c>en</c> entry
+    /// (<see cref="DiagnosticCodes.LocalizedTextMissingEnglish"/>, SIG0290 —
+    /// fatal, since every runtime fallback bottoms out at English). A per-language
+    /// value that isn't a plain scalar (e.g. a nested sequence) is diagnosed
+    /// (<see cref="DiagnosticCodes.LocalizedTextValueNotScalar"/>, SIG0292) rather
+    /// than silently collapsing to <c>""</c>. Returns <c>null</c> when the key is
+    /// absent.
+    /// </summary>
+    private static LocalizedText? ParseLocalizedText(
+        YamlMappingNode parent, string key, SourceLocation loc, List<Diagnostic> diagnostics)
+    {
+        if (!parent.Children.TryGetValue(new YamlScalarNode(key), out var node))
+        {
+            return null;
+        }
+
+        if (node is YamlScalarNode scalar)
+        {
+            return LocalizedText.Plain(scalar.Value ?? string.Empty);
+        }
+
+        if (node is not YamlMappingNode map)
+        {
+            return null;
+        }
+
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in map.Children)
+        {
+            if (kvp.Key is not YamlScalarNode tagNode || tagNode.Value is null)
+            {
+                continue;
+            }
+
+            var tag = tagNode.Value;
+            if (kvp.Value is YamlScalarNode textNode)
+            {
+                values[tag] = textNode.Value ?? string.Empty;
+            }
+            else
+            {
+                // Silent-drop guard: a non-scalar value (e.g. a nested sequence
+                // or mapping under a language key) used to collapse to "" here
+                // with zero diagnostic — the same silent-blank-rendering shape
+                // SIG0290 exists to prevent, just one language key at a time.
+                values[tag] = string.Empty;
+                diagnostics.Add(new Diagnostic(
+                    DiagnosticSeverity.Error,
+                    DiagnosticCodes.LocalizedTextValueNotScalar,
+                    $"'{key}.{tag}' must be a plain string; found a non-scalar value instead",
+                    loc,
+                    "https://docs.sigil.build/diagnostics/SIG0292"));
+            }
+
+            if (!LanguageTag.IsValid(tag))
+            {
+                diagnostics.Add(new Diagnostic(
+                    DiagnosticSeverity.Error,
+                    DiagnosticCodes.InvalidLanguageTag,
+                    $"'{key}' has an invalid language tag '{tag}'",
+                    loc,
+                    "https://docs.sigil.build/diagnostics/SIG0291"));
+            }
+        }
+
+        var localizedText = new LocalizedText(values);
+        if (!localizedText.HasEnglish)
+        {
+            diagnostics.Add(new Diagnostic(
+                DiagnosticSeverity.Error,
+                DiagnosticCodes.LocalizedTextMissingEnglish,
+                $"'{key}' is missing an 'en' entry — every runtime fallback bottoms out at English",
+                loc,
+                "https://docs.sigil.build/diagnostics/SIG0290"));
+        }
+
+        return localizedText;
     }
 
     /// <summary>
@@ -612,14 +739,20 @@ public static class ManifestParser
         {
             var loc = new SourceLocation(fileName, (int)node.Start.Line, (int)node.Start.Column);
             var id = GetScalar(node, "id") ?? string.Empty;
-            var title = GetScalar(node, "title") ?? string.Empty;
-            var subtitle = GetScalar(node, "subtitle");
+            var title = ParseLocalizedText(node, "title", loc, diagnostics) ?? LocalizedText.Plain(string.Empty);
+            var subtitle = ParseLocalizedText(node, "subtitle", loc, diagnostics);
             var when = GetScalar(node, "when");
 
-            ValidateInterpolationTokens(title, loc, diagnostics);
+            foreach (var value in title.Values.Values)
+            {
+                ValidateInterpolationTokens(value, loc, diagnostics);
+            }
             if (subtitle is not null)
             {
-                ValidateInterpolationTokens(subtitle, loc, diagnostics);
+                foreach (var value in subtitle.Values.Values)
+                {
+                    ValidateInterpolationTokens(value, loc, diagnostics);
+                }
             }
 
             if (!string.IsNullOrWhiteSpace(when))
@@ -815,7 +948,8 @@ public static class ManifestParser
 
             var values = GetSequence(value, "values");
             var installTime = GetBool(value, "install_time", defaultValue: false);
-            var description = GetScalar(value, "description");
+            var descriptionLoc = new SourceLocation(fileName, (int)keyNode.Start.Line, (int)keyNode.Start.Column);
+            var description = ParseLocalizedText(value, "description", descriptionLoc, diagnostics);
             var pattern = GetScalar(value, "pattern");
             var min = GetNullableInt(value, "min");
             var max = GetNullableInt(value, "max");

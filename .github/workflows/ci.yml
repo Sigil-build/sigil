@@ -185,10 +185,11 @@ jobs:
             -Rids win-x64,win-arm64 `
             -Configuration Release `
             -DestinationRoot publish/host-stage `
-            -SizeGateMb 40
-          # Measured win-x64: exe ~19 MB, full host footprint ~37 MB
-          # (Skia+ANGLE+HarfBuzz native libs ~19 MB). The 40 MB gate (enforced
-          # inside the script against the full footprint) carries ~3 MB headroom.
+            -SizeGateMb 45
+          # Measured win-x64: exe ~24 MB, full host footprint ~42 MB
+          # (Skia+ANGLE+HarfBuzz native libs ~18 MB). Re-pinned 40 -> 45 MB by P9
+          # (localization added ~2.26 MB over main's 39.8 MB; InvariantGlobalization
+          # intact, no ICU pulled in — see adr-008 §5.2 amendment). ~3 MB headroom.
 
       - name: verify staged win-x64 host runtime
         shell: pwsh

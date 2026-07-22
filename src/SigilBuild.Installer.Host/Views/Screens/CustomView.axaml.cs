@@ -8,6 +8,7 @@ using Avalonia.Layout;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
 using SigilBuild.Installer.Host.ViewModels;
+using SigilBuild.Wrapper.Core.Localization;
 
 namespace SigilBuild.Installer.Host.Views.Screens;
 
@@ -233,7 +234,7 @@ public partial class CustomView : UserControl
         {
             if (field.IsLoadingOptions)
             {
-                status.Text = "Loading options…";
+                status.Text = Strings.FieldOptionsLoading(SessionLanguage.Current);
                 status.Foreground = Brushes.Gray;
                 status.IsVisible = true;
             }
@@ -283,7 +284,7 @@ public partial class CustomView : UserControl
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
         var box = new TextBox { Text = field.TextValue };
         box.TextChanged += (_, _) => field.TextValue = box.Text ?? string.Empty;
-        var browse = new Button { Content = "Browse…", Margin = new Thickness(8, 0, 0, 0) };
+        var browse = new Button { Content = Strings.NavBrowse(SessionLanguage.Current), Margin = new Thickness(8, 0, 0, 0) };
         browse.Click += async (s, _) =>
         {
             var top = TopLevel.GetTopLevel(s as Control);

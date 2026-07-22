@@ -116,9 +116,15 @@ Source: `schemas/sigil-schema.json` (JSON Schema, draft-07).
 | `brand` | object | - | - | _(undocumented)_ |
 | `scope` | string | - | `auto` | Install scope: per-user, per-machine, or auto-resolve (T12). |
 | `install_dir` | string | - | - | Optional install-dir override; may reference {app.*} / {scope_root} tokens (T13). |
-| `license` | string | - | - | License file path or inline text; shows the License screen (T14). |
+| `license` | LocalizedText | - | - | _(undocumented)_ |
+| `language` | string | - | - | Optional fixed installer language tag (P9, gap G10) — the first link in the language-preference chain (installer.language -> /lang -> OS list -> en). An invalid tag is diagnosed (SIG0291). |
 | `options` | object | - | - | Built-in configurable installer components (T8). |
 | `screens` | array | - | - | Declared custom wizard screens over parameters (T9). |
+| `vars` | object | - | - | Declarative variables (P1, gap G1): each entry is `name: <expression>` evaluated once at install-session start, in dependency order, and exposed as var.<name> in `when` expressions / screen-field defaults and as a {var.<name>} brace token in step paths and args. Expressions use the closed `when` grammar plus the read-only data-retrieval functions registry_read/env/file_version/installed_version; a var referencing a secret parameter inherits secretness. A reference cycle is a pack error (SIG0270). |
+| `hooks` | object | - | - | Lifecycle hooks (P2, gap G2). Each phase is an ordered list of ordinary step records (typically run_program) that run OUTSIDE the rollback journal. WARNING: hooks have NO rollback obligations — their side effects are never recorded and never undone. A hook is governed only by its own `on_failure`: `fail` aborts the operation (the default for pre_install/pre_uninstall — the run stops before the journal opens / before the uninstall replays); `continue` logs and proceeds (the default for post_install/post_uninstall — the install is already committed and cannot be rolled back). Hook args may use {var.*} / {install_dir} tokens. |
+| `run_after_install` | object | - | - | The program the Done screen's checked-by-default 'Launch <App>' checkbox starts, and the program a headless `/silent /launch` run starts (P2, gap G4). Always launched UNELEVATED — de-elevated to the user's medium-integrity token when the installer itself ran as admin. |
+| `prerequisites` | array | - | - | First-class prerequisite units (P5, gap G6) — the declarative equivalent of Burn's ExePackage + DetectCondition. Each runs BEFORE the transactional install body and the pre_install hooks (and before the rollback journal opens): its `detect` expression is evaluated (skip when already satisfied), otherwise the `source` installer is acquired and run, and `detect` is re-evaluated to confirm it took effect. WARNING: prerequisites are NEVER journaled and are NOT rolled back — a shared machine dependency (VC++ redist, .NET runtime) must not be undone. An exit code of 3010 flags reboot-required (Done-screen notice + silent exit code 3010). |
+| `app_mutex` | array | - | - | Named mutexes the application creates while it is running (P6, gap G7) — the Inno `AppMutex` equivalent. Before touching the install directory, setup opens each name; a mutex that opens means the app is running and the install/uninstall is blocked. This complements the Restart Manager sweep, which also finds processes holding files open in the install directory even when no mutex is declared. Blocked runs: the wizard shows a 'Close applications' screen; `/silent` exits with a dedicated code unless `/closeapps` is supplied. Use the exact name the app passes to CreateMutex, including any `Global\` prefix. |
 
 ## `installer.brand`
 
@@ -140,6 +146,22 @@ Source: `schemas/sigil-schema.json` (JSON Schema, draft-07).
 | `add_to_path` | InstallerOption | - | - | _(undocumented)_ |
 | `file_associations` | FileAssociationOption | - | - | _(undocumented)_ |
 
+## `installer.hooks`
+
+| Property | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `pre_install` | HookPhase | - | - | _(undocumented)_ |
+| `post_install` | HookPhase | - | - | _(undocumented)_ |
+| `pre_uninstall` | HookPhase | - | - | _(undocumented)_ |
+| `post_uninstall` | HookPhase | - | - | _(undocumented)_ |
+
+## `installer.run_after_install`
+
+| Property | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `path` | string | yes | - | Program to launch. May use {install_dir} / {var.*} / payload:// tokens. |
+| `args` | array | - | - | Optional arguments; each may use the same tokens. |
+
 ## `parameters.<name>`
 
 | Property | Type | Required | Default | Description |
@@ -148,7 +170,7 @@ Source: `schemas/sigil-schema.json` (JSON Schema, draft-07).
 | `default` | - | - | - | _(undocumented)_ |
 | `values` | array | - | - | _(undocumented)_ |
 | `install_time` | boolean | - | `False` | _(undocumented)_ |
-| `description` | string | - | - | _(undocumented)_ |
+| `description` | LocalizedText | - | - | _(undocumented)_ |
 | `pattern` | string | - | - | _(undocumented)_ |
 | `min` | integer | - | - | _(undocumented)_ |
 | `max` | integer | - | - | _(undocumented)_ |
@@ -164,6 +186,14 @@ Source: `schemas/sigil-schema.json` (JSON Schema, draft-07).
 | `value_property` | string | yes | - | _(undocumented)_ |
 | `label_property` | string | yes | - | _(undocumented)_ |
 
+## Definition: `LocalizedText`
+
+Either a plain string (treated as English) or a { "en": ..., "uk": ... } map. An `en` entry is required (SIG0290).
+
+## Definition: `Parameters`
+
+Install-time / pack-time parameter declarations consumed by the wrapper installer (Sprint 5c).
+
 ## Definition: `InstallStep`
 
 | Property | Type | Required | Default | Description |
@@ -173,13 +203,42 @@ Source: `schemas/sigil-schema.json` (JSON Schema, draft-07).
 | `when` | string | - | - | _(undocumented)_ |
 | `on_failure` | string | - | - | _(undocumented)_ |
 
+## Definition: `InstallerOption`
+
+Built-in configurable installer component: shorthand boolean or an object.
+
+## Definition: `FileAssociationOption`
+
+file_associations component: shorthand boolean or an object with extensions.
+
+## Definition: `Prerequisite`
+
+| Property | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `name` | string | yes | - | Human label shown on the wizard progress row and in the log ('Installing <name>…'). |
+| `detect` | string | yes | - | A `when`-grammar expression that is true when the prerequisite is ALREADY satisfied (typically a registry_read / file_version / registry_exists check). Evaluated before install (skip if true) and again after (fail if still false). |
+| `source` | string | yes | - | The installer to run when detect is false: a payload://… path (bundled in the package) or an https://… URL (downloaded at install time). Args may use {var.*} / {install_dir} tokens. |
+| `sha256` | string | - | - | SHA-256 integrity checksum (hex). REQUIRED for an https:// source (a download without it is refused, SIG0280); ignored for a payload:// source. |
+| `args` | array | - | - | Arguments passed to the source installer (typically /quiet /norestart). |
+| `exit_codes_ok` | array | - | - | Exit codes treated as success; defaults to [0]. An accepted code of 3010 additionally flags reboot-required. |
+| `scope_required` | string | - | - | Requires the install to run in this scope; a mismatch with the resolved scope is a diagnostic at session start. Omit to accept any scope. |
+| `timeout_seconds` | integer | - | - | Optional per-prerequisite run timeout, in seconds. |
+
+## Definition: `HookPhase`
+
+An ordered list of lifecycle-hook steps (P2). Runs outside the rollback journal; each step is governed only by its own `on_failure` (no rollback obligations — see installer.hooks).
+
 ## Definition: `InstallerScreen`
 
 | Property | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `id` | string | yes | - | _(undocumented)_ |
-| `title` | string | yes | - | _(undocumented)_ |
-| `subtitle` | string | - | - | _(undocumented)_ |
+| `title` | LocalizedText | yes | - | _(undocumented)_ |
+| `subtitle` | LocalizedText | - | - | _(undocumented)_ |
 | `when` | string | - | - | _(undocumented)_ |
 | `fields` | array | yes | - | _(undocumented)_ |
+
+## Definition: `ScreenField`
+
+A screen field: a bare parameter-name string or a { param, widget } object.
 

@@ -1,12 +1,13 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:SigilBuild.Installer.Host.ViewModels"
+             xmlns:loc="clr-namespace:SigilBuild.Wrapper.Core.Localization;assembly=SigilBuild.Wrapper.Core"
              x:DataType="vm:InstallerViewModel"
              x:Class="SigilBuild.Installer.Host.Views.Screens.CloseAppsView">
   <StackPanel Spacing="14" VerticalAlignment="Center">
-    <TextBlock FontSize="20" FontWeight="SemiBold" Text="Close these applications to continue" />
+    <TextBlock FontSize="20" FontWeight="SemiBold" Text="{x:Static loc:S.CloseAppsTitle}" />
     <TextBlock Foreground="#4B5563" TextWrapping="Wrap"
-               Text="Setup needs to update files that these applications are using. Close them and choose Retry, or let Setup close them for you." />
+               Text="{x:Static loc:S.CloseAppsBody}" />
 
     <Border Background="#F9FAFB" BorderBrush="#E5E7EB" BorderThickness="1" CornerRadius="8"
             Height="150" Padding="12,8">
@@ -22,11 +23,11 @@
     </Border>
 
     <StackPanel Orientation="Horizontal" Spacing="10">
-      <Button Content="Retry" Click="OnRetry" />
-      <Button Content="Close for me" Click="OnCloseForMe"
+      <Button Content="{x:Static loc:S.NavRetry}" Click="OnRetry" />
+      <Button Content="{x:Static loc:S.CloseAppsCloseForMe}" Click="OnCloseForMe"
               Background="{DynamicResource AccentBrush}" Foreground="White" />
     </StackPanel>
     <TextBlock Foreground="#6B7280" FontSize="11" TextWrapping="Wrap"
-               Text="Close for me asks each application to shut down normally — unsaved work is not discarded. Applications are not restarted afterwards." />
+               Text="{x:Static loc:S.CloseAppsCloseForMeHint}" />
   </StackPanel>
 </UserControl>

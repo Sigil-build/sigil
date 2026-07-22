@@ -7,6 +7,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using SigilBuild.Core.Manifest;
+using SigilBuild.Wrapper.Core.Localization;
 using SigilBuild.Wrapper.Expressions;
 
 /// <summary>
@@ -104,7 +105,7 @@ public static class PrerequisiteRunner
                 continue;
             }
 
-            Report(progress, ctx, $"Installing {p.Name}…", isError: false);
+            Report(progress, ctx, Strings.EngineInstallingPrerequisite(SessionLanguage.Current, p.Name), isError: false);
 
             // b. acquire the source (bundled payload or verified download).
             var (exePath, tempPath, acquireError) = await AcquireAsync(p, ctx, progress, ct).ConfigureAwait(false);

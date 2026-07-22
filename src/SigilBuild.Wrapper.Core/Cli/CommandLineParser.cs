@@ -133,6 +133,14 @@ public sealed class ParsedCommandLine
     public bool CloseApps { get; init; }
 
     /// <summary>
+    /// Requested wizard language from /lang=&lt;tag&gt;. A fixed installer.language
+    /// overrides this (design §2.1) — language is a display preference, so a
+    /// conflict is logged and ignored rather than being a usage error like
+    /// T12's fixed-scope vs /allusers.
+    /// </summary>
+    public string? Lang { get; init; }
+
+    /// <summary>
     /// Re-renders the parsed args as a single space-joined string, with secret
     /// parameter values replaced by <c>***</c>. Suitable for logging without
     /// leaking license keys / passwords / tokens.
@@ -225,6 +233,12 @@ public sealed class ParsedCommandLine
             sb.Append("/closeapps");
         }
 
+        if (Lang is not null)
+        {
+            Space();
+            sb.Append("/lang=").Append(Lang);
+        }
+
         foreach (var kv in Values)
         {
             Space();
@@ -270,6 +284,9 @@ public sealed class ParsedCommandLine
 ///   <item><description><c>/launch</c> — after a silent install, start the
 ///   <c>run_after_install</c> target unelevated (P2). Ignored without <c>/silent</c>
 ///   (the wizard uses the Done-screen checkbox).</description></item>
+///   <item><description><c>/lang=tag</c> — request wizard language (P10). <c>tag</c> is a
+///   language tag like <c>en</c>, <c>uk</c>, or <c>pt-BR</c>.</description></item>
+///   <item><description><c>/?</c> (alias <c>/help</c>) — show help text.</description></item>
 ///   <item><description><c>/P&lt;Name&gt;=&lt;Value&gt;</c> — override a declared parameter or a built-in option.</description></item>
 /// </list>
 /// Anything else is a <see cref="UsageException"/> — the parser is intentionally
@@ -327,6 +344,7 @@ public static class CommandLineParser
         string? logPath = null;
         var launch = false;
         var closeApps = false;
+        string? lang = null;
 
         foreach (var rawArg in args)
         {
@@ -338,7 +356,7 @@ public static class CommandLineParser
             if (rawArg[0] != '/')
             {
                 throw new UsageException(
-                    $"unexpected positional argument '{rawArg}': only /silent, /S, /verysilent, /Update, /Uninstall, /allusers, /currentuser, /force-downgrade, /closeapps, /D=path, /LOG[=path], /launch, and /PName=Value are accepted");
+                    $"unexpected positional argument '{rawArg}': only /silent, /S, /verysilent, /Update, /Uninstall, /allusers, /currentuser, /force-downgrade, /closeapps, /D=path, /LOG[=path], /lang=tag, /launch, and /PName=Value are accepted");
             }
 
             // Strip the leading '/'.
@@ -434,6 +452,33 @@ public static class CommandLineParser
                 // unknown-flag error so the closed grammar stays closed.
             }
 
+            // /lang=<tag> — prefix form, like /D=. No collision: /launch is matched by
+            // string.Equals above, and the /LOG branch tests body[1] == 'O'/'o'.
+            if (body.Length >= 5
+                && body[4] == '='
+                && (body[0] is 'l' or 'L')
+                && (body[1] is 'a' or 'A')
+                && (body[2] is 'n' or 'N')
+                && (body[3] is 'g' or 'G'))
+            {
+                var tag = body.Substring(5);
+                if (tag.Length == 0)
+                {
+                    throw new UsageException(
+                        $"'/lang=' requires a language tag (offending token: '{rawArg}')");
+                }
+
+                if (!LanguageTag.IsValid(tag))
+                {
+                    throw new UsageException(
+                        $"'{tag}' is not a valid language tag (offending token: '{rawArg}'). " +
+                        "Expected a tag like en, uk, or pt-BR.");
+                }
+
+                lang = tag;
+                continue;
+            }
+
             // /PName=Value — declared parameter or built-in option override.
             if (body.Length >= 1 && (body[0] == 'P' || body[0] == 'p'))
             {
@@ -442,7 +487,7 @@ public static class CommandLineParser
             }
 
             throw new UsageException(
-                $"unrecognized flag '{rawArg}': expected /silent, /S, /verysilent, /Update, /Uninstall, /allusers, /currentuser, /force-downgrade, /closeapps, /D=path, /LOG[=path], /launch, or /PName=Value");
+                $"unrecognized flag '{rawArg}': expected /silent, /S, /verysilent, /Update, /Uninstall, /allusers, /currentuser, /force-downgrade, /closeapps, /D=path, /LOG[=path], /lang=tag, /launch, or /PName=Value");
         }
 
         var secretKeys = schema
@@ -482,6 +527,7 @@ public static class CommandLineParser
             LogPath = logPath,
             Launch = launch,
             CloseApps = closeApps,
+            Lang = lang,
         };
     }
 

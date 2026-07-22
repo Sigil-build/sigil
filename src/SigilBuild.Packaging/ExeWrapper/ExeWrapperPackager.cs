@@ -240,9 +240,12 @@ public sealed class ExeWrapperPackager : IPackager
             // stamped host can render them. Parameters are already populated by
             // FromWrapperBlob; screens live only on the manifest's InstallerSection.
             Screens = ScreensToArray(manifest.Installer?.Screens),
-            // T14: read the manifest-referenced license file and embed its text so
-            // the stamped host shows the License screen. Missing/unreadable/empty
-            // → null + a non-fatal diagnostic (the screen is simply omitted).
+            // T14 / P9 (gap G10): read each manifest-referenced license file and
+            // embed a tag -> text map so the stamped host can show the License
+            // screen in the resolved language. Missing/unreadable/empty entries
+            // drop out (SIG0250, non-fatal); a non-empty result missing 'en' is
+            // fatal (SIG0290, see ReadLicenseText). An entirely empty result is
+            // null (the screen is simply omitted — T14's original behavior).
             LicenseText = ReadLicenseText(manifest.Installer?.License, sourceDirectory, diagnostics),
             // T11 / decision 7: mark the artifact as INTENDED to be signed iff the
             // manifest declares a real `sign` block. The trust line is gated at
@@ -252,6 +255,11 @@ public sealed class ExeWrapperPackager : IPackager
             // pack stamps resources FIRST (invalidating any prior signature), then
             // `sigil sign` signs the finished Setup.exe LAST.
             SignDeclared = manifest.Sign is { Provider: not SignProvider.None },
+            // P9 (gap G10): the manifest's optional fixed installer language, carried
+            // like Screens/LicenseText above — a session-bootstrap concern read
+            // straight off SerializableWrapperBlob, not part of the in-memory
+            // WrapperBlob the engine steps operate on.
+            Language = manifest.Installer?.Language,
         };
 
         var json = System.Text.Json.JsonSerializer.Serialize(
@@ -281,17 +289,72 @@ public sealed class ExeWrapperPackager : IPackager
     }
 
     /// <summary>
-    /// Reads the manifest-referenced license file (<c>installer.license</c>, T14)
-    /// as text, resolving a relative path against the pack source directory.
-    /// Returns <c>null</c> — and appends a non-fatal <see cref="DiagnosticCodes.LicenseFileUnreadable"/>
-    /// warning to <paramref name="diagnostics"/> — when the path is set but the
-    /// file is missing, unreadable, or empty. Per T14 this never hard-fails the
-    /// pack; the License screen is simply omitted. Plain text only (RTF-as-text v1;
-    /// no RTF parsing).
+    /// Reads each declared license file (<c>installer.license</c>, T14 / P9 gap
+    /// G10) at pack time into a tag -&gt; text map. Ownership (design §5.3):
+    /// <see cref="DiagnosticCodes.LicenseFileUnreadable"/> (SIG0250) owns
+    /// per-file readability and is non-fatal — that entry simply drops out of
+    /// the map; <see cref="DiagnosticCodes.LocalizedTextMissingEnglish"/>
+    /// (SIG0290) owns the <c>en</c> invariant and is fatal. The invariant is
+    /// asserted on the POST-READ map, so <c>{en: missing.txt, uk: ok.txt}</c>
+    /// fails via SIG0290 rather than silently packing a license only Ukrainian
+    /// users can read. An empty result (every entry dropped) returns
+    /// <c>null</c> and omits the screen — T14's original behavior, unchanged.
     /// </summary>
-    private static string? ReadLicenseText(
-        string? path, string sourceDirectory, ICollection<Diagnostic>? diagnostics)
+    private static Dictionary<string, string>? ReadLicenseText(
+        LocalizedText? license, string sourceDirectory, ICollection<Diagnostic>? diagnostics)
     {
+        if (license is null)
+        {
+            return null;
+        }
+
+        var texts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (tag, pathOrText) in license.Values)
+        {
+            var text = ReadOneLicense(pathOrText, sourceDirectory, tag, diagnostics);
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                texts[tag] = text!;
+            }
+        }
+
+        if (texts.Count == 0)
+        {
+            return null; // T14: no readable text -> no License screen. Not a SIG0290 case.
+        }
+
+        if (!texts.ContainsKey("en"))
+        {
+            diagnostics?.Add(new Diagnostic(
+                DiagnosticSeverity.Error,
+                DiagnosticCodes.LocalizedTextMissingEnglish,
+                $"installer.license has no readable 'en' entry (found: {string.Join(", ", texts.Keys)}). " +
+                "Every localized value needs an English fallback — without it there is no defined " +
+                "rendering for users whose language you do not ship.",
+                SourceLocation.Unknown,
+                "https://docs.sigil.build/diagnostics/SIG0290"));
+        }
+
+        return texts;
+    }
+
+    /// <summary>
+    /// Reads a single declared license file as text, resolving a relative path
+    /// against the pack source directory. Returns <c>null</c> — and appends a
+    /// non-fatal <see cref="DiagnosticCodes.LicenseFileUnreadable"/> warning to
+    /// <paramref name="diagnostics"/> — when the path is set but the file is
+    /// missing, unreadable, or empty. Per T14 this never hard-fails the pack by
+    /// itself; the caller (<see cref="ReadLicenseText"/>) decides whether the
+    /// resulting map still needs the fatal SIG0290 check. Plain text only
+    /// (RTF-as-text v1; no RTF parsing). <paramref name="tag"/> identifies which
+    /// language entry this is, for callers building a tag -&gt; text map.
+    /// </summary>
+    private static string? ReadOneLicense(
+        string? path, string sourceDirectory, string tag, ICollection<Diagnostic>? diagnostics)
+    {
+        _ = tag; // identifies the entry to the caller; the SIG0250 message itself is per-file, not per-language.
+
         if (string.IsNullOrWhiteSpace(path))
             return null;
 

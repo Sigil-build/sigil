@@ -37,10 +37,14 @@
     `sigil` resolves the runtime next to itself.
 
 .PARAMETER SizeGateMb
-    Fail if the staged win-x64 host exe exceeds this many MB. Default: 40.
-    (Measured win-x64 AOT size is ~30 MB; the gate carries ~10 MB headroom for
-    Skia/ANGLE/HarfBuzz native-lib version bumps. 25 MB is unattainable — those
-    native libs alone are ~19 MB in every variant. See docs/architecture/adr-avalonia-aot.md.)
+    Fail if the staged win-x64 host FOOTPRINT (exe + native libs, excl. PDBs)
+    exceeds this many MB. Default: 45.
+    Measured win-x64 footprint: ~42 MB (exe ~24 MB + Skia/ANGLE/HarfBuzz native
+    libs ~18 MB). 25 MB is unattainable — those native libs alone are ~19 MB in
+    every variant. Re-pinned 40 -> 45 for P9 (localization added ~2.26 MB over
+    main's 39.8 MB, which was already at the old 40 MB gate's edge;
+    InvariantGlobalization stays on — no ICU/globalization data pulled in). ~3 MB
+    headroom. See docs/architecture/adr-avalonia-aot.md and adr-008 §5.2.
 
 .PARAMETER RequireAll
     Treat a per-RID publish failure as fatal (used by CI legs that provision all
@@ -51,7 +55,7 @@ param(
     [string[]] $Rids = @('win-x64', 'win-arm64'),
     [string] $Configuration = 'Release',
     [string] $DestinationRoot,
-    [double] $SizeGateMb = 40,
+    [double] $SizeGateMb = 45,
     [switch] $RequireAll
 )
 

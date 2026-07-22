@@ -55,8 +55,8 @@ public class ScreensSchemaTests
 
         var configure = screens[0];
         configure.Id.Should().Be("configure");
-        configure.Title.Should().Be("Configure {app.name}");
-        configure.Subtitle.Should().Be("Connect to your server and set preferences.");
+        configure.Title.Values["en"].Should().Be("Configure {app.name}");
+        configure.Subtitle!.Values["en"].Should().Be("Connect to your server and set preferences.");
         configure.Fields.Select(f => f.Param).Should()
             .ContainInOrder("server_address", "license_key", "channel", "autostart");
 
@@ -145,5 +145,114 @@ public class ScreensSchemaTests
 
         result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Should().BeEmpty();
         result.Manifest!.Installer!.Screens!.Single().When.Should().Be("param.autostart == true");
+    }
+
+    // ── LocalizedText (P9, gap G10): title/subtitle normalize/carry {en, uk, ...} ──
+
+    [Fact]
+    public void PlainStringTitle_NormalizesToEnglish()
+    {
+        var yaml = Prelude + """
+
+            installer:
+              screens:
+                - id: cfg
+                  title: Configure
+                  fields: []
+            """;
+
+        var result = ManifestParser.Parse(yaml, "<inline>");
+
+        result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Should().BeEmpty();
+        result.Manifest!.Installer!.Screens![0].Title.Values["en"].Should().Be("Configure");
+    }
+
+    [Fact]
+    public void MapTitle_WithoutEnglish_EmitsSig0290_AsError()
+    {
+        var yaml = Prelude + """
+
+            installer:
+              screens:
+                - id: cfg
+                  title:
+                    uk: Налаштування
+                  fields: []
+            """;
+
+        var result = ManifestParser.Parse(yaml, "<inline>");
+
+        result.Diagnostics.Should().Contain(d =>
+            d.Code == DiagnosticCodes.LocalizedTextMissingEnglish && d.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    public void MapTitle_WithEnglish_IsAccepted()
+    {
+        var yaml = Prelude + """
+
+            installer:
+              screens:
+                - id: cfg
+                  title:
+                    en: Configure
+                    uk: Налаштування
+                  fields: []
+            """;
+
+        var result = ManifestParser.Parse(yaml, "<inline>");
+
+        result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Should().BeEmpty();
+        result.Manifest!.Installer!.Screens![0].Title.Values.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public void MapTitle_WithInvalidLanguageTag_EmitsSig0291()
+    {
+        var yaml = Prelude + """
+
+            installer:
+              screens:
+                - id: cfg
+                  title:
+                    en: Configure
+                    "!!": bogus
+                  fields: []
+            """;
+
+        var result = ManifestParser.Parse(yaml, "<inline>");
+
+        result.Diagnostics.Should().Contain(d =>
+            d.Code == DiagnosticCodes.InvalidLanguageTag && d.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    public void InvalidInstallerLanguage_EmitsSig0291()
+    {
+        var yaml = Prelude + """
+
+            installer:
+              language: "!!"
+            """;
+
+        var result = ManifestParser.Parse(yaml, "<inline>");
+
+        result.Diagnostics.Should().Contain(d =>
+            d.Code == DiagnosticCodes.InvalidLanguageTag && d.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    public void ValidInstallerLanguage_IsCarried()
+    {
+        var yaml = Prelude + """
+
+            installer:
+              language: uk
+            """;
+
+        var result = ManifestParser.Parse(yaml, "<inline>");
+
+        result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Should().BeEmpty();
+        result.Manifest!.Installer!.Language.Should().Be("uk");
     }
 }

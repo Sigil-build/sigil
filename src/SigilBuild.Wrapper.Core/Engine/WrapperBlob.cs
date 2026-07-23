@@ -66,7 +66,19 @@ internal sealed partial record WrapperBlob(
     IReadOnlyList<InstallerPrerequisite>? Prerequisites = null,
     // P6 (gap G7): named mutexes the app holds while running. Setup probes these
     // before touching the install dir; an openable mutex means "app is running".
-    IReadOnlyList<string>? AppMutex = null)
+    IReadOnlyList<string>? AppMutex = null,
+    // P12 (T12.3): the app manifest's updates: metadata, threaded into the blob so
+    // the /Update runtime can fetch + verify the signed channel manifest and decide
+    // whether to fetch a newer package. All null when the manifest declares no
+    // updates: block — the app is then not update-enabled and /Update exits nonzero.
+    // UpdateManifestUrl is the https URL of the signed channel manifest (its detached
+    // signature lives at UpdateManifestUrl + ".sig"); UpdateSigningKey is the base64
+    // ECDSA P-256 SPKI public key the signature is checked against; UpdateChannel is
+    // the selected channel name (informational — the channel manifest describes one
+    // already-selected channel's latest package).
+    string? UpdateManifestUrl = null,
+    string? UpdateSigningKey = null,
+    string? UpdateChannel = null)
 {
     /// <summary>
     /// Empty sentinel blob: well-known <c>AppId</c> placeholder and zero-length

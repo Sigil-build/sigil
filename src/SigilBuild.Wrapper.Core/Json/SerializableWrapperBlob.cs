@@ -135,6 +135,19 @@ internal sealed record SerializableWrapperBlob
     /// </summary>
     public string? Language { get; init; }
 
+    // --- P12 (T12.3) update metadata, sourced from the manifest's updates: block.
+    //     Read back by the /Update runtime (InstallSession) to fetch + verify the
+    //     signed channel manifest. All null when the manifest declares no updates:. ---
+
+    /// <summary>The https URL of the signed channel manifest (<c>updates.manifestUrl</c>).</summary>
+    public string? ManifestUrl { get; init; }
+
+    /// <summary>The base64 ECDSA P-256 SPKI public key the channel manifest signature is verified against (<c>updates.signingKey</c>).</summary>
+    public string? SigningKey { get; init; }
+
+    /// <summary>The selected update channel name (<c>updates.channel</c>), informational at runtime.</summary>
+    public string? Channel { get; init; }
+
     public static WrapperBlob ToWrapperBlob(SerializableWrapperBlob s)
     {
         ArgumentNullException.ThrowIfNull(s);
@@ -166,7 +179,11 @@ internal sealed record SerializableWrapperBlob
             RunAfterInstallArgs: s.RunAfterInstallArgs,
             // P5: prerequisite units.
             Prerequisites: ConvertPrerequisites(s.Prerequisites),
-            AppMutex: s.AppMutex);
+            AppMutex: s.AppMutex,
+            // P12: update metadata read back by the /Update runtime.
+            UpdateManifestUrl: s.ManifestUrl,
+            UpdateSigningKey: s.SigningKey,
+            UpdateChannel: s.Channel);
     }
 
     public static SerializableWrapperBlob FromWrapperBlob(WrapperBlob blob)
@@ -202,6 +219,10 @@ internal sealed record SerializableWrapperBlob
             // P5: prerequisite units.
             Prerequisites = SerializePrerequisites(blob.Prerequisites),
             AppMutex = blob.AppMutex is null ? null : ToStringArray(blob.AppMutex),
+            // P12: update metadata carried onto the wire DTO.
+            ManifestUrl = blob.UpdateManifestUrl,
+            SigningKey = blob.UpdateSigningKey,
+            Channel = blob.UpdateChannel,
         };
     }
 

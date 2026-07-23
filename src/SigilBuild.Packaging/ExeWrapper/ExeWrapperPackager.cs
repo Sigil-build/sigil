@@ -222,7 +222,14 @@ public sealed class ExeWrapperPackager : IPackager
             // P5 (gap G6): first-class prerequisite units, run before the journaled body.
             Prerequisites: manifest.Installer?.Prerequisites,
             // P6 (gap G7): the declared app mutex names.
-            AppMutex: manifest.Installer?.AppMutex);
+            AppMutex: manifest.Installer?.AppMutex,
+            // P12 (T12.3): the updates: metadata (manifestUrl / signingKey / channel)
+            // so the stamped /Update runtime can fetch + verify the signed channel
+            // manifest and decide whether a newer package is available. Null when the
+            // manifest declares no updates: block (the app is not update-enabled).
+            UpdateManifestUrl: manifest.Updates?.ManifestUrl,
+            UpdateSigningKey: manifest.Updates?.SigningKey,
+            UpdateChannel: manifest.Updates?.Channel);
 
         // T7: derive the full light/dark palette at pack time and carry it, plus
         // the base64 logo/hero bytes, inside the blob so the stamped exe renders

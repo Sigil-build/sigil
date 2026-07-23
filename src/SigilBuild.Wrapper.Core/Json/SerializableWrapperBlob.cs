@@ -148,6 +148,14 @@ internal sealed record SerializableWrapperBlob
     /// <summary>The selected update channel name (<c>updates.channel</c>), informational at runtime.</summary>
     public string? Channel { get; init; }
 
+    /// <summary>
+    /// P12 (T12.5): true only for a web-installer stub's synthesized blob — see
+    /// <see cref="WrapperBlob.IsDelegatingStub"/> for why this gates
+    /// <c>InstallSession</c>'s success-path completion bookkeeping. Defaults to
+    /// <c>false</c> (an embedded-payload pack, or any un-stamped/legacy blob).
+    /// </summary>
+    public bool IsDelegatingStub { get; init; }
+
     public static WrapperBlob ToWrapperBlob(SerializableWrapperBlob s)
     {
         ArgumentNullException.ThrowIfNull(s);
@@ -183,7 +191,9 @@ internal sealed record SerializableWrapperBlob
             // P12: update metadata read back by the /Update runtime.
             UpdateManifestUrl: s.ManifestUrl,
             UpdateSigningKey: s.SigningKey,
-            UpdateChannel: s.Channel);
+            UpdateChannel: s.Channel,
+            // P12 (T12.5): the web-installer stub marker.
+            IsDelegatingStub: s.IsDelegatingStub);
     }
 
     public static SerializableWrapperBlob FromWrapperBlob(WrapperBlob blob)
@@ -223,6 +233,8 @@ internal sealed record SerializableWrapperBlob
             ManifestUrl = blob.UpdateManifestUrl,
             SigningKey = blob.UpdateSigningKey,
             Channel = blob.UpdateChannel,
+            // P12 (T12.5): the web-installer stub marker.
+            IsDelegatingStub = blob.IsDelegatingStub,
         };
     }
 

@@ -109,6 +109,16 @@ public class ExeWrapperWebInstallerPackTests
             download.Sha256.Should().Be(result.Artifact.Sha256,
                 "the stub must verify against the sha256 of the package ACTUALLY emitted, not a guess");
             stubBlob.InstallSteps.Should().ContainSingle(s => s.Type == "run_program");
+
+            // CRITICAL (post-review fix): the stub must be marked a delegating
+            // trampoline so InstallSession skips its own ARP/uninstall-state
+            // bookkeeping — the child Setup.exe it downloads+runs already does
+            // that correctly for the same AppId/scope.
+            stubBlob.IsDelegatingStub.Should().BeTrue();
+
+            // The full package it delegates to is an ordinary, non-delegating pack.
+            var fullBlob = DeserializeBlob(result.Artifact.Path);
+            fullBlob.IsDelegatingStub.Should().BeFalse("only the stub delegates; the full package installs for real");
         }
         finally
         {

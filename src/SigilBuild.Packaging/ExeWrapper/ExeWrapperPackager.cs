@@ -217,6 +217,13 @@ public sealed class ExeWrapperPackager : IPackager
     // fixed `/verysilent` argument isn't a fresh array literal on every call.
     private static readonly string[] RunSilentArgs = { "/verysilent" };
 
+    // CA1861: hoisted for the same reason. 0 = clean success; 3010 = success,
+    // reboot required (the standard MSI/Windows-installer convention the full
+    // package's own prerequisite/step handling already honors) — the child
+    // Setup.exe returning 3010 must not spuriously fail the stub's run_program
+    // (RunProgramStep otherwise defaults an unset ExpectedExitCodes to [0] only).
+    private static readonly int[] RunExpectedExitCodes = { 0, 3010 };
+
     internal static byte[] BuildWebStubBlobBytes(
         SigilManifest manifest, string packageUrl, string packageSha256, string fullPackageFileName)
     {
@@ -239,7 +246,7 @@ public sealed class ExeWrapperPackager : IPackager
                 Args: RunSilentArgs,
                 Wait: true,
                 Cwd: null,
-                ExpectedExitCodes: null,
+                ExpectedExitCodes: RunExpectedExitCodes,
                 TimeoutSeconds: null,
                 When: null,
                 OnFailure: OnFailure.Fail),
@@ -257,7 +264,12 @@ public sealed class ExeWrapperPackager : IPackager
             DisplayName: manifest.App.Name,
             Publisher: manifest.App.Publisher,
             Version: manifest.App.Version,
-            EstimatedSizeBytes: 0);
+            EstimatedSizeBytes: 0,
+            // P12 (T12.5): mark this blob as a pure delegating trampoline so
+            // InstallSession skips its OWN completion bookkeeping on success —
+            // see WrapperBlob.IsDelegatingStub for why. The embedded-payload
+            // path (BuildBlobBytes) never sets this, so it stays false there.
+            IsDelegatingStub: true);
 
         var serializable = SerializableWrapperBlob.FromWrapperBlob(inMemory) with
         {

@@ -78,7 +78,21 @@ internal sealed partial record WrapperBlob(
     // already-selected channel's latest package).
     string? UpdateManifestUrl = null,
     string? UpdateSigningKey = null,
-    string? UpdateChannel = null)
+    string? UpdateChannel = null,
+    // P12 (T12.5): true only for a web-installer STUB's synthesized blob — the
+    // stub is a pure delegating trampoline (http_download + run_program of the
+    // full package) that must do NO install-completion bookkeeping of its own.
+    // Without this flag the stub's OWN successful run would re-run
+    // InstallSession.PersistCompletion for the SAME AppId/scope AFTER the child
+    // Setup.exe it just launched already did so correctly — clobbering the
+    // child's real uninstall.json (with the stub's trivial two-step journal)
+    // and, when install dirs coincide, the child's real uninstall.exe (with a
+    // copy of the stub) — leaving Programs & Features showing the app with an
+    // uninstaller that can never actually remove it. Mirrors the philosophy of
+    // <c>UpdateRunner</c>, which likewise hands off to a child installer and
+    // deliberately re-implements no install-completion logic of its own.
+    // False (the default) for every embedded-payload pack — unchanged behavior.
+    bool IsDelegatingStub = false)
 {
     /// <summary>
     /// Empty sentinel blob: well-known <c>AppId</c> placeholder and zero-length

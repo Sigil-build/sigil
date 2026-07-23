@@ -857,7 +857,21 @@ public sealed class InstallSession
                 return new InstallOutcome(false, result.Error);
             }
 
-            PersistCompletion(result.Journal, ctx.SecretValues, ctx.InstallDir);
+            // P12 (T12.5): a web-installer stub is a pure delegating trampoline —
+            // its own "install" is just http_download + run_program of the full
+            // package, which ALREADY ran its own complete PersistCompletion (ARP
+            // register, uninstall.exe copy, UninstallStateStore.Save) for this
+            // SAME AppId/scope by the time run_program returns. Persisting AGAIN
+            // here would clobber the child's real uninstall.json/uninstall.exe
+            // with the stub's own trivial two-step journal, leaving an ARP row
+            // that can never actually uninstall the app. Skip ONLY this
+            // success-path bookkeeping call — the steps above still ran (and any
+            // in-flight rollback on a step FAILURE still works normally via the
+            // journal); this is the one call site PersistCompletion has.
+            if (!_blob.IsDelegatingStub)
+            {
+                PersistCompletion(result.Journal, ctx.SecretValues, ctx.InstallDir);
+            }
             // Install committed: a rollback can no longer be requested, so the
             // transient file_delete / directory_delete stashes (%TEMP%\sigil-fd-* /
             // sigil-dd-*) are dead weight. Reclaim them so a successful install

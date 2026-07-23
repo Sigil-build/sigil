@@ -87,6 +87,40 @@ public class ExeWrapperWebInstallerBlobTests
         blob.PostInstall.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// CRITICAL (post-review fix): the stub's blob MUST be marked a delegating
+    /// trampoline so <c>InstallSession</c> skips its OWN completion bookkeeping
+    /// (ARP register / uninstall.exe copy / UninstallStateStore.Save) on
+    /// success — the child Setup.exe it downloads and runs already does all of
+    /// that correctly for the SAME AppId/scope. Without this flag the stub's
+    /// own successful run would clobber the child's real uninstall state. The
+    /// embedded-payload path (<see cref="ExeWrapperPackager.BuildBlobBytes"/>)
+    /// must NOT set it — covered by <c>ExeWrapperHttpDownloadDeterminismTests</c>
+    /// / <c>ExeWrapperOptionStepTests</c> style embedded blobs, which never
+    /// touch this field and therefore default to false.
+    /// </summary>
+    [Fact]
+    public void Stub_blob_is_marked_a_delegating_trampoline()
+    {
+        var blob = Deserialize(ExeWrapperPackager.BuildWebStubBlobBytes(
+            Manifest(), PackageUrl, PackageSha256, FullPackageFileName));
+
+        blob.IsDelegatingStub.Should().BeTrue(
+            "InstallSession must skip its own ARP/uninstall-state bookkeeping when the stub's " +
+            "run_program hand-off already delegated the real install to the downloaded child Setup.exe");
+    }
+
+    [Fact]
+    public void Run_program_step_accepts_the_reboot_required_exit_code()
+    {
+        var blob = Deserialize(ExeWrapperPackager.BuildWebStubBlobBytes(
+            Manifest(), PackageUrl, PackageSha256, FullPackageFileName));
+
+        var run = blob.InstallSteps.Single(s => s.Type == "run_program");
+        run.ExpectedExitCodes.Should().Contain(new[] { 0, 3010 },
+            "a child Setup.exe returning 3010 (success, reboot required) must not spuriously fail the stub");
+    }
+
     [Fact]
     public void BuildWebStubBlobBytes_is_byte_identical_across_two_builds_of_the_same_input()
     {

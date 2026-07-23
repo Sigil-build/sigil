@@ -24,6 +24,7 @@ internal static class StepFactory
         InstallStep.ServiceInstall si       => new ServiceInstallStep(si),
         InstallStep.ScheduledTaskCreate stc => new ScheduledTaskCreateStep(stc),
         InstallStep.ComRegister cr          => new ComRegisterStep(cr),
+        InstallStep.FirewallRule fr         => new FirewallRuleStep(fr),
 #pragma warning restore CA1416
         InstallStep.RunProgram rp      => new RunProgramStep(rp),
         InstallStep.HttpDownload hd    => new HttpDownloadStep(hd),

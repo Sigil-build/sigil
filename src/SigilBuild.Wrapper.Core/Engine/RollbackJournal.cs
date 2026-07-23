@@ -140,6 +140,7 @@ public sealed class RollbackJournal
         RollbackRecord.RemoveUninstaller r => $"delete {r.Path}",
         RollbackRecord.DeleteScheduledTask r => $"deltask {r.TaskName}",
         RollbackRecord.UnregisterCom r => $"unregister {r.DllPath}",
+        RollbackRecord.DeleteFirewallRule r => $"delfw {r.RuleName}",
         _ => "revert",
     };
 }
@@ -608,6 +609,50 @@ public abstract record RollbackRecord
 #pragma warning restore CA1031
 
             return System.Threading.Tasks.Task.CompletedTask;
+        }
+    }
+
+    /// <summary>
+    /// Deletes a Windows Defender Firewall rule created by <c>firewall_rule</c>
+    /// (P11, T11.3) via <c>netsh advfirewall firewall delete rule</c>. Recorded
+    /// BEFORE the add so an interrupted install can still unwind. Mirrors
+    /// <see cref="RemoveService"/>/<see cref="DeleteScheduledTask"/>: netsh's
+    /// "No rules match the specified criteria" (the rule was never created, or
+    /// was already removed) is silently tolerated — the goal is "no rule after
+    /// rollback," not "exact symmetric command execution." Only the rule NAME
+    /// is carried — no secrets, no resolved program path.
+    /// </summary>
+    public sealed record DeleteFirewallRule(string RuleName) : RollbackRecord
+    {
+        public override async System.Threading.Tasks.Task UndoAsync(System.Threading.CancellationToken ct)
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("netsh.exe")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            psi.ArgumentList.Add("advfirewall");
+            psi.ArgumentList.Add("firewall");
+            psi.ArgumentList.Add("delete");
+            psi.ArgumentList.Add("rule");
+            psi.ArgumentList.Add($"name={RuleName}");
+            try
+            {
+                using var proc = System.Diagnostics.Process.Start(psi);
+                if (proc is null) return;
+                await proc.WaitForExitAsync(ct).ConfigureAwait(false);
+                // netsh exits non-zero ("No rules match the specified
+                // criteria") when the rule is already gone; benign on
+                // rollback, same tolerance as RemoveService/DeleteScheduledTask
+                // above.
+            }
+#pragma warning disable CA1031 // Best-effort uninstall — netsh.exe missing or admin denied is acceptable.
+            catch
+            {
+            }
+#pragma warning restore CA1031
         }
     }
 }

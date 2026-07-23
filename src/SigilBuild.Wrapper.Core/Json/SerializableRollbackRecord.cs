@@ -28,7 +28,7 @@ internal sealed record SerializableRollbackRecord
     /// <c>restore_registry_value</c>, <c>restore_registry_key</c>,
     /// <c>delete_shortcut</c>, <c>restore_env</c>, <c>remove_uninstaller</c>,
     /// <c>remove_service</c>, <c>delete_scheduled_task</c>,
-    /// <c>unregister_com</c>.</summary>
+    /// <c>unregister_com</c>, <c>delete_firewall_rule</c>.</summary>
     public string Type { get; init; } = string.Empty;
 
     // RestoreFile / RemoveDirectory / DeleteShortcut all use Path.
@@ -79,6 +79,12 @@ internal sealed record SerializableRollbackRecord
     // so an interrupted install still unwinds the COM registration. Path
     // only — no secrets, no registry contents.
     public string? ComDllPath { get; init; }
+
+    // DeleteFirewallRule (P11, T11.3): name of the Windows Defender Firewall
+    // rule to netsh delete on rollback / uninstall. Recorded by firewall_rule
+    // BEFORE the add so an interrupted install still tears the rule down.
+    // Name only — no secrets, no resolved program path.
+    public string? RuleName { get; init; }
 }
 
 /// <summary>
@@ -201,6 +207,12 @@ internal static class SerializableRollbackRecordExtensions
                 ComDllPath = r.DllPath,
             },
 
+            RollbackRecord.DeleteFirewallRule r => new SerializableRollbackRecord
+            {
+                Type = "delete_firewall_rule",
+                RuleName = r.RuleName,
+            },
+
             _ => throw new InvalidOperationException(
                 $"unsupported RollbackRecord subtype: {record.GetType().Name}"),
         };
@@ -269,6 +281,9 @@ internal static class SerializableRollbackRecordExtensions
 
             "unregister_com" => new RollbackRecord.UnregisterCom(
                 s.ComDllPath ?? throw MissingField("unregister_com", "comDllPath")),
+
+            "delete_firewall_rule" => new RollbackRecord.DeleteFirewallRule(
+                s.RuleName ?? throw MissingField("delete_firewall_rule", "ruleName")),
 
             _ => throw new InvalidOperationException(
                 $"unknown rollback record type '{s.Type}'"),

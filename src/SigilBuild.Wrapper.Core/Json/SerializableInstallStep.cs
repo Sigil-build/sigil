@@ -125,6 +125,17 @@ internal sealed record SerializableInstallStep
     public string? TaskArguments { get; init; }
     public string? TaskTrigger { get; init; }
     public string? TaskRunLevel { get; init; }
+
+    // firewall_rule (P11, T11.3). Fresh field names (rather than reusing the
+    // generic Name/Program slots above) avoid ambiguity with the other step
+    // types that already use those names — mirrors TaskName/TaskProgram's
+    // reasoning for scheduled_task_create.
+    public string? FirewallRuleName { get; init; }
+    public string? FirewallDirection { get; init; }
+    public string? FirewallAction { get; init; }
+    public string? FirewallProgram { get; init; }
+    public int? FirewallPort { get; init; }
+    public string? FirewallProtocol { get; init; }
 }
 
 /// <summary>
@@ -294,6 +305,17 @@ internal static class SerializableInstallStepConverter
             "com_register" => new InstallStep.ComRegister(
                 s.Id,
                 s.Path ?? throw MissingField("com_register", "path", s.Id),
+                s.When,
+                onFailure),
+
+            "firewall_rule" => new InstallStep.FirewallRule(
+                s.Id,
+                s.FirewallRuleName ?? throw MissingField("firewall_rule", "name", s.Id),
+                s.FirewallDirection ?? throw MissingField("firewall_rule", "direction", s.Id),
+                s.FirewallAction ?? throw MissingField("firewall_rule", "action", s.Id),
+                s.FirewallProgram,
+                s.FirewallPort,
+                s.FirewallProtocol,
                 s.When,
                 onFailure),
 
@@ -515,6 +537,20 @@ internal static class SerializableInstallStepConverter
                 When = x.When,
                 OnFailure = onFailure,
                 Path = x.Path,
+            },
+
+            InstallStep.FirewallRule x => new SerializableInstallStep
+            {
+                Id = x.Id,
+                Type = "firewall_rule",
+                When = x.When,
+                OnFailure = onFailure,
+                FirewallRuleName = x.Name,
+                FirewallDirection = x.Direction,
+                FirewallAction = x.Action,
+                FirewallProgram = x.Program,
+                FirewallPort = x.Port,
+                FirewallProtocol = x.Protocol,
             },
 
             _ => throw new InvalidOperationException(

@@ -257,6 +257,41 @@ public abstract record InstallStep(string Id, string? When, OnFailure OnFailure)
     {
         public override bool RequiresMachineScope => true;
     }
+
+    /// <summary>
+    /// P11 (T11.3), third and last of three machine-scope-only "system steps":
+    /// creates a Windows Defender Firewall rule via
+    /// <c>netsh advfirewall firewall add rule</c>. Firewall rules are
+    /// machine-global (there is no per-user firewall policy store), so
+    /// <see cref="RequiresMachineScope"/> is overridden to <c>true</c> (see
+    /// <see cref="SigilBuild.Core.Configuration.MachineScopeGuard"/> / SIG0310).
+    /// Journals a <c>RollbackRecord.DeleteFirewallRule</c> (rule name only)
+    /// BEFORE the add so a mid-install crash and <c>setup.exe /Uninstall</c>
+    /// both unwind the rule — mirrors <see cref="ServiceInstall"/>'s
+    /// <c>RemoveService</c> pattern.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Port"/> and <see cref="Protocol"/> are both optional, but
+    /// netsh's <c>localport=</c> only makes sense alongside a <c>protocol=</c>
+    /// (TCP/UDP); the parser defaults <see cref="Protocol"/> to <c>tcp</c>
+    /// when <see cref="Port"/> is set and no protocol was given explicitly, so
+    /// this typed field is only <c>null</c> when the manifest author left both
+    /// unset (a whole-program rule with no port restriction).
+    /// </remarks>
+    public sealed record FirewallRule(
+        string Id,
+        string Name,
+        string Direction,        // in | out
+        string Action,           // allow | block
+        string? Program,
+        int? Port,
+        string? Protocol,        // tcp | udp; parser-defaulted to "tcp" when Port is set
+        string? When,
+        OnFailure OnFailure)
+        : InstallStep(Id, When, OnFailure)
+    {
+        public override bool RequiresMachineScope => true;
+    }
 }
 
 /// <summary>

@@ -1211,6 +1211,7 @@ public static class ManifestParser
             "service_install"       => BuildServiceInstall(node, id!, when, onFailure, diagnostics, loc),
             "scheduled_task_create" => BuildScheduledTaskCreate(node, id!, when, onFailure, diagnostics, loc),
             "com_register"          => BuildComRegister(node, id!, when, onFailure, diagnostics, loc),
+            "firewall_rule"         => BuildFirewallRule(node, id!, when, onFailure, diagnostics, loc),
             _ => ReportUnknownStepType(id!, typeStr!, loc, diagnostics),
         };
 
@@ -1312,6 +1313,74 @@ public static class ManifestParser
 
         ReportUnknownStepFields(node, id, "com_register", ComRegisterFields, loc, diagnostics);
         return new InstallStep.ComRegister(id, path, when, onFailure);
+    }
+
+    private static readonly string[] FirewallRuleFields =
+    {
+        "id", "type", "when", "on_failure",
+        "name", "direction", "action", "program", "port", "protocol",
+    };
+
+    private static readonly string[] FirewallDirectionValues = { "in", "out" };
+    private static readonly string[] FirewallActionValues = { "allow", "block" };
+    private static readonly string[] FirewallProtocolValues = { "tcp", "udp" };
+
+    /// <summary>
+    /// P11 (T11.3): <c>firewall_rule</c> — creates a Windows Defender Firewall
+    /// rule via <c>netsh advfirewall firewall add rule</c>. <c>name</c>,
+    /// <c>direction</c>, and <c>action</c> are required (missing → SIG0232);
+    /// <c>direction</c>/<c>action</c>/<c>protocol</c> are enum-valued fields —
+    /// a value outside their allowed set is SIG0233.
+    /// </summary>
+    /// <remarks>
+    /// Port/protocol validation rule (documented per the brief, "keep it
+    /// simple"): netsh's <c>localport=</c> needs an accompanying
+    /// <c>protocol=</c>, so when <c>port</c> is given and <c>protocol</c> is
+    /// absent, the parser defaults <c>protocol</c> to <c>tcp</c> rather than
+    /// forcing every manifest author to spell out the common case. An
+    /// explicitly-given <c>protocol</c> is still validated against the
+    /// tcp/udp enum regardless of whether <c>port</c> is set.
+    /// </remarks>
+    private static InstallStep.FirewallRule? BuildFirewallRule(
+        YamlMappingNode node, string id, string? when, OnFailure onFailure,
+        List<Diagnostic> diagnostics, SourceLocation loc)
+    {
+        var name = GetScalar(node, "name");
+        var direction = GetScalar(node, "direction");
+        var action = GetScalar(node, "action");
+        if (name is null)      { ReportMissingField(id, "firewall_rule", "name",      loc, diagnostics); return null; }
+        if (direction is null) { ReportMissingField(id, "firewall_rule", "direction", loc, diagnostics); return null; }
+        if (action is null)    { ReportMissingField(id, "firewall_rule", "action",    loc, diagnostics); return null; }
+
+        if (!FirewallDirectionValues.Contains(direction))
+        {
+            ReportBadEnumValue(id, "firewall_rule", "direction", direction, FirewallDirectionValues, loc, diagnostics);
+            return null;
+        }
+        if (!FirewallActionValues.Contains(action))
+        {
+            ReportBadEnumValue(id, "firewall_rule", "action", action, FirewallActionValues, loc, diagnostics);
+            return null;
+        }
+
+        var program = GetScalar(node, "program");
+        var port = GetNullableInt(node, "port");
+        var protocol = GetScalar(node, "protocol");
+        if (protocol is not null && !FirewallProtocolValues.Contains(protocol))
+        {
+            ReportBadEnumValue(id, "firewall_rule", "protocol", protocol, FirewallProtocolValues, loc, diagnostics);
+            return null;
+        }
+
+        // See the remarks on this method: default protocol=tcp when a port is
+        // given but the author left protocol unset.
+        if (port is not null && protocol is null)
+        {
+            protocol = "tcp";
+        }
+
+        ReportUnknownStepFields(node, id, "firewall_rule", FirewallRuleFields, loc, diagnostics);
+        return new InstallStep.FirewallRule(id, name, direction, action, program, port, protocol, when, onFailure);
     }
 
     private static InstallStep? ReportUnknownStepType(

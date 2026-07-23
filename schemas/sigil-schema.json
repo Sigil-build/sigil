@@ -69,7 +69,7 @@
           "enum": [
             "file_copy", "directory_create", "file_delete", "directory_delete",
             "registry_write", "registry_delete_value", "registry_delete_key",
-            "shortcut_create", "env_set", "run_program", "http_download", "ini_write", "json_edit", "xml_edit", "service_install", "scheduled_task_create", "com_register"
+            "shortcut_create", "env_set", "run_program", "http_download", "ini_write", "json_edit", "xml_edit", "service_install", "scheduled_task_create", "com_register", "firewall_rule"
           ]
         },
         "when": { "type": "string" },
@@ -89,7 +89,7 @@
             "enum": [
               "file_copy", "directory_create", "file_delete", "directory_delete",
               "registry_write", "registry_delete_value", "registry_delete_key",
-              "shortcut_create", "env_set", "run_program", "http_download", "ini_write", "json_edit", "xml_edit", "service_install", "scheduled_task_create", "com_register"
+              "shortcut_create", "env_set", "run_program", "http_download", "ini_write", "json_edit", "xml_edit", "service_install", "scheduled_task_create", "com_register", "firewall_rule"
             ]
           },
           "when": { "type": "string" },
@@ -228,7 +228,7 @@
             "enum": [
               "file_copy", "directory_create", "file_delete", "directory_delete",
               "registry_write", "registry_delete_value", "registry_delete_key",
-              "shortcut_create", "env_set", "run_program", "service_install", "scheduled_task_create", "com_register"
+              "shortcut_create", "env_set", "run_program", "service_install", "scheduled_task_create", "com_register", "firewall_rule"
             ]
           },
           "when": { "type": "string" },
@@ -635,7 +635,7 @@
             "enum": [
               "file_copy", "directory_create", "file_delete", "directory_delete",
               "registry_write", "registry_delete_value", "registry_delete_key",
-              "shortcut_create", "env_set", "run_program", "http_download", "ini_write", "json_edit", "xml_edit", "service_install", "scheduled_task_create", "com_register"
+              "shortcut_create", "env_set", "run_program", "http_download", "ini_write", "json_edit", "xml_edit", "service_install", "scheduled_task_create", "com_register", "firewall_rule"
             ]
           },
           "when": { "type": "string" },
@@ -657,7 +657,7 @@
             "enum": [
               "file_copy", "directory_create", "file_delete", "directory_delete",
               "registry_write", "registry_delete_value", "registry_delete_key",
-              "shortcut_create", "env_set", "run_program", "http_download", "ini_write", "json_edit", "xml_edit", "service_install", "scheduled_task_create", "com_register"
+              "shortcut_create", "env_set", "run_program", "http_download", "ini_write", "json_edit", "xml_edit", "service_install", "scheduled_task_create", "com_register", "firewall_rule"
             ]
           },
           "when": { "type": "string" },
@@ -679,7 +679,7 @@
             "enum": [
               "file_copy", "directory_create", "file_delete", "directory_delete",
               "registry_write", "registry_delete_value", "registry_delete_key",
-              "shortcut_create", "env_set", "run_program", "http_download", "ini_write", "json_edit", "xml_edit", "service_install", "scheduled_task_create", "com_register"
+              "shortcut_create", "env_set", "run_program", "http_download", "ini_write", "json_edit", "xml_edit", "service_install", "scheduled_task_create", "com_register", "firewall_rule"
             ]
           },
           "when": { "type": "string" },
@@ -701,7 +701,7 @@
             "enum": [
               "file_copy", "directory_create", "file_delete", "directory_delete",
               "registry_write", "registry_delete_value", "registry_delete_key",
-              "shortcut_create", "env_set", "run_program", "http_download", "ini_write", "json_edit", "xml_edit", "service_install", "scheduled_task_create", "com_register"
+              "shortcut_create", "env_set", "run_program", "http_download", "ini_write", "json_edit", "xml_edit", "service_install", "scheduled_task_create", "com_register", "firewall_rule"
             ]
           },
           "when": { "type": "string" },

@@ -129,4 +129,3 @@ brand.publisher_fallback = Видавець
 engine.removing_previous = Вилучення попередньої версії
 engine.removing_newer = Вилучення новішої версії
 engine.installing_prerequisite = Встановлення {name}…
-engine.update_unsupported = /Update не підтримується цією програмою встановлення: update_steps виконуються через SDK дельта-оновлень, а не через середовище встановлення.

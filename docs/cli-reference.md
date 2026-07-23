@@ -59,8 +59,10 @@ Arguments:
   <path>  Path to the manifest [default: sigil.yaml]
 
 Options:
-  --out <out>     Output directory [default: ./dist]
-  -?, -h, --help  Show help and usage information
+  --out <out>                  Output directory [default: ./dist]
+  --payload <payload>          Exe payload delivery: embedded | web [default: embedded]
+  --package-url <package-url>  HTTPS URL the full package will be hosted at — REQUIRED when --payload web
+  -?, -h, --help               Show help and usage information
 ```
 
 ## `sigil sign`

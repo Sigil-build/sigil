@@ -138,6 +138,7 @@ public sealed class RollbackJournal
         RollbackRecord.RestoreDeletedDirectory r => $"restore {r.OriginalPath}",
         RollbackRecord.RestoreConfigFile r => $"restore {r.OriginalPath}",
         RollbackRecord.RemoveUninstaller r => $"delete {r.Path}",
+        RollbackRecord.DeleteScheduledTask r => $"deltask {r.TaskName}",
         _ => "revert",
     };
 }
@@ -526,6 +527,46 @@ public abstract record RollbackRecord
                 // sc.exe exit 1060 = service does not exist; benign on rollback.
             }
 #pragma warning disable CA1031 // Best-effort uninstall — sc.exe missing or admin denied is acceptable.
+            catch
+            {
+            }
+#pragma warning restore CA1031
+        }
+    }
+
+    /// <summary>
+    /// Deletes a Windows Scheduled Task created by <c>scheduled_task_create</c>
+    /// (P11, T11.1). Recorded BEFORE the create so an interrupted install can
+    /// still unwind. Mirrors <see cref="RemoveService"/>: schtasks.exe absence /
+    /// "task not found" is silently tolerated — the goal is "no task after
+    /// rollback," not "exact symmetric command execution." Only the task NAME
+    /// is carried — no secrets, no resolved program path.
+    /// </summary>
+    public sealed record DeleteScheduledTask(string TaskName) : RollbackRecord
+    {
+        public override async System.Threading.Tasks.Task UndoAsync(System.Threading.CancellationToken ct)
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("schtasks.exe")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            psi.ArgumentList.Add("/Delete");
+            psi.ArgumentList.Add("/TN");
+            psi.ArgumentList.Add(TaskName);
+            psi.ArgumentList.Add("/F");
+            try
+            {
+                using var proc = System.Diagnostics.Process.Start(psi);
+                if (proc is null) return;
+                await proc.WaitForExitAsync(ct).ConfigureAwait(false);
+                // schtasks /Delete on a missing task exits non-zero ("The
+                // system cannot find the file specified" / ERROR_FILE_NOT_FOUND);
+                // benign on rollback, same tolerance as RemoveService above.
+            }
+#pragma warning disable CA1031 // Best-effort uninstall — schtasks.exe missing or admin denied is acceptable.
             catch
             {
             }

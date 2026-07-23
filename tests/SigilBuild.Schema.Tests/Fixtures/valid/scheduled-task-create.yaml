@@ -1,0 +1,25 @@
+# T11.1 (P11): schema fixture for the machine-scope-only scheduled_task_create
+# install step. scope: machine is required by SIG0310 (SigilBuild.Core.Tests
+# covers that diagnostic); this file only proves the JSON Schema shape.
+spec: v1.0
+
+app:
+  id: com.example.App
+  name: App
+  version: 0.1.0
+  publisher: P
+
+build:
+  source: ./out
+
+installer:
+  scope: machine
+
+install_steps:
+  - id: install_updater_task
+    type: scheduled_task_create
+    name: AcmeUpdaterTask
+    program: "{install_dir}/updater.exe"
+    arguments: "--check --silent"
+    trigger: daily
+    run_level: highest

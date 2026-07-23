@@ -210,6 +210,30 @@ public abstract record InstallStep(string Id, string? When, OnFailure OnFailure)
         string? When,
         OnFailure OnFailure)
         : InstallStep(Id, When, OnFailure);
+
+    /// <summary>
+    /// P11 (T11.1), first of three machine-scope-only "system steps": creates a
+    /// Windows Scheduled Task via <c>schtasks.exe /Create</c>, running as
+    /// <c>SYSTEM</c> (<c>/RU SYSTEM</c>) — which is exactly why
+    /// <see cref="RequiresMachineScope"/> is overridden to <c>true</c> here (see
+    /// <see cref="SigilBuild.Core.Configuration.MachineScopeGuard"/> / SIG0310).
+    /// Journals a <c>RollbackRecord.DeleteScheduledTask</c>
+    /// (task name only) BEFORE the create so a mid-install crash and
+    /// <c>setup.exe /Uninstall</c> both unwind the task.
+    /// </summary>
+    public sealed record ScheduledTaskCreate(
+        string Id,
+        string Name,
+        string Program,
+        string? Arguments,
+        string Trigger,          // logon | daily | onstart
+        string RunLevel,         // limited (default) | highest
+        string? When,
+        OnFailure OnFailure)
+        : InstallStep(Id, When, OnFailure)
+    {
+        public override bool RequiresMachineScope => true;
+    }
 }
 
 /// <summary>

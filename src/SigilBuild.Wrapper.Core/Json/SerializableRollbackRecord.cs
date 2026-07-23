@@ -26,7 +26,8 @@ internal sealed record SerializableRollbackRecord
 {
     /// <summary>Discriminator: <c>restore_file</c>, <c>remove_directory</c>,
     /// <c>restore_registry_value</c>, <c>restore_registry_key</c>,
-    /// <c>delete_shortcut</c>, <c>restore_env</c>, <c>remove_uninstaller</c>.</summary>
+    /// <c>delete_shortcut</c>, <c>restore_env</c>, <c>remove_uninstaller</c>,
+    /// <c>remove_service</c>, <c>delete_scheduled_task</c>.</summary>
     public string Type { get; init; } = string.Empty;
 
     // RestoreFile / RemoveDirectory / DeleteShortcut all use Path.
@@ -65,6 +66,12 @@ internal sealed record SerializableRollbackRecord
     // rollback / uninstall. Recorded by service_install BEFORE the create
     // so an interrupted install still tears the service down.
     public string? ServiceName { get; init; }
+
+    // DeleteScheduledTask (P11, T11.1): name of the Scheduled Task to
+    // schtasks /Delete on rollback / uninstall. Recorded by
+    // scheduled_task_create BEFORE the create so an interrupted install
+    // still tears the task down. Name only — no secrets.
+    public string? TaskName { get; init; }
 }
 
 /// <summary>
@@ -175,6 +182,12 @@ internal static class SerializableRollbackRecordExtensions
                 ServiceName = r.ServiceName,
             },
 
+            RollbackRecord.DeleteScheduledTask r => new SerializableRollbackRecord
+            {
+                Type = "delete_scheduled_task",
+                TaskName = r.TaskName,
+            },
+
             _ => throw new InvalidOperationException(
                 $"unsupported RollbackRecord subtype: {record.GetType().Name}"),
         };
@@ -237,6 +250,9 @@ internal static class SerializableRollbackRecordExtensions
 
             "remove_service" => new RollbackRecord.RemoveService(
                 s.ServiceName ?? throw MissingField("remove_service", "serviceName")),
+
+            "delete_scheduled_task" => new RollbackRecord.DeleteScheduledTask(
+                s.TaskName ?? throw MissingField("delete_scheduled_task", "taskName")),
 
             _ => throw new InvalidOperationException(
                 $"unknown rollback record type '{s.Type}'"),

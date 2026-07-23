@@ -139,6 +139,21 @@ public class SchemaValidationTests
             string.Join("; ", errors.Select(e => e.ToString())));
     }
 
+    [Fact]
+    public async Task ScheduledTaskCreateFixture_IsValidAgainstSchema()
+    {
+        // T11.1 (P11): scheduled_task_create must be accepted by the step-type
+        // enum in every place it's duplicated (install_steps / pre_install /
+        // post_install / uninstall / hooks).
+        var schema = await LoadSchemaAsync();
+        var json = YamlToJson(await File.ReadAllTextAsync("Fixtures/valid/scheduled-task-create.yaml"));
+        var errors = schema.Validate(json);
+
+        errors.Should().BeEmpty(
+            "the scheduled_task_create fixture must satisfy the schema; got: {0}",
+            string.Join("; ", errors.Select(e => e.ToString())));
+    }
+
     public static IEnumerable<object[]> InvalidFixturePaths() =>
         Directory.EnumerateFiles("Fixtures/invalid", "*.yaml").Select(p => new object[] { p });
 

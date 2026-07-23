@@ -18,6 +18,11 @@ public static class DiagnosticCodes
     public const string StepParameterMismatch = "SIG0231";
     public const string MissingRequiredStepField = "SIG0232";
 
+    // SIG0233 — a step field holds a value outside its allowed set (e.g. a bad
+    // enum like scheduled_task_create's trigger/run_level). Fatal (Error): there
+    // is no safe fallback mapping for an unrecognized enum value.
+    public const string InvalidStepFieldValue = "SIG0233";
+
     // SIG0234 — parameter `source:` block validation (uninstaller-icon-nsis-parity Section 8)
     public const string ParameterSourceInvalid = "SIG0234";
 

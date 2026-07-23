@@ -1209,6 +1209,7 @@ public static class ManifestParser
             "json_edit"             => BuildJsonEdit(node, id!, when, onFailure, diagnostics, loc),
             "xml_edit"              => BuildXmlEdit(node, id!, when, onFailure, diagnostics, loc),
             "service_install"       => BuildServiceInstall(node, id!, when, onFailure, diagnostics, loc),
+            "scheduled_task_create" => BuildScheduledTaskCreate(node, id!, when, onFailure, diagnostics, loc),
             _ => ReportUnknownStepType(id!, typeStr!, loc, diagnostics),
         };
 
@@ -1249,6 +1250,44 @@ public static class ManifestParser
         return new InstallStep.ServiceInstall(
             id, name, binaryPath, displayName, description,
             startType, serviceAccount, startAfterInstall, when, onFailure);
+    }
+
+    private static readonly string[] ScheduledTaskCreateFields =
+    {
+        "id", "type", "when", "on_failure",
+        "name", "program", "arguments", "trigger", "run_level",
+    };
+
+    private static readonly string[] ScheduledTaskTriggerValues = { "logon", "daily", "onstart" };
+    private static readonly string[] ScheduledTaskRunLevelValues = { "limited", "highest" };
+
+    private static InstallStep.ScheduledTaskCreate? BuildScheduledTaskCreate(
+        YamlMappingNode node, string id, string? when, OnFailure onFailure,
+        List<Diagnostic> diagnostics, SourceLocation loc)
+    {
+        var name = GetScalar(node, "name");
+        var program = GetScalar(node, "program");
+        var trigger = GetScalar(node, "trigger");
+        if (name is null)    { ReportMissingField(id, "scheduled_task_create", "name",    loc, diagnostics); return null; }
+        if (program is null) { ReportMissingField(id, "scheduled_task_create", "program", loc, diagnostics); return null; }
+        if (trigger is null) { ReportMissingField(id, "scheduled_task_create", "trigger", loc, diagnostics); return null; }
+
+        if (!ScheduledTaskTriggerValues.Contains(trigger))
+        {
+            ReportBadEnumValue(id, "scheduled_task_create", "trigger", trigger, ScheduledTaskTriggerValues, loc, diagnostics);
+            return null;
+        }
+
+        var arguments = GetScalar(node, "arguments");
+        var runLevel = GetScalar(node, "run_level") ?? "limited";
+        if (!ScheduledTaskRunLevelValues.Contains(runLevel))
+        {
+            ReportBadEnumValue(id, "scheduled_task_create", "run_level", runLevel, ScheduledTaskRunLevelValues, loc, diagnostics);
+            return null;
+        }
+
+        ReportUnknownStepFields(node, id, "scheduled_task_create", ScheduledTaskCreateFields, loc, diagnostics);
+        return new InstallStep.ScheduledTaskCreate(id, name, program, arguments, trigger, runLevel, when, onFailure);
     }
 
     private static InstallStep? ReportUnknownStepType(
@@ -1507,6 +1546,28 @@ public static class ManifestParser
             $"install step '{id}' (type {stepType}) is missing required field '{field}'",
             loc,
             "https://docs.sigil.build/diagnostics/SIG0232"));
+    }
+
+    /// <summary>
+    /// P11: an enum-valued step field (e.g. <c>scheduled_task_create.trigger</c> /
+    /// <c>run_level</c>) holds a value outside its allowed set. Unlike
+    /// <see cref="ReportUnknownStepFields"/>'s unrecognized-key warning, a bad
+    /// enum value makes the step's runtime behavior undefined (there is no safe
+    /// fallback schtasks.exe mapping), so this is an Error, not a Warning — the
+    /// step is refused (its Build… method returns null) rather than packed with
+    /// a guessed default.
+    /// </summary>
+    private static void ReportBadEnumValue(
+        string id, string stepType, string field, string value, string[] allowed,
+        SourceLocation loc, List<Diagnostic> diagnostics)
+    {
+        diagnostics.Add(new Diagnostic(
+            DiagnosticSeverity.Error,
+            DiagnosticCodes.InvalidStepFieldValue,
+            $"install step '{id}' (type {stepType}) has invalid '{field}' value '{value}'; " +
+            $"expected one of: {string.Join(", ", allowed)}",
+            loc,
+            "https://docs.sigil.build/diagnostics/SIG0233"));
     }
 
     private static void ReportUnknownStepFields(

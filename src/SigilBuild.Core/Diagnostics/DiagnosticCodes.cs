@@ -89,7 +89,11 @@ public static class DiagnosticCodes
     // `updates.signingKey`.
     public const string ChannelManifestSignatureInvalid = "SIG0321";
 
-    // SIG0322 (reserved for T12.5): the web-installer bootstrapper could not
-    // resolve/download the package at the channel manifest's packageUrl.
+    // SIG0322 (T12.5): the web-installer's package URL could not be resolved.
+    // Emitted at PACK TIME by `sigil pack --payload web` when `--package-url` is
+    // missing, empty, or not https:// — pack refuses rather than stamping a stub
+    // whose synthesized http_download step could never succeed. Also reserved
+    // for the analogous install-time bootstrap failure (the stub could not
+    // resolve/download the package at that URL).
     public const string WebInstallerPackageUrlUnresolved = "SIG0322";
 }

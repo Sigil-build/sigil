@@ -17,6 +17,16 @@ public static class PackCommand
     {
         var pathArg = new Argument<string>("path", () => "sigil.yaml", "Path to the manifest");
         var outOpt = new Option<string>("--out", () => "./dist", "Output directory");
+        // P12 (T12.5): the exe format's payload delivery mode. "embedded" (default)
+        // is the original, unchanged behavior — the app payload is stamped straight
+        // into the Setup.exe. "web" instead emits the normal full package (hosted at
+        // --package-url) PLUS a small stub Setup.exe whose only install action
+        // downloads + runs it (Burn/NSIS-style web installer).
+        var payloadOpt = new Option<string>(
+            "--payload", () => "embedded", "Exe payload delivery: embedded | web");
+        var packageUrlOpt = new Option<string?>(
+            "--package-url",
+            "HTTPS URL the full package will be hosted at — REQUIRED when --payload web");
 
         var cmd = new Command(
             "pack",
@@ -29,10 +39,36 @@ public static class PackCommand
             "prior Authenticode signature, so sign the finished Setup.exe last.");
         cmd.AddArgument(pathArg);
         cmd.AddOption(outOpt);
+        cmd.AddOption(payloadOpt);
+        cmd.AddOption(packageUrlOpt);
         cmd.SetHandler(async (InvocationContext ctx) =>
         {
             var path = ctx.ParseResult.GetValueForArgument(pathArg);
             var outDir = ctx.ParseResult.GetValueForOption(outOpt) ?? "./dist";
+            var payloadRaw = ctx.ParseResult.GetValueForOption(payloadOpt) ?? "embedded";
+            var packageUrl = ctx.ParseResult.GetValueForOption(packageUrlOpt);
+            var isWebPayload = string.Equals(payloadRaw, "web", StringComparison.OrdinalIgnoreCase);
+
+            // T12.5: `--payload web` requires a resolvable (https-only) package URL —
+            // that is where the stub's synthesized http_download step fetches the full
+            // package from at install time. Fail fast, before touching the manifest.
+            if (isWebPayload &&
+                (string.IsNullOrWhiteSpace(packageUrl) ||
+                 !packageUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
+            {
+                DiagnosticReporter.Write(Console.Error, new[]
+                {
+                    new Diagnostic(
+                        DiagnosticSeverity.Error,
+                        DiagnosticCodes.WebInstallerPackageUrlUnresolved,
+                        "pack --payload web requires a resolvable HTTPS --package-url (missing, " +
+                        $"empty, or non-https URLs are refused) — got '{packageUrl ?? "<none>"}'.",
+                        SourceLocation.Unknown,
+                        "https://docs.sigil.build/diagnostics/SIG0322"),
+                }, useColor: false);
+                ctx.ExitCode = 1;
+                return;
+            }
 
             var load = await ManifestLoader.LoadAsync(path, new ProcessEnvironmentReader());
             DiagnosticReporter.Write(Console.Error, load.Diagnostics, useColor: false);
@@ -90,13 +126,28 @@ public static class PackCommand
                                 System.IO.Path.GetDirectoryName(path) ?? ".",
                                 manifest.Build.Source));
 
+                    var payloadMode = isWebPayload ? PayloadMode.Web : PayloadMode.Embedded;
                     var result = await packager.PackAsync(manifest,
-                        new PackOptions(sourceDir, outDir, format, arch),
+                        new PackOptions(sourceDir, outDir, format, arch, payloadMode, packageUrl),
                         ctx.GetCancellationToken());
 
                     DiagnosticReporter.Write(Console.Error, result.Diagnostics, useColor: false);
                     if (result.Artifact is null) { ctx.ExitCode = 1; return; }
                     Console.Out.WriteLine($"  {result.Artifact.Path}  ({result.Artifact.SizeBytes} bytes, sha256 {result.Artifact.Sha256[..12]}…)");
+
+                    // T12.5: `--payload web` emits a second artifact — the small stub
+                    // whose only install action downloads + runs the artifact just
+                    // printed above. Its absence (with web payload requested on the
+                    // exe format) is itself a failure, not a silent no-op.
+                    if (result.SecondaryArtifact is { } secondary)
+                    {
+                        Console.Out.WriteLine($"  {secondary.Path}  ({secondary.SizeBytes} bytes, sha256 {secondary.Sha256[..12]}…)");
+                    }
+                    else if (isWebPayload && format == PackageFormat.Exe)
+                    {
+                        ctx.ExitCode = 1;
+                        return;
+                    }
                 }
             }
 

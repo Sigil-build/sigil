@@ -397,13 +397,14 @@ public sealed class StepContext
 
     /// <summary>
     /// Substitute the single-brace runtime tokens — <c>{install_dir}</c>,
-    /// <c>{scope_root}</c>, <c>{app.name}</c>, <c>{app.id}</c> — that step paths and
-    /// <c>when</c> expressions use (distinct from the <c>${...}</c> parameter
-    /// templates handled by <see cref="Resolve"/>). This is what turns a step
-    /// <c>to: "{install_dir}/app.txt"</c> into a real directory rather than a
-    /// literal <c>{install_dir}</c> folder (T13). An unknown brace token is left
-    /// untouched; <c>{install_dir}</c> is left literal only when this context was
-    /// built without a resolved install dir (e.g. the step unit tests).
+    /// <c>{scope_root}</c>, <c>{app.name}</c>, <c>{app.id}</c>, <c>{temp_dir}</c> —
+    /// that step paths and <c>when</c> expressions use (distinct from the
+    /// <c>${...}</c> parameter templates handled by <see cref="Resolve"/>). This is
+    /// what turns a step <c>to: "{install_dir}/app.txt"</c> into a real directory
+    /// rather than a literal <c>{install_dir}</c> folder (T13). An unknown brace
+    /// token is left untouched; <c>{install_dir}</c> is left literal only when
+    /// this context was built without a resolved install dir (e.g. the step unit
+    /// tests).
     /// </summary>
     private string SubstituteBraceTokens(string text)
     {
@@ -423,6 +424,18 @@ public sealed class StepContext
             result = result.Replace("{app.name}", _appName, System.StringComparison.Ordinal);
         }
         result = result.Replace("{app.id}", _appId, System.StringComparison.Ordinal);
+        // P12 (T12.5): the web-installer stub's synthesized http_download `dest`
+        // needs a temp location resolvable at INSTALL time (the stub's blob is
+        // packed with the literal token, so packing stays deterministic — no
+        // GUID/timestamp is ever baked in). Resolves to the per-user temp
+        // directory (trimmed of its trailing separator so callers can safely
+        // append "/relative/path").
+        if (result.Contains("{temp_dir}", System.StringComparison.Ordinal))
+        {
+            var tempDir = System.IO.Path.GetTempPath()
+                .TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
+            result = result.Replace("{temp_dir}", tempDir, System.StringComparison.Ordinal);
+        }
         result = ReplaceVarTokens(result);
         return result;
     }

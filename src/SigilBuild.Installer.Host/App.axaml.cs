@@ -16,14 +16,19 @@ public partial class App : Application
 {
     private InstallerViewModel? _vm;
     private UninstallViewModel? _uninstallVm;
+    private UpdateViewModel? _updateVm;
 
     /// <summary>
-    /// The outcome chosen by the user during this session (install OR the T15
-    /// interactive uninstall). Read by <see cref="Program.Main"/> after the Avalonia
-    /// lifetime exits.
+    /// The outcome chosen by the user during this session (install, the T15
+    /// interactive uninstall, or a T12.4 headed <c>/Update</c>). Read by
+    /// <see cref="Program.Main"/> after the Avalonia lifetime exits. The headed
+    /// <c>/Update</c> run surfaces UpdateRunner's own int exit code directly (it is
+    /// not one of the fixed <see cref="InstallerOutcomeCode"/> values — e.g. a
+    /// launched child can return 3010), so it takes precedence when present.
     /// </summary>
     public int OutcomeExitCode =>
-        (int)(_vm?.OutcomeCode ?? _uninstallVm?.OutcomeCode ?? InstallerOutcomeCode.Completed);
+        _updateVm?.OutcomeExitCode
+        ?? (int)(_vm?.OutcomeCode ?? _uninstallVm?.OutcomeCode ?? InstallerOutcomeCode.Completed);
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
@@ -48,6 +53,25 @@ public partial class App : Application
                 _uninstallVm.ConfigureRunner((progress, ct) =>
                     session.RunUninstallInteractiveAsync(progress, ct));
                 desktop.MainWindow = new UninstallWindow { DataContext = _uninstallVm };
+                base.OnFrameworkInitializationCompleted();
+                return;
+            }
+
+            // T12.4: a non-silent /Update (Program.cs routes it here instead of the
+            // headless path) gets its own minimal branded progress → up-to-date/done/
+            // failed window, driving the real InstallSession.RunUpdateInteractiveAsync
+            // — which runs the SAME UpdateRunner as the headless path, but launches
+            // the downloaded child Setup.exe HEADED (no /silent) so the user sees its
+            // own install wizard. Kept entirely separate from the install wizard's
+            // flow/rail, mirroring the T15 uninstall window above. Unlike Uninstall
+            // there is no confirm gesture — Start() begins checking immediately.
+            if (session is not null && session.Mode == WrapperMode.Update)
+            {
+                _updateVm = new UpdateViewModel(tokens);
+                _updateVm.ConfigureRunner((report, ct) =>
+                    session.RunUpdateInteractiveAsync(report, ct));
+                _updateVm.Start();
+                desktop.MainWindow = new UpdateWindow { DataContext = _updateVm };
                 base.OnFrameworkInitializationCompleted();
                 return;
             }

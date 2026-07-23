@@ -194,6 +194,41 @@ public class UpdateRunnerTests
         launcher.Args.Should().Equal(expectedScopeFlag, "/silent");
     }
 
+    // ── 3b. T12.4: SilentChild threads through to the child's launch args ─────
+
+    [Fact]
+    public async Task SilentChild_defaults_to_true_when_unspecified()
+    {
+        // Every T12.3-era call site (and every test above) constructs UpdateRequest
+        // without naming SilentChild — the default must keep launching the child
+        // /silent, exactly as before T12.4.
+        var request = Request(NewPublicKeyBase64());
+        request.SilentChild.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Headed_update_SilentChild_false_launches_the_child_without_slash_silent()
+    {
+        // T12.4: a headed, non-silent /Update launches the downloaded child WITHOUT
+        // /silent so the user sees its own install wizard — only the scope flag is
+        // forwarded.
+        var (manifest, sig, key) = SignedManifest("2.0.0");
+        var downloader = new FakeDownloader(UpdatePackageDownloadResult.Ok());
+        var launcher = new FakeLauncher(0);
+        var log = new List<string>();
+        var runner = Runner(Fetcher(manifest, sig), downloader, launcher, Installed("1.0.0"), log);
+
+        var request = Request(key) with { SilentChild = false };
+        var code = await runner.RunAsync(request, CancellationToken.None);
+
+        code.Should().Be(0);
+        launcher.Called.Should().BeTrue();
+        launcher.Args.Should().Equal("/allusers");
+        launcher.Args.Should().NotContain("/silent");
+        string.Join("\n", log).Should().NotContain("/silent",
+            "the installing-stage log line must also reflect the headed (no /silent) child launch");
+    }
+
     // ── 4. Malformed channel manifest (real parser, SIG0320) → check failed ────
 
     [Fact]
@@ -250,6 +285,32 @@ public class UpdateRunnerTests
         string.Join("\n", log).Should().Contain("minimum");
     }
 
+    // ── 6b. T12.3 Minor fix: a malformed installed version SKIPS the floor, ────
+    // ── observably (does not silently proceed as if nothing happened) ─────────
+
+    [Fact]
+    public async Task Malformed_installed_version_skips_the_min_from_version_floor_and_logs_it()
+    {
+        var (manifest, sig, key) = SignedManifest("3.0.0", minFromVersion: "2.0.0");
+        var downloader = new FakeDownloader(UpdatePackageDownloadResult.Ok());
+        var launcher = new FakeLauncher(0);
+        var log = new List<string>();
+        // A malformed installed version can't be compared against MinFromVersion —
+        // UpgradePlanner treats it as "older" (Upgrade), so the run reaches the
+        // MinFromVersion gate; VersionComparison.IsWellFormed then rejects it, so
+        // the floor must be skipped rather than either blocking or silently no-op-ing.
+        var runner = Runner(Fetcher(manifest, sig), downloader, launcher, Installed("not-a-version"), log);
+
+        var code = await runner.RunAsync(Request(key), CancellationToken.None);
+
+        code.Should().Be(0, "the download proceeds instead of blocking — the floor was skipped, not enforced");
+        downloader.Called.Should().BeTrue();
+        var joined = string.Join("\n", log);
+        joined.Should().Contain("minFromVersion", "the skip must be an OBSERVABLE log line, not a silent no-op");
+        joined.Should().Contain("skipped");
+        joined.Should().Contain("not-a-version", "the log should name the unparseable installed version");
+    }
+
     // ── 7. Implausible sha256 → check failed (before spending a download) ──────
 
     [Fact]
@@ -296,6 +357,51 @@ public class UpdateRunnerTests
 
         code.Should().Be(InstallSession.UpdateCheckFailedExitCode);
         downloader.Called.Should().BeFalse();
+    }
+
+    // ── Secret hygiene: the signing key / signature bytes never reach the log ──
+    // (extends the SecretHygieneTests / InstallLoggingTests redaction guarantee
+    // to the /Update path, per ChannelManifestVerifier's own "redaction-safe"
+    // remarks — this proves that promise holds through UpdateRunner's full log.)
+
+    [Fact]
+    public async Task Log_never_contains_the_signing_key_on_an_invalid_signature()
+    {
+        var (manifest, sig, signedWithKey) = SignedManifest("2.0.0");
+        var downloader = new FakeDownloader(UpdatePackageDownloadResult.Ok());
+        var launcher = new FakeLauncher(0);
+        var log = new List<string>();
+        var runner = Runner(Fetcher(manifest, sig), downloader, launcher, Installed("1.0.0"), log);
+
+        // Verify against a DIFFERENT key than the one that actually signed the
+        // manifest — a SIG0321 hard reject, exercising the verifier's failure path.
+        var wrongKey = NewPublicKeyBase64();
+        var code = await runner.RunAsync(Request(wrongKey), CancellationToken.None);
+
+        code.Should().Be(InstallSession.UpdateManifestRejectedExitCode);
+        var joined = string.Join("\n", log);
+        joined.Should().NotContain(wrongKey, "the signing key configured for this run must never reach the log");
+        joined.Should().NotContain(signedWithKey, "the manifest's own signing key must never reach the log either");
+        joined.Should().NotContain(
+            Encoding.UTF8.GetString(sig), "the raw base64 signature bytes must never reach the log");
+    }
+
+    [Fact]
+    public async Task Log_never_contains_the_signing_key_or_signature_on_a_successful_update()
+    {
+        var (manifest, sig, key) = SignedManifest("2.0.0");
+        var downloader = new FakeDownloader(UpdatePackageDownloadResult.Ok());
+        var launcher = new FakeLauncher(0);
+        var log = new List<string>();
+        var runner = Runner(Fetcher(manifest, sig), downloader, launcher, Installed("1.0.0"), log);
+
+        var code = await runner.RunAsync(Request(key), CancellationToken.None);
+
+        code.Should().Be(0);
+        var joined = string.Join("\n", log);
+        joined.Should().NotContain(key, "the signing key (updates.signingKey) must never reach the log");
+        joined.Should().NotContain(
+            Encoding.UTF8.GetString(sig), "the raw base64 signature bytes must never reach the log");
     }
 
     // ── IsPlausibleSha256Hex unit coverage ────────────────────────────────────

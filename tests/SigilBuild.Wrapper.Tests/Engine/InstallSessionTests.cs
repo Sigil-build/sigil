@@ -58,6 +58,23 @@ public sealed class InstallSessionTests
     }
 
     [Fact]
+    public async Task Update_silent_routes_headless_and_returns_the_runner_exit_code()
+    {
+        // T12.4: `/Update /silent` must keep routing through the SAME headless path
+        // as a bare `/Update` (T12.3, unchanged) — Program.cs's routing change only
+        // affects a NON-silent /Update (see Program.cs). Silent stays true, Mode
+        // stays Update, and RunHeadlessAsync still returns UpdateRunner's own exit
+        // code (here: the un-stamped runtime's "not update-enabled" constant).
+        var session = InstallSession.Create(new[] { "/Update", "/silent" });
+        session.Silent.Should().BeTrue();
+        session.Mode.Should().Be(WrapperMode.Update);
+
+        var code = await session.RunHeadlessAsync(new StringWriter(), new StringWriter());
+
+        code.Should().Be(InstallSession.UpdateNotConfiguredExitCode);
+    }
+
+    [Fact]
     public async Task Silent_install_of_empty_pipeline_exits_0()
     {
         var session = InstallSession.Create(Silent);

@@ -1079,9 +1079,57 @@ public sealed class InstallSession
             _log?.WriteLine(message);
         }
 
-        var runner = new UpdateRunner(
+        var runner = BuildUpdateRunner(Report);
+        // T12.3 (unchanged): the headless path launches the downloaded child
+        // Setup.exe /silent, forwarding only the scope.
+        var request = BuildUpdateRequest(silentChild: true);
+        return await runner.RunAsync(request, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// GUI entry point (T12.4): a HEADED, non-silent <c>/Update</c> run. Drives the
+    /// SAME <see cref="UpdateRunner"/> decision logic as the headless
+    /// <see cref="RunUpdateAsync"/> — nothing is duplicated — but reports each stage
+    /// through a UI-bound callback instead of a <see cref="TextWriter"/>, and
+    /// launches the downloaded child Setup.exe HEADED (no <c>/silent</c>, gap G-Update)
+    /// so the user sees the new version's own install wizard, unlike the headless
+    /// path's silent child. Mirrors <see cref="RunUninstallInteractiveAsync"/>'s shape
+    /// for the headed uninstall flow. Returns the SAME exit code the headless path
+    /// would return for an equivalent run (0, an Update*ExitCode constant, or the
+    /// launched child's own exit code).
+    /// </summary>
+    public async Task<int> RunUpdateInteractiveAsync(Action<string, bool> report, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+
+        // P7: the headed /Update run logs the same stage trail as the headless path.
+        EnsureLog();
+
+        void Report(string message, bool isError)
+        {
+            report(message, isError);
+            _log?.WriteLine(message);
+        }
+
+        var runner = BuildUpdateRunner(Report);
+        var request = BuildUpdateRequest(silentChild: false);
+        var code = await runner.RunAsync(request, ct).ConfigureAwait(false);
+        _log?.WriteLine($"exit code: {code}");
+        return code;
+    }
+
+    /// <summary>
+    /// Wire the production I/O seams (HTTP fetch over the shared client, P4
+    /// verified download, a real child-process launch) and a scope-correct
+    /// installed-version probe (P3 <see cref="InstalledStateResolver"/>) into a
+    /// fresh <see cref="UpdateRunner"/> reporting through <paramref name="report"/>.
+    /// Shared by the headless and headed <c>/Update</c> entry points so neither
+    /// duplicates this wiring.
+    /// </summary>
+    private UpdateRunner BuildUpdateRunner(Action<string, bool> report) =>
+        new(
             fetcher: new HttpUpdateResourceFetcher(TimeSpan.FromSeconds(60)),
-            downloader: new SigilPackageDownloader(TimeSpan.FromMinutes(30), maxAttempts: 3, Report),
+            downloader: new SigilPackageDownloader(TimeSpan.FromMinutes(30), maxAttempts: 3, report),
             launcher: new ProcessChildInstallerLauncher(),
             // P3: read the installed version from the scope-correct ARP entry. Off
             // Windows there is no ARP, so nothing is installed and any channel version
@@ -1089,18 +1137,23 @@ public sealed class InstallSession
             installedStateProbe: () => OperatingSystem.IsWindows()
                 ? InstalledStateResolver.Resolve(_blob.AppId, _scope)
                 : UpgradeState.None,
-            report: Report);
+            report: report);
 
-        var request = new UpdateRequest(
+    /// <summary>
+    /// Build the <see cref="UpdateRequest"/> for this session's blob + scope, with
+    /// <paramref name="silentChild"/> threaded through (T12.4) rather than hard-coded —
+    /// <c>true</c> for the headless path (T12.3, unchanged), <c>false</c> for the
+    /// headed path so the launched child shows its own wizard.
+    /// </summary>
+    private UpdateRequest BuildUpdateRequest(bool silentChild) =>
+        new(
             ManifestUrl: _blob.UpdateManifestUrl,
             SigningKey: _blob.UpdateSigningKey,
             Channel: _blob.UpdateChannel,
             Scope: _scope,
             AppId: _blob.AppId,
-            TempDirectory: Path.GetTempPath());
-
-        return await runner.RunAsync(request, ct).ConfigureAwait(false);
-    }
+            TempDirectory: Path.GetTempPath(),
+            SilentChild: silentChild);
 
     private async Task<int> RunUninstallAsync(TextWriter error, CancellationToken ct)
     {

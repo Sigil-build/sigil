@@ -19,7 +19,14 @@ internal sealed record UpdateRequest(
     string? Channel,
     InstallScope Scope,
     string AppId,
-    string TempDirectory);
+    string TempDirectory,
+    // T12.4: whether the downloaded child Setup.exe is launched silently.
+    // Headless /Update (T12.3, unchanged) launches it /silent, forwarding only
+    // the scope flag's twin; a headed, non-silent /Update launches it WITHOUT
+    // /silent so the user sees the new version's own install wizard. Defaults to
+    // true so every T12.3-era call site (and test) keeps its original behavior
+    // without having to name this argument.
+    bool SilentChild = true);
 
 /// <summary>
 /// The core of P12 (T12.3): the headless <c>/Update</c> flow — fetch the signed
@@ -131,16 +138,29 @@ internal sealed class UpdateRunner
         // Honor the channel manifest's MinFromVersion floor: an installed version below
         // it cannot take this package via the setup-runtime path (e.g. a full package
         // with a delta-from floor). Only blocks on a KNOWN below-floor installed version.
-        if (!string.IsNullOrWhiteSpace(channel.MinFromVersion)
-            && state.Found
-            && VersionComparison.IsWellFormed(state.InstalledVersion)
-            && VersionComparison.Compare(state.InstalledVersion, channel.MinFromVersion) < 0)
+        if (!string.IsNullOrWhiteSpace(channel.MinFromVersion) && state.Found)
         {
-            _report(
-                $"update: cannot update to {channel.Version} — installed {installedLabel} is below the minimum " +
-                $"{channel.MinFromVersion} this package updates from",
-                true);
-            return InstallSession.UpdateNotEligibleExitCode;
+            if (VersionComparison.IsWellFormed(state.InstalledVersion))
+            {
+                if (VersionComparison.Compare(state.InstalledVersion, channel.MinFromVersion) < 0)
+                {
+                    _report(
+                        $"update: cannot update to {channel.Version} — installed {installedLabel} is below the minimum " +
+                        $"{channel.MinFromVersion} this package updates from",
+                        true);
+                    return InstallSession.UpdateNotEligibleExitCode;
+                }
+            }
+            else
+            {
+                // T12.3 Minor: the installed version is malformed (can't be compared
+                // against MinFromVersion), so the floor is skipped rather than blocking
+                // — but that must be an OBSERVABLE decision, not a silent no-op.
+                _report(
+                    $"update: minFromVersion floor {channel.MinFromVersion} skipped — installed version " +
+                    $"'{installedLabel}' is malformed and cannot be compared",
+                    false);
+            }
         }
 
         // 6. Validate the checksum is a plausible SHA-256 hex digest before spending a
@@ -171,8 +191,12 @@ internal sealed class UpdateRunner
             }
 
             var scopeFlag = request.Scope == InstallScope.Machine ? "/allusers" : "/currentuser";
-            var args = new[] { scopeFlag, "/silent" };
-            _report($"update: installing {channel.Version} (running the downloaded setup {scopeFlag} /silent)", false);
+            // T12.4: headless /Update (SilentChild true, T12.3 unchanged) launches the
+            // child /silent; a headed, non-silent /Update launches it WITHOUT /silent so
+            // the user sees the new version's own install wizard.
+            var args = request.SilentChild ? new[] { scopeFlag, "/silent" } : new[] { scopeFlag };
+            var argsDescription = request.SilentChild ? $"{scopeFlag} /silent" : scopeFlag;
+            _report($"update: installing {channel.Version} (running the downloaded setup {argsDescription})", false);
 
             int childCode;
             try

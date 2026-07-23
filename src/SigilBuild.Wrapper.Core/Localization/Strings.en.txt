@@ -103,6 +103,16 @@ uninstall.done = {appName} was removed
 uninstall.failed = Uninstall failed
 uninstall.failed_body = Some components may not have been removed. You can try again from Add or Remove Programs.
 
+# --- update (T12.4 headed /Update progress window) ---
+update.version = Version {version}
+update.checking = Checking for updates…
+update.downloading = Downloading the update…
+update.launching = Launching the update…
+update.up_to_date = {appName} is up to date
+update.done = {appName} was updated
+update.failed = Update failed
+update.failed_body = The update could not be completed. You can try again later.
+
 # --- fields ---
 field.show = Show
 field.hide = Hide

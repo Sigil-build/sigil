@@ -13,6 +13,18 @@ namespace SigilBuild.Core.Manifest;
 /// </summary>
 public abstract record InstallStep(string Id, string? When, OnFailure OnFailure)
 {
+    /// <summary>
+    /// True for steps that touch machine-global state (P11: scheduled tasks,
+    /// COM registration, firewall rules) and therefore MUST run in
+    /// <see cref="InstallScope.Machine"/>. Defaults to false for every existing
+    /// step type; T11.1-T11.3 override this to true on their record types. The
+    /// pack-time guard in <c>SigilBuild.Core.Configuration.MachineScopeGuard</c>
+    /// emits SIG0310 for any such step when the manifest's resolved scope isn't
+    /// <see cref="InstallScope.Machine"/> (SIG0310 — see
+    /// <see cref="SigilBuild.Core.Diagnostics.DiagnosticCodes.SystemStepRequiresMachineScope"/>).
+    /// </summary>
+    public virtual bool RequiresMachineScope => false;
+
     public sealed record FileCopy(
         string Id,
         string From,

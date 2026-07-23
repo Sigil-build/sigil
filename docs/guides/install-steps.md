@@ -198,6 +198,81 @@ Registers a Windows service via `sc.exe create`, optionally starts it. Records a
   start_after_install: true
 ```
 
+## `scheduled_task_create`
+
+Creates a Windows Scheduled Task via `schtasks.exe /Create`, always running the task as `SYSTEM` (`/RU SYSTEM`).
+
+> **Machine-scope only.** This step touches machine-global state, so the manifest must set `installer.scope: machine`. Under `user` or `auto` scope, packing fails with **SIG0310** (`installer.scope: machine` required for this step).
+
+|Field|Type|Required|Default|Notes|
+|---|---|---|---|---|
+|`name`|string|yes|-|Task name (`schtasks`'s `/TN`).|
+|`program`|string|yes|-|Path to the program the task runs (`/TR`).|
+|`arguments`|string|-|-|Arguments appended to `program` in the task's command line.|
+|`trigger`|enum|yes|-|`logon`, `daily`, or `onstart`.|
+|`run_level`|enum|-|`limited`|`limited` or `highest` (`/RL`).|
+
+For `trigger: daily`, the step always passes a fixed `/ST 00:00` start time rather than the packing machine's wall-clock time — this keeps the produced task deterministic across repeated pack runs of the same manifest. `logon` and `onstart` triggers need no start time. The create is run with `/F` (force overwrite), so a repeat install/repair is idempotent.
+
+Journals a `DeleteScheduledTask` record (task name only) **before** the create, so a mid-install crash or `setup.exe /Uninstall` both run `schtasks /Delete /TN <name> /F` to tear the task down.
+
+```yaml
+- id: register-heartbeat-task
+  type: scheduled_task_create
+  name: MyAppHeartbeat
+  program: "${parameters.install_dir}\\heartbeat.exe"
+  trigger: daily
+  run_level: limited
+```
+
+## `com_register`
+
+Self-registers a COM DLL by loading it and invoking its exported `HRESULT DllRegisterServer(void)`.
+
+> **Machine-scope only.** `DllRegisterServer` writes machine-global registration (`HKLM\Software\Classes` / `HKCR\CLSID`), so the manifest must set `installer.scope: machine`. Under `user` or `auto` scope, packing fails with **SIG0310**.
+
+|Field|Type|Required|Default|Notes|
+|---|---|---|---|---|
+|`path`|string|yes|-|Path to the COM DLL to register.|
+
+Journals an `UnregisterCom` record (DLL path only) **before** the register, so a mid-install crash or `setup.exe /Uninstall` both call `DllUnregisterServer` on the same path. A DLL that fails to load or has no `DllRegisterServer` export fails the step with a diagnostic message; on rollback, the same failure modes are tolerated best-effort (mirrors `service_install`'s `RemoveService` pattern).
+
+```yaml
+- id: register-shell-extension
+  type: com_register
+  path: "${parameters.install_dir}\\ShellExt.dll"
+```
+
+## `firewall_rule`
+
+Creates a Windows Defender Firewall rule via `netsh advfirewall firewall add rule`.
+
+> **Machine-scope only.** There is no per-user firewall policy store — firewall rules are always machine-global — so the manifest must set `installer.scope: machine`. Under `user` or `auto` scope, packing fails with **SIG0310**.
+
+|Field|Type|Required|Default|Notes|
+|---|---|---|---|---|
+|`name`|string|yes|-|Rule name (`name=`).|
+|`direction`|enum|yes|-|`in` or `out` (`dir=`).|
+|`action`|enum|yes|-|`allow` or `block` (`action=`).|
+|`program`|string|-|-|Restricts the rule to this executable (`program=`).|
+|`port`|int|-|-|Restricts the rule to this local port (`localport=`).|
+|`protocol`|enum|-|-|`tcp` or `udp` (`protocol=`). Defaults to `tcp` when `port` is set and `protocol` is left unset; stays unset for a whole-program rule with no port.|
+
+**Reinstall idempotency:** unlike `service_install`/`scheduled_task_create`, a repeated `netsh advfirewall firewall add rule` with a duplicate `name=` adds a *second* rule rather than erroring. To keep a reinstall/repair idempotent, this step deletes any existing rule with the same name (best-effort, tolerating "no rules match") immediately before the add.
+
+Journals a `DeleteFirewallRule` record (rule name only) **before** the delete-then-add, so a mid-install crash or `setup.exe /Uninstall` both run `netsh advfirewall firewall delete rule name=<name>` to tear the rule down.
+
+```yaml
+- id: open-app-port
+  type: firewall_rule
+  name: MyApp Inbound
+  direction: in
+  action: allow
+  program: "${parameters.install_dir}\\app.exe"
+  port: 8443
+  protocol: tcp
+```
+
 ## Common fields
 
 Every step accepts the same envelope:

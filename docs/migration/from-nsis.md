@@ -27,6 +27,9 @@
 | `SimpleSC::StartService` / `SimpleSC::StopService` | `service_control` (SHOULD-tier) | — |
 | `AccessControl::*` | `acl_grant` / `acl_revoke` (SHOULD-tier) | promoted from POST-MVP per Sprint 5a survey findings |
 | `nsisFirewall::*` / `SimpleFC::*` | `firewall_rule` (SHOULD-tier) | promoted from POST-MVP per Sprint 5a survey findings |
+| `RegDLL` / `UnRegDLL` | `com_register` (P11) | machine-scope only (SIG0310); invokes `DllRegisterServer`/`DllUnregisterServer` directly |
+| `ExecWait "schtasks.exe /Create ..."` / `nsExec::ExecToLog "schtasks.exe ..."` | `scheduled_task_create` (P11) | machine-scope only (SIG0310); always runs as `SYSTEM`; `daily` trigger uses a fixed `/ST 00:00` |
+| `nsExec::Exec "netsh advfirewall firewall add rule ..."` | `firewall_rule` (P11) | machine-scope only (SIG0310); alternative to the `nsisFirewall::*`/`SimpleFC::*` row above — deletes any same-named rule before adding, so reinstalls stay idempotent |
 | `InetC::get` / `NSISdl::download` | (POST-MVP) | bundle the dependency in the package payload instead |
 | `System::Call` | (declined) | use a signed `run_program` invoking a small helper exe |
 | `Push` / `Pop` | (declined — declarative model) | use parameters + conditional steps |

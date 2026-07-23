@@ -103,10 +103,10 @@ Source: `schemas/sigil-schema.json` (JSON Schema, draft-07).
 
 | Property | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `channel` | string | - | `stable` | _(undocumented)_ |
-| `manifestUrl` | string | - | - | _(undocumented)_ |
-| `deltaTargets` | integer | - | `3` | How many previous versions to generate delta patches against. |
-| `signingKey` | string | - | - | Path to an Ed25519 private key (PEM) used to sign the update manifest. |
+| `channel` | string | - | `stable` | Free-form label naming which channel manifest this app points at (e.g. 'stable', 'beta'). Purely descriptive: Sigil does not resolve or host channels itself. |
+| `manifestUrl` | string | - | - | HTTPS URL of the signed channel manifest that `/Update` fetches to check for a newer version; its detached signature is expected at the same URL with '.sig' appended. Omit to ship an installer with no update capability. |
+| `deltaTargets` | integer | - | `3` | How many previous versions a future delta-patch generator would target. Parsed and schema-validated today, but not yet consumed by the update runtime -- full-package updates ship first (see the delta-update deferral ADR). |
+| `signingKey` | string | - | - | Base64-encoded X.509 SubjectPublicKeyInfo (SPKI) DER of the ECDSA P-256 PUBLIC key that verifies the detached signature (`manifestUrl` + '.sig') on the fetched channel manifest. Embedded at pack time as the update runtime's trust anchor -- never a private key, and never a file path. |
 
 ## `installer`
 

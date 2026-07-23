@@ -291,6 +291,12 @@ internal static class SerializableInstallStepConverter
                 s.When,
                 onFailure),
 
+            "com_register" => new InstallStep.ComRegister(
+                s.Id,
+                s.Path ?? throw MissingField("com_register", "path", s.Id),
+                s.When,
+                onFailure),
+
             _ => throw new InvalidOperationException(
                 $"unknown step type '{s.Type}' for step '{s.Id}'"),
         };
@@ -500,6 +506,15 @@ internal static class SerializableInstallStepConverter
                 TaskArguments = x.Arguments,
                 TaskTrigger = x.Trigger,
                 TaskRunLevel = x.RunLevel,
+            },
+
+            InstallStep.ComRegister x => new SerializableInstallStep
+            {
+                Id = x.Id,
+                Type = "com_register",
+                When = x.When,
+                OnFailure = onFailure,
+                Path = x.Path,
             },
 
             _ => throw new InvalidOperationException(

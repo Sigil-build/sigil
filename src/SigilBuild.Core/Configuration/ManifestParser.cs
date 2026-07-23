@@ -1210,6 +1210,7 @@ public static class ManifestParser
             "xml_edit"              => BuildXmlEdit(node, id!, when, onFailure, diagnostics, loc),
             "service_install"       => BuildServiceInstall(node, id!, when, onFailure, diagnostics, loc),
             "scheduled_task_create" => BuildScheduledTaskCreate(node, id!, when, onFailure, diagnostics, loc),
+            "com_register"          => BuildComRegister(node, id!, when, onFailure, diagnostics, loc),
             _ => ReportUnknownStepType(id!, typeStr!, loc, diagnostics),
         };
 
@@ -1288,6 +1289,29 @@ public static class ManifestParser
 
         ReportUnknownStepFields(node, id, "scheduled_task_create", ScheduledTaskCreateFields, loc, diagnostics);
         return new InstallStep.ScheduledTaskCreate(id, name, program, arguments, trigger, runLevel, when, onFailure);
+    }
+
+    private static readonly string[] ComRegisterFields =
+    {
+        "id", "type", "when", "on_failure", "path",
+    };
+
+    /// <summary>
+    /// P11 (T11.2): <c>com_register</c> — self-registers a COM DLL via its
+    /// exported <c>DllRegisterServer</c> at install time. Only <c>path</c> is
+    /// required (missing → SIG0232); there are no enum-valued fields, so SIG0233
+    /// does not apply here. The step is machine-scope-only (SIG0310), enforced by
+    /// <see cref="InstallStep.RequiresMachineScope"/> on the typed record.
+    /// </summary>
+    private static InstallStep.ComRegister? BuildComRegister(
+        YamlMappingNode node, string id, string? when, OnFailure onFailure,
+        List<Diagnostic> diagnostics, SourceLocation loc)
+    {
+        var path = GetScalar(node, "path");
+        if (path is null) { ReportMissingField(id, "com_register", "path", loc, diagnostics); return null; }
+
+        ReportUnknownStepFields(node, id, "com_register", ComRegisterFields, loc, diagnostics);
+        return new InstallStep.ComRegister(id, path, when, onFailure);
     }
 
     private static InstallStep? ReportUnknownStepType(

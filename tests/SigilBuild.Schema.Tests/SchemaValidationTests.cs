@@ -154,6 +154,21 @@ public class SchemaValidationTests
             string.Join("; ", errors.Select(e => e.ToString())));
     }
 
+    [Fact]
+    public async Task ComRegisterFixture_IsValidAgainstSchema()
+    {
+        // T11.2 (P11): com_register must be accepted by the step-type enum in
+        // every place it's duplicated (install_steps / pre_install /
+        // post_install / uninstall / hooks / option components).
+        var schema = await LoadSchemaAsync();
+        var json = YamlToJson(await File.ReadAllTextAsync("Fixtures/valid/com-register.yaml"));
+        var errors = schema.Validate(json);
+
+        errors.Should().BeEmpty(
+            "the com_register fixture must satisfy the schema; got: {0}",
+            string.Join("; ", errors.Select(e => e.ToString())));
+    }
+
     public static IEnumerable<object[]> InvalidFixturePaths() =>
         Directory.EnumerateFiles("Fixtures/invalid", "*.yaml").Select(p => new object[] { p });
 

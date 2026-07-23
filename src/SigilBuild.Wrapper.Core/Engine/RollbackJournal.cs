@@ -139,6 +139,7 @@ public sealed class RollbackJournal
         RollbackRecord.RestoreConfigFile r => $"restore {r.OriginalPath}",
         RollbackRecord.RemoveUninstaller r => $"delete {r.Path}",
         RollbackRecord.DeleteScheduledTask r => $"deltask {r.TaskName}",
+        RollbackRecord.UnregisterCom r => $"unregister {r.DllPath}",
         _ => "revert",
     };
 }
@@ -571,6 +572,42 @@ public abstract record RollbackRecord
             {
             }
 #pragma warning restore CA1031
+        }
+    }
+
+    /// <summary>
+    /// Unregisters a COM DLL registered by <c>com_register</c> (P11, T11.2) by
+    /// invoking its exported <c>DllUnregisterServer</c> through the same native
+    /// path the register used (see
+    /// <see cref="SigilBuild.Wrapper.Steps.Win32.ComRegistration"/>). Recorded
+    /// BEFORE the register so an interrupted install can still unwind. Mirrors
+    /// <see cref="RemoveService"/>'s best-effort contract: a missing
+    /// <c>DllUnregisterServer</c> export or a non-zero HRESULT on undo is
+    /// silently tolerated — the goal is "COM registration gone after rollback,"
+    /// not "exact symmetric call success." Only the DLL PATH is carried — no
+    /// secrets, no registry contents.
+    /// </summary>
+    public sealed record UnregisterCom(string DllPath) : RollbackRecord
+    {
+        public override System.Threading.Tasks.Task UndoAsync(System.Threading.CancellationToken ct)
+        {
+            try
+            {
+                if (System.OperatingSystem.IsWindows())
+                {
+                    // Best-effort: the outcome (export missing / non-zero HR) is
+                    // intentionally ignored, exactly as RemoveService tolerates a
+                    // missing service. FreeLibrary is handled inside Invoke.
+                    _ = SigilBuild.Wrapper.Steps.Win32.ComRegistration.Invoke(DllPath, "DllUnregisterServer");
+                }
+            }
+#pragma warning disable CA1031 // Best-effort uninstall — a DLL that won't load / unregister on undo is acceptable.
+            catch
+            {
+            }
+#pragma warning restore CA1031
+
+            return System.Threading.Tasks.Task.CompletedTask;
         }
     }
 }

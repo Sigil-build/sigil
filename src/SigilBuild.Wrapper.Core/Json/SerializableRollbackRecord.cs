@@ -27,7 +27,8 @@ internal sealed record SerializableRollbackRecord
     /// <summary>Discriminator: <c>restore_file</c>, <c>remove_directory</c>,
     /// <c>restore_registry_value</c>, <c>restore_registry_key</c>,
     /// <c>delete_shortcut</c>, <c>restore_env</c>, <c>remove_uninstaller</c>,
-    /// <c>remove_service</c>, <c>delete_scheduled_task</c>.</summary>
+    /// <c>remove_service</c>, <c>delete_scheduled_task</c>,
+    /// <c>unregister_com</c>.</summary>
     public string Type { get; init; } = string.Empty;
 
     // RestoreFile / RemoveDirectory / DeleteShortcut all use Path.
@@ -72,6 +73,12 @@ internal sealed record SerializableRollbackRecord
     // scheduled_task_create BEFORE the create so an interrupted install
     // still tears the task down. Name only — no secrets.
     public string? TaskName { get; init; }
+
+    // UnregisterCom (P11, T11.2): path of the COM DLL to DllUnregisterServer
+    // on rollback / uninstall. Recorded by com_register BEFORE the register
+    // so an interrupted install still unwinds the COM registration. Path
+    // only — no secrets, no registry contents.
+    public string? ComDllPath { get; init; }
 }
 
 /// <summary>
@@ -188,6 +195,12 @@ internal static class SerializableRollbackRecordExtensions
                 TaskName = r.TaskName,
             },
 
+            RollbackRecord.UnregisterCom r => new SerializableRollbackRecord
+            {
+                Type = "unregister_com",
+                ComDllPath = r.DllPath,
+            },
+
             _ => throw new InvalidOperationException(
                 $"unsupported RollbackRecord subtype: {record.GetType().Name}"),
         };
@@ -253,6 +266,9 @@ internal static class SerializableRollbackRecordExtensions
 
             "delete_scheduled_task" => new RollbackRecord.DeleteScheduledTask(
                 s.TaskName ?? throw MissingField("delete_scheduled_task", "taskName")),
+
+            "unregister_com" => new RollbackRecord.UnregisterCom(
+                s.ComDllPath ?? throw MissingField("unregister_com", "comDllPath")),
 
             _ => throw new InvalidOperationException(
                 $"unknown rollback record type '{s.Type}'"),

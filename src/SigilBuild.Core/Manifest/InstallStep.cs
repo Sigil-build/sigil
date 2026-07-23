@@ -234,6 +234,29 @@ public abstract record InstallStep(string Id, string? When, OnFailure OnFailure)
     {
         public override bool RequiresMachineScope => true;
     }
+
+    /// <summary>
+    /// P11 (T11.2), second of three machine-scope-only "system steps" and the
+    /// one AOT-risk step in P11: self-registers a COM DLL by loading it and
+    /// invoking its exported <c>HRESULT DllRegisterServer(void)</c> through a
+    /// C# unmanaged function pointer. <c>DllRegisterServer</c> writes
+    /// machine-global registration (<c>HKLM\Software\Classes</c> / <c>HKCR\CLSID</c>),
+    /// so <see cref="RequiresMachineScope"/> is overridden to <c>true</c> (see
+    /// <see cref="SigilBuild.Core.Configuration.MachineScopeGuard"/> / SIG0310).
+    /// Journals a <c>RollbackRecord.UnregisterCom</c> (DLL path only) BEFORE the
+    /// register so a mid-install crash and <c>setup.exe /Uninstall</c> both call
+    /// <c>DllUnregisterServer</c> — mirrors <see cref="ServiceInstall"/>'s
+    /// <c>RemoveService</c> pattern.
+    /// </summary>
+    public sealed record ComRegister(
+        string Id,
+        string Path,
+        string? When,
+        OnFailure OnFailure)
+        : InstallStep(Id, When, OnFailure)
+    {
+        public override bool RequiresMachineScope => true;
+    }
 }
 
 /// <summary>

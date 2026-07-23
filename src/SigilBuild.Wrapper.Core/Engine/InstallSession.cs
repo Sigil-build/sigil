@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using SigilBuild.Core.Manifest;
 using SigilBuild.Wrapper.Cli;
 using SigilBuild.Wrapper.Core.Localization;
+using SigilBuild.Wrapper.Update;
 
 namespace SigilBuild.Wrapper.Engine;
 
@@ -84,6 +85,37 @@ public sealed class InstallSession
     /// app+scope is already running (P6, gap G17). The first instance is unaffected.
     /// </summary>
     public const int AlreadyRunningExitCode = 5;
+
+    /// <summary>
+    /// <c>/Update</c> (P12, T12.3): the installer is not update-enabled — the manifest
+    /// declared no <c>updates.manifestUrl</c>, so there is nothing to check. Distinct
+    /// from 64 (which stays reserved for a genuinely-malformed invocation).
+    /// </summary>
+    public const int UpdateNotConfiguredExitCode = 6;
+
+    /// <summary>
+    /// <c>/Update</c> (P12, T12.3): "could not check for updates / could not apply".
+    /// A network failure fetching the channel manifest or its signature, a malformed
+    /// channel manifest (SIG0320), an implausible package checksum, or a failed
+    /// package download / child spawn. An operational failure — nothing was changed.
+    /// </summary>
+    public const int UpdateCheckFailedExitCode = 7;
+
+    /// <summary>
+    /// <c>/Update</c> (P12, T12.3): the channel manifest's detached signature did not
+    /// verify against <c>updates.signingKey</c> (SIG0321). A HARD security reject — a
+    /// tampered or unsigned channel manifest is never acted on. Kept distinct from
+    /// <see cref="UpdateCheckFailedExitCode"/> so a tampering event is unambiguous.
+    /// </summary>
+    public const int UpdateManifestRejectedExitCode = 8;
+
+    /// <summary>
+    /// <c>/Update</c> (P12, T12.3): a newer version is advertised but the installed
+    /// version is below the channel manifest's <c>minFromVersion</c> floor, so it
+    /// cannot update via this path. Distinct from "up to date" (exit 0) — an update
+    /// exists, it just cannot be taken from the current version.
+    /// </summary>
+    public const int UpdateNotEligibleExitCode = 9;
 
     // P6: set when the files-in-use gate refused the run, so the headless path can
     // map the generic failure onto FilesInUseExitCode.
@@ -465,11 +497,7 @@ public sealed class InstallSession
         switch (_mode)
         {
             case WrapperMode.Update:
-                // Update is not implemented in this track. Say so explicitly and
-                // exit 64 rather than silently running the (always-empty)
-                // WrapperBlob.UpdateSteps and reporting success.
-                error.WriteLine(Strings.EngineUpdateUnsupported(SessionLanguage.Current));
-                return 64;
+                return await RunUpdateAsync(output, error, ct).ConfigureAwait(false);
 
             case WrapperMode.Uninstall:
                 return await RunUninstallAsync(error, ct).ConfigureAwait(false);
@@ -1031,6 +1059,47 @@ public sealed class InstallSession
             // P3: write InstallLocation so a later upgrade can recover the install dir.
             InstallLocation: uninstallDir),
             _scope);
+    }
+
+    /// <summary>
+    /// P12 (T12.3): the headless <c>/Update</c> flow. Reads the <c>updates:</c>
+    /// metadata threaded into the blob, then hands off to <see cref="UpdateRunner"/>
+    /// with the production I/O seams (HTTP fetch over the shared client, P4 verified
+    /// download, a real child-process launch) and a scope-correct installed-version
+    /// probe (P3 <see cref="InstalledStateResolver"/>). Every stage is logged into the
+    /// already-open <c>/LOG</c> sink and echoed to the console; the runner returns the
+    /// process exit code (see the <c>Update*ExitCode</c> constants, or the child
+    /// installer's own code when a newer version is installed).
+    /// </summary>
+    private async Task<int> RunUpdateAsync(TextWriter output, TextWriter error, CancellationToken ct)
+    {
+        void Report(string message, bool isError)
+        {
+            (isError ? error : output).WriteLine(message);
+            _log?.WriteLine(message);
+        }
+
+        var runner = new UpdateRunner(
+            fetcher: new HttpUpdateResourceFetcher(TimeSpan.FromSeconds(60)),
+            downloader: new SigilPackageDownloader(TimeSpan.FromMinutes(30), maxAttempts: 3, Report),
+            launcher: new ProcessChildInstallerLauncher(),
+            // P3: read the installed version from the scope-correct ARP entry. Off
+            // Windows there is no ARP, so nothing is installed and any channel version
+            // reads as newer (the same short-circuit the install path uses).
+            installedStateProbe: () => OperatingSystem.IsWindows()
+                ? InstalledStateResolver.Resolve(_blob.AppId, _scope)
+                : UpgradeState.None,
+            report: Report);
+
+        var request = new UpdateRequest(
+            ManifestUrl: _blob.UpdateManifestUrl,
+            SigningKey: _blob.UpdateSigningKey,
+            Channel: _blob.UpdateChannel,
+            Scope: _scope,
+            AppId: _blob.AppId,
+            TempDirectory: Path.GetTempPath());
+
+        return await runner.RunAsync(request, ct).ConfigureAwait(false);
     }
 
     private async Task<int> RunUninstallAsync(TextWriter error, CancellationToken ct)

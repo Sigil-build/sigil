@@ -14,7 +14,14 @@ public class IconResourceWriterTests
     [Fact]
     public async Task WriteAsync_ReplacesIconInWrapperExe()
     {
-        var stubExe = WrapperRuntimeLocator.Locate(SigilBuild.Core.Manifest.TargetArchitecture.X64);
+        // Soft-skip when the Native AOT wrapper runtime isn't staged into
+        // runtimes/win-x64/ (e.g. CI's build/test job, which does not run the
+        // aot-publish job first). Mirrors ExeWrapperPackager_StampsIconOnProducedSetupExe
+        // below; the leg runs wherever the runtime IS staged (locally, or a job
+        // that stages it) and the wrapper-vm / aot-publish CI jobs are the arbiter.
+        string stubExe;
+        try { stubExe = WrapperRuntimeLocator.Locate(SigilBuild.Core.Manifest.TargetArchitecture.X64); }
+        catch (FileNotFoundException) { return; /* soft-skip — AOT runtime not staged */ }
         var tmp = Path.Combine(Path.GetTempPath(), $"sigil-icon-{Guid.NewGuid():N}.exe");
         File.Copy(stubExe, tmp, overwrite: true);
         try

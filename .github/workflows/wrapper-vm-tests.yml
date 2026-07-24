@@ -222,17 +222,18 @@ jobs:
           dotnet build tests/SigilBuild.Wrapper.IntegrationTests/SigilBuild.Wrapper.IntegrationTests.csproj
           --configuration Release
 
-      # Diagnostic only (does not gate anything) — surfaces this runner's
-      # admin/elevation posture in the job log, since the P11 system-step
-      # tests soft-skip (rather than fail) if Elevation.IsProcessElevated()
-      # ever comes back false here.
-      - name: report elevation status (diagnostic)
+      # HARD GATE (not just a log line): the P11 system-step tests below
+      # soft-skip — reporting as Passed, not Skipped — when
+      # Elevation.IsProcessElevated() comes back false. That means an
+      # unelevated runner would make this whole job go green having
+      # exercised nothing, silently. Fail the job here instead so a green
+      # p11-system-steps-vm run is proof the live legs actually executed.
+      - name: require an elevated runner (else the live legs would silently soft-skip)
         shell: pwsh
         run: |
-          $id = [Security.Principal.WindowsIdentity]::GetCurrent()
-          $principal = New-Object Security.Principal.WindowsPrincipal($id)
-          Write-Host "user: $($id.Name)"
-          Write-Host "is administrator role: $($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))"
+          $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+          Write-Host "elevated: $isAdmin"
+          if (-not $isAdmin) { Write-Error "p11 system-step VM legs require an elevated runner; refusing to pass vacuously"; exit 1 }
 
       - name: run P11 system-step create+reverse integration tests
         shell: pwsh

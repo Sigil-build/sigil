@@ -28,7 +28,9 @@
 | `<CustomAction>` Type 50/226 (exec) | `run_program` | with `on_failure: rollback` for transactional behaviour |
 | `<CustomAction>` Type 1/17 (DLL) | (declined) | use a signed `run_program` with a small helper exe |
 | `<util:PermissionEx>` | `acl_grant` / `acl_revoke` (SHOULD-tier) | promoted from POST-MVP per Sprint 5a survey findings — bias caveat noted in catalog |
-| `<fire:FirewallException>` | `firewall_rule` (SHOULD-tier) | promoted from POST-MVP per Sprint 5a survey findings — bias caveat noted in catalog |
+| `<fire:FirewallException>` | `firewall_rule` (SHOULD-tier) | promoted from POST-MVP per Sprint 5a survey findings — bias caveat noted in catalog; machine-scope only (SIG0310), delete-then-add keeps reinstalls idempotent |
+| Custom action invoking `schtasks.exe` (Type 50/226) | `scheduled_task_create` (P11) | machine-scope only (SIG0310); always runs as `SYSTEM`; `daily` trigger uses a fixed `/ST 00:00` |
+| `<Class>` (COM class registration) | `com_register` (P11) | machine-scope only (SIG0310); invokes `DllRegisterServer`/`DllUnregisterServer` directly rather than MSI's advertised registry-based registration |
 | `<difx:DriverPackage>` | (post-MVP) | gap acknowledged; users with driver-install needs stay on WiX for v1.0. Note: WiX 5 itself deprecated DIFx |
 | `<Condition>` attribute | `when:` clause on the step | pure expression; no IL or VBScript |
 

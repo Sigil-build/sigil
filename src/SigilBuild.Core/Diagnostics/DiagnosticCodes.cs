@@ -18,6 +18,11 @@ public static class DiagnosticCodes
     public const string StepParameterMismatch = "SIG0231";
     public const string MissingRequiredStepField = "SIG0232";
 
+    // SIG0233 — a step field holds a value outside its allowed set (e.g. a bad
+    // enum like scheduled_task_create's trigger/run_level). Fatal (Error): there
+    // is no safe fallback mapping for an unrecognized enum value.
+    public const string InvalidStepFieldValue = "SIG0233";
+
     // SIG0234 — parameter `source:` block validation (uninstaller-icon-nsis-parity Section 8)
     public const string ParameterSourceInvalid = "SIG0234";
 
@@ -65,6 +70,15 @@ public static class DiagnosticCodes
     // collides with a built-in component or a declared parameter, duplicates
     // another custom component, or the component omits its required label.
     public const string InvalidCustomComponent = "SIG0300";
+
+    // SIG031x — machine-scope-only install steps (P11). T11.1-T11.3 add three
+    // steps (scheduled_task_create, com_register, firewall_rule) that touch
+    // machine-global state; each overrides InstallStep.RequiresMachineScope to
+    // true. SIG0310 is FATAL: it fires when such a step appears anywhere in the
+    // manifest (install_steps/pre_install/post_install/uninstall or any
+    // installer.hooks phase) while installer.scope is not `machine` — `auto`
+    // resolves to per-user scope by default, so it fails the guard too.
+    public const string SystemStepRequiresMachineScope = "SIG0310";
 
     // SIG0292 — a LocalizedText map's per-language value is not a plain scalar
     // (e.g. a nested sequence/mapping under a language key). Fatal for the same

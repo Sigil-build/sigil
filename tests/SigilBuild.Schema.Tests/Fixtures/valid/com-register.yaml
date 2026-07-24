@@ -1,0 +1,21 @@
+# T11.2 (P11): schema fixture for the machine-scope-only com_register install
+# step. scope: machine is required by SIG0310 (SigilBuild.Core.Tests covers that
+# diagnostic); this file only proves the JSON Schema shape accepts com_register.
+spec: v1.0
+
+app:
+  id: com.example.App
+  name: App
+  version: 0.1.0
+  publisher: P
+
+build:
+  source: ./out
+
+installer:
+  scope: machine
+
+install_steps:
+  - id: register_shell_ext
+    type: com_register
+    path: "{install_dir}/Acme.Shell.dll"

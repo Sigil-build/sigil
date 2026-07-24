@@ -138,6 +138,9 @@ public sealed class RollbackJournal
         RollbackRecord.RestoreDeletedDirectory r => $"restore {r.OriginalPath}",
         RollbackRecord.RestoreConfigFile r => $"restore {r.OriginalPath}",
         RollbackRecord.RemoveUninstaller r => $"delete {r.Path}",
+        RollbackRecord.DeleteScheduledTask r => $"deltask {r.TaskName}",
+        RollbackRecord.UnregisterCom r => $"unregister {r.DllPath}",
+        RollbackRecord.DeleteFirewallRule r => $"delfw {r.RuleName}",
         _ => "revert",
     };
 }
@@ -526,6 +529,126 @@ public abstract record RollbackRecord
                 // sc.exe exit 1060 = service does not exist; benign on rollback.
             }
 #pragma warning disable CA1031 // Best-effort uninstall — sc.exe missing or admin denied is acceptable.
+            catch
+            {
+            }
+#pragma warning restore CA1031
+        }
+    }
+
+    /// <summary>
+    /// Deletes a Windows Scheduled Task created by <c>scheduled_task_create</c>
+    /// (P11, T11.1). Recorded BEFORE the create so an interrupted install can
+    /// still unwind. Mirrors <see cref="RemoveService"/>: schtasks.exe absence /
+    /// "task not found" is silently tolerated — the goal is "no task after
+    /// rollback," not "exact symmetric command execution." Only the task NAME
+    /// is carried — no secrets, no resolved program path.
+    /// </summary>
+    public sealed record DeleteScheduledTask(string TaskName) : RollbackRecord
+    {
+        public override async System.Threading.Tasks.Task UndoAsync(System.Threading.CancellationToken ct)
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("schtasks.exe")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            psi.ArgumentList.Add("/Delete");
+            psi.ArgumentList.Add("/TN");
+            psi.ArgumentList.Add(TaskName);
+            psi.ArgumentList.Add("/F");
+            try
+            {
+                using var proc = System.Diagnostics.Process.Start(psi);
+                if (proc is null) return;
+                await proc.WaitForExitAsync(ct).ConfigureAwait(false);
+                // schtasks /Delete on a missing task exits non-zero ("The
+                // system cannot find the file specified" / ERROR_FILE_NOT_FOUND);
+                // benign on rollback, same tolerance as RemoveService above.
+            }
+#pragma warning disable CA1031 // Best-effort uninstall — schtasks.exe missing or admin denied is acceptable.
+            catch
+            {
+            }
+#pragma warning restore CA1031
+        }
+    }
+
+    /// <summary>
+    /// Unregisters a COM DLL registered by <c>com_register</c> (P11, T11.2) by
+    /// invoking its exported <c>DllUnregisterServer</c> through the same native
+    /// path the register used (see
+    /// <see cref="SigilBuild.Wrapper.Steps.Win32.ComRegistration"/>). Recorded
+    /// BEFORE the register so an interrupted install can still unwind. Mirrors
+    /// <see cref="RemoveService"/>'s best-effort contract: a missing
+    /// <c>DllUnregisterServer</c> export or a non-zero HRESULT on undo is
+    /// silently tolerated — the goal is "COM registration gone after rollback,"
+    /// not "exact symmetric call success." Only the DLL PATH is carried — no
+    /// secrets, no registry contents.
+    /// </summary>
+    public sealed record UnregisterCom(string DllPath) : RollbackRecord
+    {
+        public override System.Threading.Tasks.Task UndoAsync(System.Threading.CancellationToken ct)
+        {
+            try
+            {
+                if (System.OperatingSystem.IsWindows())
+                {
+                    // Best-effort: the outcome (export missing / non-zero HR) is
+                    // intentionally ignored, exactly as RemoveService tolerates a
+                    // missing service. FreeLibrary is handled inside Invoke.
+                    _ = SigilBuild.Wrapper.Steps.Win32.ComRegistration.Invoke(DllPath, "DllUnregisterServer");
+                }
+            }
+#pragma warning disable CA1031 // Best-effort uninstall — a DLL that won't load / unregister on undo is acceptable.
+            catch
+            {
+            }
+#pragma warning restore CA1031
+
+            return System.Threading.Tasks.Task.CompletedTask;
+        }
+    }
+
+    /// <summary>
+    /// Deletes a Windows Defender Firewall rule created by <c>firewall_rule</c>
+    /// (P11, T11.3) via <c>netsh advfirewall firewall delete rule</c>. Recorded
+    /// BEFORE the add so an interrupted install can still unwind. Mirrors
+    /// <see cref="RemoveService"/>/<see cref="DeleteScheduledTask"/>: netsh's
+    /// "No rules match the specified criteria" (the rule was never created, or
+    /// was already removed) is silently tolerated — the goal is "no rule after
+    /// rollback," not "exact symmetric command execution." Only the rule NAME
+    /// is carried — no secrets, no resolved program path.
+    /// </summary>
+    public sealed record DeleteFirewallRule(string RuleName) : RollbackRecord
+    {
+        public override async System.Threading.Tasks.Task UndoAsync(System.Threading.CancellationToken ct)
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("netsh.exe")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            psi.ArgumentList.Add("advfirewall");
+            psi.ArgumentList.Add("firewall");
+            psi.ArgumentList.Add("delete");
+            psi.ArgumentList.Add("rule");
+            psi.ArgumentList.Add($"name={RuleName}");
+            try
+            {
+                using var proc = System.Diagnostics.Process.Start(psi);
+                if (proc is null) return;
+                await proc.WaitForExitAsync(ct).ConfigureAwait(false);
+                // netsh exits non-zero ("No rules match the specified
+                // criteria") when the rule is already gone; benign on
+                // rollback, same tolerance as RemoveService/DeleteScheduledTask
+                // above.
+            }
+#pragma warning disable CA1031 // Best-effort uninstall — netsh.exe missing or admin denied is acceptable.
             catch
             {
             }

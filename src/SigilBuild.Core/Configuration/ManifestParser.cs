@@ -54,6 +54,18 @@ public static class ManifestParser
         // Parameters are parsed before the installer block so declared custom
         // screens (T9) can resolve their field references against them.
         var parameters = ParseParameters(GetMapping(root, "parameters"), diagnostics, file);
+        var installer = MapInstaller(GetMapping(root, "installer"), app, parameters, diagnostics, file);
+        // P11: installer.scope is fully resolved by MapInstaller above (default
+        // Auto when the block is absent), so every root-level step collection
+        // parsed below can thread it straight into ParseInstallStep, which
+        // guards each step (SIG0310) at its own precise node location — see
+        // MachineScopeGuard.
+        var scope = installer?.Scope ?? InstallScope.Auto;
+        var installSteps = ParseInstallSteps(GetSequenceOfMappings(root, "install_steps"), scope, diagnostics, file);
+        var preInstall = ParseInstallSteps(GetSequenceOfMappings(root, "pre_install"), scope, diagnostics, file);
+        var postInstall = ParseInstallSteps(GetSequenceOfMappings(root, "post_install"), scope, diagnostics, file);
+        var uninstall = ParseInstallSteps(GetSequenceOfMappings(root, "uninstall"), scope, diagnostics, file);
+
         return new SigilManifest(
             Spec: GetScalar(root, "spec") ?? "",
             App: app,
@@ -62,13 +74,13 @@ public static class ManifestParser
             Sign: MapSign(GetMapping(root, "sign")),
             Publish: MapPublish(GetMapping(root, "publish")),
             Updates: MapUpdates(GetMapping(root, "updates")),
-            Installer: MapInstaller(GetMapping(root, "installer"), app, parameters, diagnostics, file),
+            Installer: installer,
             Location: loc,
             Parameters: parameters,
-            InstallSteps: ParseInstallSteps(GetSequenceOfMappings(root, "install_steps"), diagnostics, file),
-            PreInstall: ParseInstallSteps(GetSequenceOfMappings(root, "pre_install"), diagnostics, file),
-            PostInstall: ParseInstallSteps(GetSequenceOfMappings(root, "post_install"), diagnostics, file),
-            Uninstall: ParseInstallSteps(GetSequenceOfMappings(root, "uninstall"), diagnostics, file));
+            InstallSteps: installSteps,
+            PreInstall: preInstall,
+            PostInstall: postInstall,
+            Uninstall: uninstall);
     }
 
     private static AppSection MapApp(YamlMappingNode node) => new(
@@ -158,6 +170,10 @@ public static class ManifestParser
         var brand = GetMapping(node, "brand");
         var screens = ParseScreens(
             GetSequenceOfMappings(node, "screens"), app, parameters, diagnostics, fileName);
+        // P11: resolve scope before installer.hooks is parsed so each hook step
+        // can be guarded (SIG0310) at its own precise node location, same as the
+        // root-level step collections in MapManifest.
+        var scope = ParseScope(node, diagnostics, fileName);
         return new InstallerSection(
             brand is null ? null : new InstallerBrand(
                 Logo: GetScalar(brand, "logo"),
@@ -185,7 +201,7 @@ public static class ManifestParser
             // T12: install scope (user | machine | auto, default auto). The schema
             // enum is the hard gate; here we map the string leniently and emit a
             // non-fatal diagnostic on an unrecognized value, falling back to auto.
-            Scope: ParseScope(node, diagnostics, fileName),
+            Scope: scope,
             // T13: optional install-dir override. Captured verbatim as a template;
             // the engine resolves its {scope_root} / {app.*} tokens at install time
             // (StepContext), against the resolved scope. A blank value is treated as
@@ -203,7 +219,7 @@ public static class ManifestParser
             Vars: ParseVars(GetMapping(node, "vars"), diagnostics, fileName),
             // P2 (gap G2): lifecycle hooks that run OUTSIDE the rollback journal.
             // Per-phase on_failure defaults: fail for pre_*, continue for post_*.
-            Hooks: ParseHooks(GetMapping(node, "hooks"), diagnostics, fileName),
+            Hooks: ParseHooks(GetMapping(node, "hooks"), scope, diagnostics, fileName),
             // P2 (gap G4): the Done-screen "Launch <App>" target.
             RunAfterInstall: ParseRunAfterInstall(GetMapping(node, "run_after_install")),
             // P5 (gap G6): first-class prerequisite units (detect → install → re-detect),
@@ -447,14 +463,14 @@ public static class ManifestParser
     /// block declares no phase.
     /// </summary>
     private static InstallerHooks? ParseHooks(
-        YamlMappingNode? node, List<Diagnostic> diagnostics, string fileName)
+        YamlMappingNode? node, InstallScope scope, List<Diagnostic> diagnostics, string fileName)
     {
         if (node is null) return null;
 
-        var pre   = ParseInstallSteps(GetSequenceOfMappings(node, "pre_install"),   diagnostics, fileName, OnFailure.Fail);
-        var post  = ParseInstallSteps(GetSequenceOfMappings(node, "post_install"),  diagnostics, fileName, OnFailure.Continue);
-        var preU  = ParseInstallSteps(GetSequenceOfMappings(node, "pre_uninstall"), diagnostics, fileName, OnFailure.Fail);
-        var postU = ParseInstallSteps(GetSequenceOfMappings(node, "post_uninstall"),diagnostics, fileName, OnFailure.Continue);
+        var pre   = ParseInstallSteps(GetSequenceOfMappings(node, "pre_install"),   scope, diagnostics, fileName, OnFailure.Fail);
+        var post  = ParseInstallSteps(GetSequenceOfMappings(node, "post_install"),  scope, diagnostics, fileName, OnFailure.Continue);
+        var preU  = ParseInstallSteps(GetSequenceOfMappings(node, "pre_uninstall"), scope, diagnostics, fileName, OnFailure.Fail);
+        var postU = ParseInstallSteps(GetSequenceOfMappings(node, "post_uninstall"),scope, diagnostics, fileName, OnFailure.Continue);
 
         if (pre is null && post is null && preU is null && postU is null)
         {
@@ -1126,21 +1142,21 @@ public static class ManifestParser
     private static readonly string[] XmlEditFields            = { "id", "type", "when", "on_failure", "path", "xpath", "attribute", "value", "create_if_missing" };
 
     private static List<InstallStep>? ParseInstallSteps(
-        List<YamlMappingNode>? nodes, List<Diagnostic> diagnostics, string fileName,
+        List<YamlMappingNode>? nodes, InstallScope scope, List<Diagnostic> diagnostics, string fileName,
         OnFailure defaultOnFailure = OnFailure.Fail)
     {
         if (nodes is null) return null;
         var list = new List<InstallStep>(nodes.Count);
         foreach (var node in nodes)
         {
-            var step = ParseInstallStep(node, diagnostics, fileName, defaultOnFailure);
+            var step = ParseInstallStep(node, scope, diagnostics, fileName, defaultOnFailure);
             if (step is not null) list.Add(step);
         }
         return list;
     }
 
     private static InstallStep? ParseInstallStep(
-        YamlMappingNode node, List<Diagnostic> diagnostics, string fileName,
+        YamlMappingNode node, InstallScope scope, List<Diagnostic> diagnostics, string fileName,
         OnFailure defaultOnFailure = OnFailure.Fail)
     {
         var loc = new SourceLocation(fileName, (int)node.Start.Line, (int)node.Start.Column);
@@ -1176,7 +1192,7 @@ public static class ManifestParser
         var onFailureRaw = GetScalar(node, "on_failure");
         var onFailure = onFailureRaw is null ? defaultOnFailure : ParseOnFailure(onFailureRaw);
 
-        return typeStr switch
+        var step = typeStr switch
         {
             "file_copy"             => BuildFileCopy(node, id!, when, onFailure, diagnostics, loc),
             "directory_create"      => BuildDirectoryCreate(node, id!, when, onFailure, diagnostics, loc),
@@ -1193,8 +1209,21 @@ public static class ManifestParser
             "json_edit"             => BuildJsonEdit(node, id!, when, onFailure, diagnostics, loc),
             "xml_edit"              => BuildXmlEdit(node, id!, when, onFailure, diagnostics, loc),
             "service_install"       => BuildServiceInstall(node, id!, when, onFailure, diagnostics, loc),
+            "scheduled_task_create" => BuildScheduledTaskCreate(node, id!, when, onFailure, diagnostics, loc),
+            "com_register"          => BuildComRegister(node, id!, when, onFailure, diagnostics, loc),
+            "firewall_rule"         => BuildFirewallRule(node, id!, when, onFailure, diagnostics, loc),
             _ => ReportUnknownStepType(id!, typeStr!, loc, diagnostics),
         };
+
+        // P11: guard machine-scope-only steps (SIG0310) right here, at the same
+        // call site that already holds this step's own precise node `loc` — the
+        // same location the SIG0230/SIG0231/SIG0232 diagnostics above use.
+        if (step is not null)
+        {
+            MachineScopeGuard.ValidateStep(step, scope, loc, diagnostics);
+        }
+
+        return step;
     }
 
     private static readonly string[] ServiceInstallFields =
@@ -1223,6 +1252,135 @@ public static class ManifestParser
         return new InstallStep.ServiceInstall(
             id, name, binaryPath, displayName, description,
             startType, serviceAccount, startAfterInstall, when, onFailure);
+    }
+
+    private static readonly string[] ScheduledTaskCreateFields =
+    {
+        "id", "type", "when", "on_failure",
+        "name", "program", "arguments", "trigger", "run_level",
+    };
+
+    private static readonly string[] ScheduledTaskTriggerValues = { "logon", "daily", "onstart" };
+    private static readonly string[] ScheduledTaskRunLevelValues = { "limited", "highest" };
+
+    private static InstallStep.ScheduledTaskCreate? BuildScheduledTaskCreate(
+        YamlMappingNode node, string id, string? when, OnFailure onFailure,
+        List<Diagnostic> diagnostics, SourceLocation loc)
+    {
+        var name = GetScalar(node, "name");
+        var program = GetScalar(node, "program");
+        var trigger = GetScalar(node, "trigger");
+        if (name is null)    { ReportMissingField(id, "scheduled_task_create", "name",    loc, diagnostics); return null; }
+        if (program is null) { ReportMissingField(id, "scheduled_task_create", "program", loc, diagnostics); return null; }
+        if (trigger is null) { ReportMissingField(id, "scheduled_task_create", "trigger", loc, diagnostics); return null; }
+
+        if (!ScheduledTaskTriggerValues.Contains(trigger))
+        {
+            ReportBadEnumValue(id, "scheduled_task_create", "trigger", trigger, ScheduledTaskTriggerValues, loc, diagnostics);
+            return null;
+        }
+
+        var arguments = GetScalar(node, "arguments");
+        var runLevel = GetScalar(node, "run_level") ?? "limited";
+        if (!ScheduledTaskRunLevelValues.Contains(runLevel))
+        {
+            ReportBadEnumValue(id, "scheduled_task_create", "run_level", runLevel, ScheduledTaskRunLevelValues, loc, diagnostics);
+            return null;
+        }
+
+        ReportUnknownStepFields(node, id, "scheduled_task_create", ScheduledTaskCreateFields, loc, diagnostics);
+        return new InstallStep.ScheduledTaskCreate(id, name, program, arguments, trigger, runLevel, when, onFailure);
+    }
+
+    private static readonly string[] ComRegisterFields =
+    {
+        "id", "type", "when", "on_failure", "path",
+    };
+
+    /// <summary>
+    /// P11 (T11.2): <c>com_register</c> — self-registers a COM DLL via its
+    /// exported <c>DllRegisterServer</c> at install time. Only <c>path</c> is
+    /// required (missing → SIG0232); there are no enum-valued fields, so SIG0233
+    /// does not apply here. The step is machine-scope-only (SIG0310), enforced by
+    /// <see cref="InstallStep.RequiresMachineScope"/> on the typed record.
+    /// </summary>
+    private static InstallStep.ComRegister? BuildComRegister(
+        YamlMappingNode node, string id, string? when, OnFailure onFailure,
+        List<Diagnostic> diagnostics, SourceLocation loc)
+    {
+        var path = GetScalar(node, "path");
+        if (path is null) { ReportMissingField(id, "com_register", "path", loc, diagnostics); return null; }
+
+        ReportUnknownStepFields(node, id, "com_register", ComRegisterFields, loc, diagnostics);
+        return new InstallStep.ComRegister(id, path, when, onFailure);
+    }
+
+    private static readonly string[] FirewallRuleFields =
+    {
+        "id", "type", "when", "on_failure",
+        "name", "direction", "action", "program", "port", "protocol",
+    };
+
+    private static readonly string[] FirewallDirectionValues = { "in", "out" };
+    private static readonly string[] FirewallActionValues = { "allow", "block" };
+    private static readonly string[] FirewallProtocolValues = { "tcp", "udp" };
+
+    /// <summary>
+    /// P11 (T11.3): <c>firewall_rule</c> — creates a Windows Defender Firewall
+    /// rule via <c>netsh advfirewall firewall add rule</c>. <c>name</c>,
+    /// <c>direction</c>, and <c>action</c> are required (missing → SIG0232);
+    /// <c>direction</c>/<c>action</c>/<c>protocol</c> are enum-valued fields —
+    /// a value outside their allowed set is SIG0233.
+    /// </summary>
+    /// <remarks>
+    /// Port/protocol validation rule (documented per the brief, "keep it
+    /// simple"): netsh's <c>localport=</c> needs an accompanying
+    /// <c>protocol=</c>, so when <c>port</c> is given and <c>protocol</c> is
+    /// absent, the parser defaults <c>protocol</c> to <c>tcp</c> rather than
+    /// forcing every manifest author to spell out the common case. An
+    /// explicitly-given <c>protocol</c> is still validated against the
+    /// tcp/udp enum regardless of whether <c>port</c> is set.
+    /// </remarks>
+    private static InstallStep.FirewallRule? BuildFirewallRule(
+        YamlMappingNode node, string id, string? when, OnFailure onFailure,
+        List<Diagnostic> diagnostics, SourceLocation loc)
+    {
+        var name = GetScalar(node, "name");
+        var direction = GetScalar(node, "direction");
+        var action = GetScalar(node, "action");
+        if (name is null)      { ReportMissingField(id, "firewall_rule", "name",      loc, diagnostics); return null; }
+        if (direction is null) { ReportMissingField(id, "firewall_rule", "direction", loc, diagnostics); return null; }
+        if (action is null)    { ReportMissingField(id, "firewall_rule", "action",    loc, diagnostics); return null; }
+
+        if (!FirewallDirectionValues.Contains(direction))
+        {
+            ReportBadEnumValue(id, "firewall_rule", "direction", direction, FirewallDirectionValues, loc, diagnostics);
+            return null;
+        }
+        if (!FirewallActionValues.Contains(action))
+        {
+            ReportBadEnumValue(id, "firewall_rule", "action", action, FirewallActionValues, loc, diagnostics);
+            return null;
+        }
+
+        var program = GetScalar(node, "program");
+        var port = GetNullableInt(node, "port");
+        var protocol = GetScalar(node, "protocol");
+        if (protocol is not null && !FirewallProtocolValues.Contains(protocol))
+        {
+            ReportBadEnumValue(id, "firewall_rule", "protocol", protocol, FirewallProtocolValues, loc, diagnostics);
+            return null;
+        }
+
+        // See the remarks on this method: default protocol=tcp when a port is
+        // given but the author left protocol unset.
+        if (port is not null && protocol is null)
+        {
+            protocol = "tcp";
+        }
+
+        ReportUnknownStepFields(node, id, "firewall_rule", FirewallRuleFields, loc, diagnostics);
+        return new InstallStep.FirewallRule(id, name, direction, action, program, port, protocol, when, onFailure);
     }
 
     private static InstallStep? ReportUnknownStepType(
@@ -1481,6 +1639,28 @@ public static class ManifestParser
             $"install step '{id}' (type {stepType}) is missing required field '{field}'",
             loc,
             "https://docs.sigil.build/diagnostics/SIG0232"));
+    }
+
+    /// <summary>
+    /// P11: an enum-valued step field (e.g. <c>scheduled_task_create.trigger</c> /
+    /// <c>run_level</c>) holds a value outside its allowed set. Unlike
+    /// <see cref="ReportUnknownStepFields"/>'s unrecognized-key warning, a bad
+    /// enum value makes the step's runtime behavior undefined (there is no safe
+    /// fallback schtasks.exe mapping), so this is an Error, not a Warning — the
+    /// step is refused (its Build… method returns null) rather than packed with
+    /// a guessed default.
+    /// </summary>
+    private static void ReportBadEnumValue(
+        string id, string stepType, string field, string value, string[] allowed,
+        SourceLocation loc, List<Diagnostic> diagnostics)
+    {
+        diagnostics.Add(new Diagnostic(
+            DiagnosticSeverity.Error,
+            DiagnosticCodes.InvalidStepFieldValue,
+            $"install step '{id}' (type {stepType}) has invalid '{field}' value '{value}'; " +
+            $"expected one of: {string.Join(", ", allowed)}",
+            loc,
+            "https://docs.sigil.build/diagnostics/SIG0233"));
     }
 
     private static void ReportUnknownStepFields(

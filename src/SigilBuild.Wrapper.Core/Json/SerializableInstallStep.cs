@@ -116,6 +116,26 @@ internal sealed record SerializableInstallStep
     public string? StartType { get; init; }
     public string? ServiceAccount { get; init; }
     public bool? StartAfterInstall { get; init; }
+
+    // scheduled_task_create (P11, T11.1). Program/ProgramArgs above belong to
+    // run_program; the task's executable + args get their own fields since a
+    // task also carries a Trigger/RunLevel that run_program has no concept of.
+    public string? TaskName { get; init; }
+    public string? TaskProgram { get; init; }
+    public string? TaskArguments { get; init; }
+    public string? TaskTrigger { get; init; }
+    public string? TaskRunLevel { get; init; }
+
+    // firewall_rule (P11, T11.3). Fresh field names (rather than reusing the
+    // generic Name/Program slots above) avoid ambiguity with the other step
+    // types that already use those names — mirrors TaskName/TaskProgram's
+    // reasoning for scheduled_task_create.
+    public string? FirewallRuleName { get; init; }
+    public string? FirewallDirection { get; init; }
+    public string? FirewallAction { get; init; }
+    public string? FirewallProgram { get; init; }
+    public int? FirewallPort { get; init; }
+    public string? FirewallProtocol { get; init; }
 }
 
 /// <summary>
@@ -269,6 +289,33 @@ internal static class SerializableInstallStepConverter
                 s.StartType ?? "auto",
                 s.ServiceAccount ?? "LocalSystem",
                 s.StartAfterInstall ?? true,
+                s.When,
+                onFailure),
+
+            "scheduled_task_create" => new InstallStep.ScheduledTaskCreate(
+                s.Id,
+                s.TaskName ?? throw MissingField("scheduled_task_create", "name", s.Id),
+                s.TaskProgram ?? throw MissingField("scheduled_task_create", "program", s.Id),
+                s.TaskArguments,
+                s.TaskTrigger ?? throw MissingField("scheduled_task_create", "trigger", s.Id),
+                s.TaskRunLevel ?? "limited",
+                s.When,
+                onFailure),
+
+            "com_register" => new InstallStep.ComRegister(
+                s.Id,
+                s.Path ?? throw MissingField("com_register", "path", s.Id),
+                s.When,
+                onFailure),
+
+            "firewall_rule" => new InstallStep.FirewallRule(
+                s.Id,
+                s.FirewallRuleName ?? throw MissingField("firewall_rule", "name", s.Id),
+                s.FirewallDirection ?? throw MissingField("firewall_rule", "direction", s.Id),
+                s.FirewallAction ?? throw MissingField("firewall_rule", "action", s.Id),
+                s.FirewallProgram,
+                s.FirewallPort,
+                s.FirewallProtocol,
                 s.When,
                 onFailure),
 
@@ -468,6 +515,42 @@ internal static class SerializableInstallStepConverter
                 StartType = x.StartType,
                 ServiceAccount = x.ServiceAccount,
                 StartAfterInstall = x.StartAfterInstall,
+            },
+
+            InstallStep.ScheduledTaskCreate x => new SerializableInstallStep
+            {
+                Id = x.Id,
+                Type = "scheduled_task_create",
+                When = x.When,
+                OnFailure = onFailure,
+                TaskName = x.Name,
+                TaskProgram = x.Program,
+                TaskArguments = x.Arguments,
+                TaskTrigger = x.Trigger,
+                TaskRunLevel = x.RunLevel,
+            },
+
+            InstallStep.ComRegister x => new SerializableInstallStep
+            {
+                Id = x.Id,
+                Type = "com_register",
+                When = x.When,
+                OnFailure = onFailure,
+                Path = x.Path,
+            },
+
+            InstallStep.FirewallRule x => new SerializableInstallStep
+            {
+                Id = x.Id,
+                Type = "firewall_rule",
+                When = x.When,
+                OnFailure = onFailure,
+                FirewallRuleName = x.Name,
+                FirewallDirection = x.Direction,
+                FirewallAction = x.Action,
+                FirewallProgram = x.Program,
+                FirewallPort = x.Port,
+                FirewallProtocol = x.Protocol,
             },
 
             _ => throw new InvalidOperationException(

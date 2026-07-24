@@ -13,6 +13,18 @@ namespace SigilBuild.Core.Manifest;
 /// </summary>
 public abstract record InstallStep(string Id, string? When, OnFailure OnFailure)
 {
+    /// <summary>
+    /// True for steps that touch machine-global state (P11: scheduled tasks,
+    /// COM registration, firewall rules) and therefore MUST run in
+    /// <see cref="InstallScope.Machine"/>. Defaults to false for every existing
+    /// step type; T11.1-T11.3 override this to true on their record types. The
+    /// pack-time guard in <c>SigilBuild.Core.Configuration.MachineScopeGuard</c>
+    /// emits SIG0310 for any such step when the manifest's resolved scope isn't
+    /// <see cref="InstallScope.Machine"/> (SIG0310 — see
+    /// <see cref="SigilBuild.Core.Diagnostics.DiagnosticCodes.SystemStepRequiresMachineScope"/>).
+    /// </summary>
+    public virtual bool RequiresMachineScope => false;
+
     public sealed record FileCopy(
         string Id,
         string From,
@@ -198,6 +210,88 @@ public abstract record InstallStep(string Id, string? When, OnFailure OnFailure)
         string? When,
         OnFailure OnFailure)
         : InstallStep(Id, When, OnFailure);
+
+    /// <summary>
+    /// P11 (T11.1), first of three machine-scope-only "system steps": creates a
+    /// Windows Scheduled Task via <c>schtasks.exe /Create</c>, running as
+    /// <c>SYSTEM</c> (<c>/RU SYSTEM</c>) — which is exactly why
+    /// <see cref="RequiresMachineScope"/> is overridden to <c>true</c> here (see
+    /// <see cref="SigilBuild.Core.Configuration.MachineScopeGuard"/> / SIG0310).
+    /// Journals a <c>RollbackRecord.DeleteScheduledTask</c>
+    /// (task name only) BEFORE the create so a mid-install crash and
+    /// <c>setup.exe /Uninstall</c> both unwind the task.
+    /// </summary>
+    public sealed record ScheduledTaskCreate(
+        string Id,
+        string Name,
+        string Program,
+        string? Arguments,
+        string Trigger,          // logon | daily | onstart
+        string RunLevel,         // limited (default) | highest
+        string? When,
+        OnFailure OnFailure)
+        : InstallStep(Id, When, OnFailure)
+    {
+        public override bool RequiresMachineScope => true;
+    }
+
+    /// <summary>
+    /// P11 (T11.2), second of three machine-scope-only "system steps" and the
+    /// one AOT-risk step in P11: self-registers a COM DLL by loading it and
+    /// invoking its exported <c>HRESULT DllRegisterServer(void)</c> through a
+    /// C# unmanaged function pointer. <c>DllRegisterServer</c> writes
+    /// machine-global registration (<c>HKLM\Software\Classes</c> / <c>HKCR\CLSID</c>),
+    /// so <see cref="RequiresMachineScope"/> is overridden to <c>true</c> (see
+    /// <see cref="SigilBuild.Core.Configuration.MachineScopeGuard"/> / SIG0310).
+    /// Journals a <c>RollbackRecord.UnregisterCom</c> (DLL path only) BEFORE the
+    /// register so a mid-install crash and <c>setup.exe /Uninstall</c> both call
+    /// <c>DllUnregisterServer</c> — mirrors <see cref="ServiceInstall"/>'s
+    /// <c>RemoveService</c> pattern.
+    /// </summary>
+    public sealed record ComRegister(
+        string Id,
+        string Path,
+        string? When,
+        OnFailure OnFailure)
+        : InstallStep(Id, When, OnFailure)
+    {
+        public override bool RequiresMachineScope => true;
+    }
+
+    /// <summary>
+    /// P11 (T11.3), third and last of three machine-scope-only "system steps":
+    /// creates a Windows Defender Firewall rule via
+    /// <c>netsh advfirewall firewall add rule</c>. Firewall rules are
+    /// machine-global (there is no per-user firewall policy store), so
+    /// <see cref="RequiresMachineScope"/> is overridden to <c>true</c> (see
+    /// <see cref="SigilBuild.Core.Configuration.MachineScopeGuard"/> / SIG0310).
+    /// Journals a <c>RollbackRecord.DeleteFirewallRule</c> (rule name only)
+    /// BEFORE the add so a mid-install crash and <c>setup.exe /Uninstall</c>
+    /// both unwind the rule — mirrors <see cref="ServiceInstall"/>'s
+    /// <c>RemoveService</c> pattern.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Port"/> and <see cref="Protocol"/> are both optional, but
+    /// netsh's <c>localport=</c> only makes sense alongside a <c>protocol=</c>
+    /// (TCP/UDP); the parser defaults <see cref="Protocol"/> to <c>tcp</c>
+    /// when <see cref="Port"/> is set and no protocol was given explicitly, so
+    /// this typed field is only <c>null</c> when the manifest author left both
+    /// unset (a whole-program rule with no port restriction).
+    /// </remarks>
+    public sealed record FirewallRule(
+        string Id,
+        string Name,
+        string Direction,        // in | out
+        string Action,           // allow | block
+        string? Program,
+        int? Port,
+        string? Protocol,        // tcp | udp; parser-defaulted to "tcp" when Port is set
+        string? When,
+        OnFailure OnFailure)
+        : InstallStep(Id, When, OnFailure)
+    {
+        public override bool RequiresMachineScope => true;
+    }
 }
 
 /// <summary>

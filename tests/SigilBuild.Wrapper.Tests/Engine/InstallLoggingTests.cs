@@ -228,6 +228,32 @@ public sealed class InstallLoggingTests
         log.Should().Contain("***", "the secret occurrence in the error is redacted");
     }
 
+    // ── /Update honors the same flags (T12.4) ─────────────────────────────────
+
+    [Fact]
+    public async Task Update_honors_LOG_flag_and_records_the_update_stage_and_exit_code()
+    {
+        using var tmp = new TempDir();
+        var logPath = Path.Combine(tmp.Path, "update.log");
+
+        // The un-stamped runtime carries no updates: metadata, so this exercises
+        // the "not update-enabled" stage — the one /Update stage InstallSession can
+        // reach without live network I/O (RunUpdateAsync wires PRODUCTION HTTP/
+        // download/launch seams with no test seam — see UpdateRunner's remarks).
+        // The deeper "checking for updates" / "up to date" / "downloading" stages
+        // are covered directly against UpdateRunner (with fakes) in
+        // UpdateRunnerTests, which already assert their exact log content.
+        var session = InstallSession.Create(new[] { "/Update", "/silent", $"/LOG={logPath}" });
+        var code = await session.RunHeadlessAsync(new StringWriter(), new StringWriter());
+
+        code.Should().Be(InstallSession.UpdateNotConfiguredExitCode);
+        File.Exists(logPath).Should().BeTrue();
+        var log = File.ReadAllText(logPath);
+        log.Should().Contain("=== sigil update log", "the /LOG header names the update mode");
+        log.Should().Contain("not update-enabled", "UpdateRunner's report callback writes each stage into the /LOG sink too");
+        log.Should().Contain($"exit code: {InstallSession.UpdateNotConfiguredExitCode}");
+    }
+
     // ── Uninstall honors the same flags ──────────────────────────────────────
 
     [Fact]

@@ -448,18 +448,27 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "channel": { "type": "string", "default": "stable", "minLength": 1 },
-        "manifestUrl": { "type": "string", "format": "uri" },
+        "channel": {
+          "type": "string",
+          "description": "Free-form label naming which channel manifest this app points at (e.g. 'stable', 'beta'). Purely descriptive: Sigil does not resolve or host channels itself.",
+          "default": "stable",
+          "minLength": 1
+        },
+        "manifestUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "HTTPS URL of the signed channel manifest that `/Update` fetches to check for a newer version; its detached signature is expected at the same URL with '.sig' appended. Omit to ship an installer with no update capability."
+        },
         "deltaTargets": {
           "type": "integer",
-          "description": "How many previous versions to generate delta patches against.",
+          "description": "How many previous versions a future delta-patch generator would target. Parsed and schema-validated today, but not yet consumed by the update runtime -- full-package updates ship first (see the delta-update deferral ADR).",
           "minimum": 0,
           "maximum": 20,
           "default": 3
         },
         "signingKey": {
           "type": "string",
-          "description": "Path to an Ed25519 private key (PEM) used to sign the update manifest."
+          "description": "Base64-encoded X.509 SubjectPublicKeyInfo (SPKI) DER of the ECDSA P-256 PUBLIC key that verifies the detached signature (`manifestUrl` + '.sig') on the fetched channel manifest. Embedded at pack time as the update runtime's trust anchor -- never a private key, and never a file path."
         }
       }
     },

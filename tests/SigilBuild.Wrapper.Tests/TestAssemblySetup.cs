@@ -7,9 +7,9 @@ using Xunit;
 // process-wide static state now read from production code paths exercised
 // across many of this assembly's test classes that never call
 // ResolveSessionLanguage themselves — InstallSession's engine-prose messages
-// (LaunchLabel, DowngradeBlockedMessage, engine.update_unsupported,
-// engine.removing_previous/newer), PrerequisiteRunner's installing-prerequisite
-// message, and StepContext's system.language (guarded separately on IsSet).
+// (LaunchLabel, DowngradeBlockedMessage, engine.removing_previous/newer),
+// PrerequisiteRunner's installing-prerequisite message, and StepContext's
+// system.language (guarded separately on IsSet).
 // In Release the SessionLanguage.Current guard falls back to Lang.En + logs;
 // in Debug it throws (by design — see SessionLanguage.Current's remarks).
 // Establish the same English default here, once, at assembly load — mirroring

@@ -1,0 +1,101 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:SigilBuild.Installer.Host.ViewModels"
+        xmlns:loc="clr-namespace:SigilBuild.Wrapper.Core.Localization;assembly=SigilBuild.Wrapper.Core"
+        x:Class="SigilBuild.Installer.Host.Views.UpdateWindow"
+        x:DataType="vm:UpdateViewModel"
+        Title="{Binding Brand.AppName}"
+        Width="800" Height="500"
+        CanResize="False"
+        WindowStartupLocation="CenterScreen"
+        WindowDecorations="BorderOnly"
+        Background="{DynamicResource WinBgBrush}">
+
+  <Grid ColumnDefinitions="240,*" RowDefinitions="*,56">
+
+    <!-- Sidebar (rail): brand block (shared with the install wizard) -->
+    <Border Grid.Row="0" Grid.Column="0" Grid.RowSpan="2" Background="{DynamicResource RailBgBrush}">
+      <DockPanel Margin="24" LastChildFill="False">
+        <StackPanel DockPanel.Dock="Top" Spacing="16">
+          <Image Source="avares://installer/Assets/default-logo.png" Height="48" HorizontalAlignment="Left" />
+          <TextBlock Text="{Binding Brand.AppName}" Foreground="{DynamicResource RailTextBrush}" FontSize="22" FontWeight="SemiBold" />
+          <TextBlock Text="{Binding Brand.Publisher}" Foreground="{DynamicResource RailMutedBrush}" FontSize="13" />
+        </StackPanel>
+        <TextBlock DockPanel.Dock="Bottom"
+                   Text="{Binding VersionLine}"
+                   Foreground="{DynamicResource RailMutedBrush}" FontSize="12" />
+      </DockPanel>
+    </Border>
+
+    <!-- Content host: state-driven panels (progress / up-to-date / done / failed) -->
+    <Panel Grid.Row="0" Grid.Column="1" Margin="32">
+
+      <!-- Progress: Checking / Downloading / LaunchingChild all share this panel -->
+      <StackPanel Spacing="16" VerticalAlignment="Center" IsVisible="{Binding IsProgress}">
+        <TextBlock FontSize="20" FontWeight="SemiBold" Text="{Binding StatusHeading}" />
+        <ProgressBar IsIndeterminate="True" Foreground="{DynamicResource AccentBrush}" />
+        <Border Background="{DynamicResource LogBgBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                CornerRadius="8" Height="180" Padding="12,8">
+          <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+            <ItemsControl ItemsSource="{Binding LogLines}">
+              <ItemsControl.Styles>
+                <Style Selector="TextBlock.err">
+                  <Setter Property="Foreground" Value="{DynamicResource DangerTextBrush}" />
+                </Style>
+              </ItemsControl.Styles>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:InstallLogLine">
+                  <TextBlock Classes.err="{Binding IsError}"
+                             Text="{Binding Text}"
+                             Foreground="{DynamicResource LogTextBrush}"
+                             FontFamily="Consolas, 'Cascadia Mono', monospace"
+                             FontSize="11"
+                             TextWrapping="NoWrap" />
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+        </Border>
+      </StackPanel>
+
+      <!-- Up to date -->
+      <StackPanel Spacing="12" VerticalAlignment="Center" IsVisible="{Binding IsUpToDate}">
+        <Border Width="48" Height="48" CornerRadius="24" HorizontalAlignment="Left"
+                Background="{DynamicResource SuccessBgBrush}">
+          <TextBlock Text="✓" FontSize="24" FontWeight="Bold"
+                     Foreground="{DynamicResource SuccessTextBrush}"
+                     HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Border>
+        <TextBlock FontSize="20" FontWeight="SemiBold" Text="{Binding UpToDateMessage}" />
+      </StackPanel>
+
+      <!-- Done (a newer version was downloaded and installed) -->
+      <StackPanel Spacing="12" VerticalAlignment="Center" IsVisible="{Binding IsDone}">
+        <Border Width="48" Height="48" CornerRadius="24" HorizontalAlignment="Left"
+                Background="{DynamicResource SuccessBgBrush}">
+          <TextBlock Text="✓" FontSize="24" FontWeight="Bold"
+                     Foreground="{DynamicResource SuccessTextBrush}"
+                     HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Border>
+        <TextBlock FontSize="20" FontWeight="SemiBold" Text="{Binding DoneMessage}" />
+      </StackPanel>
+
+      <!-- Failed -->
+      <StackPanel Spacing="12" VerticalAlignment="Center" IsVisible="{Binding IsFailed}">
+        <TextBlock FontSize="20" FontWeight="SemiBold" Text="{x:Static loc:S.UpdateFailed}" />
+        <TextBlock Text="{Binding ErrorMessage}" Foreground="{DynamicResource DangerTextBrush}" TextWrapping="Wrap" />
+        <TextBlock Text="{x:Static loc:S.UpdateFailedBody}"
+                   Foreground="{DynamicResource TextSecBrush}" TextWrapping="Wrap" />
+      </StackPanel>
+    </Panel>
+
+    <!-- Footer -->
+    <Border Grid.Row="1" Grid.Column="1" BorderBrush="{DynamicResource FrameBrush}" BorderThickness="0,1,0,0" Padding="16,8">
+      <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right">
+        <Button Content="{x:Static loc:S.NavClose}" Click="OnClose" IsVisible="{Binding IsFinished}"
+                Background="{DynamicResource AccentBrush}" Foreground="White" />
+      </StackPanel>
+    </Border>
+
+  </Grid>
+</Window>

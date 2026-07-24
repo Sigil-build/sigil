@@ -25,6 +25,19 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent | Split-Path -Parent)
 
+# Windows PowerShell 5.1 decodes a redirected child process's stdout/stderr
+# using [Console]::OutputEncoding, which defaults to the system's OEM codepage
+# (e.g. IBM437), not UTF-8. `sigil --help`'s Description strings contain
+# non-ASCII (em dashes, arrows); left at the OEM default those bytes get
+# mis-decoded and then re-encoded as UTF-8 mojibake (e.g. "—" -> "ΓÇö") in the
+# captured $rootHelp/$cmdHelp strings below — corruption that survives even
+# though the file is written out via the explicit UTF-8 WriteAllText at the
+# bottom of this script, because the damage already happened at capture time.
+# pwsh 7+ defaults to UTF-8 already, so this is a no-op there.
+if ($PSVersionTable.PSVersion.Major -lt 6) {
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+}
+
 # Subcommand list: ground truth is the `sigil --help` output.
 $rootHelp = & dotnet run --project $CliProject --no-build -- --help 2>&1
 if ($LASTEXITCODE -ne 0) { throw "sigil --help exited $LASTEXITCODE" }

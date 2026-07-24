@@ -7,9 +7,12 @@ build warning-clean under Native AOT + `TreatWarningsAsErrors`. `pack --format
 exe` produces a working stamped `Setup.exe` verified end-to-end (silent install
 lands files, real ARP, dual scope, uninstall survives deleting the setup exe).
 Size gates: CLI 13.59 MB ≤ 15 MB; host 37.4 MB ≤ 40 MB (re-pinned from the
-spec's unattainable 25 MB per the AOT spike). Remaining: push branch → CI runs
-the both-scope VM matrix (`wrapper-vm-tests.yml`, the trusted install/uninstall
-verdict) → PR to `main`. Coverage note: CI hard-gates 65% union (75.6% actual);
+spec's unattainable 25 MB per the AOT spike). **Merged to `main`** as PR #9
+(`b1e21d5`, squash) — verified against the tree 2026-07-13: all 20 lanes
+(T1–T18, S1, M0) present with code + tests; `wrapper-vm-tests.yml` carries the
+unified both-scope × install/uninstall × deleted-original × double-install
+matrix but is manual-dispatch only (run on demand, not per-push).
+Coverage note: CI hard-gates 65% union (75.6% actual);
 the spec's aspirational Core ≥80% / Signing ≥85% per-assembly bars are unmet
 (Core 63%, Signing 69%) — reported, not weakened.
 
@@ -451,25 +454,36 @@ vs gates.
 
 ## 6. Progress checklist
 
-| Task | Branch | Agent started | Pushed | Merged | Gate |
-|------|--------|:---:|:---:|:---:|------|
-| T1   | task/t1-engine-split | ☐ | ☐ | ☐ | G0 |
-| S1   | spike/avalonia-aot | ☐ | ☐ | ☐ | G0 |
-| T2   | task/t2-host-runtime | ☐ | ☐ | ☐ | G1 |
-| M0   | task/m0-manifest-surface | ☐ | ☐ | ☐ | G1 |
-| T3   | task/t3-aot-wiring | ☐ | ☐ | ☐ | G2 |
-| T5   | task/t5-payload-extraction | ☐ | ☐ | ☐ | G2 |
-| T7   | task/t7-branding | ☐ | ☐ | ☐ | G2 |
-| T9   | task/t9-custom-screens | ☐ | ☐ | ☐ | G2 |
-| T14  | task/t14-license | ☐ | ☐ | ☐ | G2 |
-| T16a | task/t16a-msix-adr | ☐ | ☐ | ☐ | G2 |
-| T4   | task/t4-exe-dispatch | ☐ | ☐ | ☐ | G3 |
-| T6   | task/t6-zstd | ☐ | ☐ | ☐ | G3 |
-| T8   | task/t8-options | ☐ | ☐ | ☐ | G3 |
-| T12  | task/t12-scope-elevation | ☐ | ☐ | ☐ | G3 |
-| T16b | task/t16b-msix-impl | ☐ | ☐ | ☐ | G3 |
-| T13  | task/t13-destination | ☐ | ☐ | ☐ | G4 |
-| T15  | task/t15-uninstall-exe | ☐ | ☐ | ☐ | G4 |
-| T10  | task/t10-arp-fields | ☐ | ☐ | ☐ | G4 |
-| T11  | task/t11-trust-line | ☐ | ☐ | ☐ | G4 |
-| T17  | task/t17-verification | ☐ | ☐ | ☐ | G5 |
+Verified against `main` (`b1e21d5`, PR #9) on 2026-07-13. Per-task branches
+were squashed into the PR, so branch provenance is historical; ☑ Merged =
+code + tests confirmed present on `main`.
+
+| Task | Branch | Agent started | Pushed | Merged | Gate | Evidence (verified 2026-07-13) |
+|------|--------|:---:|:---:|:---:|------|--------------------------------|
+| T1   | task/t1-engine-split | ☑ | ☑ | ☑ | G0 | `src/SigilBuild.Wrapper.Core/`; Wrapper thinned to 43-line shell |
+| S1   | spike/avalonia-aot | ☑ | ☑ | ☑ | G0 | `docs/architecture/adr-avalonia-aot.md` (Accepted, with numbers) |
+| T2   | task/t2-host-runtime | ☑ | ☑ | ☑ | G1 | `HostRuntime.cs`; `Services/InstallerEngine.cs` deleted; flags + exit 0/1/2/64 in `CommandLineParser` |
+| M0   | task/m0-manifest-surface | ☑ | ☑ | ☑ | G1 | `InstallerSection` Options/Screens/License/Scope/InstallDir; gradients purged; schema + blob + JSON context |
+| T3   | task/t3-aot-wiring | ☑ | ☑ | ☑ | G2 | `scripts/publish-installer-runtime.ps1` (x64+arm64, size gate); `WrapperRuntimeLocator.Locate(arch)` |
+| T5   | task/t5-payload-extraction | ☑ | ☑ | ☑ | G2 | `Engine/PayloadExtraction.cs`; `payload://` in `StepContext.ResolvePath`; 4 test files |
+| T7   | task/t7-branding | ☑ | ☑ | ☑ | G2 | `BrandTokenEmitter.SrgbMix/Derive`; blob-only brand; golden tests |
+| T9   | task/t9-custom-screens | ☑ | ☑ | ☑ | G2 | `ParseScreens` diagnostics; widget inference; secret redaction + `SecretHygieneTests` |
+| T14  | task/t14-license | ☑ | ☑ | ☑ | G2 | `LicenseText` blob field; screen iff text; `/silent` implies accept |
+| T16a | task/t16a-msix-adr | ☑ | ☑ | ☑ | G2 | `docs/architecture/adr-msix-companion.md` (option b) |
+| T4   | task/t4-exe-dispatch | ☑ | ☑ | ☑ | G3 | `PackCommand` exe arm; `<App>-<ver>-<arch>-Setup.exe`; schema enum |
+| T6   | task/t6-zstd | ☑ | ☑ | ☑ | G3 | `Codec/PayloadCodec.cs` SIGIL_PAYLOAD_V2; determinism tests |
+| T8   | task/t8-options | ☑ | ☑ | ☑ | G3 | `OptionStepGenerator` (4 components); `option.*` in expressions |
+| T12  | task/t12-scope-elevation | ☑ | ☑ | ☑ | G3 | `ScopeResolver`/`ScopeLayout`/`Elevation`; asInvoker manifest; VM both-scope matrix |
+| T16b | task/t16b-msix-impl | ☑ | ☑ | ☑ | G3 | `InstallerHostBundler` removed; zero `InstallerEngine` refs; MSIX tests green |
+| T13  | task/t13-destination | ☑ | ☑ | ☑ | G4 | `InstallDirResolver` precedence wizard→/D=→manifest→default; inline validation |
+| T15  | task/t15-uninstall-exe | ☑ | ☑ | ☑ | G4 | `InstallSurvivability.cs` + `SelfDelete.cs` (MoveFileExW fallback); VM survive leg |
+| T10  | task/t10-arp-fields | ☑ | ☑ | ☑ | G4 | real ARP values, scope hive; `ReinstallIdempotencyTests` |
+| T11  | task/t11-trust-line | ☑ | ☑ | ☑ | G4 | `AuthenticodeVerifier` (WinVerifyTrust); 3-fixture `TrustLineGatingTests` |
+| T17  | task/t17-verification | ☑ | ☑ | ☑ | G5 | roundtrip test un-skipped; unified VM matrix; headed smoke; size gates |
+| T18  | (added in-flight) | ☑ | ☑ | ☑ | G5 | native-runtime bundling: `NativeRuntimeBootstrap.cs`, SIGIL_RUNTIME_V1 resource |
+
+Residual items (documented deviations, not regressions): per-assembly coverage
+bars unmet (Core 63% vs 80%, Signing 69% vs 85%); VM matrix is
+workflow-dispatch only; ADR-008 is cited by `Functions.cs` and the
+localization deferral but no `adr-008-*.md` file exists — authored as part of
+the feature-parity track (`docs/plan/feature-parity/`).

@@ -71,4 +71,29 @@ public static class DiagnosticCodes
     // reason as SIG0290: the value silently collapses to "" otherwise, which is
     // the same silent-blank-rendering failure shape one language key at a time.
     public const string LocalizedTextValueNotScalar = "SIG0292";
+
+    // SIG032x — update engine channel manifest (P12). Unlike the bands above,
+    // these fire at UPDATE RUNTIME (inside the AOT wrapper/host, `/Update` mode),
+    // not at pack time — there is no pack-time diagnostics list to append to, so
+    // the runtime call path returns a typed parse/verify result carrying one of
+    // these codes for the caller to log + map to a process exit code. The codes
+    // stay the shared identifiers across both worlds (docs, logs, tests).
+    //
+    // SIG0320 (T12.1, this task): the fetched channel manifest JSON fails to
+    // parse, is missing a required field (version/packageUrl/sha256), declares
+    // a non-https packageUrl, or declares an unsupported schemaVersion.
+    public const string MalformedChannelManifest = "SIG0320";
+
+    // SIG0321 (reserved for T12.2): the channel manifest's detached ECDSA P-256
+    // signature (fetched from `manifestUrl + ".sig"`) fails to verify against
+    // `updates.signingKey`.
+    public const string ChannelManifestSignatureInvalid = "SIG0321";
+
+    // SIG0322 (T12.5): the web-installer's package URL could not be resolved.
+    // Emitted at PACK TIME by `sigil pack --payload web` when `--package-url` is
+    // missing, empty, or not https:// — pack refuses rather than stamping a stub
+    // whose synthesized http_download step could never succeed. Also reserved
+    // for the analogous install-time bootstrap failure (the stub could not
+    // resolve/download the package at that URL).
+    public const string WebInstallerPackageUrlUnresolved = "SIG0322";
 }

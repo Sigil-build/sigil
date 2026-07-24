@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using SigilBuild.Core.Manifest;
 using SigilBuild.Wrapper.Cli;
 using SigilBuild.Wrapper.Core.Localization;
+using SigilBuild.Wrapper.Update;
 
 namespace SigilBuild.Wrapper.Engine;
 
@@ -84,6 +85,37 @@ public sealed class InstallSession
     /// app+scope is already running (P6, gap G17). The first instance is unaffected.
     /// </summary>
     public const int AlreadyRunningExitCode = 5;
+
+    /// <summary>
+    /// <c>/Update</c> (P12, T12.3): the installer is not update-enabled — the manifest
+    /// declared no <c>updates.manifestUrl</c>, so there is nothing to check. Distinct
+    /// from 64 (which stays reserved for a genuinely-malformed invocation).
+    /// </summary>
+    public const int UpdateNotConfiguredExitCode = 6;
+
+    /// <summary>
+    /// <c>/Update</c> (P12, T12.3): "could not check for updates / could not apply".
+    /// A network failure fetching the channel manifest or its signature, a malformed
+    /// channel manifest (SIG0320), an implausible package checksum, or a failed
+    /// package download / child spawn. An operational failure — nothing was changed.
+    /// </summary>
+    public const int UpdateCheckFailedExitCode = 7;
+
+    /// <summary>
+    /// <c>/Update</c> (P12, T12.3): the channel manifest's detached signature did not
+    /// verify against <c>updates.signingKey</c> (SIG0321). A HARD security reject — a
+    /// tampered or unsigned channel manifest is never acted on. Kept distinct from
+    /// <see cref="UpdateCheckFailedExitCode"/> so a tampering event is unambiguous.
+    /// </summary>
+    public const int UpdateManifestRejectedExitCode = 8;
+
+    /// <summary>
+    /// <c>/Update</c> (P12, T12.3): a newer version is advertised but the installed
+    /// version is below the channel manifest's <c>minFromVersion</c> floor, so it
+    /// cannot update via this path. Distinct from "up to date" (exit 0) — an update
+    /// exists, it just cannot be taken from the current version.
+    /// </summary>
+    public const int UpdateNotEligibleExitCode = 9;
 
     // P6: set when the files-in-use gate refused the run, so the headless path can
     // map the generic failure onto FilesInUseExitCode.
@@ -465,11 +497,7 @@ public sealed class InstallSession
         switch (_mode)
         {
             case WrapperMode.Update:
-                // Update is not implemented in this track. Say so explicitly and
-                // exit 64 rather than silently running the (always-empty)
-                // WrapperBlob.UpdateSteps and reporting success.
-                error.WriteLine(Strings.EngineUpdateUnsupported(SessionLanguage.Current));
-                return 64;
+                return await RunUpdateAsync(output, error, ct).ConfigureAwait(false);
 
             case WrapperMode.Uninstall:
                 return await RunUninstallAsync(error, ct).ConfigureAwait(false);
@@ -829,7 +857,21 @@ public sealed class InstallSession
                 return new InstallOutcome(false, result.Error);
             }
 
-            PersistCompletion(result.Journal, ctx.SecretValues, ctx.InstallDir);
+            // P12 (T12.5): a web-installer stub is a pure delegating trampoline —
+            // its own "install" is just http_download + run_program of the full
+            // package, which ALREADY ran its own complete PersistCompletion (ARP
+            // register, uninstall.exe copy, UninstallStateStore.Save) for this
+            // SAME AppId/scope by the time run_program returns. Persisting AGAIN
+            // here would clobber the child's real uninstall.json/uninstall.exe
+            // with the stub's own trivial two-step journal, leaving an ARP row
+            // that can never actually uninstall the app. Skip ONLY this
+            // success-path bookkeeping call — the steps above still ran (and any
+            // in-flight rollback on a step FAILURE still works normally via the
+            // journal); this is the one call site PersistCompletion has.
+            if (!_blob.IsDelegatingStub)
+            {
+                PersistCompletion(result.Journal, ctx.SecretValues, ctx.InstallDir);
+            }
             // Install committed: a rollback can no longer be requested, so the
             // transient file_delete / directory_delete stashes (%TEMP%\sigil-fd-* /
             // sigil-dd-*) are dead weight. Reclaim them so a successful install
@@ -1032,6 +1074,100 @@ public sealed class InstallSession
             InstallLocation: uninstallDir),
             _scope);
     }
+
+    /// <summary>
+    /// P12 (T12.3): the headless <c>/Update</c> flow. Reads the <c>updates:</c>
+    /// metadata threaded into the blob, then hands off to <see cref="UpdateRunner"/>
+    /// with the production I/O seams (HTTP fetch over the shared client, P4 verified
+    /// download, a real child-process launch) and a scope-correct installed-version
+    /// probe (P3 <see cref="InstalledStateResolver"/>). Every stage is logged into the
+    /// already-open <c>/LOG</c> sink and echoed to the console; the runner returns the
+    /// process exit code (see the <c>Update*ExitCode</c> constants, or the child
+    /// installer's own code when a newer version is installed).
+    /// </summary>
+    private async Task<int> RunUpdateAsync(TextWriter output, TextWriter error, CancellationToken ct)
+    {
+        void Report(string message, bool isError)
+        {
+            (isError ? error : output).WriteLine(message);
+            _log?.WriteLine(message);
+        }
+
+        var runner = BuildUpdateRunner(Report);
+        // T12.3 (unchanged): the headless path launches the downloaded child
+        // Setup.exe /silent, forwarding only the scope.
+        var request = BuildUpdateRequest(silentChild: true);
+        return await runner.RunAsync(request, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// GUI entry point (T12.4): a HEADED, non-silent <c>/Update</c> run. Drives the
+    /// SAME <see cref="UpdateRunner"/> decision logic as the headless
+    /// <see cref="RunUpdateAsync"/> — nothing is duplicated — but reports each stage
+    /// through a UI-bound callback instead of a <see cref="TextWriter"/>, and
+    /// launches the downloaded child Setup.exe HEADED (no <c>/silent</c>, gap G-Update)
+    /// so the user sees the new version's own install wizard, unlike the headless
+    /// path's silent child. Mirrors <see cref="RunUninstallInteractiveAsync"/>'s shape
+    /// for the headed uninstall flow. Returns the SAME exit code the headless path
+    /// would return for an equivalent run (0, an Update*ExitCode constant, or the
+    /// launched child's own exit code).
+    /// </summary>
+    public async Task<int> RunUpdateInteractiveAsync(Action<string, bool> report, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+
+        // P7: the headed /Update run logs the same stage trail as the headless path.
+        EnsureLog();
+
+        void Report(string message, bool isError)
+        {
+            report(message, isError);
+            _log?.WriteLine(message);
+        }
+
+        var runner = BuildUpdateRunner(Report);
+        var request = BuildUpdateRequest(silentChild: false);
+        var code = await runner.RunAsync(request, ct).ConfigureAwait(false);
+        _log?.WriteLine($"exit code: {code}");
+        return code;
+    }
+
+    /// <summary>
+    /// Wire the production I/O seams (HTTP fetch over the shared client, P4
+    /// verified download, a real child-process launch) and a scope-correct
+    /// installed-version probe (P3 <see cref="InstalledStateResolver"/>) into a
+    /// fresh <see cref="UpdateRunner"/> reporting through <paramref name="report"/>.
+    /// Shared by the headless and headed <c>/Update</c> entry points so neither
+    /// duplicates this wiring.
+    /// </summary>
+    private UpdateRunner BuildUpdateRunner(Action<string, bool> report) =>
+        new(
+            fetcher: new HttpUpdateResourceFetcher(TimeSpan.FromSeconds(60)),
+            downloader: new SigilPackageDownloader(TimeSpan.FromMinutes(30), maxAttempts: 3, report),
+            launcher: new ProcessChildInstallerLauncher(),
+            // P3: read the installed version from the scope-correct ARP entry. Off
+            // Windows there is no ARP, so nothing is installed and any channel version
+            // reads as newer (the same short-circuit the install path uses).
+            installedStateProbe: () => OperatingSystem.IsWindows()
+                ? InstalledStateResolver.Resolve(_blob.AppId, _scope)
+                : UpgradeState.None,
+            report: report);
+
+    /// <summary>
+    /// Build the <see cref="UpdateRequest"/> for this session's blob + scope, with
+    /// <paramref name="silentChild"/> threaded through (T12.4) rather than hard-coded —
+    /// <c>true</c> for the headless path (T12.3, unchanged), <c>false</c> for the
+    /// headed path so the launched child shows its own wizard.
+    /// </summary>
+    private UpdateRequest BuildUpdateRequest(bool silentChild) =>
+        new(
+            ManifestUrl: _blob.UpdateManifestUrl,
+            SigningKey: _blob.UpdateSigningKey,
+            Channel: _blob.UpdateChannel,
+            Scope: _scope,
+            AppId: _blob.AppId,
+            TempDirectory: Path.GetTempPath(),
+            SilentChild: silentChild);
 
     private async Task<int> RunUninstallAsync(TextWriter error, CancellationToken ct)
     {

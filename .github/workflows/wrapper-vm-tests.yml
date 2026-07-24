@@ -102,3 +102,78 @@ jobs:
           name: wrapper-vm-test-results-${{ matrix.scope }}
           path: '**/TestResults/**/*.trx'
           if-no-files-found: warn
+
+  # P12 (T12.6): update-engine + web-installer stub end-to-end, appended as its
+  # OWN job per the append-only convention (docs/plan/ORCHESTRATION_PLAN.md:
+  # "each task appends its own job/step ... append-only, never reorder others'
+  # steps") — kept separate from the scope matrix job above rather than adding a
+  # step to it. T12.6 itself already delivers everything locally runnable
+  # (SigilBuild.Wrapper.Tests/Update/UpdateEndToEndTests.cs and
+  # SigilBuild.Packaging.Tests/ExeWrapper/WebInstallerStubEndToEndTests.cs — real
+  # local HTTPS server, real ECDSA P-256 signature verify, real sha256-checked
+  # download, real checksum-rejection rollback) via a recorded-launch double for
+  # the child process. This job additionally stages the Native-AOT installer
+  # host runtime so ExeWrapperWebInstallerPackTests / ExeWrapperWebInstallerBlobTests
+  # (SigilBuild.Packaging.Tests) run their REAL pack path instead of soft-skipping
+  # (no staged runtime locally) — producing a genuine packed `--payload web` stub +
+  # full package and asserting their construction end-to-end on a real Windows host.
+  # NOT locally runnable — this job only executes on windows-latest.
+  # Still missing (left for P13 / T13.1's full-matrix consolidation): a true
+  # cross-process leg where a packed web-installer stub downloads a packed full
+  # Setup.exe over real HTTP and the full Setup.exe actually runs and registers
+  # its own ARP/uninstall state — see T12.6's report for the exact scope drawn.
+  p12-update-webinstaller-vm:
+    runs-on: windows-latest
+    name: vm (p12 update + web-installer)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: build P12 test projects
+        run: >
+          dotnet build tests/SigilBuild.Wrapper.Tests/SigilBuild.Wrapper.Tests.csproj
+          tests/SigilBuild.Packaging.Tests/SigilBuild.Packaging.Tests.csproj
+          --configuration Release
+
+      # Stage the AOT installer host runtime next to SigilBuild.Packaging.Tests'
+      # output so ExeWrapperWebInstallerPackTests' PackAsync(--payload web) tests
+      # exercise the real pack pipeline (see LocateStagedRuntime in that file)
+      # instead of soft-skipping, mirroring the main job's publish-before-pack step.
+      - name: publish + stage installer host AOT runtime (before packing)
+        shell: pwsh
+        run: |
+          $dest = "tests/SigilBuild.Packaging.Tests/bin/Release/net10.0"
+          ./scripts/publish-installer-runtime.ps1 `
+            -Rids win-x64 `
+            -Configuration Release `
+            -DestinationRoot $dest `
+            -SizeGateMb 45
+
+      - name: run P12 update-engine end-to-end tests
+        shell: pwsh
+        run: |
+          dotnet test tests/SigilBuild.Wrapper.Tests/SigilBuild.Wrapper.Tests.csproj `
+            --configuration Release `
+            --no-build `
+            --filter "FullyQualifiedName~SigilBuild.Wrapper.Tests.Update" `
+            --logger "trx;LogFileName=wrapper-vm-p12-update-tests.trx"
+
+      - name: run P12 web-installer stub end-to-end + pack tests
+        shell: pwsh
+        run: |
+          dotnet test tests/SigilBuild.Packaging.Tests/SigilBuild.Packaging.Tests.csproj `
+            --configuration Release `
+            --no-build `
+            --filter "FullyQualifiedName~WebInstaller" `
+            --logger "trx;LogFileName=wrapper-vm-p12-webinstaller-tests.trx"
+
+      - name: upload test results (p12)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wrapper-vm-test-results-p12
+          path: '**/TestResults/**/*.trx'
+          if-no-files-found: warn

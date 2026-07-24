@@ -94,6 +94,16 @@ uninstall.done = {appName} вилучено
 uninstall.failed = Помилка вилучення
 uninstall.failed_body = Деякі компоненти могло бути не вилучено. Ви можете спробувати ще раз через «Програми та засоби».
 
+# --- update (T12.4 headed /Update progress window) ---
+update.version = Версія {version}
+update.checking = Перевірка оновлень…
+update.downloading = Завантаження оновлення…
+update.launching = Запуск оновлення…
+update.up_to_date = {appName} оновлено до останньої версії
+update.done = {appName} оновлено
+update.failed = Помилка оновлення
+update.failed_body = Оновлення не вдалося виконати. Спробуйте ще раз пізніше.
+
 # --- fields ---
 field.show = Показати
 field.hide = Приховати
@@ -119,4 +129,3 @@ brand.publisher_fallback = Видавець
 engine.removing_previous = Вилучення попередньої версії
 engine.removing_newer = Вилучення новішої версії
 engine.installing_prerequisite = Встановлення {name}…
-engine.update_unsupported = /Update не підтримується цією програмою встановлення: update_steps виконуються через SDK дельта-оновлень, а не через середовище встановлення.

@@ -33,11 +33,76 @@ public sealed class ExeWrapperPackager : IPackager
 {
     public PackageFormat Format => PackageFormat.Exe;
 
+    /// <summary>
+    /// The <c>--payload embedded</c> (default) full package's file-name suffix —
+    /// unchanged since T4.
+    /// </summary>
+    private const string SetupSuffix = "Setup";
+
+    /// <summary>
+    /// The <c>--payload web</c> stub's file-name suffix (T12.5): a clearly
+    /// distinguishing name so a directory listing never confuses the tiny stub
+    /// with the full package it downloads.
+    /// </summary>
+    private const string WebSetupSuffix = "WebSetup";
+
     public async Task<PackResult> PackAsync(SigilManifest manifest, PackOptions options, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(manifest);
         ArgumentNullException.ThrowIfNull(options);
 
+        // The full package: built exactly as `--payload embedded` always has,
+        // regardless of PayloadMode. For `--payload web` this is the artifact
+        // hosted at options.PackageUrl; its sha256 (computed below, AFTER the
+        // resource embed, same as always) is what the stub's synthesized
+        // http_download step verifies against.
+        var (fullArtifact, diagnostics) = await BuildOneExeAsync(
+            manifest, options, SetupSuffix,
+            blobBytesOverride: null, payloadBytesOverride: null, ct).ConfigureAwait(false);
+
+        if (options.Payload != PayloadMode.Web || fullArtifact is null)
+        {
+            return new PackResult(fullArtifact, diagnostics);
+        }
+
+        // P12 (T12.5): synthesize the small stub. Its blob carries exactly two
+        // install steps — reusing the EXISTING P4 http_download + run_program
+        // step types, no new step catalog entry — and it carries NO app payload
+        // (payloadBytesOverride: empty). Network only happens at INSTALL time
+        // (as with any http_download); pack time here only computes the full
+        // package's sha256 and embeds it as a literal, so two packs of the same
+        // input + URL stay byte-identical.
+        var stubBlobBytes = BuildWebStubBlobBytes(
+            manifest, options.PackageUrl!, fullArtifact.Sha256, Path.GetFileName(fullArtifact.Path));
+
+        var (stubArtifact, stubDiagnostics) = await BuildOneExeAsync(
+            manifest, options, WebSetupSuffix,
+            blobBytesOverride: stubBlobBytes, payloadBytesOverride: Array.Empty<byte>(), ct)
+            .ConfigureAwait(false);
+
+        var allDiagnostics = new List<Diagnostic>(diagnostics);
+        allDiagnostics.AddRange(stubDiagnostics);
+
+        return new PackResult(fullArtifact, allDiagnostics, SecondaryArtifact: stubArtifact);
+    }
+
+    /// <summary>
+    /// Build one stamped <c>&lt;App&gt;-&lt;ver&gt;-&lt;arch&gt;-&lt;suffix&gt;.exe</c>
+    /// artifact: copy the AOT host runtime, embed the blob + payload + native
+    /// runtime deps as Win32 resources, stamp the icon, then hash the result.
+    /// Shared by both the normal <c>--payload embedded</c> pack (suffix
+    /// <c>Setup</c>, no overrides) and the <c>--payload web</c> stub (suffix
+    /// <c>WebSetup</c>, a synthesized blob + an empty payload override) — see
+    /// <see cref="PackAsync"/>.
+    /// </summary>
+    private static async Task<(PackedArtifact? Artifact, List<Diagnostic> Diagnostics)> BuildOneExeAsync(
+        SigilManifest manifest,
+        PackOptions options,
+        string outputNameSuffix,
+        byte[]? blobBytesOverride,
+        byte[]? payloadBytesOverride,
+        CancellationToken ct)
+    {
         // Locate the AOT-published host runtime for the target architecture.
         // A manifest declaring architectures: [x64, arm64] produces one Setup.exe
         // per architecture, each stamped from the matching per-RID runtime.
@@ -51,7 +116,7 @@ public sealed class ExeWrapperPackager : IPackager
         }
         catch (FileNotFoundException ex)
         {
-            return new PackResult(null, new[]
+            return (null, new List<Diagnostic>
             {
                 new Diagnostic(DiagnosticSeverity.Error, "SIG0120",
                     $"EXE-wrapper packaging requires the AOT-published SigilBuild.Wrapper runtime. {ex.Message}",
@@ -66,7 +131,7 @@ public sealed class ExeWrapperPackager : IPackager
         // the output directory.
         var archStr = options.Architecture.ToString().ToLowerInvariant();
         var safeName = SanitizeFileNameSegment(manifest.App.Name);
-        var outputName = $"{safeName}-{manifest.App.Version}-{archStr}-Setup.exe";
+        var outputName = $"{safeName}-{manifest.App.Version}-{archStr}-{outputNameSuffix}.exe";
         var outputPath = Path.Combine(options.OutputDirectory, outputName);
 
         Directory.CreateDirectory(options.OutputDirectory);
@@ -83,14 +148,16 @@ public sealed class ExeWrapperPackager : IPackager
 
         // Build the SIGIL_BLOB_V1 wire payload: serialize a
         // SerializableWrapperBlob via the source-generated context shared
-        // with the wrapper runtime.
-        var blobBytes = BuildBlobBytes(manifest, options.SourceDirectory, diagnostics);
+        // with the wrapper runtime. A non-null override (the web stub's
+        // synthesized blob) is used verbatim instead.
+        var blobBytes = blobBytesOverride ?? BuildBlobBytes(manifest, options.SourceDirectory, diagnostics);
 
         // Build the SIGIL_PAYLOAD_V2 wire payload: the source directory packed
         // into the deterministic zstd container (T6), decoded on the host side by
         // PayloadExtraction. The codec is shared with the future delta-update
-        // engine (spec section 5).
-        var payloadBytes = BuildPayloadBytes(options.SourceDirectory, ct);
+        // engine (spec section 5). A non-null override (empty, for the web
+        // stub — it carries NO app payload) is used verbatim instead.
+        var payloadBytes = payloadBytesOverride ?? BuildPayloadBytes(options.SourceDirectory, ct);
 
         // T18: archive the host's staged native dependencies (Skia/ANGLE/HarfBuzz)
         // so the stamped Setup.exe is self-contained and can launch the GUI wizard
@@ -123,8 +190,99 @@ public sealed class ExeWrapperPackager : IPackager
         var sha256 = ManifestHasher.Sha256(outputPath);
         var size = new FileInfo(outputPath).Length;
 
-        var artifact = new PackedArtifact(outputPath, sha256, size);
-        return new PackResult(artifact, diagnostics);
+        return (new PackedArtifact(outputPath, sha256, size), diagnostics);
+    }
+
+    /// <summary>
+    /// Synthesize the web-installer stub's <c>SIGIL_BLOB_V1</c> bytes (P12,
+    /// T12.5): exactly two install steps, reusing the EXISTING catalog —
+    /// <list type="number">
+    ///   <item><description>an <see cref="InstallStep.HttpDownload"/> of
+    ///   <paramref name="packageUrl"/> to <c>{temp_dir}/&lt;fullPackageFileName&gt;</c>,
+    ///   verified against <paramref name="packageSha256"/> (the just-built full
+    ///   package's actual sha256 — computed by the caller AFTER the resource
+    ///   embed, so this is never a guess);</description></item>
+    ///   <item><description>an <see cref="InstallStep.RunProgram"/> of that same
+    ///   downloaded path, waited-on, running the full package headlessly
+    ///   (<c>/verysilent</c>) so the stub's own progress screen is the only UI
+    ///   the user sees during the hand-off.</description></item>
+    /// </list>
+    /// Deterministic: every input is a literal pack-time value (URL, sha256, file
+    /// name, app metadata) — no timestamp, GUID, or other non-reproducible byte
+    /// ever enters this blob, so two packs of the same manifest + URL are
+    /// byte-identical (network happens only at INSTALL time, resolving
+    /// <c>{temp_dir}</c> then — see <see cref="Engine.StepContext"/>).
+    /// </summary>
+    // CA1861: hoisted out of BuildWebStubBlobBytes so the RunProgram step's
+    // fixed `/verysilent` argument isn't a fresh array literal on every call.
+    private static readonly string[] RunSilentArgs = { "/verysilent" };
+
+    // CA1861: hoisted for the same reason. 0 = clean success; 3010 = success,
+    // reboot required (the standard MSI/Windows-installer convention the full
+    // package's own prerequisite/step handling already honors) — the child
+    // Setup.exe returning 3010 must not spuriously fail the stub's run_program
+    // (RunProgramStep otherwise defaults an unset ExpectedExitCodes to [0] only).
+    private static readonly int[] RunExpectedExitCodes = { 0, 3010 };
+
+    internal static byte[] BuildWebStubBlobBytes(
+        SigilManifest manifest, string packageUrl, string packageSha256, string fullPackageFileName)
+    {
+        var downloadDest = "{temp_dir}/" + fullPackageFileName;
+
+        var installSteps = new InstallStep[]
+        {
+            new InstallStep.HttpDownload(
+                Id: "web_installer_download",
+                Url: packageUrl,
+                Dest: downloadDest,
+                Sha256: packageSha256,
+                TimeoutSeconds: null,
+                Retries: 3,
+                When: null,
+                OnFailure: OnFailure.Fail),
+            new InstallStep.RunProgram(
+                Id: "web_installer_run",
+                Program: downloadDest,
+                Args: RunSilentArgs,
+                Wait: true,
+                Cwd: null,
+                ExpectedExitCodes: RunExpectedExitCodes,
+                TimeoutSeconds: null,
+                When: null,
+                OnFailure: OnFailure.Fail),
+        };
+
+        var inMemory = new WrapperBlob(
+            AppId: manifest.App.Id,
+            Parameters: Array.Empty<ParameterDefinition>(),
+            InstallSteps: installSteps,
+            PreInstall: Array.Empty<InstallStep>(),
+            PostInstall: Array.Empty<InstallStep>(),
+            UpdateSteps: Array.Empty<InstallStep>(),
+            Scope: manifest.Installer?.Scope ?? InstallScope.Auto,
+            AppName: manifest.App.Name,
+            DisplayName: manifest.App.Name,
+            Publisher: manifest.App.Publisher,
+            Version: manifest.App.Version,
+            EstimatedSizeBytes: 0,
+            // P12 (T12.5): mark this blob as a pure delegating trampoline so
+            // InstallSession skips its OWN completion bookkeeping on success —
+            // see WrapperBlob.IsDelegatingStub for why. The embedded-payload
+            // path (BuildBlobBytes) never sets this, so it stays false there.
+            IsDelegatingStub: true);
+
+        var serializable = SerializableWrapperBlob.FromWrapperBlob(inMemory) with
+        {
+            // T11 / decision 7: the stub is its own artifact — its trust line is
+            // gated on whether ITS OWN pack declares signing, same rule as the
+            // full package (see BuildBlobBytes). Both artifacts get signed
+            // independently by `sigil sign` after packing.
+            SignDeclared = manifest.Sign is { Provider: not SignProvider.None },
+        };
+
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            serializable, WrapperBlobJsonContext.Default.SerializableWrapperBlob);
+        return System.Text.Encoding.UTF8.GetBytes(json);
     }
 
     /// <summary>
@@ -222,7 +380,14 @@ public sealed class ExeWrapperPackager : IPackager
             // P5 (gap G6): first-class prerequisite units, run before the journaled body.
             Prerequisites: manifest.Installer?.Prerequisites,
             // P6 (gap G7): the declared app mutex names.
-            AppMutex: manifest.Installer?.AppMutex);
+            AppMutex: manifest.Installer?.AppMutex,
+            // P12 (T12.3): the updates: metadata (manifestUrl / signingKey / channel)
+            // so the stamped /Update runtime can fetch + verify the signed channel
+            // manifest and decide whether a newer package is available. Null when the
+            // manifest declares no updates: block (the app is not update-enabled).
+            UpdateManifestUrl: manifest.Updates?.ManifestUrl,
+            UpdateSigningKey: manifest.Updates?.SigningKey,
+            UpdateChannel: manifest.Updates?.Channel);
 
         // T7: derive the full light/dark palette at pack time and carry it, plus
         // the base64 logo/hero bytes, inside the blob so the stamped exe renders

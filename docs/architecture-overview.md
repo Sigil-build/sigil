@@ -28,8 +28,10 @@ Pack today ships working ZIP, MSIX, and **EXE-wrapper** paths. The
 EXE-wrapper produces a single self-extracting `setup.exe` with a branded
 Windows wizard, NSIS-style screen-grouped parameters, a dedicated install
 location screen with disk-space readout, and an auto-generated
-`uninstaller.exe` plus Add/Remove Programs entry. Signing, publishing, and
-the delta-update SDK arrive across the rest of the MVP timeline.
+`uninstaller.exe` plus Add/Remove Programs entry. Signing and the
+full-package update engine (see [Updates](guides/updates.md)) both ship
+today too; `publish` and delta updates are the remaining pieces of the MVP
+timeline.
 
 ## Locked-in technical decisions
 
@@ -47,9 +49,13 @@ will change without a superseding architecture decision record:
   rely on reflection paths that conflict with AOT trim warnings, so Sigil
   ships its own draft-07-compatible validator tuned for the manifest's
   shape.
-- **Delta updates: zstd dictionary mode.** Trained against an app's prior
-  release as the dictionary, then signed with Ed25519. The client SDK
-  verifies the signature before applying the patch.
+- **Updates: signed full-package first, delta deferred.** `/Update` fetches
+  a channel manifest signed with ECDSA P-256 (BCL-only, no native crypto
+  dependency — see [ADR-009](architecture/adr-009-update-manifest-signature.md))
+  and, when a newer version is available, downloads and runs the complete
+  new package. Delta patches (zstd dictionary mode, trained against an
+  app's prior release) are intentionally deferred — see
+  [ADR-010](architecture/adr-010-delta-update-deferral.md).
 - **Two-surface UX: CLI for developers, branded Windows wizard for end
   users.** The CLI is the primary product; the wizard is a thin host that
   consumes the same manifest.

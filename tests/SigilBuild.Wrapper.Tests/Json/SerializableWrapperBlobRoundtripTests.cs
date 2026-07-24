@@ -90,6 +90,34 @@ public class SerializableWrapperBlobRoundtripTests
         back.AppName.Should().BeNull();
         back.InstallDir.Should().BeNull();
         back.SignDeclared.Should().BeFalse();
+        back.IsDelegatingStub.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// P12 (T12.5): the web-installer stub marker round-trips through the
+    /// source-generated JSON context both ways — false (the embedded-payload
+    /// default) and true (a synthesized stub blob).
+    /// </summary>
+    [Fact]
+    public void IsDelegatingStub_defaults_to_false_and_roundtrips_true()
+    {
+        var embedded = new WrapperBlob(
+            AppId: "com.acme.Studio",
+            Parameters: System.Array.Empty<ParameterDefinition>(),
+            InstallSteps: System.Array.Empty<InstallStep>(),
+            PreInstall: System.Array.Empty<InstallStep>(),
+            PostInstall: System.Array.Empty<InstallStep>(),
+            UpdateSteps: System.Array.Empty<InstallStep>());
+        embedded.IsDelegatingStub.Should().BeFalse("the embedded-payload path never sets this flag");
+
+        var backEmbedded = SerializableWrapperBlob.ToWrapperBlob(
+            RoundTrip(SerializableWrapperBlob.FromWrapperBlob(embedded)));
+        backEmbedded.IsDelegatingStub.Should().BeFalse();
+
+        var stub = embedded with { IsDelegatingStub = true };
+        var backStub = SerializableWrapperBlob.ToWrapperBlob(
+            RoundTrip(SerializableWrapperBlob.FromWrapperBlob(stub)));
+        backStub.IsDelegatingStub.Should().BeTrue("a web-installer stub blob must carry the flag through pack -> JSON -> runtime");
     }
 
     [Fact]

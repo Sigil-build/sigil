@@ -41,16 +41,37 @@ public sealed class InstallSessionTests
     }
 
     [Fact]
-    public async Task Update_mode_reports_not_supported_and_exits_64()
+    public async Task Update_mode_on_a_non_update_enabled_build_exits_not_configured()
     {
+        // P12 (T12.3): the un-stamped runtime carries no updates: metadata, so /Update
+        // reports "not update-enabled" and returns the dedicated non-configured code —
+        // NOT 64 (which now stays reserved for a genuinely-malformed invocation).
         var session = InstallSession.Create(Update);
         var output = new StringWriter();
         var error = new StringWriter();
 
         var code = await session.RunHeadlessAsync(output, error);
 
-        code.Should().Be(64);
-        error.ToString().Should().Contain("not supported");
+        code.Should().Be(InstallSession.UpdateNotConfiguredExitCode);
+        code.Should().NotBe(64);
+        error.ToString().Should().Contain("not update-enabled");
+    }
+
+    [Fact]
+    public async Task Update_silent_routes_headless_and_returns_the_runner_exit_code()
+    {
+        // T12.4: `/Update /silent` must keep routing through the SAME headless path
+        // as a bare `/Update` (T12.3, unchanged) — Program.cs's routing change only
+        // affects a NON-silent /Update (see Program.cs). Silent stays true, Mode
+        // stays Update, and RunHeadlessAsync still returns UpdateRunner's own exit
+        // code (here: the un-stamped runtime's "not update-enabled" constant).
+        var session = InstallSession.Create(new[] { "/Update", "/silent" });
+        session.Silent.Should().BeTrue();
+        session.Mode.Should().Be(WrapperMode.Update);
+
+        var code = await session.RunHeadlessAsync(new StringWriter(), new StringWriter());
+
+        code.Should().Be(InstallSession.UpdateNotConfiguredExitCode);
     }
 
     [Fact]

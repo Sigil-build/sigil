@@ -64,8 +64,10 @@ public static partial class Program
         // per-user install never triggers UAC; only a resolved per-machine scope
         // from a non-elevated process relaunches self with the `runas` verb,
         // forwarding ALL original args, and propagates the elevated child's exit
-        // code as this process's exit code. Update mode is unsupported and never
-        // elevates — it falls through to the headless 64 path below.
+        // code as this process's exit code. /Update never elevates itself (a
+        // known limitation, unchanged by T12.4's headed progress window) — a
+        // machine-scope /Update instead falls through and runs unelevated,
+        // headless or headed depending on /silent, below.
         if (OperatingSystem.IsWindows()
             && session.RequiresElevation
             && session.Mode != WrapperMode.Update)
@@ -103,10 +105,11 @@ public static partial class Program
         }
 
         // Headless whenever /silent or /verysilent is present (this includes the
-        // ARP UninstallString's `/S /Uninstall`), or the unsupported /Update mode is
-        // requested. An interactive uninstall (uninstall.exe double-clicked, no /S,
-        // T15) is NOT silent, so it falls through to the branded GUI below.
-        if (session.Silent || session.Mode == WrapperMode.Update)
+        // ARP UninstallString's `/S /Uninstall`, and a scripted `/Update /silent`).
+        // An interactive uninstall (uninstall.exe double-clicked, no /S, T15) or a
+        // non-silent /Update (T12.4) is NOT silent, so both fall through to the
+        // branded GUI below — App picks the right window from session.Mode.
+        if (session.Silent)
         {
             AttachParentConsole();
             return session.RunHeadlessAsync(Console.Out, Console.Error).GetAwaiter().GetResult();

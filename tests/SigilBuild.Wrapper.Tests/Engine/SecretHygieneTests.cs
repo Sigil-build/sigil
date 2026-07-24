@@ -142,17 +142,27 @@ public sealed class SecretHygieneTests
     // ── P11 system steps: journal records carry only name/path — never a
     // resolved secret. schtasks/netsh/COM all journal their inverse BEFORE the
     // native/process call (see each step's own "no secrets" doc comment); these
-    // three tests drive the SAME redaction path (StepContext.Redact +
-    // UninstallStateStore.RedactSecrets) the DirectoryCreate tests above cover,
-    // but through the actual P11 step types so the P11 surfaces are directly
-    // exercised, not just inferred from a generic mechanism. Each step's own
-    // unit tests (ScheduledTaskCreateStepTests / FirewallRuleStepTests /
+    // three tests drive the SAME redaction path (UninstallStateStore.RedactSecrets)
+    // the DirectoryCreate tests above cover, but through the actual P11 step
+    // types so the P11 journal surfaces are directly exercised, not just
+    // inferred from a generic mechanism. Each step's own unit tests
+    // (ScheduledTaskCreateStepTests / FirewallRuleStepTests /
     // ComRegisterStepTests) already establish that running these steps
     // unelevated is safe locally (the journal append happens before the native
     // call, so a non-admin sandbox never actually mutates system state).
+    //
+    // No log/progress assertion here (unlike the DirectoryCreate tests above):
+    // InstallEngine.Describe has no arm for ScheduledTaskCreate / FirewallRule /
+    // ComRegister, so on the success/OnFailure.Continue path (used below) the
+    // reported progress line falls to Describe's default, `spec.Id` — the
+    // manifest-declared step id ("t"/"fw"/"reg"), never a resolved field. A
+    // `log.Should().NotContain(Secret)` assertion here would be vacuously true
+    // regardless of whether redaction works, so it is intentionally omitted;
+    // the journal assertion below is the one that actually exercises secret
+    // redaction for these three step types.
 
     [Fact]
-    public async Task ScheduledTaskCreate_secret_in_name_is_absent_from_journal_and_log_output()
+    public async Task ScheduledTaskCreate_secret_in_name_is_absent_from_journal()
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -165,13 +175,9 @@ public sealed class SecretHygieneTests
         var parsed = CommandLineParser.Parse(new[] { $"/Plicense_key={Secret}" }, blob.Parameters);
         var ctx = StepContext.From(blob, parsed);
 
-        var events = new List<StepProgress>();
         var result = await new InstallEngine().RunAsync(
             Array.Empty<InstallStep>(), blob.InstallSteps, Array.Empty<InstallStep>(),
-            ctx, new ListProgress(events), CancellationToken.None);
-
-        var log = string.Join("\n", events.Where(e => e.Message is not null).Select(e => e.Message));
-        log.Should().NotContain(Secret, "no log line may leak a secret value from a scheduled task name");
+            ctx, progress: null, CancellationToken.None);
 
         var appId = "t11-1-secret-" + Guid.NewGuid().ToString("N");
         try
@@ -188,7 +194,7 @@ public sealed class SecretHygieneTests
     }
 
     [Fact]
-    public async Task FirewallRule_secret_in_name_is_absent_from_journal_and_log_output()
+    public async Task FirewallRule_secret_in_name_is_absent_from_journal()
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -201,13 +207,9 @@ public sealed class SecretHygieneTests
         var parsed = CommandLineParser.Parse(new[] { $"/Plicense_key={Secret}" }, blob.Parameters);
         var ctx = StepContext.From(blob, parsed);
 
-        var events = new List<StepProgress>();
         var result = await new InstallEngine().RunAsync(
             Array.Empty<InstallStep>(), blob.InstallSteps, Array.Empty<InstallStep>(),
-            ctx, new ListProgress(events), CancellationToken.None);
-
-        var log = string.Join("\n", events.Where(e => e.Message is not null).Select(e => e.Message));
-        log.Should().NotContain(Secret, "no log line may leak a secret value from a firewall rule name");
+            ctx, progress: null, CancellationToken.None);
 
         var appId = "t11-3-secret-" + Guid.NewGuid().ToString("N");
         try
@@ -224,7 +226,7 @@ public sealed class SecretHygieneTests
     }
 
     [Fact]
-    public async Task ComRegister_secret_in_path_is_absent_from_journal_and_log_output()
+    public async Task ComRegister_secret_in_path_is_absent_from_journal()
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -238,13 +240,9 @@ public sealed class SecretHygieneTests
         var parsed = CommandLineParser.Parse(new[] { $"/Plicense_key={Secret}" }, blob.Parameters);
         var ctx = StepContext.From(blob, parsed);
 
-        var events = new List<StepProgress>();
         var result = await new InstallEngine().RunAsync(
             Array.Empty<InstallStep>(), blob.InstallSteps, Array.Empty<InstallStep>(),
-            ctx, new ListProgress(events), CancellationToken.None);
-
-        var log = string.Join("\n", events.Where(e => e.Message is not null).Select(e => e.Message));
-        log.Should().NotContain(Secret, "no log line may leak a secret value from a COM DLL path");
+            ctx, progress: null, CancellationToken.None);
 
         var appId = "t11-2-secret-" + Guid.NewGuid().ToString("N");
         try

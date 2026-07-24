@@ -38,7 +38,16 @@ public class LogoAssetGeneratorTests
             File.Exists(Path.Combine(outDir, "Wide310x150Logo.png")).Should().BeTrue();
             File.Exists(Path.Combine(outDir, "StoreLogo.png")).Should().BeTrue();
 
-            using var bmp = SKBitmap.Decode(Path.Combine(outDir, "Square44x44Logo.png"));
+            // Decode from bytes, not from path: SKBitmap.Decode(string) opens a
+            // native file stream whose handle release is not guaranteed to be
+            // synchronous with the `using` on the returned SKBitmap (it can
+            // depend on GC/finalizer timing), which intermittently raced with
+            // the recursive Directory.Delete below under parallel test load
+            // (IOException: "Square44x44Logo.png" in use). Reading the bytes
+            // first — the same fix LogoAssetGenerator.Generate itself already
+            // applies to the master logo, see its comment — closes the file
+            // before any decode happens, so no handle can outlive this method.
+            using var bmp = SKBitmap.Decode(File.ReadAllBytes(Path.Combine(outDir, "Square44x44Logo.png")));
             bmp.Width.Should().Be(44);
             bmp.Height.Should().Be(44);
         }

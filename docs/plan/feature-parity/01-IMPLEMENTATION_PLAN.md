@@ -5,9 +5,13 @@ as `docs/plan/ORCHESTRATION_PLAN.md` §0–§1 (standing rules, worktrees, gates
 CI VM verdict) — those rules apply verbatim; this file only defines the lanes.
 Branch naming: `task/p<n>-<slug>`.
 
-> **Status (2026-07-22).** Waves 0–4 are **merged**: P0–P10 all landed on `main`
-> (see the progress checklist). **Remaining work: P11, P12, P13** (waves 5–6).
-> The detailed task breakdowns for those three are in the [Remaining
+> **Status (2026-07-24).** Waves 0–6 are **merged**: P0–P13 all landed on
+> `main` (see the progress checklist) — the feature-parity track is closed.
+> P11 (PR #13, `f61bfbe`) and P12 (PR #14, `110b7d5`) shipped the last
+> product behavior (system steps + the update engine/web installer); P13
+> (this branch) is the docs-only verification sweep that reconciles this
+> plan and `00-GAP_ANALYSIS.md` against that merged state. The detailed task
+> breakdowns for P11–P13 are in the [Remaining
 > work](#remaining-work--detailed-breakdown-p11p13) section at the end; the
 > lane sketches for P0–P10 above are kept as historical record of what shipped.
 
@@ -179,9 +183,9 @@ section.)
 | P6  | task/p6-files-in-use | ☑ | ☑ | ☑ | 3 | `d92cfa5` — Restart Manager + mutex |
 | P9  | task/p9-localization | ☑ | ☑ | ☑ | 4 | `c033cfc` — `Localization/`, `SIG029x` |
 | P10 | task/p10-custom-components | ☑ | ☑ | ☑ | 4 | `9088c72` — `SIG0300` |
-| P11 | task/p11-system-steps | ☐ | ☐ | ☐ | 5 | — not started |
-| P12 | task/p12-updates-webinstaller | ☐ | ☐ | ☐ | 5 | — not started; Update mode still exits 64 |
-| P13 | task/p13-verification | ☐ | ☐ | ☐ | 6 | — not started |
+| P11 | task/p11-system-steps | ☑ | ☑ | ☑ | 5 | PR #13, `f61bfbe` — `scheduled_task_create`/`com_register`/`firewall_rule`, `SIG0310` |
+| P12 | task/p12-updates-webinstaller | ☑ | ☑ | ☑ | 5 | PR #14, `110b7d5` — signed channel manifest, `/Update` runtime, `--payload web` (`SIG0320`–`SIG0322`) |
+| P13 | task/p13-verification | ☑ | ☐ | ☐ | 6 | this branch — VM matrix, size/coverage re-pin, status reconciliation + `from-inno.md` (docs-only; not yet merged) |
 
 ---
 

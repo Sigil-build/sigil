@@ -177,3 +177,77 @@ jobs:
           name: wrapper-vm-test-results-p12
           path: '**/TestResults/**/*.trx'
           if-no-files-found: warn
+
+  # P11 (T13.1): the live create+reverse legs for the three P11 "system steps"
+  # (scheduled_task_create/T11.1, com_register/T11.2, firewall_rule/T11.3),
+  # appended as its OWN job per the append-only convention (same rationale as
+  # the p12-update-webinstaller-vm job above: kept separate from the scope
+  # matrix job rather than adding a step to it). P11 shipped with unit/parse/
+  # roundtrip tests only (ScheduledTaskCreateStepTests/FirewallRuleStepTests/
+  # ComRegisterStepTests in SigilBuild.Wrapper.Tests) — the live legs that need
+  # a real elevated schtasks.exe/netsh.exe/HKCR were explicitly deferred to
+  # "CI-VM". ScheduledTaskCreateInstallTests / FirewallRuleInstallTests /
+  # ComRegisterInstallTests (SigilBuild.Wrapper.IntegrationTests) drive the
+  # step classes directly (not through a packed Setup.exe — these steps are
+  # machine-scope-only and the point is the step's own schtasks/netsh/COM
+  # round trip, not the packaging pipeline), so unlike the main scope-matrix
+  # job and the p12 job above, this job does NOT need the AOT installer-host
+  # runtime staged.
+  # Gating: each test soft-skips unless Windows + SIGIL_VM_TESTS=1 +
+  # SIGIL_VM_SYSTEMSTEPS=1 + the process is elevated
+  # (SigilBuild.Wrapper.Engine.Elevation.IsProcessElevated) — schtasks
+  # /RU SYSTEM and netsh advfirewall both require admin. The com_register
+  # live register->assert-HKCR-CLSID->unregister leg additionally needs a
+  # bundled self-registering test DLL that does not exist yet in this repo;
+  # ComRegisterInstallTests.Live_register_then_unregister_a_real_self_registering_dll
+  # is an explicit xunit Skip documenting that follow-up (see the T13.1
+  # report) rather than a fabricated fixture — it always reports "Skipped",
+  # on the VM included, until that DLL is added.
+  # NOT locally runnable — this job only executes on windows-latest.
+  p11-system-steps-vm:
+    runs-on: windows-latest
+    name: vm (p11 system steps)
+    env:
+      SIGIL_VM_TESTS: "1"
+      SIGIL_VM_SYSTEMSTEPS: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: build integration test project
+        run: >
+          dotnet build tests/SigilBuild.Wrapper.IntegrationTests/SigilBuild.Wrapper.IntegrationTests.csproj
+          --configuration Release
+
+      # HARD GATE (not just a log line): the P11 system-step tests below
+      # soft-skip — reporting as Passed, not Skipped — when
+      # Elevation.IsProcessElevated() comes back false. That means an
+      # unelevated runner would make this whole job go green having
+      # exercised nothing, silently. Fail the job here instead so a green
+      # p11-system-steps-vm run is proof the live legs actually executed.
+      - name: require an elevated runner (else the live legs would silently soft-skip)
+        shell: pwsh
+        run: |
+          $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+          Write-Host "elevated: $isAdmin"
+          if (-not $isAdmin) { Write-Error "p11 system-step VM legs require an elevated runner; refusing to pass vacuously"; exit 1 }
+
+      - name: run P11 system-step create+reverse integration tests
+        shell: pwsh
+        run: |
+          dotnet test tests/SigilBuild.Wrapper.IntegrationTests/SigilBuild.Wrapper.IntegrationTests.csproj `
+            --configuration Release `
+            --no-build `
+            --filter "FullyQualifiedName~ScheduledTaskCreateInstallTests|FullyQualifiedName~FirewallRuleInstallTests|FullyQualifiedName~ComRegisterInstallTests" `
+            --logger "trx;LogFileName=wrapper-vm-p11-systemsteps-tests.trx"
+
+      - name: upload test results (p11 system steps)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wrapper-vm-test-results-p11-systemsteps
+          path: '**/TestResults/**/*.trx'
+          if-no-files-found: warn

@@ -139,6 +139,125 @@ public sealed class SecretHygieneTests
         }
     }
 
+    // ── P11 system steps: journal records carry only name/path — never a
+    // resolved secret. schtasks/netsh/COM all journal their inverse BEFORE the
+    // native/process call (see each step's own "no secrets" doc comment); these
+    // three tests drive the SAME redaction path (UninstallStateStore.RedactSecrets)
+    // the DirectoryCreate tests above cover, but through the actual P11 step
+    // types so the P11 journal surfaces are directly exercised, not just
+    // inferred from a generic mechanism. Each step's own unit tests
+    // (ScheduledTaskCreateStepTests / FirewallRuleStepTests /
+    // ComRegisterStepTests) already establish that running these steps
+    // unelevated is safe locally (the journal append happens before the native
+    // call, so a non-admin sandbox never actually mutates system state).
+    //
+    // No log/progress assertion here (unlike the DirectoryCreate tests above):
+    // InstallEngine.Describe has no arm for ScheduledTaskCreate / FirewallRule /
+    // ComRegister, so on the success/OnFailure.Continue path (used below) the
+    // reported progress line falls to Describe's default, `spec.Id` — the
+    // manifest-declared step id ("t"/"fw"/"reg"), never a resolved field. A
+    // `log.Should().NotContain(Secret)` assertion here would be vacuously true
+    // regardless of whether redaction works, so it is intentionally omitted;
+    // the journal assertion below is the one that actually exercises secret
+    // redaction for these three step types.
+
+    [Fact]
+    public async Task ScheduledTaskCreate_secret_in_name_is_absent_from_journal()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var blob = BlobWith(new InstallStep.ScheduledTaskCreate(
+            "t", "SigilTestTask_${parameters.license_key}", "app.exe", Arguments: null,
+            Trigger: "logon", RunLevel: "limited", When: null, OnFailure: OnFailure.Continue));
+        var parsed = CommandLineParser.Parse(new[] { $"/Plicense_key={Secret}" }, blob.Parameters);
+        var ctx = StepContext.From(blob, parsed);
+
+        var result = await new InstallEngine().RunAsync(
+            Array.Empty<InstallStep>(), blob.InstallSteps, Array.Empty<InstallStep>(),
+            ctx, progress: null, CancellationToken.None);
+
+        var appId = "t11-1-secret-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            UninstallStateStore.Save(appId, result.Journal, InstallScope.User, ctx.SecretValues);
+            var content = File.ReadAllText(UninstallStateStore.PathFor(appId, InstallScope.User));
+            content.Should().NotContain(Secret, "the persisted journal must never contain a secret value");
+            content.Should().Contain("***", "the secret occurrence in the journal must be redacted");
+        }
+        finally
+        {
+            UninstallStateStore.Delete(appId, InstallScope.User);
+        }
+    }
+
+    [Fact]
+    public async Task FirewallRule_secret_in_name_is_absent_from_journal()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var blob = BlobWith(new InstallStep.FirewallRule(
+            "fw", "SigilTestRule_${parameters.license_key}", "in", "allow",
+            Program: null, Port: null, Protocol: null, When: null, OnFailure: OnFailure.Continue));
+        var parsed = CommandLineParser.Parse(new[] { $"/Plicense_key={Secret}" }, blob.Parameters);
+        var ctx = StepContext.From(blob, parsed);
+
+        var result = await new InstallEngine().RunAsync(
+            Array.Empty<InstallStep>(), blob.InstallSteps, Array.Empty<InstallStep>(),
+            ctx, progress: null, CancellationToken.None);
+
+        var appId = "t11-3-secret-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            UninstallStateStore.Save(appId, result.Journal, InstallScope.User, ctx.SecretValues);
+            var content = File.ReadAllText(UninstallStateStore.PathFor(appId, InstallScope.User));
+            content.Should().NotContain(Secret, "the persisted journal must never contain a secret value");
+            content.Should().Contain("***", "the secret occurrence in the journal must be redacted");
+        }
+        finally
+        {
+            UninstallStateStore.Delete(appId, InstallScope.User);
+        }
+    }
+
+    [Fact]
+    public async Task ComRegister_secret_in_path_is_absent_from_journal()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        // A non-existent path (LoadFailed) — safe to run locally without admin
+        // or a real self-registering DLL (mirrors ComRegisterStepTests).
+        var blob = BlobWith(new InstallStep.ComRegister(
+            "reg", @"C:\does\not\exist\${parameters.license_key}.dll", When: null, OnFailure: OnFailure.Continue));
+        var parsed = CommandLineParser.Parse(new[] { $"/Plicense_key={Secret}" }, blob.Parameters);
+        var ctx = StepContext.From(blob, parsed);
+
+        var result = await new InstallEngine().RunAsync(
+            Array.Empty<InstallStep>(), blob.InstallSteps, Array.Empty<InstallStep>(),
+            ctx, progress: null, CancellationToken.None);
+
+        var appId = "t11-2-secret-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            UninstallStateStore.Save(appId, result.Journal, InstallScope.User, ctx.SecretValues);
+            var content = File.ReadAllText(UninstallStateStore.PathFor(appId, InstallScope.User));
+            content.Should().NotContain(Secret, "the persisted journal must never contain a secret value");
+            content.Should().Contain("***", "the secret occurrence in the journal must be redacted");
+        }
+        finally
+        {
+            UninstallStateStore.Delete(appId, InstallScope.User);
+        }
+    }
+
     private sealed class ListProgress : IProgress<StepProgress>
     {
         private readonly List<StepProgress> _sink;

@@ -55,5 +55,10 @@
     <InternalsVisibleTo Include="SigilBuild.Wrapper.Tests" />
     <InternalsVisibleTo Include="SigilBuild.Packaging.Tests" />
     <InternalsVisibleTo Include="SigilBuild.Installer.Host.Tests" />
+    <!-- T13.1 (P13): the P11 system-step (scheduled_task_create/com_register/
+         firewall_rule) live create+reverse legs drive ScheduledTaskCreateStep /
+         ComRegisterStep / ComRegistration / RollbackJournal / Elevation directly
+         from the VM-gated integration tests. -->
+    <InternalsVisibleTo Include="SigilBuild.Wrapper.IntegrationTests" />
   </ItemGroup>
 </Project>

@@ -9,7 +9,7 @@ items below without a P-task are standalone doc debt, fixable now.
 | Item | Action |
 |---|---|
 | **ADR-008 missing** | Cited by `Functions.cs` and the localization deferral but the file does not exist. Author `docs/architecture/adr-008-expression-policy.md` — this *is* task P0. |
-| `docs/migration/from-inno.md` missing | NSIS and WiX migration guides exist; Inno Setup is the most popular free alternative. Add mapping table: `[Setup]`/`[Files]`/`[Icons]`/`[Registry]`/`[Run]`/`[Code]`-idioms → manifest equivalents (and "not supported by design: [Code]" pointing at vars/hooks). |
+| ~~`docs/migration/from-inno.md` missing~~ **Closed (P13, T13.4)** | Added, mirroring `from-nsis.md`/`from-wix.md`'s structure: `[Setup]`/`[Files]`/`[Icons]`/`[Registry]`/`[Run]` postinstall/`[Tasks]`/`[Languages]`/`AppMutex`+`CloseApplications`/`PrivilegesRequired`/`[Code]` Pascal (declarative-equivalents non-goal table) → manifest equivalents, plus the P11/P12 rows (scheduled task/COM `regserver`/firewall/`DownloadTemporaryFile`/update checks) that didn't exist when this row was first written. Linked from `docs/README.md`. |
 | `ORCHESTRATION_PLAN.md` checklist | Done 2026-07-13 — marked ☑ with evidence column, T18 row added, status note updated to "merged as PR #9". |
 | `docs/plan/exe-installer-and-wizard.md` status line | Verified 2026-07-13: already marked "SUPERSEDED (2026-07-09) by IMPLEMENTATION_SPEC.md" — no action. |
 | CLI reference: `/Update` | Documented behavior is exit 64 "not supported"; keep, but add pointer to P12. |

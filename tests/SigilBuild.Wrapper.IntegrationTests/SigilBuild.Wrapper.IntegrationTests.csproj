@@ -13,6 +13,10 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\SigilBuild.Core\SigilBuild.Core.csproj" />
     <ProjectReference Include="..\..\src\SigilBuild.Packaging\SigilBuild.Packaging.csproj" />
+    <!-- T13.1 (P13): drives the P11 system steps (ScheduledTaskCreateStep,
+         ComRegisterStep, FirewallRuleStep) and RollbackJournal/Elevation
+         directly for the live create+reverse VM legs. -->
+    <ProjectReference Include="..\..\src\SigilBuild.Wrapper.Core\SigilBuild.Wrapper.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />

@@ -139,6 +139,127 @@ public sealed class SecretHygieneTests
         }
     }
 
+    // ── P11 system steps: journal records carry only name/path — never a
+    // resolved secret. schtasks/netsh/COM all journal their inverse BEFORE the
+    // native/process call (see each step's own "no secrets" doc comment); these
+    // three tests drive the SAME redaction path (StepContext.Redact +
+    // UninstallStateStore.RedactSecrets) the DirectoryCreate tests above cover,
+    // but through the actual P11 step types so the P11 surfaces are directly
+    // exercised, not just inferred from a generic mechanism. Each step's own
+    // unit tests (ScheduledTaskCreateStepTests / FirewallRuleStepTests /
+    // ComRegisterStepTests) already establish that running these steps
+    // unelevated is safe locally (the journal append happens before the native
+    // call, so a non-admin sandbox never actually mutates system state).
+
+    [Fact]
+    public async Task ScheduledTaskCreate_secret_in_name_is_absent_from_journal_and_log_output()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var blob = BlobWith(new InstallStep.ScheduledTaskCreate(
+            "t", "SigilTestTask_${parameters.license_key}", "app.exe", Arguments: null,
+            Trigger: "logon", RunLevel: "limited", When: null, OnFailure: OnFailure.Continue));
+        var parsed = CommandLineParser.Parse(new[] { $"/Plicense_key={Secret}" }, blob.Parameters);
+        var ctx = StepContext.From(blob, parsed);
+
+        var events = new List<StepProgress>();
+        var result = await new InstallEngine().RunAsync(
+            Array.Empty<InstallStep>(), blob.InstallSteps, Array.Empty<InstallStep>(),
+            ctx, new ListProgress(events), CancellationToken.None);
+
+        var log = string.Join("\n", events.Where(e => e.Message is not null).Select(e => e.Message));
+        log.Should().NotContain(Secret, "no log line may leak a secret value from a scheduled task name");
+
+        var appId = "t11-1-secret-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            UninstallStateStore.Save(appId, result.Journal, InstallScope.User, ctx.SecretValues);
+            var content = File.ReadAllText(UninstallStateStore.PathFor(appId, InstallScope.User));
+            content.Should().NotContain(Secret, "the persisted journal must never contain a secret value");
+            content.Should().Contain("***", "the secret occurrence in the journal must be redacted");
+        }
+        finally
+        {
+            UninstallStateStore.Delete(appId, InstallScope.User);
+        }
+    }
+
+    [Fact]
+    public async Task FirewallRule_secret_in_name_is_absent_from_journal_and_log_output()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var blob = BlobWith(new InstallStep.FirewallRule(
+            "fw", "SigilTestRule_${parameters.license_key}", "in", "allow",
+            Program: null, Port: null, Protocol: null, When: null, OnFailure: OnFailure.Continue));
+        var parsed = CommandLineParser.Parse(new[] { $"/Plicense_key={Secret}" }, blob.Parameters);
+        var ctx = StepContext.From(blob, parsed);
+
+        var events = new List<StepProgress>();
+        var result = await new InstallEngine().RunAsync(
+            Array.Empty<InstallStep>(), blob.InstallSteps, Array.Empty<InstallStep>(),
+            ctx, new ListProgress(events), CancellationToken.None);
+
+        var log = string.Join("\n", events.Where(e => e.Message is not null).Select(e => e.Message));
+        log.Should().NotContain(Secret, "no log line may leak a secret value from a firewall rule name");
+
+        var appId = "t11-3-secret-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            UninstallStateStore.Save(appId, result.Journal, InstallScope.User, ctx.SecretValues);
+            var content = File.ReadAllText(UninstallStateStore.PathFor(appId, InstallScope.User));
+            content.Should().NotContain(Secret, "the persisted journal must never contain a secret value");
+            content.Should().Contain("***", "the secret occurrence in the journal must be redacted");
+        }
+        finally
+        {
+            UninstallStateStore.Delete(appId, InstallScope.User);
+        }
+    }
+
+    [Fact]
+    public async Task ComRegister_secret_in_path_is_absent_from_journal_and_log_output()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        // A non-existent path (LoadFailed) — safe to run locally without admin
+        // or a real self-registering DLL (mirrors ComRegisterStepTests).
+        var blob = BlobWith(new InstallStep.ComRegister(
+            "reg", @"C:\does\not\exist\${parameters.license_key}.dll", When: null, OnFailure: OnFailure.Continue));
+        var parsed = CommandLineParser.Parse(new[] { $"/Plicense_key={Secret}" }, blob.Parameters);
+        var ctx = StepContext.From(blob, parsed);
+
+        var events = new List<StepProgress>();
+        var result = await new InstallEngine().RunAsync(
+            Array.Empty<InstallStep>(), blob.InstallSteps, Array.Empty<InstallStep>(),
+            ctx, new ListProgress(events), CancellationToken.None);
+
+        var log = string.Join("\n", events.Where(e => e.Message is not null).Select(e => e.Message));
+        log.Should().NotContain(Secret, "no log line may leak a secret value from a COM DLL path");
+
+        var appId = "t11-2-secret-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            UninstallStateStore.Save(appId, result.Journal, InstallScope.User, ctx.SecretValues);
+            var content = File.ReadAllText(UninstallStateStore.PathFor(appId, InstallScope.User));
+            content.Should().NotContain(Secret, "the persisted journal must never contain a secret value");
+            content.Should().Contain("***", "the secret occurrence in the journal must be redacted");
+        }
+        finally
+        {
+            UninstallStateStore.Delete(appId, InstallScope.User);
+        }
+    }
+
     private sealed class ListProgress : IProgress<StepProgress>
     {
         private readonly List<StepProgress> _sink;

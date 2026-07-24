@@ -11,7 +11,7 @@ namespace SigilBuild.Packaging.Tests.ExeWrapper;
 
 public class IconResourceWriterTests
 {
-    [Fact(Skip = "Requires the AOT-published Wrapper.exe in runtimes/win-x64/.")]
+    [Fact]
     public async Task WriteAsync_ReplacesIconInWrapperExe()
     {
         var stubExe = WrapperRuntimeLocator.Locate(SigilBuild.Core.Manifest.TargetArchitecture.X64);

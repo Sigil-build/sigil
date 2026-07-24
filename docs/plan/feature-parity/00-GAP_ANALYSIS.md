@@ -30,6 +30,11 @@ common, **T3** = niche but expected of a mature tool.
 | Deterministic compressed payload | zstd `SIGIL_PAYLOAD_V2` |
 | Conditions on steps/screens | `When` expression engine: `param.*`, `option.*`, `app.*`, `system.*`, `scope*`, `install_dir`; fns `defined, empty, version_gte, os_version, arch, locale, file_exists, registry_exists` |
 | Reinstall idempotency / repair | T10 existing-install detection, double-install safe |
+| Scheduled tasks | `scheduled_task_create` step (P11) — wraps `schtasks.exe /Create`, always runs as `SYSTEM`, machine-scope only (SIG0310), journaled rollback via `schtasks /Delete` |
+| COM/DLL registration | `com_register` step (P11) — invokes the target DLL's exported `DllRegisterServer`/`DllUnregisterServer` via a statically-bound `[LibraryImport]`/unmanaged function pointer (AOT-safe, no reflection), machine-scope only (SIG0310) |
+| Firewall rules | `firewall_rule` step (P11) — wraps `netsh advfirewall firewall add/delete rule`, delete-then-add for idempotent reinstalls, machine-scope only (SIG0310) |
+| Auto-update (full package) | `updates:` manifest block + `Setup.exe /Update` (P12) — ECDSA P-256-signed channel manifest (detached `.sig`, ADR-009), version compare vs installed ARP entry, sha256-verified full-package download and hand-off to the downloaded installer; dedicated exit codes 0/6/7/8/9. **Delta/binary-diff updates are explicitly deferred** — `deltaTargets` stays a parsed, schema-validated, functionally inert field (ADR-010) |
+| Web (net) installer | `sigil pack --payload web --package-url <https-url>` (P12) — emits a tiny stub `Setup.exe` (`WebSetup`) whose only install action is an `http_download` of the full package (sha256-verified) followed by handing off to it; refuses without a resolvable HTTPS `--package-url` (SIG0322) |
 
 ## 2. Gaps
 
@@ -58,11 +63,11 @@ common, **T3** = niche but expected of a mature tool.
 
 | # | Gap | What competitors have | Sigil today | Plan task |
 |---|---|---|---|---|
-| G12 | Scheduled tasks | `schtasks` via Exec everywhere; WiX community ext | none (workaround: `run_program schtasks.exe`) | P11 |
-| G13 | COM/DLL registration | MSI Class tables; NSIS `RegDLL`; Inno `regserver` | none | P11 |
-| G14 | Firewall rules | WiX firewall extension; `netsh` elsewhere | none | P11 |
-| G15 | Auto/delta updates | Velopack/Squirrel core feature; MSIX AppInstaller | `UpdatesSection` metadata parsed, `/Update` exits 64 "not supported"; codec designed for reuse | P12 |
-| G16 | Web (net) installer — stub exe, payload downloaded | Burn; NSIS web installers | payload always embedded | P12 (after P4) |
+| G12 | ~~Scheduled tasks~~ **Shipped P11** | `schtasks` via Exec everywhere; WiX community ext | `scheduled_task_create` step — machine-scope only (SIG0310), journaled rollback | P11 — closed |
+| G13 | ~~COM/DLL registration~~ **Shipped P11** | MSI Class tables; NSIS `RegDLL`; Inno `regserver` | `com_register` step — `DllRegisterServer`/`DllUnregisterServer` via AOT-safe function pointer, machine-scope only (SIG0310) | P11 — closed |
+| G14 | ~~Firewall rules~~ **Shipped P11** | WiX firewall extension; `netsh` elsewhere | `firewall_rule` step — wraps `netsh advfirewall firewall add/delete rule`, machine-scope only (SIG0310) | P11 — closed |
+| G15 | ~~Auto/delta updates~~ **Full-package shipped P12; delta deferred** | Velopack/Squirrel core feature; MSIX AppInstaller | `updates:` block + `Setup.exe /Update`: ECDSA-P256-signed channel manifest (ADR-009), version-aware fetch/verify/install, dedicated exit codes. `deltaTargets` stays parsed-but-inert **by design** — delta/binary-diff patches are explicitly deferred to a later release (ADR-010), not implemented | P12 — closed (full-package); delta tracked by ADR-010, not a plan task |
+| G16 | ~~Web (net) installer — stub exe, payload downloaded~~ **Shipped P12** | Burn; NSIS web installers | `sigil pack --payload web --package-url <url>` — tiny stub `Setup.exe` downloads + sha256-verifies + hands off to the full package | P12 — closed |
 | G17 | Installer self single-instance mutex | Inno `SetupMutex`; NSIS CreateMutex idiom | none | P6 (bundled) |
 | G18 | Drivers (pnputil) | InstallShield/Advanced Installer | none — **explicitly out of scope for now** | — |
 | G19 | IIS/SQL configuration | WiX extensions | none — **out of scope** (server-app niche) | — |

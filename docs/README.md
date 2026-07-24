@@ -44,6 +44,7 @@ not sure which output format you need.
 
 - [From WiX](migration/from-wix.md)
 - [From NSIS](migration/from-nsis.md)
+- [From Inno Setup](migration/from-inno.md)
 
 ## A note on the auto-generated files
 

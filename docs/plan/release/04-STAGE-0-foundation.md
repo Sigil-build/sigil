@@ -263,9 +263,19 @@ shape — gate the PR, then re-verify the integrated result.
 > the four files; GitHub is the authoritative parser and Task 4's PR is where a
 > parse error would surface (the job would be absent from `gh pr checks`).
 
-The one thing to check by eye, because it is the likely failure: `release/**`
-**must stay quoted**. In YAML a token beginning with `*` is an alias reference,
-so an unquoted `release/**` inside a flow sequence is a parse error, not a glob.
+Two things to check by eye:
+
+1. **The glob is right.** GitHub's `branches:` filter uses its own dialect, not
+   shell globbing: `*` matches within a path segment and will not cross `/`,
+   while `**` matches any characters **including** `/` — and matches zero of
+   them. So `release/**` does match the single-segment
+   `release/v0.1.0-alpha`. (`release/*` would also work here, but `**` keeps
+   working if a future RC branch gains a second segment.)
+2. **`release/**` is quoted.** Keep the quotes for unambiguity. *Correction to
+   an earlier draft of this plan:* the reason is **not** a YAML alias hazard —
+   a plain scalar is read as an alias only when `*` is the token's **first**
+   character, and this one starts with `r`, so unquoted would have parsed fine.
+   Quote it anyway as defensive style, but do not repeat the wrong rationale.
 
 - [ ] **Step 4: Verify the filters by inspection**
 

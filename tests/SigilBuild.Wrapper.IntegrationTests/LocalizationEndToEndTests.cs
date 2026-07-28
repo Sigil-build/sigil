@@ -25,7 +25,8 @@ namespace SigilBuild.Wrapper.IntegrationTests;
 /// genuinely end-to-end leg (unlike
 /// <c>SigilBuild.Installer.Host.Tests.Localization.LocalizationEndToEndTests</c>,
 /// which stops at the VM-render layer).</para>
-/// <para><b>Soft-skips</b> (returns Passed) exactly like
+/// <para><b>Gating</b> reports a genuine Skipped result (via
+/// <see cref="VmFactAttribute"/>, register row R6) exactly like
 /// <see cref="MultiEditionInstallTests"/>: not Windows, <c>SIGIL_VM_TESTS=1</c>
 /// not set, or the Native-AOT-published <c>SigilBuild.Installer.Host</c>
 /// runtime is not staged under <c>runtimes/win-x64/</c>
@@ -40,11 +41,6 @@ namespace SigilBuild.Wrapper.IntegrationTests;
 /// </remarks>
 public class LocalizationEndToEndTests
 {
-    private static bool ShouldRun()
-        => OperatingSystem.IsWindows()
-            && TestEnvironment.IsEnabled
-            && TestEnvironment.IsRuntimeAvailable;
-
     private static string FindFixtureManifest(string fixtureName)
     {
         var dir = AppContext.BaseDirectory;
@@ -84,14 +80,9 @@ public class LocalizationEndToEndTests
     /// because it is the support surface (someone pasting it into a ticket must
     /// not need translation).
     /// </summary>
-    [Fact]
+    [VmFact]
     public async Task SilentInstall_IsUnaffectedByLang()
     {
-        if (!ShouldRun())
-        {
-            return; // soft-skip — see class remarks.
-        }
-
         using var sandbox = new VmSandbox();
         var manifestPath = FindFixtureManifest("localized-uk");
         var outDir = Path.Combine(sandbox.Root, "out");
@@ -173,14 +164,9 @@ public class LocalizationEndToEndTests
     /// <c>/allusers</c> rule, which exits 64 — scope is a trust boundary,
     /// language is a display preference).
     /// </summary>
-    [Fact]
+    [VmFact]
     public async Task FixedManifestLanguage_LogsAndIgnoresLangFlag()
     {
-        if (!ShouldRun())
-        {
-            return; // soft-skip — see class remarks.
-        }
-
         using var sandbox = new VmSandbox();
         var manifestPath = FindFixtureManifest("localized-uk-fixed");
         var outDir = Path.Combine(sandbox.Root, "out");

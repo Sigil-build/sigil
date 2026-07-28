@@ -18,7 +18,8 @@ namespace SigilBuild.Wrapper.IntegrationTests;
 ///   <item><description>detect-true → the prerequisite is skipped (a would-fail exe is never run);</description></item>
 ///   <item><description>exit code outside <c>exit_codes_ok</c> → abort before the journal (no app installed).</description></item>
 /// </list>
-/// Soft-skips unless Windows + <c>SIGIL_VM_TESTS=1</c> + <c>SIGIL_VM_PREREQ=1</c> +
+/// Reports a genuine Skipped result (via <see cref="VmPrerequisiteFactAttribute"/>,
+/// register row R6) unless Windows + <c>SIGIL_VM_TESTS=1</c> + <c>SIGIL_VM_PREREQ=1</c> +
 /// the staged AOT runtime. The runner decision logic is additionally covered by fast
 /// unit tests (<c>PrerequisiteRunnerTests</c>).
 /// </summary>
@@ -26,21 +27,10 @@ public sealed class PrerequisiteInstallTests
 {
     private const string DetectKeyRoot = @"Software\SigilPrereqTest";
 
-    private static bool ShouldRun()
-        => OperatingSystem.IsWindows()
-            && TestEnvironment.IsEnabled
-            && Environment.GetEnvironmentVariable("SIGIL_VM_PREREQ") == "1"
-            && TestEnvironment.IsRuntimeAvailable;
-
-    [Fact]
+    [VmPrerequisiteFact]
     [SupportedOSPlatform("windows")]
     public async Task Prerequisite_installs_and_exit_3010_makes_the_silent_install_exit_3010()
     {
-        if (!ShouldRun())
-        {
-            return; // soft-skip — see class remarks.
-        }
-
         using var sandbox = new VmSandbox();
         var id = Guid.NewGuid().ToString("N");
         var detectKey = $@"{DetectKeyRoot}\{id}";
@@ -60,15 +50,10 @@ public sealed class PrerequisiteInstallTests
         }
     }
 
-    [Fact]
+    [VmPrerequisiteFact]
     [SupportedOSPlatform("windows")]
     public async Task Already_satisfied_prerequisite_is_skipped()
     {
-        if (!ShouldRun())
-        {
-            return; // soft-skip — see class remarks.
-        }
-
         using var sandbox = new VmSandbox();
         var id = Guid.NewGuid().ToString("N");
         var detectKey = $@"{DetectKeyRoot}\{id}";
@@ -94,15 +79,10 @@ public sealed class PrerequisiteInstallTests
         }
     }
 
-    [Fact]
+    [VmPrerequisiteFact]
     [SupportedOSPlatform("windows")]
     public async Task Prerequisite_exit_code_outside_ok_set_aborts_before_install()
     {
-        if (!ShouldRun())
-        {
-            return; // soft-skip — see class remarks.
-        }
-
         using var sandbox = new VmSandbox();
         var id = Guid.NewGuid().ToString("N");
         var detectKey = $@"{DetectKeyRoot}\{id}";

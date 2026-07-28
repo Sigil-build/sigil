@@ -20,27 +20,16 @@ namespace SigilBuild.Packaging.Tests.ExeWrapper;
 /// stub's embedded sha256 matches the actually-emitted full package, the stub
 /// carries no <c>SIGIL_PAYLOAD_V2</c> resource, and two web packs of the same
 /// input are byte-identical. Gated exactly like the existing exe-pack tests
-/// (<see cref="ExeWrapperPackagerTests"/>): the Native-AOT host runtime must be
-/// staged under <c>runtimes/win-x64/</c> (via
-/// <c>scripts/publish-installer-runtime.ps1</c>) or these tests SKIP rather than
-/// trigger a slow on-demand AOT publish. The live download-and-run of the stub
-/// is CI-VM-only (T12.6) — not exercised here.
+/// (<see cref="ExeWrapperPackagerTests"/>): via <see cref="RuntimeStagedFactAttribute"/>
+/// (register row R6), the Native-AOT host runtime must be staged under
+/// <c>runtimes/win-x64/</c> (via <c>scripts/publish-installer-runtime.ps1</c>) or these
+/// tests report a genuine Skipped result rather than trigger a slow on-demand AOT
+/// publish. The live download-and-run of the stub is CI-VM-only (T12.6) — not
+/// exercised here.
 /// </summary>
 public class ExeWrapperWebInstallerPackTests
 {
     private const string PackageUrl = "https://cdn.example.com/acme/pkg.exe";
-
-    private static string? LocateStagedRuntime()
-    {
-        if (!OperatingSystem.IsWindows())
-        {
-            return null;
-        }
-
-        var staged = Path.Combine(
-            AppContext.BaseDirectory, "runtimes", "win-x64", "SigilBuild.Installer.Host.exe");
-        return File.Exists(staged) ? staged : null;
-    }
 
     private static SerializableWrapperBlob DeserializeBlob(string exePath)
     {
@@ -49,19 +38,9 @@ public class ExeWrapperWebInstallerPackTests
             Encoding.UTF8.GetString(bytes), WrapperBlobJsonContext.Default.SerializableWrapperBlob)!;
     }
 
-    [Fact]
+    [RuntimeStagedFact]
     public async Task PackAsync_payload_web_emits_full_package_and_a_no_payload_stub_whose_blob_matches()
     {
-        var runtime = LocateStagedRuntime();
-        if (runtime is null)
-        {
-            Console.WriteLine(
-                "SKIP: PackAsync_payload_web_emits_full_package_and_a_no_payload_stub_whose_blob_matches — " +
-                "runtimes/win-x64/SigilBuild.Installer.Host.exe not staged (non-Windows or AOT runtime not " +
-                "published). Run scripts/publish-installer-runtime.ps1.");
-            return;
-        }
-
         var fixtureDir = Path.Combine(AppContext.BaseDirectory, "Fixtures", "minimal-payload");
         var outputDir = Path.Combine(Path.GetTempPath(), $"sigil-web-{Guid.NewGuid():N}");
         Directory.CreateDirectory(outputDir);
@@ -126,19 +105,9 @@ public class ExeWrapperWebInstallerPackTests
         }
     }
 
-    [Fact]
+    [RuntimeStagedFact]
     public async Task PackAsync_payload_web_is_deterministic_across_two_identical_packs()
     {
-        var runtime = LocateStagedRuntime();
-        if (runtime is null)
-        {
-            Console.WriteLine(
-                "SKIP: PackAsync_payload_web_is_deterministic_across_two_identical_packs — " +
-                "runtimes/win-x64/SigilBuild.Installer.Host.exe not staged (non-Windows or AOT runtime not " +
-                "published). Run scripts/publish-installer-runtime.ps1.");
-            return;
-        }
-
         var fixtureDir = Path.Combine(AppContext.BaseDirectory, "Fixtures", "minimal-payload");
         var outDir1 = Path.Combine(Path.GetTempPath(), $"sigil-web-a-{Guid.NewGuid():N}");
         var outDir2 = Path.Combine(Path.GetTempPath(), $"sigil-web-b-{Guid.NewGuid():N}");
@@ -179,19 +148,9 @@ public class ExeWrapperWebInstallerPackTests
         }
     }
 
-    [Fact]
+    [RuntimeStagedFact]
     public async Task PackAsync_payload_embedded_default_is_unchanged()
     {
-        var runtime = LocateStagedRuntime();
-        if (runtime is null)
-        {
-            Console.WriteLine(
-                "SKIP: PackAsync_payload_embedded_default_is_unchanged — " +
-                "runtimes/win-x64/SigilBuild.Installer.Host.exe not staged (non-Windows or AOT runtime not " +
-                "published). Run scripts/publish-installer-runtime.ps1.");
-            return;
-        }
-
         var fixtureDir = Path.Combine(AppContext.BaseDirectory, "Fixtures", "minimal-payload");
         var outputDir = Path.Combine(Path.GetTempPath(), $"sigil-embedded-{Guid.NewGuid():N}");
         Directory.CreateDirectory(outputDir);

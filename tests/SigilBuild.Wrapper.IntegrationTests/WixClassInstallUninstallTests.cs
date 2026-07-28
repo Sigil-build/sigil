@@ -13,10 +13,10 @@ using Xunit;
 /// mark — and asserts that uninstall reverts every observable mutation.
 /// </summary>
 /// <remarks>
-/// <para>Soft-skips (returns Passed) when any of the following are missing:
-/// the host is not Windows; <c>SIGIL_VM_TESTS=1</c> is not set; the
-/// AOT-published wrapper runtime is not staged under
-/// <c>runtimes/win-x64/SigilBuild.Wrapper.exe</c>.</para>
+/// <para>Reports a genuine Skipped result (via <see cref="VmFactAttribute"/>, register
+/// row R6) when any of the following are missing: the host is not Windows;
+/// <c>SIGIL_VM_TESTS=1</c> is not set; the AOT-published wrapper runtime is not staged
+/// under <c>runtimes/win-x64/SigilBuild.Wrapper.exe</c>.</para>
 ///
 /// <para>The test uses HKCU (not HKLM) so it never needs admin rights.
 /// Real installers would write under HKLM, but exercising HKLM here would
@@ -53,19 +53,9 @@ public class WixClassInstallUninstallTests
         return Path.Combine(dir, ManifestRel.Replace('/', Path.DirectorySeparatorChar));
     }
 
-    private static bool ShouldRun() =>
-        OperatingSystem.IsWindows() &&
-        TestEnvironment.IsEnabled &&
-        TestEnvironment.IsRuntimeAvailable;
-
-    [Fact]
+    [VmFact]
     public async Task WixClass_install_then_uninstall_yields_empty_diff()
     {
-        if (!ShouldRun())
-        {
-            return; // soft-skip — see class remarks.
-        }
-
         // Re-assert at the call site so the CA1416 platform analyzer is happy
         // narrowing into the [SupportedOSPlatform("windows")] SnapshotDiffer.Take.
         if (!OperatingSystem.IsWindows())

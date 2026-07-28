@@ -73,10 +73,10 @@ public sealed class InstallTimeParameter
 /// </summary>
 public sealed class InstallTimeParameterSource
 {
-    [JsonPropertyName("url")]            public string Url { get; init; } = "";
-    [JsonPropertyName("itemsPath")]      public string ItemsPath { get; init; } = "";
-    [JsonPropertyName("valueProperty")]  public string ValueProperty { get; init; } = "";
-    [JsonPropertyName("labelProperty")]  public string LabelProperty { get; init; } = "";
+    [JsonPropertyName("url")] public string Url { get; init; } = "";
+    [JsonPropertyName("itemsPath")] public string ItemsPath { get; init; } = "";
+    [JsonPropertyName("valueProperty")] public string ValueProperty { get; init; } = "";
+    [JsonPropertyName("labelProperty")] public string LabelProperty { get; init; } = "";
 }
 
 /// <summary>

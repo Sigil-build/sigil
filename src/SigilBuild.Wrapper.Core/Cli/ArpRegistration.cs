@@ -68,9 +68,9 @@ internal static class ArpRegistration
         using var key = HiveFor(scope).CreateSubKey(keyPath, writable: true)
             ?? throw new InvalidOperationException($"could not create ARP key '{keyPath}'");
 
-        key.SetValue("DisplayName",     entry.DisplayName);
-        key.SetValue("DisplayVersion",  entry.DisplayVersion);
-        key.SetValue("Publisher",       entry.Publisher);
+        key.SetValue("DisplayName", entry.DisplayName);
+        key.SetValue("DisplayVersion", entry.DisplayVersion);
+        key.SetValue("Publisher", entry.Publisher);
         key.SetValue("UninstallString", entry.UninstallString);
         // Standard ARP InstallLocation — surfaces the install dir to Windows and lets
         // a later P3 upgrade recover the prior install directory (InstalledStateResolver).
@@ -80,10 +80,10 @@ internal static class ArpRegistration
         }
         // EstimatedSize is documented as a DWORD in KB.
         var sizeKb = (int)Math.Min(int.MaxValue, Math.Max(0, entry.EstimatedSizeBytes / 1024));
-        key.SetValue("EstimatedSize",   sizeKb, RegistryValueKind.DWord);
-        key.SetValue("InstallDate",     DateTime.Now.ToString("yyyyMMdd", CultureInfo.InvariantCulture));
-        key.SetValue("NoModify",        1, RegistryValueKind.DWord);
-        key.SetValue("NoRepair",        1, RegistryValueKind.DWord);
+        key.SetValue("EstimatedSize", sizeKb, RegistryValueKind.DWord);
+        key.SetValue("InstallDate", DateTime.Now.ToString("yyyyMMdd", CultureInfo.InvariantCulture));
+        key.SetValue("NoModify", 1, RegistryValueKind.DWord);
+        key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
     }
 
     /// <summary>

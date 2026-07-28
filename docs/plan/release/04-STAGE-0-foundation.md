@@ -158,13 +158,20 @@ Expected in `.claude/`: `settings.json`, `hooks/post-edit-guard.sh`, and
 
 - [ ] **Step 3: Verify the workflow parses and its format job would pass**
 
+> **No local YAML parser.** `python3` on this machine is the Windows Store alias
+> stub, not an interpreter, and `actionlint` is not installed. Validate
+> structurally by reading the file, and treat **GitHub as the authoritative
+> parser** — a malformed workflow surfaces as a repo-level Actions error and the
+> job simply never appears in `gh pr checks`. Task 4 is where that gets
+> confirmed. Do not claim "YAML valid" on the strength of a check you could not
+> run; say what you actually did.
+
 ```bash
-python3 -c "import yaml,sys; yaml.safe_load(open('.github/workflows/pr-guards.yml')); print('YAML OK')"
 dotnet format Sigil.slnx --verify-no-changes --no-restore; echo "format exit=$?"
 ```
 
-Expected: `YAML OK`, format exit **0**. The second command is exactly what the
-workflow's `format` job runs — if it fails here it will fail in CI.
+Expected: format exit **0**. That command is exactly what the workflow's
+`format` job runs — if it fails here it will fail in CI.
 
 - [ ] **Step 4: Remove the staging directory**
 
@@ -200,6 +207,221 @@ false. Same for .claude/, which CLAUDE.md references.
 
 Installs both and removes the _agent-setup/ staging directory, per its own
 apply.ps1 instructions."
+```
+
+---
+
+## Task 2b: Widen the CI triggers to cover the RC branch
+
+**Added mid-execution, 2026-07-28**, after Task 2's review found that
+`pr-guards.yml:9` scopes itself to `on.pull_request.branches: [main]`.
+Investigation showed **all four** workflows do the same, so the RC branch and
+every lane PR into it currently run **no CI whatsoever** — no build, no tests,
+no coverage gate, no format gate, no gitleaks. The design's premise that
+"PR-per-lane gives `pr-guards` a per-lane gate" was false. Human ruled: widen
+all four.
+
+This must land **before Task 4**, because Task 4 opens the first lane PR and
+performs the G0 gate-proof ceremony, both of which are meaningless without it.
+
+**Files:**
+- Modify: `.github/workflows/pr-guards.yml`, `ci.yml`, `docs.yml`, `secret-scan.yml`
+
+**Interfaces:**
+- Consumes: Task 2's installed `pr-guards.yml`
+- Produces: workflows that trigger for PRs based on `release/**` and for pushes
+  to `release/**` — the precondition for every later lane's PR being gated
+
+- [ ] **Step 1: Confirm the scope of the problem**
+
+```bash
+grep -n -A3 "^on:" .github/workflows/pr-guards.yml .github/workflows/ci.yml \
+  .github/workflows/docs.yml .github/workflows/secret-scan.yml
+```
+
+Expected: every one shows `branches: [main]` under `pull_request` (and, for
+`ci`/`docs`/`secret-scan`, under `push` too).
+
+- [ ] **Step 2: Widen every branch filter**
+
+In all four files, change each branch list from `[main]` to
+`[main, 'release/**']`. Apply it to **both** the `push:` and `pull_request:`
+filters wherever each appears. Do not change `types:`, `paths:`, `permissions:`,
+`concurrency:`, or any job body — only the branch lists.
+
+Note the resulting behaviour, and confirm you understand it before editing:
+lane branches are named `rc/<lane>-<slug>`, which does **not** match
+`release/**`. That is intentional. A push to a lane branch triggers nothing; the
+`pull_request` filter matches on the **base** branch, so a PR from
+`rc/s1-trusted-state` into `release/v0.1.0-alpha` **is** gated, and the `push`
+filter re-runs CI on the RC itself after each merge. That is exactly the desired
+shape — gate the PR, then re-verify the integrated result.
+
+- [ ] **Step 3: Validate all four still parse**
+
+> **No local YAML parser** — see the note in Task 2 Step 3. Validate by reading
+> the four files; GitHub is the authoritative parser and Task 4's PR is where a
+> parse error would surface (the job would be absent from `gh pr checks`).
+
+Two things to check by eye:
+
+1. **The glob is right.** GitHub's `branches:` filter uses its own dialect, not
+   shell globbing: `*` matches within a path segment and will not cross `/`,
+   while `**` matches any characters **including** `/` — and matches zero of
+   them. So `release/**` does match the single-segment
+   `release/v0.1.0-alpha`. (`release/*` would also work here, but `**` keeps
+   working if a future RC branch gains a second segment.)
+2. **`release/**` is quoted.** Keep the quotes for unambiguity. *Correction to
+   an earlier draft of this plan:* the reason is **not** a YAML alias hazard —
+   a plain scalar is read as an alias only when `*` is the token's **first**
+   character, and this one starts with `r`, so unquoted would have parsed fine.
+   Quote it anyway as defensive style, but do not repeat the wrong rationale.
+
+- [ ] **Step 4: Verify the filters by inspection**
+
+```bash
+grep -n -B1 -A2 "branches:" .github/workflows/*.yml
+```
+
+Expected: every `branches:` list now contains both `main` and `release/**`.
+Count them — `ci.yml`, `docs.yml`, and `secret-scan.yml` have two each (push +
+pull_request), `pr-guards.yml` has one (pull_request only). **Seven** in total.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add .github/workflows/
+git commit -m "ci: trigger workflows for release/** branches (R20)
+
+All four workflows scoped themselves to branches: [main], so the
+release/v0.1.0-alpha RC branch and every lane PR into it would have run no
+CI at all — no build, no tests, no coverage gate, no format gate, no
+gitleaks. The RC track's premise that a PR per lane gets gated by pr-guards
+was false.
+
+Adds release/** to every push and pull_request branch filter. Lane branches
+(rc/*) still trigger nothing on push; the pull_request filter matches the
+base branch, so lane PRs into the RC are gated and CI re-runs on the RC
+after each merge."
+```
+
+---
+
+## Task 2c: Make the format gate able to pass at all
+
+**Added mid-execution, 2026-07-28**, after Task 4 opened the first lane PR and the
+`dotnet format` job **failed in CI while passing locally**.
+
+**Diagnosis.** `Lang` is a source-generated type —
+`src/SigilBuild.Localization.Generator/StringsEmitter.cs:27` emits
+`public enum Lang { En… }`. The format job
+(`.github/workflows/pr-guards.yml`) runs:
+
+```yaml
+- name: restore
+  run: dotnet restore Sigil.slnx
+- name: verify formatting
+  run: dotnet format Sigil.slnx --verify-no-changes --no-restore
+```
+
+`restore` is not `build`. On a clean CI checkout the analyzer assembly
+`SigilBuild.Localization.Generator.dll` (netstandard2.0) has never been produced,
+so the generator cannot run, so `Lang` is never emitted, so **every** file
+referencing it fails `CS0246: The type or namespace name 'Lang' could not be
+found` — roughly 40 errors across `SigilBuild.Wrapper.Tests` and
+`SigilBuild.Installer.Host.Tests`. The job exits 1 on compile errors, not on
+formatting.
+
+It passes on the dev machine only because
+`src/SigilBuild.Localization.Generator/bin/Release/netstandard2.0/` is already
+populated from earlier builds. **This gate could never have passed in CI as
+written** — nobody noticed because the workflow was never installed until Task 2.
+
+**Files:**
+- Modify: `.github/workflows/pr-guards.yml` (the `format` job only)
+
+**Interfaces:**
+- Consumes: Task 2's installed workflow, Task 2b's widened triggers
+- Produces: a `format` job that actually reports formatting, not compile errors
+
+- [ ] **Step 1: Reproduce the CI failure locally — do not skip this**
+
+The whole reason this shipped broken is that nobody reproduced a clean-checkout
+build. Simulate one by removing the generator's output:
+
+```bash
+mv src/SigilBuild.Localization.Generator/bin /tmp/gen-bin-backup
+mv src/SigilBuild.Localization.Generator/obj /tmp/gen-obj-backup
+dotnet restore Sigil.slnx
+dotnet format Sigil.slnx --verify-no-changes --no-restore 2>&1 | grep -c "CS0246"
+```
+
+Expected: a non-zero count of `CS0246` errors, reproducing CI. If you get 0, the
+generator output is still being found somewhere — investigate before continuing,
+because a fix you cannot see fail is a fix you cannot trust.
+
+- [ ] **Step 2: Fix the job**
+
+Insert a build step before the format verification. Prefer building **only the
+generator**, because `pr-guards.yml`'s own header states these are "deterministic
+checks that don't need the full build matrix" — a full solution build here would
+duplicate `ci.yml` and make every PR wait on it twice:
+
+```yaml
+      # No -c/--configuration here: 'dotnet format' below also runs with no -c
+      # flag, so it resolves project-reference analyzers against MSBuild's
+      # default configuration (Debug). Keep the two in sync rather than pinning
+      # either independently.
+      - name: build source generators
+        run: dotnet build src/SigilBuild.Localization.Generator/SigilBuild.Localization.Generator.csproj --no-restore
+
+      - name: verify formatting
+        run: dotnet format Sigil.slnx --verify-no-changes --no-restore
+```
+
+> **Corrected 2026-07-28.** An earlier draft of this task specified
+> `dotnet build … -c Release --no-restore`. **That does not work**, and the
+> implementer proved it by reproducing: with `-c Release` the generator lands in
+> `bin/Release/netstandard2.0/` while `dotnet format` — which is never given a
+> `-c` flag — looks in `bin/Debug/netstandard2.0/`. All 54 `CS0246` errors
+> remained and format still exited 2. The configuration of the build step must
+> **match** the format step's, which means leaving both unset.
+
+If the targeted build proves insufficient (any remaining `CS0246`), fall back to
+`dotnet build Sigil.slnx --no-restore` and say in your report that you had to,
+and why.
+
+- [ ] **Step 3: Verify the fix against the reproduction**
+
+```bash
+dotnet build src/SigilBuild.Localization.Generator/SigilBuild.Localization.Generator.csproj -c Release --no-restore
+dotnet format Sigil.slnx --verify-no-changes --no-restore; echo "format exit=$?"
+```
+
+Expected: exit **0**, and zero `CS0246`. Then restore your backups:
+
+```bash
+rm -rf src/SigilBuild.Localization.Generator/bin src/SigilBuild.Localization.Generator/obj
+mv /tmp/gen-bin-backup src/SigilBuild.Localization.Generator/bin
+mv /tmp/gen-obj-backup src/SigilBuild.Localization.Generator/obj
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add .github/workflows/pr-guards.yml
+git commit -m "ci: build source generators before the format check (R20)
+
+The format job ran 'dotnet restore' then 'dotnet format --no-restore' with no
+build in between. Restore is not build, so on a clean checkout the
+SigilBuild.Localization.Generator analyzer assembly did not exist, the
+generator never ran, and the generated 'Lang' enum was missing — producing
+~40 CS0246 errors and a job failure that had nothing to do with formatting.
+
+The gate could never have passed in CI as written; it only passed locally
+because the generator's bin/ was already populated from earlier builds.
+
+Builds the generator project before verifying formatting."
 ```
 
 ---

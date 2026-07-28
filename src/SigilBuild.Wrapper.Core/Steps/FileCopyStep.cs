@@ -20,7 +20,7 @@ internal sealed class FileCopyStep : IStep
         // Source may be a payload:// URI (rebased onto the extracted payload
         // root); destination is always a real install-side path.
         var from = ctx.ResolvePath(_spec.From);
-        var to   = ctx.Resolve(_spec.To);
+        var to = ctx.Resolve(_spec.To);
         Directory.CreateDirectory(to);
 
         var (rootDir, pattern, recurse) = SplitGlob(from);

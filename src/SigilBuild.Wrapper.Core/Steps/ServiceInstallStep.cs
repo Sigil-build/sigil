@@ -118,20 +118,20 @@ internal sealed class ServiceInstallStep : IStep
 
     private static string NormaliseStartType(string startType) => startType switch
     {
-        "auto"     => "auto",
-        "demand"   => "demand",
+        "auto" => "auto",
+        "demand" => "demand",
         "disabled" => "disabled",
-        "boot"     => "boot",
-        "system"   => "system",
-        _          => "auto",
+        "boot" => "boot",
+        "system" => "system",
+        _ => "auto",
     };
 
     private static string NormaliseAccount(string account) => account switch
     {
-        "LocalSystem"    => "LocalSystem",
+        "LocalSystem" => "LocalSystem",
         "NetworkService" => "NT AUTHORITY\\NetworkService",
-        "LocalService"   => "NT AUTHORITY\\LocalService",
-        _                => "LocalSystem",
+        "LocalService" => "NT AUTHORITY\\LocalService",
+        _ => "LocalSystem",
     };
 
     private readonly record struct ScResult(int ExitCode, string Stdout, string Stderr);

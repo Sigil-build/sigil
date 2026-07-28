@@ -25,9 +25,9 @@ public enum InstallerStep { Welcome, License, InstallOptions, Options, Installin
 /// </summary>
 public enum InstallerOutcomeCode
 {
-    Completed        = 0,
-    Failed           = 1,
-    UserCancelled    = 2,
+    Completed = 0,
+    Failed = 1,
+    UserCancelled = 2,
     DowngradeBlocked = 3,
 }
 

@@ -187,8 +187,16 @@ Expected: **no output**.
 
 - [ ] **Step 3: Validate the YAML**
 
+> **There is no local YAML parser on the dev machine** — `python3` resolves to
+> the Windows Store alias stub, not an interpreter, and `actionlint` is not
+> installed. (This bit Stage 0: two tasks specified a `python3` check that could
+> not run.) Validate structurally by reading the file, and treat GitHub as the
+> authoritative parser: push the branch and confirm the workflow is picked up
+> rather than reported as invalid. Do not claim "YAML valid" from a check you
+> did not run — say what you actually did.
+
 ```bash
-python3 -c "import yaml; yaml.safe_load(open('.github/workflows/release.yml')); print('YAML OK')"
+gh workflow list --all | grep -i release || echo "not registered yet — expected until the branch is pushed"
 ```
 
 - [ ] **Step 4: Do not claim you verified the release.** The signed run is

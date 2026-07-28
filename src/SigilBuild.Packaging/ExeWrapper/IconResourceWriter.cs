@@ -26,7 +26,7 @@ namespace SigilBuild.Packaging.ExeWrapper;
 /// </remarks>
 internal static partial class IconResourceWriter
 {
-    private static readonly IntPtr RtIcon      = (IntPtr)3;
+    private static readonly IntPtr RtIcon = (IntPtr)3;
     private static readonly IntPtr RtGroupIcon = (IntPtr)14;
 
     private const ushort LangNeutral = 0;
@@ -102,13 +102,13 @@ internal static partial class IconResourceWriter
             if (pos + 16 > ico.Length)
                 throw new InvalidDataException($"ICONDIRENTRY {i} truncated");
             var e = new IcoEntry(
-                Width:      ico[pos + 0],
-                Height:     ico[pos + 1],
+                Width: ico[pos + 0],
+                Height: ico[pos + 1],
                 ColorCount: ico[pos + 2],
-                Reserved:   ico[pos + 3],
-                Planes:     BinaryPrimitives.ReadUInt16LittleEndian(ico.AsSpan(pos + 4)),
-                BitCount:   BinaryPrimitives.ReadUInt16LittleEndian(ico.AsSpan(pos + 6)),
-                SizeBytes:  BinaryPrimitives.ReadUInt32LittleEndian(ico.AsSpan(pos + 8)),
+                Reserved: ico[pos + 3],
+                Planes: BinaryPrimitives.ReadUInt16LittleEndian(ico.AsSpan(pos + 4)),
+                BitCount: BinaryPrimitives.ReadUInt16LittleEndian(ico.AsSpan(pos + 6)),
+                SizeBytes: BinaryPrimitives.ReadUInt32LittleEndian(ico.AsSpan(pos + 8)),
                 OffsetBytes: BinaryPrimitives.ReadUInt32LittleEndian(ico.AsSpan(pos + 12)));
             entries[i] = e;
             if (e.OffsetBytes + e.SizeBytes > ico.Length)
@@ -134,9 +134,9 @@ internal static partial class IconResourceWriter
             blob[pos + 1] = entries[i].Height;
             blob[pos + 2] = entries[i].ColorCount;
             blob[pos + 3] = entries[i].Reserved;
-            BinaryPrimitives.WriteUInt16LittleEndian(blob.AsSpan(pos + 4),  entries[i].Planes);
-            BinaryPrimitives.WriteUInt16LittleEndian(blob.AsSpan(pos + 6),  entries[i].BitCount);
-            BinaryPrimitives.WriteUInt32LittleEndian(blob.AsSpan(pos + 8),  entries[i].SizeBytes);
+            BinaryPrimitives.WriteUInt16LittleEndian(blob.AsSpan(pos + 4), entries[i].Planes);
+            BinaryPrimitives.WriteUInt16LittleEndian(blob.AsSpan(pos + 6), entries[i].BitCount);
+            BinaryPrimitives.WriteUInt32LittleEndian(blob.AsSpan(pos + 8), entries[i].SizeBytes);
             BinaryPrimitives.WriteUInt16LittleEndian(blob.AsSpan(pos + 12), (ushort)(i + 1));
             pos += 14;
         }

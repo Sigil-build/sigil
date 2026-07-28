@@ -131,16 +131,16 @@ internal sealed class ScheduledTaskCreateStep : IStep
 
     private static string MapTrigger(string trigger) => trigger switch
     {
-        "logon"   => "ONLOGON",
-        "daily"   => "DAILY",
+        "logon" => "ONLOGON",
+        "daily" => "DAILY",
         "onstart" => "ONSTART",
-        _         => "ONLOGON",
+        _ => "ONLOGON",
     };
 
     private static string MapRunLevel(string runLevel) => runLevel switch
     {
         "highest" => "HIGHEST",
-        _         => "LIMITED",
+        _ => "LIMITED",
     };
 
     private readonly record struct SchtasksResult(int ExitCode, string Stdout, string Stderr);

@@ -11,26 +11,26 @@ internal static class StepFactory
     // own RunAsync still re-checks via OperatingSystem.IsWindows().
     public static IStep Create(InstallStep spec) => spec switch
     {
-        InstallStep.FileCopy fc           => new FileCopyStep(fc),
-        InstallStep.DirectoryCreate dc    => new DirectoryCreateStep(dc),
-        InstallStep.FileDelete fd         => new FileDeleteStep(fd),
-        InstallStep.DirectoryDelete dd    => new DirectoryDeleteStep(dd),
+        InstallStep.FileCopy fc => new FileCopyStep(fc),
+        InstallStep.DirectoryCreate dc => new DirectoryCreateStep(dc),
+        InstallStep.FileDelete fd => new FileDeleteStep(fd),
+        InstallStep.DirectoryDelete dd => new DirectoryDeleteStep(dd),
 #pragma warning disable CA1416 // Wrapper RID is win-x64; Windows-only steps guard via OperatingSystem.IsWindows().
-        InstallStep.RegistryWrite rw        => new RegistryWriteStep(rw),
+        InstallStep.RegistryWrite rw => new RegistryWriteStep(rw),
         InstallStep.RegistryDeleteValue rdv => new RegistryDeleteValueStep(rdv),
-        InstallStep.RegistryDeleteKey rdk   => new RegistryDeleteKeyStep(rdk),
-        InstallStep.ShortcutCreate sc       => new ShortcutCreateStep(sc),
-        InstallStep.EnvSet es               => new EnvSetStep(es),
-        InstallStep.ServiceInstall si       => new ServiceInstallStep(si),
+        InstallStep.RegistryDeleteKey rdk => new RegistryDeleteKeyStep(rdk),
+        InstallStep.ShortcutCreate sc => new ShortcutCreateStep(sc),
+        InstallStep.EnvSet es => new EnvSetStep(es),
+        InstallStep.ServiceInstall si => new ServiceInstallStep(si),
         InstallStep.ScheduledTaskCreate stc => new ScheduledTaskCreateStep(stc),
-        InstallStep.ComRegister cr          => new ComRegisterStep(cr),
-        InstallStep.FirewallRule fr         => new FirewallRuleStep(fr),
+        InstallStep.ComRegister cr => new ComRegisterStep(cr),
+        InstallStep.FirewallRule fr => new FirewallRuleStep(fr),
 #pragma warning restore CA1416
-        InstallStep.RunProgram rp      => new RunProgramStep(rp),
-        InstallStep.HttpDownload hd    => new HttpDownloadStep(hd),
-        InstallStep.IniWrite iw        => new IniWriteStep(iw),
-        InstallStep.JsonEdit je        => new JsonEditStep(je),
-        InstallStep.XmlEdit xe         => new XmlEditStep(xe),
+        InstallStep.RunProgram rp => new RunProgramStep(rp),
+        InstallStep.HttpDownload hd => new HttpDownloadStep(hd),
+        InstallStep.IniWrite iw => new IniWriteStep(iw),
+        InstallStep.JsonEdit je => new JsonEditStep(je),
+        InstallStep.XmlEdit xe => new XmlEditStep(xe),
         _ => throw new System.NotSupportedException(
             $"step type '{spec.GetType().Name}' is not implemented in the current sprint."),
     };

@@ -19,9 +19,9 @@ internal sealed record SerializableWrapperBlob
         = Array.Empty<SerializableParameterDefinition>();
 
     public SerializableInstallStep[] InstallSteps { get; init; } = Array.Empty<SerializableInstallStep>();
-    public SerializableInstallStep[] PreInstall   { get; init; } = Array.Empty<SerializableInstallStep>();
-    public SerializableInstallStep[] PostInstall  { get; init; } = Array.Empty<SerializableInstallStep>();
-    public SerializableInstallStep[] UpdateSteps  { get; init; } = Array.Empty<SerializableInstallStep>();
+    public SerializableInstallStep[] PreInstall { get; init; } = Array.Empty<SerializableInstallStep>();
+    public SerializableInstallStep[] PostInstall { get; init; } = Array.Empty<SerializableInstallStep>();
+    public SerializableInstallStep[] UpdateSteps { get; init; } = Array.Empty<SerializableInstallStep>();
 
     // --- Add/Remove Programs metadata (T10). Sourced from manifest.App.* +
     //     the packed size; consumed by ArpRegistration at install time. ---
@@ -106,9 +106,9 @@ internal sealed record SerializableWrapperBlob
 
     // --- P2 lifecycle hooks (gap G2). Ordered step lists that run OUTSIDE the
     //     rollback journal, around the transactional body. ---
-    public SerializableInstallStep[] HookPreInstall    { get; init; } = Array.Empty<SerializableInstallStep>();
-    public SerializableInstallStep[] HookPostInstall   { get; init; } = Array.Empty<SerializableInstallStep>();
-    public SerializableInstallStep[] HookPreUninstall  { get; init; } = Array.Empty<SerializableInstallStep>();
+    public SerializableInstallStep[] HookPreInstall { get; init; } = Array.Empty<SerializableInstallStep>();
+    public SerializableInstallStep[] HookPostInstall { get; init; } = Array.Empty<SerializableInstallStep>();
+    public SerializableInstallStep[] HookPreUninstall { get; init; } = Array.Empty<SerializableInstallStep>();
     public SerializableInstallStep[] HookPostUninstall { get; init; } = Array.Empty<SerializableInstallStep>();
 
     // --- P2 run-after-install (gap G4): the Done-screen "Launch <App>" target. ---
@@ -163,26 +163,26 @@ internal sealed record SerializableWrapperBlob
             AppId: s.AppId,
             Parameters: ConvertParameters(s.Parameters),
             InstallSteps: ConvertSteps(s.InstallSteps),
-            PreInstall:   ConvertSteps(s.PreInstall),
-            PostInstall:  ConvertSteps(s.PostInstall),
-            UpdateSteps:  ConvertSteps(s.UpdateSteps),
-            Scope:        s.Scope,
-            Options:      ConvertOptions(s.Options),
-            Vars:         ConvertVars(s.Vars),
-            AppName:      s.AppName,
-            InstallDir:   s.InstallDir,
+            PreInstall: ConvertSteps(s.PreInstall),
+            PostInstall: ConvertSteps(s.PostInstall),
+            UpdateSteps: ConvertSteps(s.UpdateSteps),
+            Scope: s.Scope,
+            Options: ConvertOptions(s.Options),
+            Vars: ConvertVars(s.Vars),
+            AppName: s.AppName,
+            InstallDir: s.InstallDir,
             // T10: real ARP fields threaded into the in-memory blob so
             // InstallSession.PersistCompletion registers the actual
             // name/version/publisher/size instead of the placeholders.
-            DisplayName:        s.DisplayName,
-            Publisher:          s.Publisher,
-            Version:            s.Version,
+            DisplayName: s.DisplayName,
+            Publisher: s.Publisher,
+            Version: s.Version,
             EstimatedSizeBytes: s.EstimatedSizeBytes ?? 0,
             // P2: hooks + launch target.
-            HookPreInstall:      ConvertSteps(s.HookPreInstall),
-            HookPostInstall:     ConvertSteps(s.HookPostInstall),
-            HookPreUninstall:    ConvertSteps(s.HookPreUninstall),
-            HookPostUninstall:   ConvertSteps(s.HookPostUninstall),
+            HookPreInstall: ConvertSteps(s.HookPreInstall),
+            HookPostInstall: ConvertSteps(s.HookPostInstall),
+            HookPreUninstall: ConvertSteps(s.HookPreUninstall),
+            HookPostUninstall: ConvertSteps(s.HookPostUninstall),
             RunAfterInstallPath: s.RunAfterInstallPath,
             RunAfterInstallArgs: s.RunAfterInstallArgs,
             // P5: prerequisite units.
@@ -204,26 +204,26 @@ internal sealed record SerializableWrapperBlob
             AppId = blob.AppId,
             Parameters = SerializeParameters(blob.Parameters),
             InstallSteps = SerializeSteps(blob.InstallSteps),
-            PreInstall   = SerializeSteps(blob.PreInstall),
-            PostInstall  = SerializeSteps(blob.PostInstall),
-            UpdateSteps  = SerializeSteps(blob.UpdateSteps),
-            Scope        = blob.Scope,
-            Options      = SerializeOptions(blob.Options),
-            Vars         = SerializeVars(blob.Vars),
-            AppName      = blob.AppName,
-            InstallDir   = blob.InstallDir,
+            PreInstall = SerializeSteps(blob.PreInstall),
+            PostInstall = SerializeSteps(blob.PostInstall),
+            UpdateSteps = SerializeSteps(blob.UpdateSteps),
+            Scope = blob.Scope,
+            Options = SerializeOptions(blob.Options),
+            Vars = SerializeVars(blob.Vars),
+            AppName = blob.AppName,
+            InstallDir = blob.InstallDir,
             // T10: carry the real ARP fields onto the wire DTO. A zero size is
             // emitted as null so a blob with no computed footprint round-trips to
             // the same "unset" state (matching the DisplayName/Version/Publisher nulls).
-            DisplayName        = blob.DisplayName,
-            Publisher          = blob.Publisher,
-            Version            = blob.Version,
+            DisplayName = blob.DisplayName,
+            Publisher = blob.Publisher,
+            Version = blob.Version,
             EstimatedSizeBytes = blob.EstimatedSizeBytes == 0 ? null : blob.EstimatedSizeBytes,
             // P2: hooks + launch target.
-            HookPreInstall      = SerializeSteps(blob.HookPreInstall ?? Array.Empty<InstallStep>()),
-            HookPostInstall     = SerializeSteps(blob.HookPostInstall ?? Array.Empty<InstallStep>()),
-            HookPreUninstall    = SerializeSteps(blob.HookPreUninstall ?? Array.Empty<InstallStep>()),
-            HookPostUninstall   = SerializeSteps(blob.HookPostUninstall ?? Array.Empty<InstallStep>()),
+            HookPreInstall = SerializeSteps(blob.HookPreInstall ?? Array.Empty<InstallStep>()),
+            HookPostInstall = SerializeSteps(blob.HookPostInstall ?? Array.Empty<InstallStep>()),
+            HookPreUninstall = SerializeSteps(blob.HookPreUninstall ?? Array.Empty<InstallStep>()),
+            HookPostUninstall = SerializeSteps(blob.HookPostUninstall ?? Array.Empty<InstallStep>()),
             RunAfterInstallPath = blob.RunAfterInstallPath,
             RunAfterInstallArgs = blob.RunAfterInstallArgs is null ? null : ToStringArray(blob.RunAfterInstallArgs),
             // P5: prerequisite units.
@@ -427,10 +427,10 @@ internal sealed record SerializableParameterDefinition
             JsonValueKind.Number => type == ParameterType.Int && v.TryGetInt32(out var i)
                 ? i
                 : (v.TryGetInt64(out var l) ? l : v.GetDouble()),
-            JsonValueKind.True   => true,
-            JsonValueKind.False  => false,
-            JsonValueKind.Null   => null,
-            _                    => v,
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Null => null,
+            _ => v,
         };
     }
 
@@ -441,9 +441,9 @@ internal sealed record SerializableParameterDefinition
         string json = value switch
         {
             string s => System.Text.Json.JsonSerializer.Serialize(s, WrapperBlobJsonContext.Default.String),
-            bool b   => b ? "true" : "false",
-            int i    => i.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            long l   => l.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            bool b => b ? "true" : "false",
+            int i => i.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            long l => l.ToString(System.Globalization.CultureInfo.InvariantCulture),
             JsonElement je => je.GetRawText(),
             _ => System.Text.Json.JsonSerializer.Serialize(
                      value.ToString() ?? string.Empty,

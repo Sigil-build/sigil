@@ -102,11 +102,11 @@ public sealed class CancelFlowTests
     // ── CanCancel property ────────────────────────────────────────────────────
 
     [Theory]
-    [InlineData(InstallerStep.Welcome,        true)]
-    [InlineData(InstallerStep.License,        true)]
+    [InlineData(InstallerStep.Welcome, true)]
+    [InlineData(InstallerStep.License, true)]
     [InlineData(InstallerStep.InstallOptions, true)]
-    [InlineData(InstallerStep.Installing,     true)]
-    [InlineData(InstallerStep.Finish,         false)]
+    [InlineData(InstallerStep.Installing, true)]
+    [InlineData(InstallerStep.Finish, false)]
     public void CanCancel_ReflectsCurrentStep(InstallerStep step, bool expected)
     {
         var vm = new InstallerViewModel(new BrandTokens());

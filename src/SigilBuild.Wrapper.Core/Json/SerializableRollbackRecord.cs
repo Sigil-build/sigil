@@ -240,7 +240,7 @@ internal static class SerializableRollbackRecordExtensions
 
             "restore_registry_value" => new RollbackRecord.RestoreRegistryValue(
                 s.Hive ?? throw MissingField("restore_registry_value", "hive"),
-                s.Key  ?? throw MissingField("restore_registry_value", "key"),
+                s.Key ?? throw MissingField("restore_registry_value", "key"),
                 s.Name ?? string.Empty,
                 s.View ?? "default",
                 s.PriorTypeStr,
@@ -249,14 +249,14 @@ internal static class SerializableRollbackRecordExtensions
 
             "restore_registry_key" => new RollbackRecord.RestoreRegistryKey(
                 s.Hive ?? throw MissingField("restore_registry_key", "hive"),
-                s.Key  ?? throw MissingField("restore_registry_key", "key"),
+                s.Key ?? throw MissingField("restore_registry_key", "key"),
                 s.View ?? "default",
                 WireToSnapshots(s.ValuesAtKeyLevel),
                 s.PreviouslyAbsent ?? false),
 
             "restore_env" => new RollbackRecord.RestoreEnv(
                 s.Scope ?? throw MissingField("restore_env", "scope"),
-                s.Name  ?? throw MissingField("restore_env", "name"),
+                s.Name ?? throw MissingField("restore_env", "name"),
                 s.PriorValueString,
                 s.PreviouslyAbsent ?? false),
 
@@ -341,10 +341,10 @@ internal static class SerializableRollbackRecordExtensions
         {
             JsonValueKind.String => v.GetString(),
             JsonValueKind.Number => v.TryGetInt64(out var l) ? l : v.GetDouble(),
-            JsonValueKind.True   => true,
-            JsonValueKind.False  => false,
-            JsonValueKind.Null   => null,
-            _                    => v,
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Null => null,
+            _ => v,
         };
     }
 
@@ -360,12 +360,12 @@ internal static class SerializableRollbackRecordExtensions
 
         string json = value switch
         {
-            string s       => JsonSerializer.Serialize(s, WrapperBlobJsonContext.Default.String),
-            bool b         => b ? "true" : "false",
-            int i          => i.ToString(CultureInfo.InvariantCulture),
-            long l         => l.ToString(CultureInfo.InvariantCulture),
+            string s => JsonSerializer.Serialize(s, WrapperBlobJsonContext.Default.String),
+            bool b => b ? "true" : "false",
+            int i => i.ToString(CultureInfo.InvariantCulture),
+            long l => l.ToString(CultureInfo.InvariantCulture),
             JsonElement je => je.GetRawText(),
-            _              => JsonSerializer.Serialize(
+            _ => JsonSerializer.Serialize(
                                   value.ToString() ?? string.Empty,
                                   WrapperBlobJsonContext.Default.String),
         };

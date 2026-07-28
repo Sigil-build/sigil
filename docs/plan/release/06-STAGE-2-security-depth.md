@@ -47,6 +47,18 @@ step-`type` enum appears in **multiple** places in the schema file, and
 `tests/SigilBuild.Schema.Tests/` fixtures must move in the same commit or
 `pr-guards`' `schema-lockstep` job fails the PR.
 
+> **S4 carries a proof obligation the other lanes do not.** Stage 0's final
+> review established that `schema-lockstep`'s **failing** path has never
+> executed — every run so far has taken the early-exit-when-schema-untouched
+> branch at `.github/workflows/pr-guards.yml:53-56`. The branch was traced by
+> hand and no bug was found, but it is untested code on a load-bearing gate.
+> **S4 is the first lane to touch the schema, so it is that gate's
+> proof-of-failure.** Before landing the full lockstep chain, push a commit that
+> changes `schemas/sigil-schema.json` **alone** and confirm the job **fails**
+> naming the missing companions; then add the companions and confirm it passes.
+> Record both run URLs. Same principle as G0's throwaway PR: a gate nobody has
+> seen fail is not a gate.
+
 ## File structure
 
 | File | Action | Responsibility |

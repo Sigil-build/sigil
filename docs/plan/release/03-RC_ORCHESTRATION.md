@@ -176,6 +176,23 @@ assumed.**
 - [ ] **Proof of gate:** open a throwaway PR titled `broken title` against the
       RC and **watch `pr-guards` fail it**, then close the PR. A gate nobody has
       seen fail is not a gate.
+- [ ] **Branch protection — the checks must GATE, not merely report.** Added
+      after Stage 0's final review found that
+      `gh api repos/Sigil-build/sigil/branches/release%2Fv0.1.0-alpha/protection`
+      returns **404 "Branch not protected"** and `main` has no required status
+      checks. Without this, a lane PR can go fully red and still be merged, and
+      Stage 0's whole purpose is only half met.
+
+      Require on `release/v0.1.0-alpha`: `build`, `aot publish (win-x64)`,
+      `conventional-commit PR title`, `schema / docs lockstep`, `dotnet format`,
+      `gitleaks`.
+
+      > **Do NOT require `docs drift check`.** `.github/workflows/docs.yml:8-13`
+      > puts a `paths:` filter on its `pull_request` trigger, so on a PR touching
+      > none of those paths the check never reports at all — and a required-check
+      > rule on a check that never reports wedges the PR permanently. `ci.yml`,
+      > `secret-scan.yml` and `pr-guards.yml` carry no path filters and are safe
+      > to require.
 - [ ] `dotnet build -c Release` and `dotnet test -c Release` totals unchanged
       from before Stage 0 (record both)
 

@@ -6,7 +6,7 @@ name: pr-guards
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, 'release/**']
     types: [opened, edited, synchronize, reopened]
 
 permissions:
@@ -81,6 +81,26 @@ jobs:
 
       - name: restore
         run: dotnet restore Sigil.slnx
+
+      # No -c/--configuration here: 'dotnet format' below also runs with no
+      # -c flag, so it resolves project-reference analyzers against MSBuild's
+      # default configuration (Debug). Building the generator as -c Release
+      # populates bin/Release/netstandard2.0/ while format looks in
+      # bin/Debug/netstandard2.0/ — verified locally this leaves the analyzer
+      # unresolved and CS0246 still fires. Keep this step's configuration in
+      # sync with the format step's (i.e. both unset) rather than pinning
+      # either one independently.
+      - name: build source generators
+        run: dotnet build src/SigilBuild.Localization.Generator/SigilBuild.Localization.Generator.csproj --no-restore
+
+      - name: assert the generator analyzer is discoverable
+        shell: pwsh
+        run: |
+          $dll = 'src/SigilBuild.Localization.Generator/bin/Debug/netstandard2.0/SigilBuild.Localization.Generator.dll'
+          if (-not (Test-Path $dll)) {
+            Write-Error "Source generator not found at $dll. 'dotnet format' resolves project-reference analyzers against MSBuild's DEFAULT configuration, so the build step above must NOT pass -c/--configuration. If you just added one, remove it. Without this assembly every file using the generated 'Lang' enum fails CS0246 and the format job's error output will look like a code defect rather than a CI-config defect."
+            exit 1
+          }
 
       - name: verify formatting
         run: dotnet format Sigil.slnx --verify-no-changes --no-restore

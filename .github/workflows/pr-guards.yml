@@ -82,5 +82,16 @@ jobs:
       - name: restore
         run: dotnet restore Sigil.slnx
 
+      # No -c/--configuration here: 'dotnet format' below also runs with no
+      # -c flag, so it resolves project-reference analyzers against MSBuild's
+      # default configuration (Debug). Building the generator as -c Release
+      # populates bin/Release/netstandard2.0/ while format looks in
+      # bin/Debug/netstandard2.0/ — verified locally this leaves the analyzer
+      # unresolved and CS0246 still fires. Keep this step's configuration in
+      # sync with the format step's (i.e. both unset) rather than pinning
+      # either one independently.
+      - name: build source generators
+        run: dotnet build src/SigilBuild.Localization.Generator/SigilBuild.Localization.Generator.csproj --no-restore
+
       - name: verify formatting
         run: dotnet format Sigil.slnx --verify-no-changes --no-restore

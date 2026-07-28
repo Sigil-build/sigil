@@ -204,6 +204,92 @@ apply.ps1 instructions."
 
 ---
 
+## Task 2b: Widen the CI triggers to cover the RC branch
+
+**Added mid-execution, 2026-07-28**, after Task 2's review found that
+`pr-guards.yml:9` scopes itself to `on.pull_request.branches: [main]`.
+Investigation showed **all four** workflows do the same, so the RC branch and
+every lane PR into it currently run **no CI whatsoever** — no build, no tests,
+no coverage gate, no format gate, no gitleaks. The design's premise that
+"PR-per-lane gives `pr-guards` a per-lane gate" was false. Human ruled: widen
+all four.
+
+This must land **before Task 4**, because Task 4 opens the first lane PR and
+performs the G0 gate-proof ceremony, both of which are meaningless without it.
+
+**Files:**
+- Modify: `.github/workflows/pr-guards.yml`, `ci.yml`, `docs.yml`, `secret-scan.yml`
+
+**Interfaces:**
+- Consumes: Task 2's installed `pr-guards.yml`
+- Produces: workflows that trigger for PRs based on `release/**` and for pushes
+  to `release/**` — the precondition for every later lane's PR being gated
+
+- [ ] **Step 1: Confirm the scope of the problem**
+
+```bash
+grep -n -A3 "^on:" .github/workflows/pr-guards.yml .github/workflows/ci.yml \
+  .github/workflows/docs.yml .github/workflows/secret-scan.yml
+```
+
+Expected: every one shows `branches: [main]` under `pull_request` (and, for
+`ci`/`docs`/`secret-scan`, under `push` too).
+
+- [ ] **Step 2: Widen every branch filter**
+
+In all four files, change each branch list from `[main]` to
+`[main, 'release/**']`. Apply it to **both** the `push:` and `pull_request:`
+filters wherever each appears. Do not change `types:`, `paths:`, `permissions:`,
+`concurrency:`, or any job body — only the branch lists.
+
+Note the resulting behaviour, and confirm you understand it before editing:
+lane branches are named `rc/<lane>-<slug>`, which does **not** match
+`release/**`. That is intentional. A push to a lane branch triggers nothing; the
+`pull_request` filter matches on the **base** branch, so a PR from
+`rc/s1-trusted-state` into `release/v0.1.0-alpha` **is** gated, and the `push`
+filter re-runs CI on the RC itself after each merge. That is exactly the desired
+shape — gate the PR, then re-verify the integrated result.
+
+- [ ] **Step 3: Validate all four still parse**
+
+```bash
+for f in pr-guards ci docs secret-scan; do
+  python3 -c "import yaml,sys; yaml.safe_load(open('.github/workflows/$f.yml')); print('$f OK')"
+done
+```
+
+Expected: four `OK` lines.
+
+- [ ] **Step 4: Verify the filters by inspection**
+
+```bash
+grep -n -B1 -A2 "branches:" .github/workflows/*.yml
+```
+
+Expected: every `branches:` list now contains both `main` and `release/**`.
+Count them — `ci.yml`, `docs.yml`, and `secret-scan.yml` have two each (push +
+pull_request), `pr-guards.yml` has one (pull_request only). **Seven** in total.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add .github/workflows/
+git commit -m "ci: trigger workflows for release/** branches (R20)
+
+All four workflows scoped themselves to branches: [main], so the
+release/v0.1.0-alpha RC branch and every lane PR into it would have run no
+CI at all — no build, no tests, no coverage gate, no format gate, no
+gitleaks. The RC track's premise that a PR per lane gets gated by pr-guards
+was false.
+
+Adds release/** to every push and pull_request branch filter. Lane branches
+(rc/*) still trigger nothing on push; the pull_request filter matches the
+base branch, so lane PRs into the RC are gated and CI re-runs on the RC
+after each merge."
+```
+
+---
+
 ## Task 3: Fix `.gitignore`
 
 **Files:**

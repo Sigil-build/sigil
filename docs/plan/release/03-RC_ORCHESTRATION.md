@@ -11,19 +11,19 @@
 > `schema / docs lockstep`, `conventional-commit PR title`. Tests unchanged
 > throughout at **1097 total / 1096 passed / 1 skipped / 0 failed**.
 >
-> ### ⚠️ One item outstanding before Stage 1 opens
+> ### ✅ The RC is gated (confirmed 2026-07-28)
 >
-> Ruleset `19919273` ("release") is **configured correctly but
-> `enforcement: disabled`**, so nothing gates the RC:
-> `gh api repos/Sigil-build/sigil/rules/branches/release%2Fv0.1.0-alpha` returns
-> **`[]`**. Until it is `active`, lane PRs can merge fully red — the checks
-> report but do not block.
+> Ruleset `19919273` ("release") is **`enforcement: active`**.
+> `gh api repos/Sigil-build/sigil/rules/branches/release%2Fv0.1.0-alpha` reports
+> four rule types in force — `deletion`, `non_fast_forward`, `pull_request`,
+> `required_status_checks` — with six required contexts: `build`,
+> `aot publish (win-x64)`, `dotnet format`, `schema / docs lockstep`,
+> `conventional-commit PR title`, `gitleaks`.
 >
-> ```bash
-> gh api -X PUT repos/Sigil-build/sigil/rulesets/19919273 -f enforcement=active
-> # verify (expect a non-empty list):
-> gh api "repos/Sigil-build/sigil/rules/branches/release%2Fv0.1.0-alpha" --jq '.[].type'
-> ```
+> `docs drift check` is deliberately **not** required: `docs.yml:8-13`
+> path-filters its `pull_request` trigger, so on a PR touching none of those
+> paths it never reports, and a required-check rule on a never-reporting check
+> wedges the PR permanently.
 >
 > Note the ruleset sets `strict_required_status_checks_policy: true`, so once
 > active each merge into the RC invalidates the other open lane PRs and they must

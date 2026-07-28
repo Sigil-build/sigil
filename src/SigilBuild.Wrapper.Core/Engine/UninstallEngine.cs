@@ -39,7 +39,9 @@ public sealed class UninstallEngine
     {
         ArgumentException.ThrowIfNullOrEmpty(appId);
 
-        var loaded = UninstallStateStore.TryLoad(appId, preferredScope);
+        // progress is threaded through so an R1 state refusal reaches the console,
+        // the wizard log pane and the /LOG file instead of vanishing.
+        var loaded = UninstallStateStore.TryLoad(appId, preferredScope, progress);
         if (loaded is null)
         {
             return EngineResult.Failed(

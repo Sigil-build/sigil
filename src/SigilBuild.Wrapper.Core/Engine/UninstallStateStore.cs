@@ -68,7 +68,19 @@ internal static class UninstallStateStore
         ArgumentNullException.ThrowIfNull(journal);
 
         var dir = DirectoryFor(appId, scope);
-        Directory.CreateDirectory(dir);
+
+        // R1: machine scope lands in %ProgramData%, whose inherited DACL grants
+        // BUILTIN\Users write and makes the creating user CREATOR OWNER. Create it
+        // with an explicit, non-inherited DACL instead. User scope legitimately
+        // lives in the user's own profile, so hardening it would be meaningless.
+        if (scope == InstallScope.Machine && OperatingSystem.IsWindows())
+        {
+            StateDirectorySecurity.CreateHardened(dir);
+        }
+        else
+        {
+            Directory.CreateDirectory(dir);
+        }
 
         var records = new SerializableRollbackRecord[journal.Records.Count];
         for (var i = 0; i < journal.Records.Count; i++)
@@ -125,9 +137,15 @@ internal static class UninstallStateStore
     /// and drives ARP-hive / state-dir selection. Returns <c>null</c> when no
     /// state file exists in either scope or the JSON is unreadable; the caller
     /// (<c>UninstallEngine</c>) translates that into the documented "no uninstall
-    /// state found" error.
+    /// state found" error. Machine-scope state whose directory is not owned by
+    /// SYSTEM or Administrators is refused outright (R1) and reported on
+    /// <paramref name="progress"/> — the store has no logger of its own, and the
+    /// caller's progress sink is what the <c>/LOG</c> file is fed from.
     /// </summary>
-    public static LoadedState? TryLoad(string appId, InstallScope preferredScope)
+    public static LoadedState? TryLoad(
+        string appId,
+        InstallScope preferredScope,
+        IProgress<StepProgress>? progress = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(appId);
 
@@ -143,6 +161,24 @@ internal static class UninstallStateStore
             if (!File.Exists(path))
             {
                 continue;
+            }
+
+            // R1: an unprivileged user can pre-create %ProgramData%\Sigil\<AppId>
+            // and become CREATOR OWNER of the file the elevated uninstall later
+            // replays. Refuse rather than replay, and say so — and do NOT fall
+            // through to the other scope, because a silent skip here reads as
+            // "no prior install" and would mask an attack.
+            if (dirScope == InstallScope.Machine
+                && OperatingSystem.IsWindows()
+                && !StateDirectorySecurity.IsTrusted(DirectoryFor(appId, dirScope)))
+            {
+                progress?.Report(new StepProgress(
+                    0,
+                    0,
+                    $"refusing state in '{DirectoryFor(appId, dirScope)}': " +
+                    "not owned by SYSTEM or Administrators",
+                    IsError: true));
+                return null;
             }
 
             var json = File.ReadAllText(path);

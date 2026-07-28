@@ -307,6 +307,113 @@ after each merge."
 
 ---
 
+## Task 2c: Make the format gate able to pass at all
+
+**Added mid-execution, 2026-07-28**, after Task 4 opened the first lane PR and the
+`dotnet format` job **failed in CI while passing locally**.
+
+**Diagnosis.** `Lang` is a source-generated type —
+`src/SigilBuild.Localization.Generator/StringsEmitter.cs:27` emits
+`public enum Lang { En… }`. The format job
+(`.github/workflows/pr-guards.yml`) runs:
+
+```yaml
+- name: restore
+  run: dotnet restore Sigil.slnx
+- name: verify formatting
+  run: dotnet format Sigil.slnx --verify-no-changes --no-restore
+```
+
+`restore` is not `build`. On a clean CI checkout the analyzer assembly
+`SigilBuild.Localization.Generator.dll` (netstandard2.0) has never been produced,
+so the generator cannot run, so `Lang` is never emitted, so **every** file
+referencing it fails `CS0246: The type or namespace name 'Lang' could not be
+found` — roughly 40 errors across `SigilBuild.Wrapper.Tests` and
+`SigilBuild.Installer.Host.Tests`. The job exits 1 on compile errors, not on
+formatting.
+
+It passes on the dev machine only because
+`src/SigilBuild.Localization.Generator/bin/Release/netstandard2.0/` is already
+populated from earlier builds. **This gate could never have passed in CI as
+written** — nobody noticed because the workflow was never installed until Task 2.
+
+**Files:**
+- Modify: `.github/workflows/pr-guards.yml` (the `format` job only)
+
+**Interfaces:**
+- Consumes: Task 2's installed workflow, Task 2b's widened triggers
+- Produces: a `format` job that actually reports formatting, not compile errors
+
+- [ ] **Step 1: Reproduce the CI failure locally — do not skip this**
+
+The whole reason this shipped broken is that nobody reproduced a clean-checkout
+build. Simulate one by removing the generator's output:
+
+```bash
+mv src/SigilBuild.Localization.Generator/bin /tmp/gen-bin-backup
+mv src/SigilBuild.Localization.Generator/obj /tmp/gen-obj-backup
+dotnet restore Sigil.slnx
+dotnet format Sigil.slnx --verify-no-changes --no-restore 2>&1 | grep -c "CS0246"
+```
+
+Expected: a non-zero count of `CS0246` errors, reproducing CI. If you get 0, the
+generator output is still being found somewhere — investigate before continuing,
+because a fix you cannot see fail is a fix you cannot trust.
+
+- [ ] **Step 2: Fix the job**
+
+Insert a build step before the format verification. Prefer building **only the
+generator**, because `pr-guards.yml`'s own header states these are "deterministic
+checks that don't need the full build matrix" — a full solution build here would
+duplicate `ci.yml` and make every PR wait on it twice:
+
+```yaml
+      - name: build source generators
+        run: dotnet build src/SigilBuild.Localization.Generator/SigilBuild.Localization.Generator.csproj -c Release --no-restore
+
+      - name: verify formatting
+        run: dotnet format Sigil.slnx --verify-no-changes --no-restore
+```
+
+If the targeted build proves insufficient (any remaining `CS0246`), fall back to
+`dotnet build Sigil.slnx -c Release --no-restore` and say in your report that you
+had to, and why.
+
+- [ ] **Step 3: Verify the fix against the reproduction**
+
+```bash
+dotnet build src/SigilBuild.Localization.Generator/SigilBuild.Localization.Generator.csproj -c Release --no-restore
+dotnet format Sigil.slnx --verify-no-changes --no-restore; echo "format exit=$?"
+```
+
+Expected: exit **0**, and zero `CS0246`. Then restore your backups:
+
+```bash
+rm -rf src/SigilBuild.Localization.Generator/bin src/SigilBuild.Localization.Generator/obj
+mv /tmp/gen-bin-backup src/SigilBuild.Localization.Generator/bin
+mv /tmp/gen-obj-backup src/SigilBuild.Localization.Generator/obj
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add .github/workflows/pr-guards.yml
+git commit -m "ci: build source generators before the format check (R20)
+
+The format job ran 'dotnet restore' then 'dotnet format --no-restore' with no
+build in between. Restore is not build, so on a clean checkout the
+SigilBuild.Localization.Generator analyzer assembly did not exist, the
+generator never ran, and the generated 'Lang' enum was missing — producing
+~40 CS0246 errors and a job failure that had nothing to do with formatting.
+
+The gate could never have passed in CI as written; it only passed locally
+because the generator's bin/ was already populated from earlier builds.
+
+Builds the generator project before verifying formatting."
+```
+
+---
+
 ## Task 3: Fix `.gitignore`
 
 **Files:**

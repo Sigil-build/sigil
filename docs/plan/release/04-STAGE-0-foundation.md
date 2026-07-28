@@ -1,5 +1,32 @@
 # Stage 0 — Foundation
 
+> ## ✅ COMPLETE — merged 2026-07-28 as [PR #16](https://github.com/Sigil-build/sigil/pull/16) → `c82f5eb`
+>
+> Gate **G0 passed**. Closes register rows **R20, R40, R41**.
+>
+> **Executed as 6 tasks, not the 4 planned.** Tasks 2b and 2c were added
+> mid-flight because running the gates exposed defects that were invisible on
+> paper. The full record, including every finding and adjudication, was kept in
+> the SDD ledger and is summarised here:
+>
+> | # | Defect | Found by |
+> |---|---|---|
+> | 1 | Gate-proof PR branched from a base with no `pr-guards.yml` → would have "passed" having run no job at all | pre-flight scan |
+> | 2 | All four workflows scoped `branches: [main]` → the RC and every lane PR would have run **zero CI** | Task 2 review → **Task 2b** |
+> | 3 | `python3` YAML checks unrunnable here (Windows Store alias stub, not an interpreter) | Task 2b implementer |
+> | 4 | The format gate **could never have passed in CI** — `restore` is not `build`, so the source generator never ran and `Lang` was never emitted (~54 `CS0246`) | running the gate → **Task 2c** |
+> | 5 | The *fix* for #4 was also wrong — `-c Release` puts the generator where `dotnet format` does not look | Task 2c implementer, by reproducing |
+> | 6 | Checks **ran but were not required** — no branch protection | final whole-branch review |
+> | 7 | The ruleset added to fix #6 was created with `enforcement: disabled` | post-merge verification |
+>
+> Every one is the same failure mode — a gate that appears to work while proving
+> nothing — recursing one level up each time. #6 and #7 remain open as a repo
+> setting; see the status block in
+> [`03-RC_ORCHESTRATION.md`](03-RC_ORCHESTRATION.md).
+>
+> Three of the seven were subagents correcting the orchestrator. In each case the
+> correction came because they were asked to **reproduce** rather than assert.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: use `superpowers:subagent-driven-development`
 > or `superpowers:executing-plans`. Steps use checkbox (`- [ ]`) syntax.
 > Global constraints live in [`03-RC_ORCHESTRATION.md`](03-RC_ORCHESTRATION.md#global-constraints)

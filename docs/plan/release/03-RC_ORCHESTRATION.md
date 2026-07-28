@@ -1,5 +1,53 @@
 # Release-candidate track — orchestration
 
+> ## Status: Stage 0 COMPLETE (2026-07-28) · Stage 1 ready to open
+>
+> **Stage 0 (lane F0) merged as [PR #16](https://github.com/Sigil-build/sigil/pull/16)
+> → `c82f5eb`.** Gate **G0 passed**, including its proof-of-failure ceremony:
+> throwaway PR #17, titled `broken title`, was *observed failing* the
+> `conventional-commit PR title` job, then closed. Register rows **R20, R40, R41**
+> closed. Full CI green on the RC: `build`, `dotnet format`,
+> `aot publish (win-x64)`, `docs drift check`, `gitleaks`,
+> `schema / docs lockstep`, `conventional-commit PR title`. Tests unchanged
+> throughout at **1097 total / 1096 passed / 1 skipped / 0 failed**.
+>
+> ### ⚠️ One item outstanding before Stage 1 opens
+>
+> Ruleset `19919273` ("release") is **configured correctly but
+> `enforcement: disabled`**, so nothing gates the RC:
+> `gh api repos/Sigil-build/sigil/rules/branches/release%2Fv0.1.0-alpha` returns
+> **`[]`**. Until it is `active`, lane PRs can merge fully red — the checks
+> report but do not block.
+>
+> ```bash
+> gh api -X PUT repos/Sigil-build/sigil/rulesets/19919273 -f enforcement=active
+> # verify (expect a non-empty list):
+> gh api "repos/Sigil-build/sigil/rules/branches/release%2Fv0.1.0-alpha" --jq '.[].type'
+> ```
+>
+> Note the ruleset sets `strict_required_status_checks_policy: true`, so once
+> active each merge into the RC invalidates the other open lane PRs and they must
+> be rebased before merging. That is the correct trade for this track — it
+> guarantees each lane's checks ran against the integrated tree — but it makes
+> the G1 merge order (S1 → S2 → S3 → T1) a serial rebase chain, not a free-for-all.
+> `bypass_actors` is empty and `current_user_can_bypass` is `never`, so **direct
+> pushes to `release/**` will also stop working** once it is active; bookkeeping
+> edits to these plan docs then need a PR like anything else.
+
+### CI evidence captured at G0 (authoritative — resolves audit UNVERIFIED items)
+
+| Metric | Audit (local) | CI |
+|---|---|---|
+| `SigilBuild.Core` coverage | 63.89% | **63.89%** |
+| `SigilBuild.Signing` coverage | 68.79% | **68.79%** |
+| Project-wide union | 75.17% | **74.74%** |
+| `sigil.exe` size | 13.98 MB | **13.98 MB** (≤ 15 MB gate) |
+| AOT publish | fails on dev box | **succeeds in CI** |
+
+**R21 confirmed:** the coverage denominator contains only six assemblies —
+`SigilBuild.Cli`, `SigilBuild.Wrapper` and `SigilBuild.Installer.Host`
+contribute zero lines. T1 fixes this.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: use `superpowers:subagent-driven-development`
 > (recommended) or `superpowers:executing-plans` to implement the stage documents
 > task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -290,7 +338,7 @@ Merge order: **S4 → S5 → S6 → REL → SUP → DOC**.
 
 | Lane | Branch | Started | PR | Merged | Gate |
 |------|--------|:---:|:---:|:---:|------|
-| F0  | `rc/f0-foundation` | ☐ | ☐ | ☐ | G0 |
+| F0  | `rc/f0-foundation` | ☑ | [#16](https://github.com/Sigil-build/sigil/pull/16) | ☑ `c82f5eb` | **G0 ✅** |
 | S1  | `rc/s1-trusted-state` | ☐ | ☐ | ☐ | G1 |
 | S2  | `rc/s2-path-containment` | ☐ | ☐ | ☐ | G1 |
 | S3  | `rc/s3-staged-execution` | ☐ | ☐ | ☐ | G1 |

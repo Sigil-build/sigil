@@ -38,8 +38,10 @@ appsettings.Local.json
 .env
 .env.*
 !.env.example
-./docs/
 dist/
+
+# Agent scratch space — excluded by repo policy, not by a nested .gitignore
+.superpowers/
 
 # Claude Code — personal settings stay local; .claude/settings.json is shared
 .claude/settings.local.json

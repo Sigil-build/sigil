@@ -1,6 +1,24 @@
 # Fix plan — first public release
 
-Status: **NOT STARTED (authored 2026-07-28)** against `main` @ `1be494c`.
+> ## ⚠️ SUPERSEDED
+>
+> This document is the audit's **initial** lane sketch, kept as a record of what
+> the audit proposed on 2026-07-28. It is **not** the plan being executed.
+>
+> The live plan is [`03-RC_ORCHESTRATION.md`](03-RC_ORCHESTRATION.md) and its
+> five stage documents. It differs in three ways that matter:
+>
+> - **Scope.** This document defers the post-v1 rows (R33–R39) and the notes
+>   (R40–R43). The executed track covers **all 46**.
+> - **Integration.** This document merges lanes to `main`. The executed track
+>   uses a `release/v0.1.0-alpha` branch with a PR per lane.
+> - **Granularity.** This document gives one prompt per lane. The stage
+>   documents give TDD tasks with real test code and per-step verification.
+>
+> Do not execute from this file. Findings and evidence still live in
+> [`00-GAP_REGISTER.md`](00-GAP_REGISTER.md), which remains authoritative.
+
+Status: **SUPERSEDED (authored 2026-07-28)** against `main` @ `1be494c`.
 
 Execution companion to [`00-GAP_REGISTER.md`](00-GAP_REGISTER.md) — the register
 defines *what is wrong*; this defines *who fixes what, when*. Same execution

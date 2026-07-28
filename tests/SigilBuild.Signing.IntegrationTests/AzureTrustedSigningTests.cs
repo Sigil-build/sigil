@@ -17,7 +17,8 @@ using SigilBuild.Signing.Azure;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Soft-skips (returns Passed) unless every gating condition is met:
+/// Reports a genuine Skipped result (via <see cref="AzureTrustedSigningFactAttribute"/>,
+/// register row R6) unless every gating condition is met:
 /// </para>
 /// <list type="bullet">
 ///   <item><description><c>SIGIL_AZURE_TS_INTEGRATION=1</c> in the environment — opt-in flag for the live-tenant suite.</description></item>
@@ -25,6 +26,17 @@ using SigilBuild.Signing.Azure;
 ///   <item><description><c>SIGIL_AZURE_TS_ENDPOINT</c>, <c>SIGIL_AZURE_TS_ACCOUNT</c>, <c>SIGIL_AZURE_TS_PROFILE</c> populated.</description></item>
 ///   <item><description>A test-artifact path for the format under test (<c>SIGIL_AZURE_TS_TEST_MSIX</c>, <c>SIGIL_AZURE_TS_TEST_ZIP</c>, <c>SIGIL_AZURE_TS_TEST_EXE</c>).</description></item>
 /// </list>
+/// <para>
+/// Previously a single <c>[Theory]</c> with three <c>[InlineData]</c> rows. Converted
+/// to three discrete <c>[Fact]</c>s (R6 fix round 1): xunit v2's <c>Skip</c> is
+/// resolved once per attribute instance at discovery, before any row's data is bound,
+/// so a <c>[Theory]</c> cannot report a different Skip reason per row — the missing
+/// per-format artifact precondition could not become a real, per-row Skipped result
+/// while it stayed a Theory. Splitting into one Fact per format (each carrying its own
+/// artifact env var at compile time) lets <see cref="AzureTrustedSigningFactAttribute"/>
+/// report the correct reason per format. The shared body and its assertions are
+/// unchanged.
+/// </para>
 /// <para>
 /// The test never persists secrets to disk and tears down the produced
 /// <c>.sig</c> file in cleanup. CI scheduling lives in
@@ -34,33 +46,21 @@ using SigilBuild.Signing.Azure;
 /// </remarks>
 public class AzureTrustedSigningTests
 {
-    private const string OptInVar = "SIGIL_AZURE_TS_INTEGRATION";
+    [AzureTrustedSigningFact("SIGIL_AZURE_TS_TEST_MSIX")]
+    public Task Signs_msix_artifact_against_live_tenant() =>
+        SignArtifactAsync("msix", "SIGIL_AZURE_TS_TEST_MSIX");
 
-    private static bool ShouldRun() =>
-        Environment.GetEnvironmentVariable(OptInVar) == "1" &&
-        !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("AZURE_TENANT_ID")) &&
-        !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("AZURE_CLIENT_ID")) &&
-        !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("AZURE_CLIENT_SECRET")) &&
-        !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SIGIL_AZURE_TS_ENDPOINT")) &&
-        !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SIGIL_AZURE_TS_ACCOUNT")) &&
-        !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SIGIL_AZURE_TS_PROFILE"));
+    [AzureTrustedSigningFact("SIGIL_AZURE_TS_TEST_ZIP")]
+    public Task Signs_zip_artifact_against_live_tenant() =>
+        SignArtifactAsync("zip", "SIGIL_AZURE_TS_TEST_ZIP");
 
-    [Theory]
-    [InlineData("msix", "SIGIL_AZURE_TS_TEST_MSIX")]
-    [InlineData("zip", "SIGIL_AZURE_TS_TEST_ZIP")]
-    [InlineData("exe-wrapper", "SIGIL_AZURE_TS_TEST_EXE")]
-    public async Task Signs_artifact_against_live_tenant(string format, string artifactEnvVar)
+    [AzureTrustedSigningFact("SIGIL_AZURE_TS_TEST_EXE")]
+    public Task Signs_exe_wrapper_artifact_against_live_tenant() =>
+        SignArtifactAsync("exe-wrapper", "SIGIL_AZURE_TS_TEST_EXE");
+
+    private static async Task SignArtifactAsync(string format, string artifactEnvVar)
     {
-        if (!ShouldRun())
-        {
-            return; // soft-skip — see class remarks.
-        }
-
-        var artifactPath = Environment.GetEnvironmentVariable(artifactEnvVar);
-        if (string.IsNullOrEmpty(artifactPath) || !File.Exists(artifactPath))
-        {
-            return; // soft-skip — no test artifact provided for this format.
-        }
+        var artifactPath = Environment.GetEnvironmentVariable(artifactEnvVar)!;
 
         var config = new AzureTrustedSigningConfig(
             Endpoint: Environment.GetEnvironmentVariable("SIGIL_AZURE_TS_ENDPOINT")!,

@@ -9,8 +9,10 @@ namespace SigilBuild.Wrapper.IntegrationTests;
 /// Exercises the REAL <c>WinVerifyTrust</c> P/Invoke behind
 /// <see cref="AuthenticodeVerifier"/> (T11 / decision 7) against files with a
 /// known Authenticode state — no bespoke test cert required. Windows-only; on
-/// other hosts (and when the reference file is absent) the tests soft-skip
-/// (early <c>return</c>, reported Passed) mirroring the VM-gated install tests.
+/// other hosts (and when the reference file is absent) the tests report a genuine
+/// Skipped result (via <see cref="AuthenticodeFactAttribute"/> /
+/// <see cref="AuthenticodeReferenceFileFactAttribute"/>, register row R6) mirroring
+/// the VM-gated install tests.
 /// The pure trust-line gating decision is covered in the unit test project; this
 /// proves the native call itself distinguishes a validly-signed binary from an
 /// unsigned one.
@@ -22,14 +24,9 @@ public class AuthenticodeVerifierTests
     private static string SignedSystemFile =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "kernel32.dll");
 
-    [Fact]
+    [AuthenticodeReferenceFileFact]
     public void VerifyFile_returns_true_for_a_signed_system_binary()
     {
-        if (!OperatingSystem.IsWindows() || !File.Exists(SignedSystemFile))
-        {
-            return; // soft-skip — see class remarks.
-        }
-
         // Register row R17 switched revocation checking on (WTD_REVOKE_WHOLECHAIN), which
         // means this file's verdict now depends on whether a CRL/OCSP responder is
         // reachable. Asserting BeTrue would make this test pass on a networked host and
@@ -44,14 +41,9 @@ public class AuthenticodeVerifierTests
             "kernel32.dll is Authenticode/catalog-signed; only its revocation reachability may vary");
     }
 
-    [Fact]
+    [AuthenticodeFact]
     public void VerifyFile_returns_false_for_an_unsigned_binary()
     {
-        if (!OperatingSystem.IsWindows())
-        {
-            return; // soft-skip — see class remarks.
-        }
-
         // A freshly written file has no signature: WinVerifyTrust reports
         // TRUST_E_NOSIGNATURE / TRUST_E_SUBJECT_FORM_UNKNOWN → not trusted.
         var tmp = Path.Combine(Path.GetTempPath(), "sigil-unsigned-" + Path.GetRandomFileName() + ".exe");

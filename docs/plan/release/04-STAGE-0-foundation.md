@@ -368,16 +368,28 @@ checks that don't need the full build matrix" — a full solution build here wou
 duplicate `ci.yml` and make every PR wait on it twice:
 
 ```yaml
+      # No -c/--configuration here: 'dotnet format' below also runs with no -c
+      # flag, so it resolves project-reference analyzers against MSBuild's
+      # default configuration (Debug). Keep the two in sync rather than pinning
+      # either independently.
       - name: build source generators
-        run: dotnet build src/SigilBuild.Localization.Generator/SigilBuild.Localization.Generator.csproj -c Release --no-restore
+        run: dotnet build src/SigilBuild.Localization.Generator/SigilBuild.Localization.Generator.csproj --no-restore
 
       - name: verify formatting
         run: dotnet format Sigil.slnx --verify-no-changes --no-restore
 ```
 
+> **Corrected 2026-07-28.** An earlier draft of this task specified
+> `dotnet build … -c Release --no-restore`. **That does not work**, and the
+> implementer proved it by reproducing: with `-c Release` the generator lands in
+> `bin/Release/netstandard2.0/` while `dotnet format` — which is never given a
+> `-c` flag — looks in `bin/Debug/netstandard2.0/`. All 54 `CS0246` errors
+> remained and format still exited 2. The configuration of the build step must
+> **match** the format step's, which means leaving both unset.
+
 If the targeted build proves insufficient (any remaining `CS0246`), fall back to
-`dotnet build Sigil.slnx -c Release --no-restore` and say in your report that you
-had to, and why.
+`dotnet build Sigil.slnx --no-restore` and say in your report that you had to,
+and why.
 
 - [ ] **Step 3: Verify the fix against the reproduction**
 

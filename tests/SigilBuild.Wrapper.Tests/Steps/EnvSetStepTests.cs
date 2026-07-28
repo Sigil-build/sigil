@@ -29,14 +29,14 @@ public class EnvSetStepTests
     }
 
     [Theory]
-    [InlineData("set",     "old",       "new", ";", "new")]
-    [InlineData("set",     null,        "new", ";", "new")]
-    [InlineData("append",  "C:/a;C:/b", "NEW", ";", "C:/a;C:/b;NEW")]
+    [InlineData("set", "old", "new", ";", "new")]
+    [InlineData("set", null, "new", ";", "new")]
+    [InlineData("append", "C:/a;C:/b", "NEW", ";", "C:/a;C:/b;NEW")]
     [InlineData("prepend", "C:/a;C:/b", "NEW", ";", "NEW;C:/a;C:/b")]
-    [InlineData("append",  null,        "NEW", ";", "NEW")]
-    [InlineData("append",  "",          "NEW", ";", "NEW")]
-    [InlineData("prepend", null,        "NEW", ";", "NEW")]
-    [InlineData("prepend", "",          "NEW", ";", "NEW")]
+    [InlineData("append", null, "NEW", ";", "NEW")]
+    [InlineData("append", "", "NEW", ";", "NEW")]
+    [InlineData("prepend", null, "NEW", ";", "NEW")]
+    [InlineData("prepend", "", "NEW", ";", "NEW")]
     public void ComputeNewValue_returns_correct_combined_string(
         string action, string? prior, string value, string sep, string expected)
     {

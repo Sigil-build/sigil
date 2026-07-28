@@ -283,7 +283,7 @@ internal static class SerializableInstallStepConverter
             "service_install" => new InstallStep.ServiceInstall(
                 s.Id,
                 s.ServiceName ?? throw MissingField("service_install", "name", s.Id),
-                s.BinaryPath  ?? throw MissingField("service_install", "binary_path", s.Id),
+                s.BinaryPath ?? throw MissingField("service_install", "binary_path", s.Id),
                 s.DisplayName ?? s.ServiceName ?? "",
                 s.ServiceDescription,
                 s.StartType ?? "auto",
@@ -562,16 +562,16 @@ internal static class SerializableInstallStepConverter
     {
         "rollback" => OnFailure.Rollback,
         "continue" => OnFailure.Continue,
-        "fail"     => OnFailure.Fail,
-        _          => OnFailure.Fail,
+        "fail" => OnFailure.Fail,
+        _ => OnFailure.Fail,
     };
 
     private static string FormatOnFailure(OnFailure value) => value switch
     {
         OnFailure.Rollback => "rollback",
         OnFailure.Continue => "continue",
-        OnFailure.Fail     => "fail",
-        _                  => "fail",
+        OnFailure.Fail => "fail",
+        _ => "fail",
     };
 
     private static InvalidOperationException MissingField(string type, string field, string id) =>
@@ -602,10 +602,10 @@ internal static class SerializableInstallStepConverter
         {
             JsonValueKind.String => v.GetString(),
             JsonValueKind.Number => v.TryGetInt64(out var l) ? l : v.GetDouble(),
-            JsonValueKind.True   => true,
-            JsonValueKind.False  => false,
-            JsonValueKind.Null   => null,
-            _                    => v,
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Null => null,
+            _ => v,
         };
     }
 
@@ -623,9 +623,9 @@ internal static class SerializableInstallStepConverter
         string json = value switch
         {
             string s => System.Text.Json.JsonSerializer.Serialize(s, WrapperBlobJsonContext.Default.String),
-            bool b   => b ? "true" : "false",
-            int i    => i.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            long l   => l.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            bool b => b ? "true" : "false",
+            int i => i.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            long l => l.ToString(System.Globalization.CultureInfo.InvariantCulture),
             JsonElement je => je.GetRawText(),
             _ => System.Text.Json.JsonSerializer.Serialize(
                      value.ToString() ?? string.Empty,

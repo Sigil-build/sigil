@@ -19,10 +19,10 @@ internal static class RegistryHelper
     /// </summary>
     public static RegistryHive ParseHive(string? hive) => hive switch
     {
-        "HKLM" or "HKEY_LOCAL_MACHINE"  => RegistryHive.LocalMachine,
-        "HKCU" or "HKEY_CURRENT_USER"   => RegistryHive.CurrentUser,
-        "HKCR" or "HKEY_CLASSES_ROOT"   => RegistryHive.ClassesRoot,
-        "HKU"  or "HKEY_USERS"          => RegistryHive.Users,
+        "HKLM" or "HKEY_LOCAL_MACHINE" => RegistryHive.LocalMachine,
+        "HKCU" or "HKEY_CURRENT_USER" => RegistryHive.CurrentUser,
+        "HKCR" or "HKEY_CLASSES_ROOT" => RegistryHive.ClassesRoot,
+        "HKU" or "HKEY_USERS" => RegistryHive.Users,
         "HKCC" or "HKEY_CURRENT_CONFIG" => RegistryHive.CurrentConfig,
         _ => throw new ArgumentException($"unknown registry hive '{hive}'"),
     };
@@ -46,12 +46,12 @@ internal static class RegistryHelper
     /// </summary>
     public static RegistryValueKind ParseValueKind(string? type) => type switch
     {
-        "REG_SZ"        => RegistryValueKind.String,
-        "REG_DWORD"     => RegistryValueKind.DWord,
-        "REG_QWORD"     => RegistryValueKind.QWord,
-        "REG_MULTI_SZ"  => RegistryValueKind.MultiString,
+        "REG_SZ" => RegistryValueKind.String,
+        "REG_DWORD" => RegistryValueKind.DWord,
+        "REG_QWORD" => RegistryValueKind.QWord,
+        "REG_MULTI_SZ" => RegistryValueKind.MultiString,
         "REG_EXPAND_SZ" => RegistryValueKind.ExpandString,
-        "REG_BINARY"    => RegistryValueKind.Binary,
+        "REG_BINARY" => RegistryValueKind.Binary,
         _ => throw new ArgumentException($"unknown registry value kind '{type}'"),
     };
 
@@ -61,13 +61,13 @@ internal static class RegistryHelper
     /// </summary>
     public static string ValueKindToString(RegistryValueKind k) => k switch
     {
-        RegistryValueKind.String       => "REG_SZ",
-        RegistryValueKind.DWord        => "REG_DWORD",
-        RegistryValueKind.QWord        => "REG_QWORD",
-        RegistryValueKind.MultiString  => "REG_MULTI_SZ",
+        RegistryValueKind.String => "REG_SZ",
+        RegistryValueKind.DWord => "REG_DWORD",
+        RegistryValueKind.QWord => "REG_QWORD",
+        RegistryValueKind.MultiString => "REG_MULTI_SZ",
         RegistryValueKind.ExpandString => "REG_EXPAND_SZ",
-        RegistryValueKind.Binary       => "REG_BINARY",
-        _                              => "REG_NONE",
+        RegistryValueKind.Binary => "REG_BINARY",
+        _ => "REG_NONE",
     };
 
     /// <summary>

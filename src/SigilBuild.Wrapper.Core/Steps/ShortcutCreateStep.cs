@@ -72,7 +72,7 @@ internal sealed class ShortcutCreateStep : IStep
     private static string ResolveLocation(string location, StepContext ctx) => location switch
     {
         "start_menu" => ctx.Layout.StartMenuFolder,
-        "desktop"    => ctx.Layout.DesktopFolder,
-        _            => location,
+        "desktop" => ctx.Layout.DesktopFolder,
+        _ => location,
     };
 }

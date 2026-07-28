@@ -93,8 +93,8 @@ internal sealed class EnvSetStep : IStep
     /// </summary>
     internal static string ComputeNewValue(string action, string? prior, string value, string separator) => action switch
     {
-        "set"     => value,
-        "append"  => string.IsNullOrEmpty(prior) ? value : prior + separator + value,
+        "set" => value,
+        "append" => string.IsNullOrEmpty(prior) ? value : prior + separator + value,
         "prepend" => string.IsNullOrEmpty(prior) ? value : value + separator + prior,
         _ => throw new ArgumentException($"unknown env_set action '{action}'"),
     };
@@ -114,7 +114,7 @@ internal sealed class EnvSetStep : IStep
 
     private static RegistryKey? OpenEnvKey(string scope, bool writable) => scope switch
     {
-        "user"    => Registry.CurrentUser.OpenSubKey("Environment", writable),
+        "user" => Registry.CurrentUser.OpenSubKey("Environment", writable),
         "machine" => Registry.LocalMachine.OpenSubKey(
             @"System\CurrentControlSet\Control\Session Manager\Environment", writable),
         _ => throw new ArgumentException($"unknown env scope '{scope}'"),

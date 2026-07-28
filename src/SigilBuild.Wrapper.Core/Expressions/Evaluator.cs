@@ -131,42 +131,42 @@ public sealed class Evaluator
         switch (op)
         {
             case "&&":
-            {
-                var l = Evaluate(leftNode, ctx);
-                if (l is not bool lb)
                 {
-                    throw new ExpressionException($"operator '&&' requires boolean operands, got {Describe(l)}");
-                }
+                    var l = Evaluate(leftNode, ctx);
+                    if (l is not bool lb)
+                    {
+                        throw new ExpressionException($"operator '&&' requires boolean operands, got {Describe(l)}");
+                    }
 
-                if (!lb)
-                {
-                    return false;
-                }
+                    if (!lb)
+                    {
+                        return false;
+                    }
 
-                var r = Evaluate(rightNode, ctx);
-                return r is bool rb
-                    ? rb
-                    : throw new ExpressionException($"operator '&&' requires boolean operands, got {Describe(r)}");
-            }
+                    var r = Evaluate(rightNode, ctx);
+                    return r is bool rb
+                        ? rb
+                        : throw new ExpressionException($"operator '&&' requires boolean operands, got {Describe(r)}");
+                }
 
             case "||":
-            {
-                var l = Evaluate(leftNode, ctx);
-                if (l is not bool lb)
                 {
-                    throw new ExpressionException($"operator '||' requires boolean operands, got {Describe(l)}");
-                }
+                    var l = Evaluate(leftNode, ctx);
+                    if (l is not bool lb)
+                    {
+                        throw new ExpressionException($"operator '||' requires boolean operands, got {Describe(l)}");
+                    }
 
-                if (lb)
-                {
-                    return true;
-                }
+                    if (lb)
+                    {
+                        return true;
+                    }
 
-                var r = Evaluate(rightNode, ctx);
-                return r is bool rb
-                    ? rb
-                    : throw new ExpressionException($"operator '||' requires boolean operands, got {Describe(r)}");
-            }
+                    var r = Evaluate(rightNode, ctx);
+                    return r is bool rb
+                        ? rb
+                        : throw new ExpressionException($"operator '||' requires boolean operands, got {Describe(r)}");
+                }
         }
 
         var left = Evaluate(leftNode, ctx);

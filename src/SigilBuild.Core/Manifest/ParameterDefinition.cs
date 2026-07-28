@@ -26,6 +26,6 @@ public sealed record ParameterDefinition(
 /// keep these two surfaces in sync.
 /// </summary>
 #pragma warning disable CA1720 // Identifier contains type name — these are intentionally
-                              // shaped to mirror the YAML schema's `type:` enum surface.
+// shaped to mirror the YAML schema's `type:` enum surface.
 public enum ParameterType { String, Path, Bool, Int, Enum, Secret }
 #pragma warning restore CA1720

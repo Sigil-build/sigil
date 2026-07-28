@@ -5,8 +5,8 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
 using NJsonSchema;
-using YamlDotNet.RepresentationModel;
 using Xunit;
+using YamlDotNet.RepresentationModel;
 
 namespace SigilBuild.Schema.Tests;
 

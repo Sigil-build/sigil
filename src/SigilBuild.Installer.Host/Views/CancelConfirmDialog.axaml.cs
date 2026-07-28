@@ -16,5 +16,5 @@ public sealed partial class CancelConfirmDialog : Window
     }
 
     private void OnYes(object? _, RoutedEventArgs __) => Close(true);
-    private void OnNo(object? _, RoutedEventArgs __)  => Close(false);
+    private void OnNo(object? _, RoutedEventArgs __) => Close(false);
 }

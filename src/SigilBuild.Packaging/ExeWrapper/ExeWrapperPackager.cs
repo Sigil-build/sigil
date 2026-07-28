@@ -370,9 +370,9 @@ public sealed class ExeWrapperPackager : IPackager
             // var.<name>. Order-preserving; cycles were rejected at parse time.
             Vars: manifest.Installer?.Vars,
             // P2 (gap G2): lifecycle hooks that run outside the journal.
-            HookPreInstall:    manifest.Installer?.Hooks?.PreInstall,
-            HookPostInstall:   manifest.Installer?.Hooks?.PostInstall,
-            HookPreUninstall:  manifest.Installer?.Hooks?.PreUninstall,
+            HookPreInstall: manifest.Installer?.Hooks?.PreInstall,
+            HookPostInstall: manifest.Installer?.Hooks?.PostInstall,
+            HookPreUninstall: manifest.Installer?.Hooks?.PreUninstall,
             HookPostUninstall: manifest.Installer?.Hooks?.PostUninstall,
             // P2 (gap G4): the Done-screen "Launch <App>" target.
             RunAfterInstallPath: manifest.Installer?.RunAfterInstall?.Path,

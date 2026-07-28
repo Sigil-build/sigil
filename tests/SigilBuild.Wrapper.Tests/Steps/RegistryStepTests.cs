@@ -85,9 +85,9 @@ public class RegistryStepTests
     }
 
     [Theory]
-    [InlineData("REG_SZ",        "hello",  RegistryValueKind.String)]
-    [InlineData("REG_DWORD",     42,       RegistryValueKind.DWord)]
-    [InlineData("REG_QWORD",     999_999L, RegistryValueKind.QWord)]
+    [InlineData("REG_SZ", "hello", RegistryValueKind.String)]
+    [InlineData("REG_DWORD", 42, RegistryValueKind.DWord)]
+    [InlineData("REG_QWORD", 999_999L, RegistryValueKind.QWord)]
     [InlineData("REG_EXPAND_SZ", "%PATH%", RegistryValueKind.ExpandString)]
     public async Task RegistryWrite_round_trips_scalar_value_kinds(
         string typeStr, object raw, RegistryValueKind expectedKind)

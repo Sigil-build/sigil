@@ -45,8 +45,10 @@ public sealed class SignToolRunner
     {
         var psi = new ProcessStartInfo(_exePath)
         {
-            RedirectStandardOutput = true, RedirectStandardError = true,
-            UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
         };
         foreach (var a in args) psi.ArgumentList.Add(a);
 

@@ -80,7 +80,7 @@ public class ExeWrapperPackagerTests
         }
 
         var fixtureDir = Path.Combine(AppContext.BaseDirectory, "Fixtures", "minimal-payload");
-        var outputDir  = Path.Combine(Path.GetTempPath(), $"sigil-wrap-{Guid.NewGuid():N}");
+        var outputDir = Path.Combine(Path.GetTempPath(), $"sigil-wrap-{Guid.NewGuid():N}");
         Directory.CreateDirectory(outputDir);
 
         var loadResult = await ManifestLoader.LoadAsync(

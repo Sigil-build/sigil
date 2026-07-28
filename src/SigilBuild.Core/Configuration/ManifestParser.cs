@@ -467,10 +467,10 @@ public static class ManifestParser
     {
         if (node is null) return null;
 
-        var pre   = ParseInstallSteps(GetSequenceOfMappings(node, "pre_install"),   scope, diagnostics, fileName, OnFailure.Fail);
-        var post  = ParseInstallSteps(GetSequenceOfMappings(node, "post_install"),  scope, diagnostics, fileName, OnFailure.Continue);
-        var preU  = ParseInstallSteps(GetSequenceOfMappings(node, "pre_uninstall"), scope, diagnostics, fileName, OnFailure.Fail);
-        var postU = ParseInstallSteps(GetSequenceOfMappings(node, "post_uninstall"),scope, diagnostics, fileName, OnFailure.Continue);
+        var pre = ParseInstallSteps(GetSequenceOfMappings(node, "pre_install"), scope, diagnostics, fileName, OnFailure.Fail);
+        var post = ParseInstallSteps(GetSequenceOfMappings(node, "post_install"), scope, diagnostics, fileName, OnFailure.Continue);
+        var preU = ParseInstallSteps(GetSequenceOfMappings(node, "pre_uninstall"), scope, diagnostics, fileName, OnFailure.Fail);
+        var postU = ParseInstallSteps(GetSequenceOfMappings(node, "post_uninstall"), scope, diagnostics, fileName, OnFailure.Continue);
 
         if (pre is null && post is null && preU is null && postU is null)
         {
@@ -1089,10 +1089,10 @@ public static class ManifestParser
             if (sourceMap is not null)
             {
                 var paramLoc = new SourceLocation(fileName, (int)keyNode.Start.Line, (int)keyNode.Start.Column);
-                var url     = GetScalar(sourceMap, "url");
-                var itemsP  = GetScalar(sourceMap, "items_path");
-                var valueP  = GetScalar(sourceMap, "value_property");
-                var labelP  = GetScalar(sourceMap, "label_property");
+                var url = GetScalar(sourceMap, "url");
+                var itemsP = GetScalar(sourceMap, "items_path");
+                var valueP = GetScalar(sourceMap, "value_property");
+                var labelP = GetScalar(sourceMap, "label_property");
                 if (url is null || itemsP is null || valueP is null || labelP is null)
                 {
                     diagnostics.Add(new Diagnostic(
@@ -1126,20 +1126,20 @@ public static class ManifestParser
 
     // Per-step "known field" allowlists. Hoisted to static readonly fields so the
     // analyzer (CA1861) doesn't fault us for allocating them on every step parse.
-    private static readonly string[] FileCopyFields            = { "id", "type", "when", "on_failure", "from", "to", "overwrite" };
-    private static readonly string[] DirectoryCreateFields     = { "id", "type", "when", "on_failure", "path" };
-    private static readonly string[] FileDeleteFields          = { "id", "type", "when", "on_failure", "path", "if_missing" };
-    private static readonly string[] DirectoryDeleteFields     = { "id", "type", "when", "on_failure", "path", "recursive" };
-    private static readonly string[] RegistryWriteFields       = { "id", "type", "when", "on_failure", "hive", "key", "name", "type_value", "value_type", "value", "view" };
+    private static readonly string[] FileCopyFields = { "id", "type", "when", "on_failure", "from", "to", "overwrite" };
+    private static readonly string[] DirectoryCreateFields = { "id", "type", "when", "on_failure", "path" };
+    private static readonly string[] FileDeleteFields = { "id", "type", "when", "on_failure", "path", "if_missing" };
+    private static readonly string[] DirectoryDeleteFields = { "id", "type", "when", "on_failure", "path", "recursive" };
+    private static readonly string[] RegistryWriteFields = { "id", "type", "when", "on_failure", "hive", "key", "name", "type_value", "value_type", "value", "view" };
     private static readonly string[] RegistryDeleteValueFields = { "id", "type", "when", "on_failure", "hive", "key", "name", "view" };
-    private static readonly string[] RegistryDeleteKeyFields   = { "id", "type", "when", "on_failure", "hive", "key", "recursive", "view" };
-    private static readonly string[] ShortcutCreateFields      = { "id", "type", "when", "on_failure", "target", "location", "name", "args", "working_dir", "icon", "description" };
-    private static readonly string[] EnvSetFields              = { "id", "type", "when", "on_failure", "name", "value", "scope", "action", "separator" };
-    private static readonly string[] RunProgramFields          = { "id", "type", "when", "on_failure", "program", "args", "wait", "cwd", "expected_exit_codes", "timeout_seconds" };
-    private static readonly string[] HttpDownloadFields        = { "id", "type", "when", "on_failure", "url", "dest", "sha256", "timeout_seconds", "retries" };
-    private static readonly string[] IniWriteFields            = { "id", "type", "when", "on_failure", "path", "section", "key", "value", "create_if_missing" };
-    private static readonly string[] JsonEditFields           = { "id", "type", "when", "on_failure", "path", "pointer", "value", "create_if_missing" };
-    private static readonly string[] XmlEditFields            = { "id", "type", "when", "on_failure", "path", "xpath", "attribute", "value", "create_if_missing" };
+    private static readonly string[] RegistryDeleteKeyFields = { "id", "type", "when", "on_failure", "hive", "key", "recursive", "view" };
+    private static readonly string[] ShortcutCreateFields = { "id", "type", "when", "on_failure", "target", "location", "name", "args", "working_dir", "icon", "description" };
+    private static readonly string[] EnvSetFields = { "id", "type", "when", "on_failure", "name", "value", "scope", "action", "separator" };
+    private static readonly string[] RunProgramFields = { "id", "type", "when", "on_failure", "program", "args", "wait", "cwd", "expected_exit_codes", "timeout_seconds" };
+    private static readonly string[] HttpDownloadFields = { "id", "type", "when", "on_failure", "url", "dest", "sha256", "timeout_seconds", "retries" };
+    private static readonly string[] IniWriteFields = { "id", "type", "when", "on_failure", "path", "section", "key", "value", "create_if_missing" };
+    private static readonly string[] JsonEditFields = { "id", "type", "when", "on_failure", "path", "pointer", "value", "create_if_missing" };
+    private static readonly string[] XmlEditFields = { "id", "type", "when", "on_failure", "path", "xpath", "attribute", "value", "create_if_missing" };
 
     private static List<InstallStep>? ParseInstallSteps(
         List<YamlMappingNode>? nodes, InstallScope scope, List<Diagnostic> diagnostics, string fileName,
@@ -1194,24 +1194,24 @@ public static class ManifestParser
 
         var step = typeStr switch
         {
-            "file_copy"             => BuildFileCopy(node, id!, when, onFailure, diagnostics, loc),
-            "directory_create"      => BuildDirectoryCreate(node, id!, when, onFailure, diagnostics, loc),
-            "file_delete"           => BuildFileDelete(node, id!, when, onFailure, diagnostics, loc),
-            "directory_delete"      => BuildDirectoryDelete(node, id!, when, onFailure, diagnostics, loc),
-            "registry_write"        => BuildRegistryWrite(node, id!, when, onFailure, diagnostics, loc),
+            "file_copy" => BuildFileCopy(node, id!, when, onFailure, diagnostics, loc),
+            "directory_create" => BuildDirectoryCreate(node, id!, when, onFailure, diagnostics, loc),
+            "file_delete" => BuildFileDelete(node, id!, when, onFailure, diagnostics, loc),
+            "directory_delete" => BuildDirectoryDelete(node, id!, when, onFailure, diagnostics, loc),
+            "registry_write" => BuildRegistryWrite(node, id!, when, onFailure, diagnostics, loc),
             "registry_delete_value" => BuildRegistryDeleteValue(node, id!, when, onFailure, diagnostics, loc),
-            "registry_delete_key"   => BuildRegistryDeleteKey(node, id!, when, onFailure, diagnostics, loc),
-            "shortcut_create"       => BuildShortcutCreate(node, id!, when, onFailure, diagnostics, loc),
-            "env_set"               => BuildEnvSet(node, id!, when, onFailure, diagnostics, loc),
-            "run_program"           => BuildRunProgram(node, id!, when, onFailure, diagnostics, loc),
-            "http_download"         => BuildHttpDownload(node, id!, when, onFailure, diagnostics, loc),
-            "ini_write"             => BuildIniWrite(node, id!, when, onFailure, diagnostics, loc),
-            "json_edit"             => BuildJsonEdit(node, id!, when, onFailure, diagnostics, loc),
-            "xml_edit"              => BuildXmlEdit(node, id!, when, onFailure, diagnostics, loc),
-            "service_install"       => BuildServiceInstall(node, id!, when, onFailure, diagnostics, loc),
+            "registry_delete_key" => BuildRegistryDeleteKey(node, id!, when, onFailure, diagnostics, loc),
+            "shortcut_create" => BuildShortcutCreate(node, id!, when, onFailure, diagnostics, loc),
+            "env_set" => BuildEnvSet(node, id!, when, onFailure, diagnostics, loc),
+            "run_program" => BuildRunProgram(node, id!, when, onFailure, diagnostics, loc),
+            "http_download" => BuildHttpDownload(node, id!, when, onFailure, diagnostics, loc),
+            "ini_write" => BuildIniWrite(node, id!, when, onFailure, diagnostics, loc),
+            "json_edit" => BuildJsonEdit(node, id!, when, onFailure, diagnostics, loc),
+            "xml_edit" => BuildXmlEdit(node, id!, when, onFailure, diagnostics, loc),
+            "service_install" => BuildServiceInstall(node, id!, when, onFailure, diagnostics, loc),
             "scheduled_task_create" => BuildScheduledTaskCreate(node, id!, when, onFailure, diagnostics, loc),
-            "com_register"          => BuildComRegister(node, id!, when, onFailure, diagnostics, loc),
-            "firewall_rule"         => BuildFirewallRule(node, id!, when, onFailure, diagnostics, loc),
+            "com_register" => BuildComRegister(node, id!, when, onFailure, diagnostics, loc),
+            "firewall_rule" => BuildFirewallRule(node, id!, when, onFailure, diagnostics, loc),
             _ => ReportUnknownStepType(id!, typeStr!, loc, diagnostics),
         };
 
@@ -1239,13 +1239,13 @@ public static class ManifestParser
     {
         var name = GetScalar(node, "name");
         var binaryPath = GetScalar(node, "binary_path");
-        if (name is null)        { ReportMissingField(id, "service_install", "name",        loc, diagnostics); return null; }
-        if (binaryPath is null)  { ReportMissingField(id, "service_install", "binary_path", loc, diagnostics); return null; }
+        if (name is null) { ReportMissingField(id, "service_install", "name", loc, diagnostics); return null; }
+        if (binaryPath is null) { ReportMissingField(id, "service_install", "binary_path", loc, diagnostics); return null; }
 
-        var displayName       = GetScalar(node, "display_name") ?? name;
-        var description       = GetScalar(node, "description");
-        var startType         = GetScalar(node, "start_type") ?? "auto";
-        var serviceAccount    = GetScalar(node, "service_account") ?? "LocalSystem";
+        var displayName = GetScalar(node, "display_name") ?? name;
+        var description = GetScalar(node, "description");
+        var startType = GetScalar(node, "start_type") ?? "auto";
+        var serviceAccount = GetScalar(node, "service_account") ?? "LocalSystem";
         var startAfterInstall = GetBool(node, "start_after_install", defaultValue: true);
 
         ReportUnknownStepFields(node, id, "service_install", ServiceInstallFields, loc, diagnostics);
@@ -1270,7 +1270,7 @@ public static class ManifestParser
         var name = GetScalar(node, "name");
         var program = GetScalar(node, "program");
         var trigger = GetScalar(node, "trigger");
-        if (name is null)    { ReportMissingField(id, "scheduled_task_create", "name",    loc, diagnostics); return null; }
+        if (name is null) { ReportMissingField(id, "scheduled_task_create", "name", loc, diagnostics); return null; }
         if (program is null) { ReportMissingField(id, "scheduled_task_create", "program", loc, diagnostics); return null; }
         if (trigger is null) { ReportMissingField(id, "scheduled_task_create", "trigger", loc, diagnostics); return null; }
 
@@ -1348,9 +1348,9 @@ public static class ManifestParser
         var name = GetScalar(node, "name");
         var direction = GetScalar(node, "direction");
         var action = GetScalar(node, "action");
-        if (name is null)      { ReportMissingField(id, "firewall_rule", "name",      loc, diagnostics); return null; }
+        if (name is null) { ReportMissingField(id, "firewall_rule", "name", loc, diagnostics); return null; }
         if (direction is null) { ReportMissingField(id, "firewall_rule", "direction", loc, diagnostics); return null; }
-        if (action is null)    { ReportMissingField(id, "firewall_rule", "action",    loc, diagnostics); return null; }
+        if (action is null) { ReportMissingField(id, "firewall_rule", "action", loc, diagnostics); return null; }
 
         if (!FirewallDirectionValues.Contains(direction))
         {
@@ -1399,9 +1399,9 @@ public static class ManifestParser
     {
         "rollback" => OnFailure.Rollback,
         "continue" => OnFailure.Continue,
-        "fail"     => OnFailure.Fail,
-        null       => OnFailure.Fail,
-        _          => OnFailure.Fail,
+        "fail" => OnFailure.Fail,
+        null => OnFailure.Fail,
+        _ => OnFailure.Fail,
     };
 
     private static InstallStep.FileCopy? BuildFileCopy(
@@ -1411,7 +1411,7 @@ public static class ManifestParser
         var from = GetScalar(node, "from");
         var to = GetScalar(node, "to");
         if (from is null) { ReportMissingField(id, "file_copy", "from", loc, diagnostics); return null; }
-        if (to is null)   { ReportMissingField(id, "file_copy", "to",   loc, diagnostics); return null; }
+        if (to is null) { ReportMissingField(id, "file_copy", "to", loc, diagnostics); return null; }
         var overwrite = GetBool(node, "overwrite", defaultValue: true);
         ReportUnknownStepFields(node, id, "file_copy", FileCopyFields, loc, diagnostics);
         return new InstallStep.FileCopy(id, from, to, overwrite, when, onFailure);
@@ -1458,7 +1458,7 @@ public static class ManifestParser
         var name = GetScalar(node, "name");
         var typeValue = GetScalar(node, "type_value") ?? GetScalar(node, "value_type");
         if (hive is null) { ReportMissingField(id, "registry_write", "hive", loc, diagnostics); return null; }
-        if (key  is null) { ReportMissingField(id, "registry_write", "key",  loc, diagnostics); return null; }
+        if (key is null) { ReportMissingField(id, "registry_write", "key", loc, diagnostics); return null; }
         if (name is null) { ReportMissingField(id, "registry_write", "name", loc, diagnostics); return null; }
         // The step-level "type" field is reused for the step kind — registry value type
         // travels under the alias "type_value" (or "value_type"). If not provided, default to REG_SZ.
@@ -1476,7 +1476,7 @@ public static class ManifestParser
         var key = GetScalar(node, "key");
         var name = GetScalar(node, "name");
         if (hive is null) { ReportMissingField(id, "registry_delete_value", "hive", loc, diagnostics); return null; }
-        if (key  is null) { ReportMissingField(id, "registry_delete_value", "key",  loc, diagnostics); return null; }
+        if (key is null) { ReportMissingField(id, "registry_delete_value", "key", loc, diagnostics); return null; }
         if (name is null) { ReportMissingField(id, "registry_delete_value", "name", loc, diagnostics); return null; }
         var view = GetScalar(node, "view") ?? "native";
         ReportUnknownStepFields(node, id, "registry_delete_value", RegistryDeleteValueFields, loc, diagnostics);
@@ -1490,7 +1490,7 @@ public static class ManifestParser
         var hive = GetScalar(node, "hive");
         var key = GetScalar(node, "key");
         if (hive is null) { ReportMissingField(id, "registry_delete_key", "hive", loc, diagnostics); return null; }
-        if (key  is null) { ReportMissingField(id, "registry_delete_key", "key",  loc, diagnostics); return null; }
+        if (key is null) { ReportMissingField(id, "registry_delete_key", "key", loc, diagnostics); return null; }
         var recursive = GetBool(node, "recursive", defaultValue: false);
         var view = GetScalar(node, "view") ?? "native";
         ReportUnknownStepFields(node, id, "registry_delete_key", RegistryDeleteKeyFields, loc, diagnostics);
@@ -1504,9 +1504,9 @@ public static class ManifestParser
         var target = GetScalar(node, "target");
         var location = GetScalar(node, "location");
         var name = GetScalar(node, "name");
-        if (target   is null) { ReportMissingField(id, "shortcut_create", "target",   loc, diagnostics); return null; }
+        if (target is null) { ReportMissingField(id, "shortcut_create", "target", loc, diagnostics); return null; }
         if (location is null) { ReportMissingField(id, "shortcut_create", "location", loc, diagnostics); return null; }
-        if (name     is null) { ReportMissingField(id, "shortcut_create", "name",     loc, diagnostics); return null; }
+        if (name is null) { ReportMissingField(id, "shortcut_create", "name", loc, diagnostics); return null; }
         var args = GetSequence(node, "args");
         var workingDir = GetScalar(node, "working_dir");
         var icon = GetScalar(node, "icon");
@@ -1521,7 +1521,7 @@ public static class ManifestParser
     {
         var name = GetScalar(node, "name");
         var value = GetScalar(node, "value");
-        if (name  is null) { ReportMissingField(id, "env_set", "name",  loc, diagnostics); return null; }
+        if (name is null) { ReportMissingField(id, "env_set", "name", loc, diagnostics); return null; }
         if (value is null) { ReportMissingField(id, "env_set", "value", loc, diagnostics); return null; }
         var scope = GetScalar(node, "scope") ?? "user";
         var action = GetScalar(node, "action") ?? "set";
@@ -1552,7 +1552,7 @@ public static class ManifestParser
         var url = GetScalar(node, "url");
         var dest = GetScalar(node, "dest");
         var sha256 = GetScalar(node, "sha256");
-        if (url  is null) { ReportMissingField(id, "http_download", "url",  loc, diagnostics); return null; }
+        if (url is null) { ReportMissingField(id, "http_download", "url", loc, diagnostics); return null; }
         if (dest is null) { ReportMissingField(id, "http_download", "dest", loc, diagnostics); return null; }
 
         // sha256 is REQUIRED — refuse to pack a download without an integrity check.
@@ -1593,7 +1593,7 @@ public static class ManifestParser
         var path = GetScalar(node, "path");
         var key = GetScalar(node, "key");
         if (path is null) { ReportMissingField(id, "ini_write", "path", loc, diagnostics); return null; }
-        if (key  is null) { ReportMissingField(id, "ini_write", "key",  loc, diagnostics); return null; }
+        if (key is null) { ReportMissingField(id, "ini_write", "key", loc, diagnostics); return null; }
         var section = GetScalar(node, "section") ?? string.Empty;
         var value = GetScalar(node, "value") ?? string.Empty;
         var createIfMissing = GetBool(node, "create_if_missing", defaultValue: false);
@@ -1607,7 +1607,7 @@ public static class ManifestParser
     {
         var path = GetScalar(node, "path");
         var pointer = GetScalar(node, "pointer");
-        if (path    is null) { ReportMissingField(id, "json_edit", "path",    loc, diagnostics); return null; }
+        if (path is null) { ReportMissingField(id, "json_edit", "path", loc, diagnostics); return null; }
         if (pointer is null) { ReportMissingField(id, "json_edit", "pointer", loc, diagnostics); return null; }
         var value = GetScalar(node, "value") ?? string.Empty;
         var createIfMissing = GetBool(node, "create_if_missing", defaultValue: false);
@@ -1621,7 +1621,7 @@ public static class ManifestParser
     {
         var path = GetScalar(node, "path");
         var xpath = GetScalar(node, "xpath");
-        if (path  is null) { ReportMissingField(id, "xml_edit", "path",  loc, diagnostics); return null; }
+        if (path is null) { ReportMissingField(id, "xml_edit", "path", loc, diagnostics); return null; }
         if (xpath is null) { ReportMissingField(id, "xml_edit", "xpath", loc, diagnostics); return null; }
         var attribute = GetScalar(node, "attribute");
         var value = GetScalar(node, "value") ?? string.Empty;
@@ -1694,12 +1694,12 @@ public static class ManifestParser
         switch (raw)
         {
             case "string": type = ParameterType.String; return true;
-            case "path":   type = ParameterType.Path;   return true;
-            case "bool":   type = ParameterType.Bool;   return true;
-            case "int":    type = ParameterType.Int;    return true;
-            case "enum":   type = ParameterType.Enum;   return true;
+            case "path": type = ParameterType.Path; return true;
+            case "bool": type = ParameterType.Bool; return true;
+            case "int": type = ParameterType.Int; return true;
+            case "enum": type = ParameterType.Enum; return true;
             case "secret": type = ParameterType.Secret; return true;
-            default:       type = default;              return false;
+            default: type = default; return false;
         }
     }
 
@@ -1715,7 +1715,7 @@ public static class ManifestParser
         return type switch
         {
             ParameterType.Bool => bool.TryParse(scalar.Value, out var b) ? b : (object?)scalar.Value,
-            ParameterType.Int  => int.TryParse(scalar.Value, out var i)  ? i : (object?)scalar.Value,
+            ParameterType.Int => int.TryParse(scalar.Value, out var i) ? i : (object?)scalar.Value,
             _ => scalar.Value,
         };
     }

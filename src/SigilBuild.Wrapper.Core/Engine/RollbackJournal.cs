@@ -320,7 +320,7 @@ public abstract record RollbackRecord
         [SupportedOSPlatform("windows")]
         private static RegistryKey? OpenEnvKey(string scope, bool writable) => scope switch
         {
-            "user"    => Registry.CurrentUser.OpenSubKey("Environment", writable),
+            "user" => Registry.CurrentUser.OpenSubKey("Environment", writable),
             "machine" => Registry.LocalMachine.OpenSubKey(
                 @"System\CurrentControlSet\Control\Session Manager\Environment", writable),
             _ => throw new System.ArgumentException($"unknown env scope '{scope}'"),

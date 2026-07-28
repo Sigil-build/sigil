@@ -91,8 +91,8 @@ public static class AppxManifestBuilder
         var plus = semver.IndexOf('+');
         var cut = (dash, plus) switch
         {
-            (>= 0, >= 0) => Math.Min(dash, plus),
-            (>= 0, _) => dash,
+            ( >= 0, >= 0) => Math.Min(dash, plus),
+            ( >= 0, _) => dash,
             (_, >= 0) => plus,
             _ => semver.Length,
         };

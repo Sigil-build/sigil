@@ -2,9 +2,9 @@ name: docs
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'release/**']
   pull_request:
-    branches: [main]
+    branches: [main, 'release/**']
     paths:
       - src/**
       - schemas/**

@@ -302,19 +302,27 @@ schema is untouched.)
 
 - [ ] **Step 3: Prove the gate can fail — G0's real check**
 
-Open a **throwaway** PR against the RC with a deliberately invalid title:
+Open a **throwaway** PR against the RC with a deliberately invalid title.
+
+> **Branch from `rc/f0-foundation`, NOT from the RC.** GitHub runs
+> `pull_request` workflows from the PR's **head** branch. `pr-guards.yml` does
+> not exist on `release/v0.1.0-alpha` yet (it lands only when this lane merges),
+> so a throwaway branched from the RC would run **no `pr-guards` job at all** —
+> and would "pass" having proved nothing. That is exactly the vacuous-check
+> failure this whole track exists to fix; do not reproduce it here.
 
 ```bash
-git checkout -b rc/f0-gate-proof release/v0.1.0-alpha
+git checkout -b rc/f0-gate-proof rc/f0-foundation
 git commit --allow-empty -m "chore: gate proof"
 git push -u origin rc/f0-gate-proof
 gh pr create --base release/v0.1.0-alpha --title "broken title" --body "Throwaway: proving pr-guards fails a bad title. Close without merging."
 gh pr checks --watch || true
 ```
 
-Expected: the `pr-title` job **FAILS** with the conventional-commit error.
-**This is the point of the exercise** — a gate nobody has seen fail is not a
-gate.
+Expected: the `pr-title` job **RUNS and FAILS** with the conventional-commit
+error. **This is the point of the exercise** — a gate nobody has seen fail is
+not a gate. If the job does not appear in `gh pr checks` at all, the workflow
+was not picked up: stop and report rather than recording a pass.
 
 - [ ] **Step 4: Clean up the throwaway**
 

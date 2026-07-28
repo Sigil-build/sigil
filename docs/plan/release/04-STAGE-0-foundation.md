@@ -158,13 +158,20 @@ Expected in `.claude/`: `settings.json`, `hooks/post-edit-guard.sh`, and
 
 - [ ] **Step 3: Verify the workflow parses and its format job would pass**
 
+> **No local YAML parser.** `python3` on this machine is the Windows Store alias
+> stub, not an interpreter, and `actionlint` is not installed. Validate
+> structurally by reading the file, and treat **GitHub as the authoritative
+> parser** — a malformed workflow surfaces as a repo-level Actions error and the
+> job simply never appears in `gh pr checks`. Task 4 is where that gets
+> confirmed. Do not claim "YAML valid" on the strength of a check you could not
+> run; say what you actually did.
+
 ```bash
-python3 -c "import yaml,sys; yaml.safe_load(open('.github/workflows/pr-guards.yml')); print('YAML OK')"
 dotnet format Sigil.slnx --verify-no-changes --no-restore; echo "format exit=$?"
 ```
 
-Expected: `YAML OK`, format exit **0**. The second command is exactly what the
-workflow's `format` job runs — if it fails here it will fail in CI.
+Expected: format exit **0**. That command is exactly what the workflow's
+`format` job runs — if it fails here it will fail in CI.
 
 - [ ] **Step 4: Remove the staging directory**
 
@@ -252,13 +259,13 @@ shape — gate the PR, then re-verify the integrated result.
 
 - [ ] **Step 3: Validate all four still parse**
 
-```bash
-for f in pr-guards ci docs secret-scan; do
-  python3 -c "import yaml,sys; yaml.safe_load(open('.github/workflows/$f.yml')); print('$f OK')"
-done
-```
+> **No local YAML parser** — see the note in Task 2 Step 3. Validate by reading
+> the four files; GitHub is the authoritative parser and Task 4's PR is where a
+> parse error would surface (the job would be absent from `gh pr checks`).
 
-Expected: four `OK` lines.
+The one thing to check by eye, because it is the likely failure: `release/**`
+**must stay quoted**. In YAML a token beginning with `*` is an alias reference,
+so an unquoted `release/**` inside a flow sequence is a parse error, not a glob.
 
 - [ ] **Step 4: Verify the filters by inspection**
 

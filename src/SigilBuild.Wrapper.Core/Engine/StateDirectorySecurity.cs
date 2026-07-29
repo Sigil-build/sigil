@@ -270,26 +270,76 @@ internal static class StateDirectorySecurity
     }
 
     /// <summary>
-    /// The single trust decision both predicates answer with: a trusted owner AND a
-    /// DACL granting no write-class right to anything else. Callers wrap it in the
+    /// The file-level counterpart of <see cref="IsTrusted"/>: true when
+    /// <paramref name="path"/> exists as a file, its owner is SYSTEM,
+    /// <c>BUILTIN\Administrators</c> or TrustedInstaller, and no other principal holds
+    /// a write-class right on the file itself. False on any error, including
+    /// "does not exist".
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A trusted directory is <b>not</b> sufficient to trust the file inside it, which
+    /// is the second half of register row R1: <c>File.WriteAllText</c> truncates in
+    /// place, so a file an unprivileged user pre-created keeps its original owner and
+    /// its original explicit ACEs even after an elevated process writes to it. The
+    /// attacker remains the owner, keeps implicit <c>WRITE_DAC</c>, and can re-grant
+    /// themselves write and rewrite the file at any later moment — after which the
+    /// elevated uninstall replays it. Hardening the container alone leaves that open.
+    /// </para>
+    /// <para>
+    /// "Does not exist" answers <c>false</c>, but that never turns a first install into
+    /// a refusal: the load path only consults this after <see cref="File.Exists(string)"/>
+    /// has already said the state file is there, so an absent file stays an absence
+    /// ("no uninstall state found"), not a refusal.
+    /// </para>
+    /// </remarks>
+    public static bool IsTrustedFile(string path)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            return false;
+        }
+
+#pragma warning disable CA1031 // Fail closed: any failure to read owner/DACL means "not trusted".
+        try
+        {
+            return File.Exists(path)
+                && IsTrustedSecurity(new FileInfo(path)
+                    .GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access));
+        }
+        catch
+        {
+            return false;
+        }
+#pragma warning restore CA1031
+    }
+
+    /// <summary>
+    /// The directory form of <see cref="IsTrustedSecurity"/>. Callers wrap it in the
     /// fail-closed <c>catch</c>; it deliberately lets exceptions out so no failure is
     /// silently read as "trusted".
     /// </summary>
-    private static bool IsTrustedDirectory(string directory)
-    {
-        var security = new DirectoryInfo(directory)
-            .GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access);
+    private static bool IsTrustedDirectory(string directory) =>
+        IsTrustedSecurity(new DirectoryInfo(directory)
+            .GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access));
 
+    /// <summary>
+    /// The single trust decision every predicate here answers with: a trusted owner AND
+    /// a DACL granting no write-class right to anything else. Shared by the directory
+    /// and file forms so the two can never drift apart.
+    /// </summary>
+    private static bool IsTrustedSecurity(FileSystemSecurity security)
+    {
         // Owner half: the owner implicitly holds WRITE_DAC, so a non-trusted owner can
-        // re-permission the directory at will regardless of what the DACL says today.
+        // re-permission the object at will regardless of what the DACL says today.
         if (security.GetOwner(typeof(SecurityIdentifier)) is not SecurityIdentifier owner
             || !IsTrustedPrincipal(owner))
         {
             return false;
         }
 
-        // DACL half: an admin-OWNED directory can still be user-WRITABLE — that is
-        // exactly what %ProgramData% and every pre-fix state directory under it is.
+        // DACL half: an admin-OWNED object can still be user-WRITABLE — that is exactly
+        // what %ProgramData% and every pre-fix state directory under it is.
         var rules = security.GetAccessRules(
             includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier));
 

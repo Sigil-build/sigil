@@ -254,29 +254,34 @@ public class StateProvenanceTests
         using var temp = new TempDir();
         var dir = Path.Combine(temp.Path, "hardened");
 
-        // Act
-        StateDirectorySecurity.CreateHardened(dir);
-
-        // Assert
-        Directory.Exists(dir).Should().BeTrue();
-        var security = new DirectoryInfo(dir).GetAccessControl(AccessControlSections.Access);
-        security.AreAccessRulesProtected.Should().BeTrue(
-            "SetAccessRuleProtection(true, false) must DISCARD the permissive inherited " +
-            "ACEs rather than merge them — merging them is the whole bug");
-
-        DescribeRules(security).Should().BeEquivalentTo(new[]
+        try
         {
-            $"{LocalSystem.Value}|{FileSystemRights.FullControl}|Allow",
-            $"{Administrators.Value}|{FileSystemRights.FullControl}|Allow",
-            // Windows persists the implied SYNCHRONIZE bit alongside ReadAndExecute;
-            // FullControl already contains it, which is why only this line names it.
-            $"{Users.Value}|{FileSystemRights.ReadAndExecute | FileSystemRights.Synchronize}|Allow",
-        });
+            // Act
+            StateDirectorySecurity.CreateHardened(dir);
 
-        // In production CreateHardened runs only for machine scope, which only
-        // happens elevated, so the owner is Administrators/SYSTEM there and the
-        // directory does pass IsTrusted. Unelevated it cannot — the owner is this
-        // user — so asserting the round trip here would assert a falsehood.
+            // Assert
+            Directory.Exists(dir).Should().BeTrue();
+            var security = new DirectoryInfo(dir).GetAccessControl(AccessControlSections.Access);
+            security.AreAccessRulesProtected.Should().BeTrue(
+                "SetAccessRuleProtection(true, false) must DISCARD the permissive inherited " +
+                "ACEs rather than merge them — merging them is the whole bug");
+
+            DescribeRules(security).Should().BeEquivalentTo(new[]
+            {
+                $"{LocalSystem.Value}|{FileSystemRights.FullControl}|Allow",
+                $"{Administrators.Value}|{FileSystemRights.FullControl}|Allow",
+                // Windows persists the implied SYNCHRONIZE bit alongside ReadAndExecute;
+                // FullControl already contains it, which is why only this line names it.
+                $"{Users.Value}|{FileSystemRights.ReadAndExecute | FileSystemRights.Synchronize}|Allow",
+            });
+
+            // Ownership is not asserted here: it depends on whether the host is
+            // elevated, which CreateHardened_repairs_ownership_when_it_can… covers.
+        }
+        finally
+        {
+            Unharden(dir);
+        }
     }
 
     [WindowsFact("Windows ACL APIs")]
@@ -293,89 +298,133 @@ public class StateProvenanceTests
         var me = WindowsIdentity.GetCurrent().User;
         me.Should().NotBeNull();
 
-        var permissive = new DirectoryInfo(dir).GetAccessControl();
-        permissive.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
-        permissive.AddAccessRule(new FileSystemAccessRule(
-            me!,
-            FileSystemRights.FullControl,
-            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
-            PropagationFlags.None,
-            AccessControlType.Allow));
-        new DirectoryInfo(dir).SetAccessControl(permissive);
-
-        DescribeRules(new DirectoryInfo(dir).GetAccessControl(AccessControlSections.Access))
-            .Should().Contain($"{me!.Value}|{FileSystemRights.FullControl}|Allow",
-                "the fixture must really be permissive, or the repair proves nothing");
-
-        var progress = new CapturingProgress();
-
-        // Act — no throw: Ruling 2 says CreateHardened repairs rather than refuses.
-        StateDirectorySecurity.CreateHardened(dir, progress);
-
-        // Assert
-        var after = new DirectoryInfo(dir).GetAccessControl(AccessControlSections.Access);
-        after.AreAccessRulesProtected.Should().BeTrue();
-        DescribeRules(after).Should().BeEquivalentTo(new[]
+        try
         {
-            $"{LocalSystem.Value}|{FileSystemRights.FullControl}|Allow",
-            $"{Administrators.Value}|{FileSystemRights.FullControl}|Allow",
-            // Windows persists the implied SYNCHRONIZE bit alongside ReadAndExecute;
-            // FullControl already contains it, which is why only this line names it.
-            $"{Users.Value}|{FileSystemRights.ReadAndExecute | FileSystemRights.Synchronize}|Allow",
-        },
-        "the repair must replace the DACL wholesale, dropping the non-admin write grant");
+            var permissive = new DirectoryInfo(dir).GetAccessControl();
+            permissive.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+            permissive.AddAccessRule(new FileSystemAccessRule(
+                me!,
+                FileSystemRights.FullControl,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None,
+                AccessControlType.Allow));
+            new DirectoryInfo(dir).SetAccessControl(permissive);
 
-        progress.Messages.Should().Contain(
-            m => m.Contains("repaired", StringComparison.OrdinalIgnoreCase),
-            "a silent repair of a security boundary leaves no trail for an incident responder");
+            DescribeRules(new DirectoryInfo(dir).GetAccessControl(AccessControlSections.Access))
+                .Should().Contain($"{me!.Value}|{FileSystemRights.FullControl}|Allow",
+                    "the fixture must really be permissive, or the repair proves nothing");
+
+            var progress = new CapturingProgress();
+
+            // Act — no throw: Ruling 2 says CreateHardened repairs rather than refuses.
+            StateDirectorySecurity.CreateHardened(dir, progress);
+
+            // Assert
+            var after = new DirectoryInfo(dir).GetAccessControl(AccessControlSections.Access);
+            after.AreAccessRulesProtected.Should().BeTrue();
+            DescribeRules(after).Should().BeEquivalentTo(new[]
+            {
+                $"{LocalSystem.Value}|{FileSystemRights.FullControl}|Allow",
+                $"{Administrators.Value}|{FileSystemRights.FullControl}|Allow",
+                // Windows persists the implied SYNCHRONIZE bit alongside ReadAndExecute;
+                // FullControl already contains it, which is why only this line names it.
+                $"{Users.Value}|{FileSystemRights.ReadAndExecute | FileSystemRights.Synchronize}|Allow",
+            },
+            "the repair must replace the DACL wholesale, dropping the non-admin write grant");
+
+            progress.Messages.Should().Contain(
+                m => m.Contains("repaired", StringComparison.OrdinalIgnoreCase),
+                "a silent repair of a security boundary leaves no trail for an incident responder");
+        }
+        finally
+        {
+            Unharden(dir);
+        }
     }
 
+    /// <summary>
+    /// The repair path also hands ownership to <c>BUILTIN\Administrators</c>, because
+    /// an owner keeps implicit <c>WRITE_DAC</c> and <c>IsTrusted</c> demands a trusted
+    /// owner. Only an ELEVATED caller can assign that SID, so which branch runs depends
+    /// on the host: a developer box is normally unelevated, GitHub's
+    /// <c>windows-latest</c> runners execute elevated. Both are asserted, and the case
+    /// is derived from the OBSERVED owner rather than from an environment variable —
+    /// neither branch is vacuous and either can fail for a real defect.
+    /// </summary>
     [WindowsFact("Windows ACL APIs")]
-    public void CreateHardened_keeps_the_dacl_repair_when_taking_ownership_fails()
+    public void CreateHardened_repairs_ownership_when_it_can_and_keeps_the_dacl_when_it_cannot()
     {
-        // Arrange — the repair path also hands ownership to BUILTIN\Administrators,
-        // because an owner keeps implicit WRITE_DAC and IsTrusted demands a trusted
-        // owner. Only an ELEVATED caller can assign that SID, and this session is not
-        // elevated, so this test exercises the best-effort failure branch: the one that
-        // must not take the DACL repair down with it.
+        // Arrange
         using var temp = new TempDir();
         var dir = Path.Combine(temp.Path, "attacker-owned");
         Directory.CreateDirectory(dir);
-
-        var me = WindowsIdentity.GetCurrent().User;
-        me.Should().NotBeNull();
-        OwnerOf(dir).Should().Be(me!, "an unelevated process owns what it creates");
-
-        var progress = new CapturingProgress();
-
-        // Act — must not throw even though the ownership half cannot succeed here.
-        StateDirectorySecurity.CreateHardened(dir, progress);
-
-        // Assert — the ownership attempt really did fail (otherwise this test would be
-        // asserting the wrong branch), and the DACL repair survived it intact.
-        OwnerOf(dir).Should().Be(me!,
-            "an unelevated token cannot assign BUILTIN\\Administrators as owner — this " +
-            "test is only meaningful while that stays true");
-
-        var after = new DirectoryInfo(dir).GetAccessControl(AccessControlSections.Access);
-        after.AreAccessRulesProtected.Should().BeTrue(
-            "a failed ownership fix must not roll back or skip the DACL repair");
-        DescribeRules(after).Should().BeEquivalentTo(new[]
+        try
         {
-            $"{LocalSystem.Value}|{FileSystemRights.FullControl}|Allow",
-            $"{Administrators.Value}|{FileSystemRights.FullControl}|Allow",
-            // Windows persists the implied SYNCHRONIZE bit alongside ReadAndExecute;
-            // FullControl already contains it, which is why only this line names it.
-            $"{Users.Value}|{FileSystemRights.ReadAndExecute | FileSystemRights.Synchronize}|Allow",
-        });
+            var me = WindowsIdentity.GetCurrent().User;
+            me.Should().NotBeNull();
 
-        progress.Messages.Should().Contain(
-            m => m.Contains("could not take ownership", StringComparison.OrdinalIgnoreCase),
-            "a skipped ownership fix leaves the directory untrusted, so it must be said out loud");
+            // Holds on both host kinds: %TEMP% grants its user FullControl, which is
+            // inherited here, so the fixture is untrusted however it is owned and the
+            // repair path is the one that runs.
+            StateDirectorySecurity.IsTrusted(dir).Should().BeFalse(
+                "the fixture must need repairing, or this test exercises nothing");
 
-        // NOT asserted, because it cannot be from here: that an ELEVATED caller ends up
-        // with owner == BUILTIN\Administrators and a directory that then passes
-        // IsTrusted. That path needs an elevated run (gate G1).
+            var progress = new CapturingProgress();
+
+            // Act — must succeed whether or not the ownership half can.
+            StateDirectorySecurity.CreateHardened(dir, progress);
+
+            // Assert (1) — the invariant that holds on EVERY host: the DACL repair
+            // happened and is intact, whatever the ownership attempt did.
+            var after = new DirectoryInfo(dir).GetAccessControl(AccessControlSections.Access);
+            after.AreAccessRulesProtected.Should().BeTrue(
+                "the DACL repair is the load-bearing half and must never be skipped or " +
+                "rolled back by the outcome of the ownership attempt");
+            DescribeRules(after).Should().BeEquivalentTo(new[]
+            {
+                $"{LocalSystem.Value}|{FileSystemRights.FullControl}|Allow",
+                $"{Administrators.Value}|{FileSystemRights.FullControl}|Allow",
+                // Windows persists the implied SYNCHRONIZE bit alongside ReadAndExecute;
+                // FullControl already contains it, which is why only this line names it.
+                $"{Users.Value}|{FileSystemRights.ReadAndExecute | FileSystemRights.Synchronize}|Allow",
+            });
+
+            // Assert (2) — which branch ran, decided by the actual owner on disk. The
+            // ownership repair assigns exactly BUILTIN\Administrators, so this is an
+            // exact discriminator, not a guess.
+            var owner = OwnerOf(dir);
+            if (owner is not null && Administrators.Equals(owner))
+            {
+                // Elevated host. This is the branch a developer box cannot reach, and
+                // it is the one that proves the round-3 fix actually completes: after a
+                // successful repair the directory must pass the R1 gate end to end.
+                StateDirectorySecurity.IsTrusted(dir).Should().BeTrue(
+                    "an elevated CreateHardened must leave a directory that is trusted — " +
+                    "a repaired DACL with an untrusted owner would still refuse its own state");
+                progress.Messages.Should().Contain(
+                    m => m.Contains("took ownership", StringComparison.OrdinalIgnoreCase),
+                    "a successful ownership repair must be recorded");
+            }
+            else
+            {
+                // Unelevated host: the assignment cannot succeed, so the creator stays
+                // the owner and the directory stays untrusted — fail-closed, and said
+                // out loud rather than silently degraded.
+                owner.Should().Be(me!,
+                    "an unelevated token cannot assign BUILTIN\\Administrators, so the " +
+                    "creator must still own it");
+                StateDirectorySecurity.IsTrusted(dir).Should().BeFalse(
+                    "an untrusted owner must keep the directory untrusted no matter how " +
+                    "clean the DACL is");
+                progress.Messages.Should().Contain(
+                    m => m.Contains("could not take ownership", StringComparison.OrdinalIgnoreCase),
+                    "a skipped ownership fix leaves the directory untrusted, so it must be said out loud");
+            }
+        }
+        finally
+        {
+            Unharden(dir);
+        }
     }
 
     /// <summary>
@@ -418,6 +467,12 @@ public class StateProvenanceTests
             StateDirectorySecurity.IsTrusted(machineDir).Should().BeFalse(
                 "the planted directory must really be attacker-owned/writable");
 
+            // The FILE was planted too, not just the directory — that is the half of
+            // R1 that survives a hardened container, because File.WriteAllText
+            // truncates in place and preserves the planted file's owner and ACEs.
+            var machinePath = UninstallStateStore.PathFor(appId, InstallScope.Machine);
+            var plantedFileIsUntrusted = !StateDirectorySecurity.IsTrustedFile(machinePath);
+
             // Act
             var progress = new CapturingProgress();
             var loaded = UninstallStateStore.TryLoad(appId, InstallScope.Machine, progress);
@@ -429,12 +484,33 @@ public class StateProvenanceTests
 
             // …and refused for the right reason, not incidentally null: the store
             // reports a refusal distinct from an absence, and says so on the sink.
-            UninstallStateStore.Load(appId, InstallScope.Machine).RefusalReason
-                .Should().NotBeNullOrEmpty(
-                    "a refusal must be distinguishable from 'no prior install'");
+            var reason = UninstallStateStore.Load(appId, InstallScope.Machine).RefusalReason;
+            reason.Should().NotBeNullOrEmpty(
+                "a refusal must be distinguishable from 'no prior install'");
+            reason.Should().Contain("the state directory",
+                "the planted container must be named in the refusal");
             progress.Messages.Should().Contain(
                 m => m.Contains("refusing state in", StringComparison.Ordinal),
                 "a silent refusal reads as 'no prior install' and would mask the attack");
+
+            if (plantedFileIsUntrusted)
+            {
+                // Unelevated host: the planted uninstall.json really is owned by a
+                // non-administrator, so the refusal must name the FILE as well. A check
+                // that only inspected the container would not — and that container check
+                // is precisely what a hardened-directory-only fix leaves passing once the
+                // elevated installer has repaired the directory around the planted file.
+                reason.Should().Contain("the state file",
+                    "trusting a file because its directory is trusted is the second half of R1");
+            }
+            else
+            {
+                // Elevated host (GitHub windows-latest): a file this session creates is
+                // already admin-owned, so the file half cannot be staged here. It is
+                // pinned independently by the IsTrustedFile_* tests, which run on every
+                // host, and by Save_replaces_a_pre_existing_state_file_….
+                StateDirectorySecurity.IsTrustedFile(machinePath).Should().BeTrue();
+            }
 
             // Control — the very same bytes DO load from user scope, so the null above
             // is the R1 refusal and not a malformed fixture or a missing file.
@@ -461,6 +537,152 @@ public class StateProvenanceTests
             }
 #pragma warning restore CA1031
         }
+    }
+
+    [WindowsFact("Windows ACL APIs")]
+    public void IsTrustedFile_is_true_for_a_real_admin_only_file()
+    {
+        // Arrange — %WINDIR%\System32\kernel32.dll is owned by NT SERVICE\TrustedInstaller
+        // and grants nobody a write-class right but TrustedInstaller itself.
+        var kernel32 = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.System), "kernel32.dll");
+        File.Exists(kernel32).Should().BeTrue(
+            "the positive case needs a real admin-only file to assert against");
+
+        // Act / Assert
+        StateDirectorySecurity.IsTrustedFile(kernel32).Should().BeTrue(
+            "a TrustedInstaller-owned file that no non-administrator can write is trusted");
+    }
+
+    [WindowsFact("Windows ACL APIs")]
+    public void IsTrustedFile_is_false_for_a_file_the_current_user_owns()
+    {
+        // Arrange — the shape of a planted uninstall.json: created by an unprivileged
+        // user, who therefore owns it and keeps implicit WRITE_DAC on it forever.
+        using var temp = new TempDir();
+        var file = Path.Combine(temp.Path, "uninstall.json");
+        File.WriteAllText(file, "{}");
+
+        // Act / Assert
+        StateDirectorySecurity.IsTrustedFile(file).Should().BeFalse(
+            "a file owned by a non-administrator can be re-permissioned by that user at " +
+            "any time, so its contents must never be replayed with elevation");
+    }
+
+    [WindowsFact("Windows ACL APIs")]
+    public void IsTrustedFile_fails_closed_on_a_missing_file()
+    {
+        using var temp = new TempDir();
+
+        StateDirectorySecurity
+            .IsTrustedFile(Path.Combine(temp.Path, "does-not-exist.json"))
+            .Should().BeFalse(
+                "fail closed — and note this never refuses a first install, because the " +
+                "load path only consults it after File.Exists has already succeeded");
+    }
+
+    /// <summary>
+    /// R1, write half: <c>File.WriteAllText</c> truncates in place, so a pre-existing
+    /// file survives the write with its owner and explicit ACEs intact. <c>Save</c>
+    /// must replace the file instead. Asserted through the observable consequence —
+    /// a protected DACL planted on the old file cannot survive — which holds on an
+    /// elevated and an unelevated host alike. User scope is used because that is the
+    /// scope an unelevated test can actually drive; the replacement code path is the
+    /// same one machine scope takes.
+    /// </summary>
+    [WindowsFact("Windows ACL APIs")]
+    public void Save_replaces_a_pre_existing_state_file_instead_of_truncating_it()
+    {
+        var appId = "sigil.r1file." + Guid.NewGuid().ToString("N");
+        var dir = UninstallStateStore.DirectoryFor(appId, InstallScope.User);
+        var path = UninstallStateStore.PathFor(appId, InstallScope.User);
+
+        try
+        {
+            // Arrange — a pre-existing state file carrying a PROTECTED DACL of its own,
+            // standing in for the attacker's explicit ACEs. Nothing of it may survive.
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(path, "{}");
+
+            var me = WindowsIdentity.GetCurrent().User;
+            me.Should().NotBeNull();
+
+            var planted = new FileInfo(path).GetAccessControl();
+            planted.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+            planted.AddAccessRule(new FileSystemAccessRule(
+                me!, FileSystemRights.FullControl, AccessControlType.Allow));
+            new FileInfo(path).SetAccessControl(planted);
+
+            new FileInfo(path).GetAccessControl(AccessControlSections.Access)
+                .AreAccessRulesProtected.Should().BeTrue(
+                    "the fixture must really carry a DACL of its own, or the test proves nothing");
+
+            // Act
+            var journal = new RollbackJournal();
+            journal.Append(new RollbackRecord.RemoveDirectory(
+                Path.Combine(Path.GetTempPath(), "sigil-r1file-" + appId)));
+            UninstallStateStore.Save(appId, journal, InstallScope.User);
+
+            // Assert — the file that exists now is a NEW file that inherited the
+            // directory's DACL, not the planted one truncated in place. If Save still
+            // called File.WriteAllText over the target, the protected DACL below would
+            // still be protected and this assertion would fail.
+            new FileInfo(path).GetAccessControl(AccessControlSections.Access)
+                .AreAccessRulesProtected.Should().BeFalse(
+                    "Save must create a fresh file and move it over the target; truncating " +
+                    "in place preserves the previous owner and DACL, which is register row R1");
+
+            // …and the state is still readable, i.e. the replacement is not a regression.
+            UninstallStateStore.TryLoad(appId, InstallScope.User)!.Journal.Records
+                .Should().HaveCount(1);
+
+            // No staging file may be left behind in the state directory.
+            Directory.GetFiles(dir).Should().ContainSingle()
+                .Which.Should().EndWith("uninstall.json");
+        }
+        finally
+        {
+            UninstallStateStore.Delete(appId, InstallScope.User);
+        }
+    }
+
+    /// <summary>
+    /// Re-grant write access so <see cref="TempDir"/> can actually delete a hardened
+    /// directory. <see cref="StateDirectorySecurity.CreateHardened"/> leaves
+    /// <c>BUILTIN\Users</c> with ReadAndExecute only, so an unelevated caller cannot
+    /// remove it or its contents without re-permissioning it first (it still can as the
+    /// owner) — without this, every run would litter the temp tree. Best-effort: a
+    /// cleanup failure must not mask the assertion that ran before it.
+    /// </summary>
+    private static void Unharden(string directory)
+    {
+#pragma warning disable CA1031 // Best-effort test cleanup.
+        try
+        {
+            if (!Directory.Exists(directory))
+            {
+                return;
+            }
+
+            var security = new DirectoryInfo(directory).GetAccessControl();
+            security.SetAccessRuleProtection(isProtected: false, preserveInheritance: true);
+            var me = WindowsIdentity.GetCurrent().User;
+            if (me is not null)
+            {
+                security.AddAccessRule(new FileSystemAccessRule(
+                    me,
+                    FileSystemRights.FullControl,
+                    InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                    PropagationFlags.None,
+                    AccessControlType.Allow));
+            }
+            new DirectoryInfo(directory).SetAccessControl(security);
+        }
+        catch
+        {
+            // Best-effort.
+        }
+#pragma warning restore CA1031
     }
 
     /// <summary>The directory's owner SID, or <c>null</c> if it cannot be read.</summary>

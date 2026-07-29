@@ -120,7 +120,69 @@ internal static class UninstallStateStore
         // literal secret occurrence defensively before the file touches disk.
         json = RedactSecrets(json, secretValues);
 
-        File.WriteAllText(PathFor(appId, scope), json);
+        WriteReplacingAnyExistingFile(PathFor(appId, scope), dir, json);
+    }
+
+    /// <summary>
+    /// Write <paramref name="json"/> to <paramref name="target"/> by creating a fresh
+    /// file in <paramref name="directory"/> and moving it over the target, never by
+    /// truncating the target in place.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// R1, file half: <see cref="File.WriteAllText(string, string?)"/> truncates an
+    /// existing file <em>in place</em>. It does not recreate it, so the file keeps its
+    /// original owner and its original explicit ACEs across the write. An unprivileged
+    /// user who pre-creates <c>uninstall.json</c> therefore still owns it after an
+    /// elevated install has written to it, still holds implicit <c>WRITE_DAC</c>, and
+    /// can re-grant themselves write and rewrite the records the elevated uninstall
+    /// later replays — even though <see cref="StateDirectorySecurity.CreateHardened"/>
+    /// hardened the directory around it.
+    /// </para>
+    /// <para>
+    /// A brand-new file in the (already hardened) directory inherits that directory's
+    /// admin-only DACL and is owned by whoever wrote it, so nothing of the planted
+    /// file's security descriptor survives. <see cref="File.Move(string, string, bool)"/>
+    /// maps to <c>MoveFileEx</c> with <c>MOVEFILE_REPLACE_EXISTING</c>, which replaces
+    /// the destination wholesale — deliberately <em>not</em>
+    /// <see cref="File.Replace(string, string, string?)"/>, whose documented purpose is
+    /// to preserve the destination's attributes and ACL, i.e. exactly the bug.
+    /// </para>
+    /// <para>
+    /// Chosen over delete-then-create because the swap is atomic: a crash leaves either
+    /// the complete old state or the complete new state, never a hardened directory with
+    /// no <c>uninstall.json</c> at all — which would read as "no prior install" and
+    /// leave the app unremovable. The staging file is cleaned up on every failure path.
+    /// </para>
+    /// </remarks>
+    private static void WriteReplacingAnyExistingFile(string target, string directory, string json)
+    {
+        // Same directory as the target, so the move is a rename on one volume (atomic)
+        // and the staging file inherits the hardened DACL from the moment it exists.
+        var staging = Path.Combine(directory, $"uninstall.json.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            File.WriteAllText(staging, json);
+            File.Move(staging, target, overwrite: true);
+        }
+        finally
+        {
+            // Only reachable when the write or the move failed — a successful move
+            // consumes the staging file.
+            if (File.Exists(staging))
+            {
+#pragma warning disable CA1031 // Best-effort cleanup; the original failure is what the caller must see.
+                try
+                {
+                    File.Delete(staging);
+                }
+                catch
+                {
+                    // Best-effort.
+                }
+#pragma warning restore CA1031
+            }
+        }
     }
 
     private static string RedactSecrets(
@@ -151,10 +213,14 @@ internal static class UninstallStateStore
     /// and drives ARP-hive / state-dir selection. Returns <c>null</c> when no
     /// state file exists in either scope or the JSON is unreadable; the caller
     /// (<c>UninstallEngine</c>) translates that into the documented "no uninstall
-    /// state found" error. Machine-scope state whose directory is not trusted
-    /// (<see cref="StateDirectorySecurity.IsTrusted"/>) is refused outright (R1) and
-    /// reported on <paramref name="progress"/> — the store has no logger of its own,
-    /// and the caller's progress sink is what the <c>/LOG</c> file is fed from.
+    /// state found" error. Machine-scope state is refused outright (R1) unless BOTH
+    /// its directory (<see cref="StateDirectorySecurity.IsTrusted"/>) and the
+    /// <c>uninstall.json</c> file itself
+    /// (<see cref="StateDirectorySecurity.IsTrustedFile"/>) pass the provenance check,
+    /// and the refusal is reported on <paramref name="progress"/> — the store has no
+    /// logger of its own, and the caller's progress sink is what the <c>/LOG</c> file
+    /// is fed from. A missing state file is an <em>absence</em>, never a refusal, so a
+    /// first install is unaffected.
     /// Use <see cref="Load"/> when the caller must tell a refusal apart from an
     /// absence; this overload collapses both to <c>null</c>.
     /// </summary>
@@ -197,16 +263,32 @@ internal static class UninstallStateStore
             // replays. Refuse rather than replay, and say so — and do NOT fall
             // through to the other scope, because a silent skip here reads as
             // "no prior install" and would mask an attack.
-            if (dirScope == InstallScope.Machine
-                && OperatingSystem.IsWindows()
-                && !StateDirectorySecurity.IsTrusted(DirectoryFor(appId, dirScope)))
+            if (dirScope == InstallScope.Machine && OperatingSystem.IsWindows())
             {
-                var reason =
-                    $"refusing state in '{DirectoryFor(appId, dirScope)}': it is not owned by " +
-                    "SYSTEM, Administrators or TrustedInstaller, or a non-administrator can " +
-                    "write it, so an unprivileged user could have authored the records";
-                progress?.Report(new StepProgress(0, 0, reason, IsError: true));
-                return new LoadAttempt(null, reason);
+                var dir = DirectoryFor(appId, dirScope);
+
+                // BOTH objects must be trusted. The directory alone is not enough:
+                // File.WriteAllText truncates in place, so a pre-created uninstall.json
+                // keeps its attacker owner and ACEs even inside a hardened directory
+                // (see UninstallStateStore.WriteReplacingAnyExistingFile). The file
+                // alone is not enough either: a writable directory lets an attacker
+                // swap the file wholesale.
+                var directoryTrusted = StateDirectorySecurity.IsTrusted(dir);
+                var fileTrusted = StateDirectorySecurity.IsTrustedFile(path);
+
+                if (!directoryTrusted || !fileTrusted)
+                {
+                    var what = !directoryTrusted && !fileTrusted
+                        ? "the state directory and the state file"
+                        : !directoryTrusted ? "the state directory" : "the state file";
+                    var reason =
+                        $"refusing state in '{dir}': {what} failed the provenance check " +
+                        "(the owner must be SYSTEM, Administrators or TrustedInstaller, and no " +
+                        "non-administrator may hold a write-class right), so an unprivileged " +
+                        "user could have authored — or could still alter — the records";
+                    progress?.Report(new StepProgress(0, 0, reason, IsError: true));
+                    return new LoadAttempt(null, reason);
+                }
             }
 
             var json = File.ReadAllText(path);

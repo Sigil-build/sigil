@@ -1,6 +1,6 @@
-using System;
-
 namespace SigilBuild.Packaging.IntegrationTests;
+
+using System;
 
 /// <summary>
 /// Reports a genuine Skipped result when the MSIX VM-style install preconditions —

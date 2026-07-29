@@ -38,6 +38,33 @@ jobs:
       - name: build
         run: dotnet build Sigil.slnx --configuration Release --no-restore
 
+      # T1.2 (R6, CI half): WrapperRuntimeLocator.Locate() / RuntimeStagedFactAttribute
+      # resolve the staged host runtime at `runtimes/win-x64/SigilBuild.Installer.Host.exe`
+      # relative to AppContext.BaseDirectory -- which, for the packaging test project at
+      # `dotnet test` time, is that project's OWN build output directory, not the CLI's.
+      # Without staging here, every push runs the ExeWrapper packaging tests against an
+      # absent runtime and they report (honestly, post-T1.1) as Skipped instead of Passed.
+      # win-x64 ONLY: the tests need no more, and an AOT publish is expensive; aot-publish
+      # (below) separately stages win-x64 + win-arm64 for the real shipping artifacts. This
+      # duplicates that AOT publish on the critical path of every push -- see T1.2 report
+      # for the wall-clock cost trade-off and cheaper alternatives considered.
+      - name: stage installer host runtime for tests (win-x64)
+        shell: pwsh
+        run: |
+          ./scripts/publish-installer-runtime.ps1 `
+            -Rids win-x64 `
+            -Configuration Release `
+            -DestinationRoot tests/SigilBuild.Packaging.Tests/bin/Release/net10.0 `
+            -SizeGateMb 45
+
+      - name: verify staged win-x64 host runtime for tests
+        shell: pwsh
+        run: |
+          $exe = "tests/SigilBuild.Packaging.Tests/bin/Release/net10.0/runtimes/win-x64/SigilBuild.Installer.Host.exe"
+          if (-not (Test-Path $exe)) { throw "staged win-x64 host runtime missing at $exe -- the ExeWrapper packaging tests will silently skip instead of run (R6/R22 failure mode); publish-installer-runtime.ps1 must have failed silently, check its output above" }
+          $exeMb = [math]::Round((Get-Item $exe).Length / 1MB, 2)
+          Write-Host "staged win-x64 SigilBuild.Installer.Host.exe for tests: $exeMb MB"
+
       - name: test
         run: dotnet test Sigil.slnx --configuration Release --no-build --logger "trx;LogFileName=test-results.trx" --collect:"XPlat Code Coverage"
 

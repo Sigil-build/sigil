@@ -81,14 +81,56 @@ jobs:
           # true union instead: for each unique (assembly, file, line), record
           # max(hits) across all reports, then sum.
           #
-          # WBS targets per CLAUDE.md are Core >=80% / Signing+SDK >=85%; the
-          # gate here enforces a project-wide stop-gap of 65% (6pp under the
-          # measured baseline) and prints per-assembly numbers so regressions
-          # in any one component are visible. Integration-only wrappers
-          # (signtool/MakeAppx/Azure/COM) carry [ExcludeFromCodeCoverage].
+          # WBS targets per CLAUDE.md are Core >=80% / Signing+SDK >=85%. The
+          # project-wide ratchet (T1.3/R21) is set at the Stage 0 measured
+          # baseline rounded down; per-assembly floors below are ratchets too --
+          # raise them only when a lane demonstrably raises the measured number,
+          # never lower them. Integration-only wrappers (signtool/MakeAppx/Azure/
+          # COM) carry [ExcludeFromCodeCoverage].
           import glob, sys, xml.etree.ElementTree as ET
           from collections import defaultdict
+
+          # Floor of floors, retained for continuity/back-compat; PROJECT_WIDE_FLOOR
+          # below is the actual enforced gate and is strictly higher than this.
           THRESHOLD = 0.65
+
+          # T1.3/R21 per-assembly floors: set at the CURRENT MEASURED value from
+          # Stage 0 rounded DOWN -- a ratchet, not the aspirational CLAUDE.md/
+          # AGENTS.md targets (Core >=80%, Signing/SDK >=85%). Project-wide union
+          # measured 74.74% at Stage 0.
+          PROJECT_WIDE_FLOOR = 0.74
+          ASSEMBLY_FLOORS = {
+              'SigilBuild.Core': 0.63,
+              'SigilBuild.Signing': 0.68,
+              'SigilBuild.Wrapper.Core': 0.77,
+              'SigilBuild.Packaging': 0.72,
+          }
+
+          # All nine shipping assemblies (AGENTS.md repo map). SigilBuild.Cli,
+          # SigilBuild.Wrapper and SigilBuild.Installer.Host report ZERO coverage
+          # lines today -- nothing in the coverlet-instrumented unit-test tree
+          # exercises them directly (only VM/integration suites do).
+          #
+          # RULING (T1.3, overrides plan text): a MISSING assembly is reported
+          # loudly via ::warning:: but does NOT fail the build -- hard-failing here
+          # would turn the required `build` check red the moment this lane merges,
+          # blocking every Stage 2/3 lane behind it. This tolerance is deliberate
+          # and TEMPORARY: move these three into ASSEMBLY_FLOORS (and delete this
+          # comment) the day each reports nonzero coverage. Per-assembly floors for
+          # assemblies that DO report still hard-fail below -- absence is reported,
+          # regression is enforced.
+          EXPECTED_ASSEMBLIES = {
+              'SigilBuild.Cli',
+              'SigilBuild.Core',
+              'SigilBuild.Installer.BrandGenerator',
+              'SigilBuild.Installer.Host',
+              'SigilBuild.Localization.Generator',
+              'SigilBuild.Packaging',
+              'SigilBuild.Signing',
+              'SigilBuild.Wrapper',
+              'SigilBuild.Wrapper.Core',
+          }
+
           files = glob.glob('**/TestResults/**/coverage.cobertura.xml', recursive=True)
           if not files:
               print("::error::no coverage.cobertura.xml files found — ensure coverlet is installed")
@@ -113,19 +155,39 @@ jobs:
           if not asm_keys:
               print("::error::no SigilBuild.* packages found in coverage reports")
               sys.exit(1)
-          print(f"{'assembly':<40} {'covered':>8} {'valid':>8} {'rate':>8}")
+          print(f"{'assembly':<40} {'covered':>8} {'valid':>8} {'rate':>8} {'floor':>8}")
           total_c = total_v = 0
+          failing = []
           for asm, keys in sorted(asm_keys.items()):
               valid = len(keys)
               covered = sum(1 for (f, ln) in keys if union_hits[(asm, f, ln)] > 0)
               total_c += covered
               total_v += valid
-              print(f"{asm:<40} {covered:>8} {valid:>8} {covered/valid if valid else 0:>8.2%}")
+              rate = covered / valid if valid else 0
+              floor = ASSEMBLY_FLOORS.get(asm)
+              floor_str = f"{floor:.0%}" if floor is not None else "n/a"
+              print(f"{asm:<40} {covered:>8} {valid:>8} {rate:>8.2%} {floor_str:>8}")
+              if floor is not None and rate < floor:
+                  failing.append((asm, rate, floor))
           rate = total_c / total_v
-          print(f"\nproject-wide union coverage: {total_c}/{total_v} = {rate:.2%}")
-          if rate < THRESHOLD:
-              print(f"::error::coverage {rate:.2%} is below the {THRESHOLD:.0%} threshold")
-              sys.exit(1)
+          print(f"\nproject-wide union coverage: {total_c}/{total_v} = {rate:.2%} (ratchet floor {PROJECT_WIDE_FLOOR:.0%})")
+
+          missing = sorted(EXPECTED_ASSEMBLIES - set(asm_keys.keys()))
+          exit_code = 0
+          if missing:
+              print(f"::warning::{len(missing)} expected assembly(ies) report ZERO coverage lines: {', '.join(missing)} (TEMPORARILY tolerated -- see comment above, T1.3/R21)")
+              for asm in missing:
+                  print(f"::warning::missing expected assembly: {asm} (0 lines observed in coverage reports)")
+
+          for asm, a_rate, floor in failing:
+              print(f"::error::{asm} coverage {a_rate:.2%} is below its {floor:.0%} floor")
+              exit_code = 1
+
+          if rate < PROJECT_WIDE_FLOOR:
+              print(f"::error::project-wide union coverage {rate:.2%} is below the {PROJECT_WIDE_FLOOR:.0%} ratchet floor")
+              exit_code = 1
+
+          sys.exit(exit_code)
           PY
 
       - name: upload test results

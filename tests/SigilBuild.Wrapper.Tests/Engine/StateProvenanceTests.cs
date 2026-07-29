@@ -459,19 +459,37 @@ public class StateProvenanceTests
 
             // Arrange (2) — plant it under %ProgramData% as the unprivileged current
             // user, with a bare CreateDirectory, exactly as the attacker would.
+            var machinePath = UninstallStateStore.PathFor(appId, InstallScope.Machine);
             Directory.CreateDirectory(machineDir);
-            File.WriteAllText(UninstallStateStore.PathFor(appId, InstallScope.Machine), payload);
-            File.Exists(UninstallStateStore.PathFor(appId, InstallScope.Machine)).Should().BeTrue(
+            File.WriteAllText(machinePath, payload);
+            File.Exists(machinePath).Should().BeTrue(
                 "if %ProgramData% is not writable in this session the attack fixture is " +
                 "not real and this test must be reported as inconclusive, not passing");
             StateDirectorySecurity.IsTrusted(machineDir).Should().BeFalse(
                 "the planted directory must really be attacker-owned/writable");
 
-            // The FILE was planted too, not just the directory — that is the half of
-            // R1 that survives a hardened container, because File.WriteAllText
-            // truncates in place and preserves the planted file's owner and ACEs.
-            var machinePath = UninstallStateStore.PathFor(appId, InstallScope.Machine);
-            var plantedFileIsUntrusted = !StateDirectorySecurity.IsTrustedFile(machinePath);
+            // Arrange (3) — the FILE is planted too, not just the directory. That is the
+            // half of R1 that survives a hardened container: File.WriteAllText truncates
+            // in place, so the planted file keeps its owner and its explicit ACEs even
+            // after an elevated installer has repaired the directory around it.
+            //
+            // The ACE below is what makes this fixture host-INDEPENDENT. Unelevated, the
+            // planted file is already untrusted because this user owns it. Elevated —
+            // which is how GitHub's windows-latest runners execute — a file created under
+            // %ProgramData% is Administrators-owned (its Users write ACE is (CI)-only and
+            // so does not reach files), and would read as trusted. Granting BUILTIN\Users
+            // FullControl puts a non-administrator write-class right on the file itself,
+            // which fails the DACL half of the check on EITHER kind of host. Without it
+            // the assertion below could not fail on CI, and the read half of the fix
+            // could be deleted with the suite still green.
+            var planted = new FileInfo(machinePath).GetAccessControl();
+            planted.AddAccessRule(new FileSystemAccessRule(
+                Users, FileSystemRights.FullControl, AccessControlType.Allow));
+            new FileInfo(machinePath).SetAccessControl(planted);
+
+            StateDirectorySecurity.IsTrustedFile(machinePath).Should().BeFalse(
+                "the fixture must really be an attacker-writable file on every host, or " +
+                "the refusal assertion below would be unfalsifiable");
 
             // Act
             var progress = new CapturingProgress();
@@ -493,24 +511,13 @@ public class StateProvenanceTests
                 m => m.Contains("refusing state in", StringComparison.Ordinal),
                 "a silent refusal reads as 'no prior install' and would mask the attack");
 
-            if (plantedFileIsUntrusted)
-            {
-                // Unelevated host: the planted uninstall.json really is owned by a
-                // non-administrator, so the refusal must name the FILE as well. A check
-                // that only inspected the container would not — and that container check
-                // is precisely what a hardened-directory-only fix leaves passing once the
-                // elevated installer has repaired the directory around the planted file.
-                reason.Should().Contain("the state file",
-                    "trusting a file because its directory is trusted is the second half of R1");
-            }
-            else
-            {
-                // Elevated host (GitHub windows-latest): a file this session creates is
-                // already admin-owned, so the file half cannot be staged here. It is
-                // pinned independently by the IsTrustedFile_* tests, which run on every
-                // host, and by Save_replaces_a_pre_existing_state_file_….
-                StateDirectorySecurity.IsTrustedFile(machinePath).Should().BeTrue();
-            }
+            // Unconditional, on every host: the refusal must name the FILE as well.
+            // Deleting the file term from the load site's check would leave the reason
+            // reading "the state directory" alone and fail here — including on an
+            // elevated CI runner, which is the point. Trusting a file because its
+            // directory is trusted is the second half of R1.
+            reason.Should().Contain("the state file",
+                "a hardened directory does not make an attacker-owned file inside it safe");
 
             // Control — the very same bytes DO load from user scope, so the null above
             // is the R1 refusal and not a malformed fixture or a missing file.
@@ -523,6 +530,13 @@ public class StateProvenanceTests
         finally
         {
             UninstallStateStore.Delete(appId, InstallScope.User);
+
+            // The planted directory carries the fixture's own ACEs and lives in
+            // %ProgramData%, which is shared across runs — leaving it behind would
+            // litter and eventually collide. Re-grant as owner first (the same
+            // technique the hardened-directory tests use) so the delete cannot be
+            // refused by the ACL the fixture itself stamped on.
+            Unharden(machineDir);
 #pragma warning disable CA1031 // Best-effort cleanup of the planted attack fixture.
             try
             {

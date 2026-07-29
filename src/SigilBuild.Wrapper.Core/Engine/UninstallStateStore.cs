@@ -54,15 +54,27 @@ internal static class UninstallStateStore
     public sealed record LoadedState(RollbackJournal Journal, InstallScope Scope);
 
     /// <summary>
+    /// The outcome of a load attempt. <paramref name="State"/> is the rehydrated
+    /// state, or <c>null</c>. <paramref name="RefusalReason"/> is non-<c>null</c>
+    /// only when state was found but <em>refused</em> on provenance grounds (R1) —
+    /// which is emphatically not the same thing as "no prior install", and callers
+    /// must not report it as such.
+    /// </summary>
+    public sealed record LoadAttempt(LoadedState? State, string? RefusalReason);
+
+    /// <summary>
     /// Persist <paramref name="journal"/> as <c>uninstall.json</c> under the
     /// scope-correct per-app state directory, creating it if needed, and record
-    /// <paramref name="scope"/> in the file (T12).
+    /// <paramref name="scope"/> in the file (T12). <paramref name="progress"/>
+    /// carries the R1 hardening trail (e.g. a repaired state-directory DACL) into
+    /// the console / wizard log / <c>/LOG</c> file; the store has no logger of its own.
     /// </summary>
     public static void Save(
         string appId,
         RollbackJournal journal,
         InstallScope scope,
-        System.Collections.Generic.IReadOnlyList<string>? secretValues = null)
+        System.Collections.Generic.IReadOnlyList<string>? secretValues = null,
+        IProgress<StepProgress>? progress = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(appId);
         ArgumentNullException.ThrowIfNull(journal);
@@ -71,11 +83,13 @@ internal static class UninstallStateStore
 
         // R1: machine scope lands in %ProgramData%, whose inherited DACL grants
         // BUILTIN\Users write and makes the creating user CREATOR OWNER. Create it
-        // with an explicit, non-inherited DACL instead. User scope legitimately
-        // lives in the user's own profile, so hardening it would be meaningless.
+        // with an explicit, non-inherited DACL instead — and re-apply that DACL to a
+        // directory that already exists without it, which is the state every machine
+        // with a pre-fix install is in. User scope legitimately lives in the user's
+        // own profile, so hardening it would be meaningless.
         if (scope == InstallScope.Machine && OperatingSystem.IsWindows())
         {
-            StateDirectorySecurity.CreateHardened(dir);
+            StateDirectorySecurity.CreateHardened(dir, progress);
         }
         else
         {
@@ -137,12 +151,27 @@ internal static class UninstallStateStore
     /// and drives ARP-hive / state-dir selection. Returns <c>null</c> when no
     /// state file exists in either scope or the JSON is unreadable; the caller
     /// (<c>UninstallEngine</c>) translates that into the documented "no uninstall
-    /// state found" error. Machine-scope state whose directory is not owned by
-    /// SYSTEM or Administrators is refused outright (R1) and reported on
-    /// <paramref name="progress"/> — the store has no logger of its own, and the
-    /// caller's progress sink is what the <c>/LOG</c> file is fed from.
+    /// state found" error. Machine-scope state whose directory is not trusted
+    /// (<see cref="StateDirectorySecurity.IsTrusted"/>) is refused outright (R1) and
+    /// reported on <paramref name="progress"/> — the store has no logger of its own,
+    /// and the caller's progress sink is what the <c>/LOG</c> file is fed from.
+    /// Use <see cref="Load"/> when the caller must tell a refusal apart from an
+    /// absence; this overload collapses both to <c>null</c>.
     /// </summary>
     public static LoadedState? TryLoad(
+        string appId,
+        InstallScope preferredScope,
+        IProgress<StepProgress>? progress = null)
+        => Load(appId, preferredScope, progress).State;
+
+    /// <summary>
+    /// <see cref="TryLoad"/> with the refusal distinguished from the absence: a
+    /// non-<c>null</c> <see cref="LoadAttempt.RefusalReason"/> means state WAS present
+    /// and was rejected on R1 provenance grounds. Reporting that as "no uninstall
+    /// state found" would tell the operator the opposite of what happened and would
+    /// mask an attack, so <c>UninstallEngine</c> consumes this shape.
+    /// </summary>
+    public static LoadAttempt Load(
         string appId,
         InstallScope preferredScope,
         IProgress<StepProgress>? progress = null)
@@ -172,13 +201,12 @@ internal static class UninstallStateStore
                 && OperatingSystem.IsWindows()
                 && !StateDirectorySecurity.IsTrusted(DirectoryFor(appId, dirScope)))
             {
-                progress?.Report(new StepProgress(
-                    0,
-                    0,
-                    $"refusing state in '{DirectoryFor(appId, dirScope)}': " +
-                    "not owned by SYSTEM or Administrators",
-                    IsError: true));
-                return null;
+                var reason =
+                    $"refusing state in '{DirectoryFor(appId, dirScope)}': it is not owned by " +
+                    "SYSTEM, Administrators or TrustedInstaller, or a non-administrator can " +
+                    "write it, so an unprivileged user could have authored the records";
+                progress?.Report(new StepProgress(0, 0, reason, IsError: true));
+                return new LoadAttempt(null, reason);
             }
 
             var json = File.ReadAllText(path);
@@ -207,10 +235,10 @@ internal static class UninstallStateStore
             }
             // Honor the scope recorded in the file (falls back to the directory's
             // scope for pre-T12 state that predates the recorded field).
-            return new LoadedState(journal, s.Scope);
+            return new LoadAttempt(new LoadedState(journal, s.Scope), null);
         }
 
-        return null;
+        return new LoadAttempt(null, null);
     }
 
     /// <summary>

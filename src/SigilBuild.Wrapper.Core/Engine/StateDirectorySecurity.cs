@@ -93,11 +93,16 @@ internal static class StateDirectorySecurity
     /// <see cref="UnauthorizedAccessException"/>.
     /// </para>
     /// <para>
-    /// The repair fixes the DACL, not the owner: taking ownership needs privilege the
-    /// running token may not carry, and a failed <c>SetOwner</c> would convert a
-    /// hardening step into an install failure. An attacker-owned directory therefore
-    /// still fails <see cref="IsTrusted"/> after a repair and its state is refused on
-    /// the read side — which is the fail-closed direction.
+    /// The repair then hands ownership to <c>BUILTIN\Administrators</c>, best-effort.
+    /// The DACL is the load-bearing half, but the owner of an object retains implicit
+    /// <c>WRITE_DAC</c> — it can re-permission the directory at will — which is why
+    /// <see cref="IsTrusted"/> requires a trusted owner too. A repaired-but-still-
+    /// attacker-owned directory would therefore have its state refused on every later
+    /// load, turning a privilege-escalation attempt into a permanent uninstall denial
+    /// for that app. Assigning an owner needs the target SID in the caller's token (or
+    /// <c>SeTakeOwnership</c>/<c>SeRestorePrivilege</c>), which only an <em>elevated</em>
+    /// caller has, so the attempt is swallowed and reported rather than fatal: the DACL
+    /// repair stands on its own, and machine scope only ever runs elevated in production.
     /// </para>
     /// <para>
     /// In production this runs only for machine scope, which only happens elevated,
@@ -147,6 +152,43 @@ internal static class StateDirectorySecurity
             $"repaired the access control list of state directory '{path}' " +
             "(admin-only, inheritance disabled)",
             IsError: false));
+
+        // The DACL repair above does not change WHO owns the directory, and an owner
+        // keeps implicit WRITE_DAC — it can hand itself write access back whenever it
+        // likes. IsTrusted therefore also demands a trusted owner, so leaving an
+        // attacker-created directory attacker-owned would make every later TryLoad
+        // refuse its state: the escalation attempt becomes a permanent uninstall
+        // denial. Hand ownership to BUILTIN\Administrators so the repair is complete.
+        //
+        // Best-effort by necessity: only a caller whose token carries the target SID
+        // (i.e. an ELEVATED one) can assign it. Machine scope only ever runs elevated
+        // in production, so this succeeds where it matters; an unelevated caller keeps
+        // the repaired DACL and is told the ownership fix was skipped. A failure here
+        // must never fail the install — the DACL is the load-bearing half.
+        var ownerRepaired = false;
+#pragma warning disable CA1031 // Owner repair is best-effort: only an elevated caller can succeed.
+        try
+        {
+            var ownership = new DirectorySecurity();
+            ownership.SetOwner(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null));
+            new DirectoryInfo(path).SetAccessControl(ownership);
+            ownerRepaired = true;
+        }
+        catch
+        {
+            // Insufficient privilege is the expected unelevated outcome; see above.
+        }
+#pragma warning restore CA1031
+
+        progress?.Report(new StepProgress(
+            0,
+            0,
+            ownerRepaired
+                ? $"took ownership of state directory '{path}' for BUILTIN\\Administrators"
+                : $"could not take ownership of state directory '{path}' — this needs an " +
+                  "elevated caller; the admin-only ACL is in place but the directory stays " +
+                  "untrusted and its state will be refused on load",
+            IsError: !ownerRepaired));
     }
 
     /// <summary>

@@ -330,6 +330,54 @@ public class StateProvenanceTests
             "a silent repair of a security boundary leaves no trail for an incident responder");
     }
 
+    [WindowsFact("Windows ACL APIs")]
+    public void CreateHardened_keeps_the_dacl_repair_when_taking_ownership_fails()
+    {
+        // Arrange — the repair path also hands ownership to BUILTIN\Administrators,
+        // because an owner keeps implicit WRITE_DAC and IsTrusted demands a trusted
+        // owner. Only an ELEVATED caller can assign that SID, and this session is not
+        // elevated, so this test exercises the best-effort failure branch: the one that
+        // must not take the DACL repair down with it.
+        using var temp = new TempDir();
+        var dir = Path.Combine(temp.Path, "attacker-owned");
+        Directory.CreateDirectory(dir);
+
+        var me = WindowsIdentity.GetCurrent().User;
+        me.Should().NotBeNull();
+        OwnerOf(dir).Should().Be(me!, "an unelevated process owns what it creates");
+
+        var progress = new CapturingProgress();
+
+        // Act — must not throw even though the ownership half cannot succeed here.
+        StateDirectorySecurity.CreateHardened(dir, progress);
+
+        // Assert — the ownership attempt really did fail (otherwise this test would be
+        // asserting the wrong branch), and the DACL repair survived it intact.
+        OwnerOf(dir).Should().Be(me!,
+            "an unelevated token cannot assign BUILTIN\\Administrators as owner — this " +
+            "test is only meaningful while that stays true");
+
+        var after = new DirectoryInfo(dir).GetAccessControl(AccessControlSections.Access);
+        after.AreAccessRulesProtected.Should().BeTrue(
+            "a failed ownership fix must not roll back or skip the DACL repair");
+        DescribeRules(after).Should().BeEquivalentTo(new[]
+        {
+            $"{LocalSystem.Value}|{FileSystemRights.FullControl}|Allow",
+            $"{Administrators.Value}|{FileSystemRights.FullControl}|Allow",
+            // Windows persists the implied SYNCHRONIZE bit alongside ReadAndExecute;
+            // FullControl already contains it, which is why only this line names it.
+            $"{Users.Value}|{FileSystemRights.ReadAndExecute | FileSystemRights.Synchronize}|Allow",
+        });
+
+        progress.Messages.Should().Contain(
+            m => m.Contains("could not take ownership", StringComparison.OrdinalIgnoreCase),
+            "a skipped ownership fix leaves the directory untrusted, so it must be said out loud");
+
+        // NOT asserted, because it cannot be from here: that an ELEVATED caller ends up
+        // with owner == BUILTIN\Administrators and a directory that then passes
+        // IsTrusted. That path needs an elevated run (gate G1).
+    }
+
     /// <summary>
     /// Gate G1 attack #1, expressed as a test: an unprivileged user pre-creates
     /// <c>%ProgramData%\Sigil\&lt;AppId&gt;</c> with a plain
@@ -414,6 +462,12 @@ public class StateProvenanceTests
 #pragma warning restore CA1031
         }
     }
+
+    /// <summary>The directory's owner SID, or <c>null</c> if it cannot be read.</summary>
+    private static SecurityIdentifier? OwnerOf(string directory) =>
+        new DirectoryInfo(directory)
+            .GetAccessControl(AccessControlSections.Owner)
+            .GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
 
     /// <summary>
     /// Renders a DACL as <c>sid|rights|type</c> strings so an assertion can name the

@@ -23,9 +23,9 @@ public sealed class UninstallEngine
     /// scope it was installed under (T12). <paramref name="preferredScope"/> is the
     /// scope resolved from the uninstall command line (the ARP
     /// <c>UninstallString</c> carries <c>/allusers</c> or <c>/currentuser</c>); the
-    /// state store searches it first, then the recorded scope in the state file
-    /// drives ARP-hive and state-dir selection so the uninstall reverses exactly
-    /// what the install wrote.
+    /// state store reads that scope's directory and only that one, and the scope of
+    /// the directory the state was found in drives ARP-hive and state-dir selection
+    /// (R1 — never the <c>scope</c> field inside the file).
     /// </summary>
     [System.Diagnostics.CodeAnalysis.SuppressMessage(
         "Performance",

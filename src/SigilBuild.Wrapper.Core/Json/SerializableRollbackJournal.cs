@@ -19,10 +19,16 @@ internal sealed record SerializableRollbackJournal
     public string Version { get; init; } = "1";
 
     /// <summary>
-    /// The install scope this state was written under (T12). Recorded so an
-    /// uninstall runs in the same scope it was installed with — the ARP hive and
-    /// the state directory both follow it. Defaults to
-    /// <see cref="InstallScope.User"/> for state files written before T12.
+    /// The install scope this state was written under (T12). <strong>Written, never
+    /// read.</strong> R1 clause (b): <c>UninstallStateStore.Load</c> used to take the
+    /// authoritative scope from this field, so a file planted in the user-scope
+    /// directory could claim <c>machine</c> and steer an uninstall onto the HKLM ARP
+    /// hive and the <c>%ProgramData%</c> state directory. The scope now comes from the
+    /// directory the file was found in; this field is retained only so state written
+    /// before the fix still deserializes, and must never be consumed again — a value
+    /// inside a file whose trustworthiness is in question cannot decide the privilege
+    /// that file is handled with. Defaults to <see cref="InstallScope.User"/> for
+    /// state files written before T12.
     /// </summary>
     public InstallScope Scope { get; init; } = InstallScope.User;
 

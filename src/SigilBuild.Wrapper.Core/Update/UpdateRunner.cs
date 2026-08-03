@@ -174,22 +174,41 @@ internal sealed class UpdateRunner
 
         _report($"update: newer version available (installed {installedLabel} → {channel.Version})", false);
 
-        // 7. Download the new version's stamped Setup.exe and run it silently in the
-        //    current scope. Clean up the temp file regardless of outcome.
-        var dest = Path.Combine(
-            request.TempDirectory,
-            $"sigil-update-{SanitizeSegment(request.AppId)}-{Guid.NewGuid():N}.exe");
+        // 7. Download the new version's stamped Setup.exe into a private, per-run
+        //    staging directory and run it in the current scope. The staged file is
+        //    re-verified from an OPEN, write-and-delete-denying handle that is held
+        //    across the child launch — register row R12: verifying and then launching a
+        //    file nobody is holding leaves a window in which the bytes can be swapped.
+        //    Disposing the staging directory cleans up regardless of outcome.
+        var stagedName = $"sigil-update-{SanitizeSegment(request.AppId)}.exe";
+        using var staging = SecureStaging.Create("update", request.TempDirectory);
+        var dest = staging.PathFor(stagedName);
+
+        var download = await _downloader
+            .DownloadAsync(channel.PackageUrl, dest, channel.Sha256, ct)
+            .ConfigureAwait(false);
+        if (!download.Success)
+        {
+            _report($"update: download failed — {download.Error}", true);
+            return InstallSession.UpdateCheckFailedExitCode;
+        }
+
+        FileStream handle;
         try
         {
-            var download = await _downloader
-                .DownloadAsync(channel.PackageUrl, dest, channel.Sha256, ct)
-                .ConfigureAwait(false);
-            if (!download.Success)
-            {
-                _report($"update: download failed — {download.Error}", true);
-                return InstallSession.UpdateCheckFailedExitCode;
-            }
+            handle = staging.OpenVerified(stagedName, channel.Sha256);
+        }
+        catch (Exception ex) when (
+            ex is StagedFileVerificationException or IOException or UnauthorizedAccessException)
+        {
+            // Fail closed. A downloaded package that no longer matches the sha256 it was
+            // verified under is not a transient problem — it is the attack.
+            _report($"update: refusing to run the downloaded installer — {ex.Message}", true);
+            return InstallSession.UpdateCheckFailedExitCode;
+        }
 
+        using (handle)
+        {
             var scopeFlag = request.Scope == InstallScope.Machine ? "/allusers" : "/currentuser";
             // T12.4: headless /Update (SilentChild true, T12.3 unchanged) launches the
             // child /silent; a headed, non-silent /Update launches it WITHOUT /silent so
@@ -213,10 +232,6 @@ internal sealed class UpdateRunner
 
             _report($"update: setup exited with code {childCode}", childCode != 0 && childCode != InstallSession.RebootRequiredExitCode);
             return childCode;
-        }
-        finally
-        {
-            TryDelete(dest);
         }
     }
 
@@ -257,22 +272,5 @@ internal sealed class UpdateRunner
         }
         var s = sb.ToString();
         return s.Length == 0 ? "app" : s;
-    }
-
-    private static void TryDelete(string path)
-    {
-#pragma warning disable CA1031 // Best-effort temp cleanup: a failure to delete must not fault the update.
-        try
-        {
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-        }
-        catch (Exception)
-        {
-            // best-effort
-        }
-#pragma warning restore CA1031
     }
 }

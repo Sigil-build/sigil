@@ -264,7 +264,7 @@ public static class PrerequisiteRunner
             // The staging report carries the "an elevated run degraded to a user-writable
             // root" line, so it must reach the same progress sink as everything else here.
             staging = SecureStaging.Create(
-                "prereq", fallbackRoot: null, report: (msg, isErr) => Report(progress, ctx, msg, isErr));
+                "prereq", (msg, isErr) => Report(progress, ctx, msg, isErr));
         }
 #pragma warning disable CA1031 // A staging failure becomes the same typed failure as every other failure in this method: a redirected or ACL-hostile %TEMP% must be diagnosable, not fatal to the host.
         catch (Exception ex)

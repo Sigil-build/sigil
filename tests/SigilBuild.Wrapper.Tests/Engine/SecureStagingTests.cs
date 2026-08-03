@@ -48,6 +48,22 @@ using Xunit;
 [SupportedOSPlatform("windows")]
 public sealed class SecureStagingTests
 {
+    /// <summary>
+    /// Every staging line this file provokes. xUnit constructs the class per test, so
+    /// this is per-test state.
+    /// </summary>
+    private readonly List<(string Message, bool IsError)> _reported = new();
+
+    /// <summary>
+    /// The only way this file stages. <c>SecureStaging.Create</c>'s report parameter is
+    /// required so that no call site can quietly drop it; a test helper that passed a
+    /// discarding sink would re-create exactly the omission the requirement exists to
+    /// prevent, so everything lands in <see cref="_reported"/> and is asserted on —
+    /// including the assertion that an unelevated fallback stays silent.
+    /// </summary>
+    private SecureStaging Staging(string purpose, string root) =>
+        SecureStaging.Create(purpose, (message, isError) => _reported.Add((message, isError)), root);
+
     private static string Sha256Hex(byte[] data) =>
         Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
 
@@ -65,8 +81,8 @@ public sealed class SecureStagingTests
     {
         using var root = new TempDir();
 
-        using var first = SecureStaging.Create("prereq", root.Path);
-        using var second = SecureStaging.Create("prereq", root.Path);
+        using var first = Staging("prereq", root.Path);
+        using var second = Staging("prereq", root.Path);
 
         Directory.Exists(first.Directory).Should().BeTrue();
         Directory.Exists(second.Directory).Should().BeTrue();
@@ -81,7 +97,7 @@ public sealed class SecureStagingTests
         using var root = new TempDir();
         string directory;
 
-        using (var staging = SecureStaging.Create("update", root.Path))
+        using (var staging = Staging("update", root.Path))
         {
             directory = staging.Directory;
             Stage(staging, "setup.exe", Encoding.UTF8.GetBytes("payload"));
@@ -94,7 +110,7 @@ public sealed class SecureStagingTests
     public void PathFor_refuses_a_name_that_would_escape_the_staging_directory()
     {
         using var root = new TempDir();
-        using var staging = SecureStaging.Create("prereq", root.Path);
+        using var staging = Staging("prereq", root.Path);
 
         var escape = () => staging.PathFor(Path.Combine("..", "elsewhere.exe"));
         var rooted = () => staging.PathFor(Path.Combine(root.Path, "elsewhere.exe"));
@@ -108,7 +124,7 @@ public sealed class SecureStagingTests
     public void Created_directory_carries_a_protected_non_inherited_dacl()
     {
         using var root = new TempDir();
-        using var staging = SecureStaging.Create("prereq", root.Path);
+        using var staging = Staging("prereq", root.Path);
 
         var security = new DirectoryInfo(staging.Directory)
             .GetAccessControl(AccessControlSections.Access);
@@ -151,7 +167,7 @@ public sealed class SecureStagingTests
     public void Staging_is_admin_only_exactly_when_the_process_is_elevated()
     {
         using var root = new TempDir();
-        using var staging = SecureStaging.Create("prereq", root.Path);
+        using var staging = Staging("prereq", root.Path);
 
         // The single frozen predicate (S1) is the only answer consulted — SecureStaging
         // implements no second ACL check, so its own flag must agree with it.
@@ -182,6 +198,9 @@ public sealed class SecureStagingTests
             staging.IsAdminOnly.Should().BeFalse(
                 "an unelevated process cannot create a directory only administrators can write");
             staging.Directory.Should().StartWith(root.Path, "unelevated staging falls back to the caller's root");
+            _reported.Should().BeEmpty(
+                "staging in the caller's root unelevated is the only option there is, not a downgrade — " +
+                "reporting it would train an operator to ignore the line that does matter");
         }
     }
 
@@ -191,7 +210,7 @@ public sealed class SecureStagingTests
     public void OpenVerified_throws_when_the_staged_file_changed_after_it_was_hashed()
     {
         using var root = new TempDir();
-        using var staging = SecureStaging.Create("prereq", root.Path);
+        using var staging = Staging("prereq", root.Path);
 
         // Stage a file and take the hash a downloader would have verified.
         var genuine = Encoding.UTF8.GetBytes("the-genuine-installer-bytes");
@@ -214,7 +233,7 @@ public sealed class SecureStagingTests
     public void OpenVerified_returns_a_readable_handle_positioned_at_zero_when_the_hash_still_matches()
     {
         using var root = new TempDir();
-        using var staging = SecureStaging.Create("prereq", root.Path);
+        using var staging = Staging("prereq", root.Path);
         var bytes = Encoding.UTF8.GetBytes("the-genuine-installer-bytes");
         Stage(staging, "setup.exe", bytes);
 
@@ -229,7 +248,7 @@ public sealed class SecureStagingTests
     public void OpenVerified_is_case_insensitive_about_the_expected_digest()
     {
         using var root = new TempDir();
-        using var staging = SecureStaging.Create("prereq", root.Path);
+        using var staging = Staging("prereq", root.Path);
         var bytes = Encoding.UTF8.GetBytes("case-insensitive-digest");
         Stage(staging, "setup.exe", bytes);
 
@@ -247,7 +266,7 @@ public sealed class SecureStagingTests
     public void OpenVerified_refuses_a_file_with_no_expected_digest_at_all()
     {
         using var root = new TempDir();
-        using var staging = SecureStaging.Create("prereq", root.Path);
+        using var staging = Staging("prereq", root.Path);
         Stage(staging, "setup.exe", Encoding.UTF8.GetBytes("x"));
 
         var open = () => staging.OpenVerified("setup.exe", "   ");
@@ -262,7 +281,7 @@ public sealed class SecureStagingTests
     public void The_returned_handle_denies_write_and_delete_but_still_admits_readers()
     {
         using var root = new TempDir();
-        using var staging = SecureStaging.Create("prereq", root.Path);
+        using var staging = Staging("prereq", root.Path);
         var bytes = Encoding.UTF8.GetBytes("held-across-the-launch");
         var path = Stage(staging, "setup.exe", bytes);
 
@@ -285,7 +304,7 @@ public sealed class SecureStagingTests
         // CreateProcess opens the image for read+execute, which None would refuse with
         // a sharing violation — the protection would break the launch it protects.
         using var root = new TempDir();
-        using var staging = SecureStaging.Create("prereq", root.Path);
+        using var staging = Staging("prereq", root.Path);
 
         var source = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe");
         var staged = staging.PathFor("staged.exe");
@@ -392,7 +411,7 @@ public sealed class SecureStagingTests
     public void OpenVerified_after_dispose_is_refused()
     {
         using var root = new TempDir();
-        var staging = SecureStaging.Create("prereq", root.Path);
+        var staging = Staging("prereq", root.Path);
         staging.Dispose();
 
         var open = () => staging.OpenVerified("setup.exe", new string('a', 64));

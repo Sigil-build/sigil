@@ -187,7 +187,7 @@ internal sealed class UpdateRunner
         {
             // _report also carries SecureStaging's own "an elevated run degraded to a
             // user-writable staging root" line — that must never be swallowed.
-            created = SecureStaging.Create("update", request.TempDirectory, _report);
+            created = SecureStaging.Create("update", _report, request.TempDirectory);
         }
 #pragma warning disable CA1031 // A staging failure becomes the same typed exit code as every other failure here; a redirected or ACL-hostile temp directory must not crash the host, which has no general catch.
         catch (Exception ex)

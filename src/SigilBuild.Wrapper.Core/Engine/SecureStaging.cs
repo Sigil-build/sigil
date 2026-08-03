@@ -103,21 +103,29 @@ internal sealed class SecureStaging : IDisposable
     /// (default <c>%TEMP%</c>), with a protected — non-inherited — DACL.
     /// </summary>
     /// <param name="purpose">Short tag for the directory name, e.g. <c>prereq</c>.</param>
-    /// <param name="fallbackRoot">
-    /// Root to use when no admin-only root is available. Lets a caller that already
-    /// owns a session temp directory keep staging inside it; <c>null</c> means
-    /// <see cref="Path.GetTempPath"/>.
-    /// </param>
     /// <param name="report">
     /// Receives <c>(message, isError)</c> lines. An <em>elevated</em> run that cannot
     /// establish its admin-only root still stages — but the degrade is announced here
     /// as an error, never swallowed. An elevated process quietly downgrading its own
     /// containment is the failure mode that reads as success.
+    /// <para>
+    /// <b>Required, and deliberately not defaulted.</b> An optional reporting parameter
+    /// reintroduces that exact failure by omission — a future call site that simply does
+    /// not pass one loses the degrade line with no compile error to catch it. Making it
+    /// required means the omission cannot be made by accident; passing a sink that
+    /// discards has to be a decision someone writes down.
+    /// </para>
+    /// </param>
+    /// <param name="fallbackRoot">
+    /// Root to use when no admin-only root is available. Lets a caller that already
+    /// owns a session temp directory keep staging inside it; <c>null</c> means
+    /// <see cref="Path.GetTempPath"/>.
     /// </param>
     public static SecureStaging Create(
-        string purpose, string? fallbackRoot = null, Action<string, bool>? report = null)
+        string purpose, Action<string, bool> report, string? fallbackRoot = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(purpose);
+        ArgumentNullException.ThrowIfNull(report);
 
         var (root, isAdminOnly) = ResolveRoot(fallbackRoot, report);
         var directory = Path.Combine(root, $"sigil-{Sanitize(purpose)}-{Guid.NewGuid():N}");
@@ -239,7 +247,7 @@ internal sealed class SecureStaging : IDisposable
     /// whether the returned root passed
     /// <see cref="StateDirectorySecurity.IsAdminOnlyWritable"/>.
     /// </summary>
-    private static (string Root, bool IsAdminOnly) ResolveRoot(string? fallbackRoot, Action<string, bool>? report)
+    private static (string Root, bool IsAdminOnly) ResolveRoot(string? fallbackRoot, Action<string, bool> report)
     {
         // Only an ELEVATED run can reach an admin-only root, and only an elevated run
         // that fails to is degrading: staging in %TEMP% unelevated is the only option
@@ -284,7 +292,7 @@ internal sealed class SecureStaging : IDisposable
     /// </para>
     /// </remarks>
     [SupportedOSPlatform("windows")]
-    internal static string? TryResolveAdminOnlyRoot(string commonAppData, Action<string, bool>? report)
+    internal static string? TryResolveAdminOnlyRoot(string commonAppData, Action<string, bool> report)
     {
         var sigil = Path.Combine(commonAppData, SigilFolder);
         var staging = Path.Combine(sigil, StagingFolder);
@@ -340,8 +348,8 @@ internal sealed class SecureStaging : IDisposable
     /// degrade reads as success, which is exactly the failure this stage exists to
     /// remove.
     /// </summary>
-    private static void Degrade(Action<string, bool>? report, string reason) =>
-        report?.Invoke(
+    private static void Degrade(Action<string, bool> report, string reason) =>
+        report(
             "staging: SECURITY DEGRADED — this elevated process could not create an " +
             "administrator-only staging directory, so the download will be staged in a " +
             $"location the current user can also write ({reason})",

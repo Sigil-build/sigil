@@ -92,10 +92,34 @@ public sealed class RollbackJournal
 #pragma warning restore CA1031
     }
 
-    public async System.Threading.Tasks.Task UndoAsync(
+    /// <summary>
+    /// Replay every record in reverse (LIFO), best-effort: an individual failure is
+    /// swallowed so one bad record cannot strand the rest of an uninstall.
+    /// </summary>
+    /// <param name="installDir">
+    /// The install directory this journal belongs to. Supplying it turns on replay
+    /// anchoring (R1): a record whose target escapes the install directory or the
+    /// narrow set of scope roots an installer legitimately writes is skipped, logged,
+    /// and returned in <see cref="UndoOutcome.RefusedRecords"/>.
+    /// <para>
+    /// <c>null</c> means "this journal was built in memory by this process during this
+    /// run" — the mid-install rollback path, where every record was authored moments
+    /// ago by the engine itself from the signed manifest and nothing has round-tripped
+    /// through a file an attacker can write. There is nothing to anchor against there,
+    /// and anchoring it would refuse legitimate reversals of manifest-declared work
+    /// outside the install directory. Any replay of PERSISTED state
+    /// (<c>UninstallStateStore</c> → <c>UninstallEngine</c>) must pass a real
+    /// directory; that is the path register row R1 is about.
+    /// </para>
+    /// </param>
+    public async System.Threading.Tasks.Task<UndoOutcome> UndoAsync(
         System.Threading.CancellationToken ct,
-        System.IProgress<StepProgress>? progress = null)
+        System.IProgress<StepProgress>? progress = null,
+        string? installDir = null)
     {
+        var anchor = ReplayAnchor.For(installDir);
+        var refused = new System.Collections.Generic.List<string>();
+
         // Walk in reverse. Undo failures should not cascade — log and continue.
         var total = _records.Count;
         var completed = 0;
@@ -103,6 +127,26 @@ public sealed class RollbackJournal
         {
             ct.ThrowIfCancellationRequested();
             var record = _records[i];
+
+            if (anchor is not null)
+            {
+                var verdict = anchor.Check(record);
+                if (verdict.RefusalReason is not null)
+                {
+                    // Logged and skipped, never silent and never fatal: silence would
+                    // mask an attack, and aborting would let one planted record block a
+                    // legitimate uninstall.
+                    refused.Add(verdict.RefusalReason);
+                    completed++;
+                    progress?.Report(new StepProgress(
+                        completed, total, $"refused: {verdict.RefusalReason}", IsError: true));
+                    continue;
+                }
+                // The verdict may hand back a re-derived record (unregister_com's DLL
+                // path is rebuilt from install_dir rather than trusted).
+                record = verdict.Record;
+            }
+
             try
             {
                 await record.UndoAsync(ct).ConfigureAwait(false);
@@ -116,6 +160,8 @@ public sealed class RollbackJournal
             completed++;
             progress?.Report(new StepProgress(completed, total, DescribeUndo(record), IsError: false));
         }
+
+        return new UndoOutcome(refused);
     }
 
     /// <summary>
@@ -144,6 +190,19 @@ public sealed class RollbackJournal
         _ => "revert",
     };
 }
+
+/// <summary>
+/// The result of a <see cref="RollbackJournal.UndoAsync"/> replay.
+/// </summary>
+/// <param name="RefusedRecords">
+/// One human-readable line per record that replay anchoring skipped (R1): what it was,
+/// what it targeted, and why that target is not reachable from this install. Empty on
+/// an unanchored replay and on a clean anchored one. A non-empty list after a
+/// legitimate uninstall means either a planted journal or an anchoring bug, and either
+/// way it must reach the operator rather than being swallowed.
+/// </param>
+public sealed record UndoOutcome(
+    System.Collections.Generic.IReadOnlyList<string> RefusedRecords);
 
 public abstract record RollbackRecord
 {

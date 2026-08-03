@@ -35,6 +35,7 @@ public sealed class UninstallEngine
         string appId,
         InstallScope preferredScope = InstallScope.User,
         IProgress<StepProgress>? progress = null,
+        string? installDir = null,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(appId);
@@ -64,7 +65,26 @@ public sealed class UninstallEngine
                 $"no uninstall state found for '{appId}' (expected at {UninstallStateStore.PathFor(appId, preferredScope)})");
         }
 
-        await loaded.Journal.UndoAsync(ct, progress).ConfigureAwait(false);
+        // R1 clause (c): this journal came off disk. Anchor the replay to the install
+        // directory the caller resolved from the signed blob / command line, so a
+        // planted record cannot aim the elevated process at System32, HKLM\SYSTEM, a
+        // service the app never installed, or a DLL of the attacker's choosing.
+        var undo = await loaded.Journal
+            .UndoAsync(ct, progress, installDir)
+            .ConfigureAwait(false);
+
+        if (undo.RefusedRecords.Count > 0)
+        {
+            // Never silent: a refusal here is either a planted journal or an anchoring
+            // bug, and both need a human. S5 surfaces this per-record for R15.
+            progress?.Report(new StepProgress(
+                0,
+                0,
+                $"{undo.RefusedRecords.Count} rollback record(s) were REFUSED and not " +
+                "replayed because their target lies outside this installation — see the " +
+                "lines above; the uninstall continued with the remaining records",
+                IsError: true));
+        }
 
         // Remove the ARP entry we wrote on install, from the recorded scope's hive.
         // Best-effort: if the user already cleaned it manually, keep going.

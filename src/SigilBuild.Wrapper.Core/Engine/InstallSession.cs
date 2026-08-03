@@ -835,7 +835,7 @@ public sealed class InstallSession
             }
             else
             {
-                await PerformReinstallCleanupAsync(ct).ConfigureAwait(false);
+                await PerformReinstallCleanupAsync(ctx.InstallDir, ct).ConfigureAwait(false);
             }
 
             // P2: pre_install hooks run OUTSIDE and BEFORE the journal opens. A hook
@@ -949,7 +949,7 @@ public sealed class InstallSession
     /// the outcome is intentionally ignored. No-op for the un-stamped runtime and
     /// off Windows.
     /// </summary>
-    private async Task PerformReinstallCleanupAsync(CancellationToken ct)
+    private async Task PerformReinstallCleanupAsync(string? installDir, CancellationToken ct)
     {
         if (!ExistingInstallDetected)
         {
@@ -959,8 +959,12 @@ public sealed class InstallSession
         // the reinstall's own progress stream begins with the fresh install below —
         // but the log-only sink is still passed so an R1 refusal (which would make
         // this cleanup silently do nothing) is recorded in the /LOG file.
+        //
+        // installDir comes from the resolved StepContext — the signed blob, the
+        // manifest and the command line — never from the persisted journal, and it is
+        // what anchors the replay (R1 clause (c)).
         await new UninstallEngine()
-            .RunAsync(_blob.AppId, _scope, progress: StateProgress, ct)
+            .RunAsync(_blob.AppId, _scope, progress: StateProgress, installDir, ct)
             .ConfigureAwait(false);
     }
 
@@ -1241,8 +1245,10 @@ public sealed class InstallSession
             return 1;
         }
 
+        // R1 clause (c): ctx.InstallDir is resolved from the signed blob / manifest /
+        // command line and anchors the replay of the persisted journal.
         var result = await new UninstallEngine()
-            .RunAsync(_blob.AppId, _scope, progress, ct)
+            .RunAsync(_blob.AppId, _scope, progress, ctx.InstallDir, ct)
             .ConfigureAwait(false);
         if (!result.Success)
         {
@@ -1300,8 +1306,9 @@ public sealed class InstallSession
             return new InstallOutcome(false, msg);
         }
 
+        // R1 clause (c): anchored to the install dir resolved from the signed blob.
         var result = await new UninstallEngine()
-            .RunAsync(_blob.AppId, _scope, effectiveProgress, ct)
+            .RunAsync(_blob.AppId, _scope, effectiveProgress, ctx.InstallDir, ct)
             .ConfigureAwait(false);
 
         if (result.Success)

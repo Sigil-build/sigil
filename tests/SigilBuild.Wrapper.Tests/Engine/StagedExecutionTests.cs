@@ -228,6 +228,39 @@ public sealed class StagedExecutionTests
         deleteRefused.Should().BeTrue("delete must be denied too — a swap can be a delete plus a re-create");
     }
 
+    // ── 3. A staging failure is a diagnosable failure, not a crash ────────────
+
+    [Fact]
+    public async Task Update_reports_an_unusable_staging_root_instead_of_throwing()
+    {
+        // A TempDirectory that is a FILE, not a directory: creating the staging
+        // directory under it throws. Every other failure in RunAsync comes back as a
+        // typed exit code plus a report line, and the console host has no general catch,
+        // so a redirected or ACL-hostile temp location must not become a crash.
+        using var tmp = new TempDir();
+        var notADirectory = Path.Combine(tmp.Path, "temp-is-a-file");
+        File.WriteAllText(notADirectory, "x");
+
+        var packageBytes = Encoding.UTF8.GetBytes("never-downloaded");
+        var (manifest, signature, key) = SignedManifest("2.0.0", Sha256Hex(packageBytes));
+        var downloader = new WritingDownloader(packageBytes);
+        var launcher = new RecordingLauncher(0);
+        var log = new List<string>();
+        var runner = new UpdateRunner(
+            Fetcher(manifest, signature), downloader, launcher, () => Installed("1.0.0"), (m, _) => log.Add(m));
+
+        var request = new UpdateRequest(
+            ManifestUrl: ManifestUrl, SigningKey: key, Channel: "stable",
+            Scope: InstallScope.Machine, AppId: "com.acme.Studio", TempDirectory: notADirectory);
+
+        var code = await runner.RunAsync(request, CancellationToken.None);
+
+        code.Should().Be(InstallSession.UpdateCheckFailedExitCode,
+            "a staging failure is reported the same typed way every other failure in this method is");
+        launcher.Called.Should().BeFalse();
+        string.Join("\n", log).Should().Contain("could not create a private staging directory");
+    }
+
     // ── Fixtures ──────────────────────────────────────────────────────────────
 
     private static UpdateRequest Request(string signingKey) =>

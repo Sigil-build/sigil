@@ -53,16 +53,22 @@ using System.Security.Principal;
 /// </list>
 /// <para>
 /// <b>Where it stages.</b> When the process is elevated the directory is sited under
-/// an admin-only root (<c>%ProgramData%\Sigil\staging</c>, created and repaired by
-/// <see cref="StateDirectorySecurity.CreateHardened"/> and then <em>confirmed</em>
-/// with <see cref="StateDirectorySecurity.IsAdminOnlyWritable"/> — the one shared
-/// "who can write here?" predicate; this type deliberately implements no second ACL
-/// check). Unelevated there is no admin-only location to reach, so it falls back to
-/// the caller's root (or <c>%TEMP%</c>) and still applies a <em>protected</em>
-/// (inheritance-discarding) DACL granting only the current user, SYSTEM and
-/// <c>BUILTIN\Administrators</c>. That is weaker by construction — an unelevated
-/// process cannot create something it cannot itself modify — which is why
+/// an admin-only root (<c>%ProgramData%\Sigil\staging</c>, created hardened and then
+/// <em>confirmed</em> with <see cref="StateDirectorySecurity.IsAdminOnlyWritable"/> —
+/// the one shared "who can write here?" predicate; this type deliberately implements
+/// no second ACL check). Unelevated there is no admin-only location to reach, so it
+/// falls back to the caller's root (or <c>%TEMP%</c>) and still applies a
+/// <em>protected</em> (inheritance-discarding) DACL granting only the current user,
+/// SYSTEM and <c>BUILTIN\Administrators</c>. That is weaker by construction — an
+/// unelevated process cannot create something it cannot itself modify — which is why
 /// <see cref="OpenVerified"/>, not the directory ACL, is the load-bearing half.
+/// </para>
+/// <para>
+/// <b>An elevated run that cannot get its admin-only root still stages, but says so.</b>
+/// The fallback is announced on the <c>report</c> callback as an error naming what
+/// failed, exception type and message included. Whether an elevated run should refuse
+/// outright rather than degrade is a policy question owned elsewhere; what is not
+/// negotiable is that the degrade is visible, because a silent one reads as success.
 /// </para>
 /// </remarks>
 internal sealed class SecureStaging : IDisposable
@@ -102,11 +108,18 @@ internal sealed class SecureStaging : IDisposable
     /// owns a session temp directory keep staging inside it; <c>null</c> means
     /// <see cref="Path.GetTempPath"/>.
     /// </param>
-    public static SecureStaging Create(string purpose, string? fallbackRoot = null)
+    /// <param name="report">
+    /// Receives <c>(message, isError)</c> lines. An <em>elevated</em> run that cannot
+    /// establish its admin-only root still stages — but the degrade is announced here
+    /// as an error, never swallowed. An elevated process quietly downgrading its own
+    /// containment is the failure mode that reads as success.
+    /// </param>
+    public static SecureStaging Create(
+        string purpose, string? fallbackRoot = null, Action<string, bool>? report = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(purpose);
 
-        var (root, isAdminOnly) = ResolveRoot(fallbackRoot);
+        var (root, isAdminOnly) = ResolveRoot(fallbackRoot, report);
         var directory = Path.Combine(root, $"sigil-{Sanitize(purpose)}-{Guid.NewGuid():N}");
 
         if (OperatingSystem.IsWindows())
@@ -226,11 +239,15 @@ internal sealed class SecureStaging : IDisposable
     /// whether the returned root passed
     /// <see cref="StateDirectorySecurity.IsAdminOnlyWritable"/>.
     /// </summary>
-    private static (string Root, bool IsAdminOnly) ResolveRoot(string? fallbackRoot)
+    private static (string Root, bool IsAdminOnly) ResolveRoot(string? fallbackRoot, Action<string, bool>? report)
     {
+        // Only an ELEVATED run can reach an admin-only root, and only an elevated run
+        // that fails to is degrading: staging in %TEMP% unelevated is the only option
+        // there is, not a downgrade, and must not cry wolf.
         if (OperatingSystem.IsWindows() && Elevation.IsProcessElevated())
         {
-            var adminRoot = TryCreateAdminOnlyRoot();
+            var adminRoot = TryResolveAdminOnlyRoot(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), report);
             if (adminRoot is not null)
             {
                 return (adminRoot, true);
@@ -243,37 +260,92 @@ internal sealed class SecureStaging : IDisposable
     }
 
     /// <summary>
-    /// Establish <c>%ProgramData%\Sigil\staging</c> as an admin-only root, or return
-    /// <c>null</c> if that cannot be confirmed. Both levels are hardened and both are
-    /// checked: an attacker who owned the intermediate <c>%ProgramData%\Sigil</c> could
-    /// delete and re-create <c>staging</c> underneath an otherwise correct check.
+    /// Establish <c>&lt;commonAppData&gt;\Sigil\staging</c> as an admin-only root, or
+    /// return <c>null</c> having <b>reported why</b>. Both levels are checked: an
+    /// attacker who owned the intermediate <c>Sigil</c> directory could delete and
+    /// re-create <c>staging</c> underneath an otherwise correct check.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b><c>%ProgramData%\Sigil</c> is lane S1's install-state root and is NOT repaired
+    /// from here.</b> It is created when it is simply missing, but an existing one that
+    /// fails <see cref="StateDirectorySecurity.IsAdminOnlyWritable"/> is left exactly as
+    /// found: re-permissioning it, or taking ownership of it, as a side effect of
+    /// staging a downloaded prerequisite is far too broad a repair for this call site.
+    /// Healing that directory is <c>UninstallStateStore</c>'s job on the install path,
+    /// where the decision belongs. Here an untrusted parent is simply the degrade case —
+    /// reported, then fallen back from.
+    /// </para>
+    /// <para>
+    /// <paramref name="commonAppData"/> is a parameter rather than a direct read of
+    /// <see cref="Environment.SpecialFolder.CommonApplicationData"/> so the degrade path
+    /// is testable without an elevated process and without touching the real
+    /// machine-scope state root.
+    /// </para>
+    /// </remarks>
     [SupportedOSPlatform("windows")]
-    private static string? TryCreateAdminOnlyRoot()
+    internal static string? TryResolveAdminOnlyRoot(string commonAppData, Action<string, bool>? report)
     {
-#pragma warning disable CA1031 // Fail soft to %TEMP%: an unusable admin root must not break the install, and OpenVerified is the load-bearing half either way.
+        var sigil = Path.Combine(commonAppData, SigilFolder);
+        var staging = Path.Combine(sigil, StagingFolder);
+
+#pragma warning disable CA1031 // Fail soft to a user-writable root — but never silently: the cause is reported before returning, and OpenVerified stays the load-bearing half.
         try
         {
-            var sigil = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), SigilFolder);
-            var staging = Path.Combine(sigil, StagingFolder);
-
-            StateDirectorySecurity.CreateHardened(sigil);
-            StateDirectorySecurity.CreateHardened(staging);
+            // Create the state root only if it is absent. Never repair an existing one
+            // (see the remarks) — CreateHardened would otherwise re-permission and take
+            // ownership of S1's directory from the staging path.
+            if (!System.IO.Directory.Exists(sigil))
+            {
+                StateDirectorySecurity.CreateHardened(sigil);
+            }
 
             // The frozen cross-lane predicate (S1) is the ONLY "who can write here?"
             // answer used anywhere in the engine — deliberately not re-implemented.
-            return StateDirectorySecurity.IsAdminOnlyWritable(sigil)
-                && StateDirectorySecurity.IsAdminOnlyWritable(staging)
-                ? staging
-                : null;
+            if (!StateDirectorySecurity.IsAdminOnlyWritable(sigil))
+            {
+                Degrade(
+                    report,
+                    $"the state root '{sigil}' is not administrator-only writable, and it is deliberately " +
+                    "not repaired from the staging path — that directory belongs to the install state store");
+                return null;
+            }
+
+            // The staging directory IS this component's own; creating it hardened, and
+            // repairing it if a previous run or an attacker left it permissive, is in
+            // scope here in a way that touching the parent is not.
+            StateDirectorySecurity.CreateHardened(staging);
+            if (!StateDirectorySecurity.IsAdminOnlyWritable(staging))
+            {
+                Degrade(report, $"the staging root '{staging}' could not be made administrator-only writable");
+                return null;
+            }
+
+            return staging;
         }
-        catch
+        catch (Exception ex)
         {
+            // The exception is NOT swallowed: its type and message are what tell an
+            // operator whether this was a redirected %ProgramData%, a denied ACL write,
+            // or something an attacker provoked.
+            Degrade(report, $"'{staging}' could not be established — {ex.GetType().Name}: {ex.Message}");
             return null;
         }
 #pragma warning restore CA1031
     }
+
+    /// <summary>
+    /// Announce that an elevated run failed to obtain an administrator-only staging
+    /// root and is proceeding in a user-writable one. Reported as an error: a silent
+    /// degrade reads as success, which is exactly the failure this stage exists to
+    /// remove.
+    /// </summary>
+    private static void Degrade(Action<string, bool>? report, string reason) =>
+        report?.Invoke(
+            "staging: SECURITY DEGRADED — this elevated process could not create an " +
+            "administrator-only staging directory, so the download will be staged in a " +
+            $"location the current user can also write ({reason})",
+            true);
 
     /// <summary>
     /// Create the per-run directory with a protected DACL — inheritance discarded, so

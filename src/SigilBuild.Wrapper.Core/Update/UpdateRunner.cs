@@ -181,7 +181,23 @@ internal sealed class UpdateRunner
         //    file nobody is holding leaves a window in which the bytes can be swapped.
         //    Disposing the staging directory cleans up regardless of outcome.
         var stagedName = $"sigil-update-{SanitizeSegment(request.AppId)}.exe";
-        using var staging = SecureStaging.Create("update", request.TempDirectory);
+
+        SecureStaging created;
+        try
+        {
+            // _report also carries SecureStaging's own "an elevated run degraded to a
+            // user-writable staging root" line — that must never be swallowed.
+            created = SecureStaging.Create("update", request.TempDirectory, _report);
+        }
+#pragma warning disable CA1031 // A staging failure becomes the same typed exit code as every other failure here; a redirected or ACL-hostile temp directory must not crash the host, which has no general catch.
+        catch (Exception ex)
+        {
+            _report($"update: could not create a private staging directory for the download — {ex.Message}", true);
+            return InstallSession.UpdateCheckFailedExitCode;
+        }
+#pragma warning restore CA1031
+
+        using var staging = created;
         var dest = staging.PathFor(stagedName);
 
         var download = await _downloader

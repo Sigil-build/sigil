@@ -1,6 +1,7 @@
 namespace SigilBuild.Wrapper.Tests.Engine;
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.Versioning;
@@ -156,6 +157,13 @@ public sealed class SecureStagingTests
         // implements no second ACL check, so its own flag must agree with it.
         staging.IsAdminOnly.Should().Be(StateDirectorySecurity.IsAdminOnlyWritable(staging.Directory));
 
+        // …and that agreement must not be two falses produced by a predicate that says
+        // false to everything. %WINDIR%\System32 is TrustedInstaller-owned with only
+        // privileged writers, so it is the control that keeps this assertion honest.
+        StateDirectorySecurity.IsAdminOnlyWritable(
+            Environment.GetFolderPath(Environment.SpecialFolder.System))
+            .Should().BeTrue("the predicate must still answer true for a genuinely admin-only directory");
+
         if (Elevation.IsProcessElevated())
         {
             // ELEVATED: the admin-only root under %ProgramData%\Sigil\staging is
@@ -227,7 +235,12 @@ public sealed class SecureStagingTests
 
         using var handle = staging.OpenVerified("setup.exe", Sha256Hex(bytes).ToUpperInvariant());
 
-        handle.Should().NotBeNull();
+        // An upper-case digest must be accepted on the same terms as a lower-case one —
+        // same rewound handle over the same verified bytes, not merely "did not throw".
+        handle.Position.Should().Be(0);
+        handle.Length.Should().Be(bytes.Length);
+        using var reader = new BinaryReader(handle, Encoding.UTF8, leaveOpen: true);
+        reader.ReadBytes(bytes.Length).Should().Equal(bytes);
     }
 
     [Fact]
@@ -294,6 +307,85 @@ public sealed class SecureStagingTests
         process.Should().NotBeNull("holding the verified handle must not block the launch");
         process!.WaitForExit();
         process.ExitCode.Should().Be(7, "the launched child is the staged file whose bytes were verified");
+    }
+
+    // ── The elevated degrade must be loud, and must not repair S1's state root ──
+
+    /// <summary>
+    /// <c>TryResolveAdminOnlyRoot</c> takes the state-root base as a parameter precisely
+    /// so these three can run unelevated against a throwaway directory instead of the
+    /// real <c>%ProgramData%</c>. Unelevated, a directory this process creates is owned
+    /// by this process, so the admin-only check fails — which is the degrade case, and
+    /// is exactly what has to be observable.
+    /// </summary>
+    [WindowsFact("Windows ACL APIs")]
+    public void An_elevated_run_that_cannot_get_an_admin_only_root_reports_the_degrade()
+    {
+        using var root = new TempDir();
+        var reported = new List<(string Message, bool IsError)>();
+
+        var resolved = SecureStaging.TryResolveAdminOnlyRoot(
+            root.Path, (m, e) => reported.Add((m, e)));
+
+        resolved.Should().BeNull("this process is not elevated, so it cannot own an admin-only root");
+        reported.Should().ContainSingle(
+            "a degrade that says nothing reads as success — the whole point of the report");
+        reported[0].IsError.Should().BeTrue("a downgrade of containment is not an informational line");
+        reported[0].Message.Should().Contain("SECURITY DEGRADED");
+        reported[0].Message.Should().Contain(
+            "the current user can also write", "the report must say what the staging location now is");
+        reported[0].Message.Should().Contain(
+            Path.Combine(root.Path, "Sigil"), "the report must name the directory that failed the check");
+    }
+
+    [WindowsFact("Windows ACL APIs")]
+    public void An_existing_untrusted_state_root_is_reported_and_left_unrepaired()
+    {
+        // %ProgramData%\Sigil is lane S1's install-state root. Staging a download must
+        // never re-permission it or take ownership of it as a side effect — that repair
+        // belongs to the install path, where the decision is made deliberately.
+        using var root = new TempDir();
+        var sigil = Path.Combine(root.Path, "Sigil");
+        Directory.CreateDirectory(sigil); // plain, inheriting, this-user-owned
+        var before = new DirectoryInfo(sigil).GetAccessControl(AccessControlSections.Access);
+        before.AreAccessRulesProtected.Should().BeFalse("precondition: the pre-existing root inherits its ACL");
+
+        var reported = new List<(string Message, bool IsError)>();
+        var resolved = SecureStaging.TryResolveAdminOnlyRoot(root.Path, (m, e) => reported.Add((m, e)));
+
+        resolved.Should().BeNull();
+        reported.Should().ContainSingle();
+        reported[0].Message.Should().Contain("not repaired");
+        reported[0].Message.Should().Contain("install state store");
+
+        var after = new DirectoryInfo(sigil).GetAccessControl(AccessControlSections.Access);
+        after.AreAccessRulesProtected.Should().BeFalse(
+            "an existing state root must be left exactly as found — hardening it here would be S1's repair " +
+            "happening as a side effect of staging a download");
+        Directory.Exists(Path.Combine(sigil, "staging")).Should().BeFalse(
+            "nothing is created underneath a state root that failed the check");
+    }
+
+    [WindowsFact("Windows ACL APIs")]
+    public void The_degrade_report_names_the_exception_type_and_message_when_the_root_cannot_be_created()
+    {
+        // A state-root base that is a FILE, not a directory — the creation throws, and
+        // the cause must survive into the report rather than being swallowed.
+        using var root = new TempDir();
+        var notADirectory = Path.Combine(root.Path, "not-a-directory");
+        File.WriteAllText(notADirectory, "x");
+
+        var reported = new List<(string Message, bool IsError)>();
+        var resolved = SecureStaging.TryResolveAdminOnlyRoot(notADirectory, (m, e) => reported.Add((m, e)));
+
+        resolved.Should().BeNull();
+        reported.Should().ContainSingle();
+        reported[0].IsError.Should().BeTrue();
+        reported[0].Message.Should().Contain("could not be established");
+        reported[0].Message.Should().MatchRegex(
+            @"[A-Za-z]+Exception: .+",
+            "the swallowed cause is what tells an operator whether this was a redirected root, a denied " +
+            "ACL write, or something provoked deliberately — its type AND message must be recorded");
     }
 
     [Fact]

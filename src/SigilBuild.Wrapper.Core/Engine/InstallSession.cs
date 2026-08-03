@@ -500,7 +500,21 @@ public sealed class InstallSession
         // (e.g. /Update → 64) still produces a log, and write the final exit code
         // as the last line.
         EnsureLog();
-        var code = await RunHeadlessCoreAsync(output, error, ct).ConfigureAwait(false);
+        int code;
+        try
+        {
+            code = await RunHeadlessCoreAsync(output, error, ct).ConfigureAwait(false);
+        }
+        catch (InstallDirRejectedException ex)
+        {
+            // R3: a refused install_dir is a user-input error, not a crash. The
+            // silent path renders it as a plain failure (exit 1) with nothing
+            // installed — the resolver throws before any journal is opened.
+            _log?.WriteLine($"result: refused — {ex.Message}");
+            error.WriteLine(ex.Message);
+            code = 1;
+        }
+
         _log?.WriteLine($"exit code: {code}");
         return code;
     }
@@ -594,17 +608,40 @@ public sealed class InstallSession
     /// <c>&lt;scope root&gt;\&lt;App.Name&gt;</c>. Does NOT consider a previously
     /// collected path, so re-toggling scope recomputes a clean default.
     /// </summary>
-    public string ResolveDefaultInstallDir(InstallScope? scope = null) =>
-        InstallDirResolver.Resolve(
-            scope: scope ?? _scope,
-            appName: _blob.AppName,
-            appId: _blob.AppId,
-            manifestInstallDir: _blob.InstallDir,
-            cliOverride: _parsed.InstallDir,
-            collected: null,
-            // P3: an upgrade pre-fills the prior install dir so the Destination screen
-            // defaults to the existing location (preserving user data).
-            priorInstallDir: PriorInstallDirDefault);
+    public string ResolveDefaultInstallDir(InstallScope? scope = null)
+    {
+        var effective = scope ?? _scope;
+        try
+        {
+            return InstallDirResolver.Resolve(
+                scope: effective,
+                appName: _blob.AppName,
+                appId: _blob.AppId,
+                manifestInstallDir: _blob.InstallDir,
+                cliOverride: _parsed.InstallDir,
+                collected: null,
+                // P3: an upgrade pre-fills the prior install dir so the Destination screen
+                // defaults to the existing location (preserving user data).
+                priorInstallDir: PriorInstallDirDefault);
+        }
+        catch (InstallDirRejectedException ex)
+        {
+            // R3: this is the wizard's PRE-FILL, computed by App before any window
+            // exists — a throw here would take the process down instead of showing
+            // a failure. Fall back to the scope default so the Destination screen
+            // opens on a legal path (visible to the user), and record the refusal
+            // in the /LOG. The rule itself is not weakened: whatever the user
+            // finally confirms is re-resolved through the checking path in
+            // RunInstallCoreAsync, which refuses it there.
+            _log?.WriteLine($"install dir: {ex.Message} Falling back to the scope default.");
+            return InstallDirResolver.Resolve(
+                scope: effective,
+                appName: _blob.AppName,
+                appId: _blob.AppId,
+                manifestInstallDir: null,
+                cliOverride: null);
+        }
+    }
 
     /// <summary>
     /// True when the effective scope is <see cref="InstallScope.Auto"/>-derived and
@@ -780,10 +817,22 @@ public sealed class InstallSession
                 payloadRoot = payload.Root;
             }
 
-            var ctx = StepContext.From(
-                _blob, _parsed, payloadRoot, _collectedValues, _scope, _collectedOptions, CollectedInstallDir,
-                // P3: an upgrade installs into the prior location (default destination).
-                priorInstallDir: PriorInstallDirDefault);
+            StepContext ctx;
+            try
+            {
+                ctx = StepContext.From(
+                    _blob, _parsed, payloadRoot, _collectedValues, _scope, _collectedOptions, CollectedInstallDir,
+                    // P3: an upgrade installs into the prior location (default destination).
+                    priorInstallDir: PriorInstallDirDefault);
+            }
+            catch (InstallDirRejectedException ex)
+            {
+                // R3: refuse before anything is laid down. Both the wizard's
+                // Failed screen and the silent path render this as an install
+                // failure rather than letting it escape unhandled.
+                _log?.WriteLine($"result: refused — {ex.Message}");
+                return new InstallOutcome(false, ex.Message);
+            }
 
             // P7: hand the run's secrets to the log for redaction, and tee the
             // engine's progress (step + rollback lines) into the /LOG file.
@@ -1288,7 +1337,19 @@ public sealed class InstallSession
         // the same reversal trail as the headless path.
         EnsureLog();
         var effectiveProgress = _log is null ? progress : new LoggingProgress(progress, _log);
-        var ctx = BuildUninstallContext();
+
+        StepContext ctx;
+        try
+        {
+            ctx = BuildUninstallContext();
+        }
+        catch (InstallDirRejectedException ex)
+        {
+            // R3: `uninstall.exe /D=<out-of-root>` reaches the same resolver.
+            // Surface it on the wizard's failure screen, not as a crash.
+            _log?.WriteLine($"result: uninstall refused — {ex.Message}");
+            return new InstallOutcome(false, ex.Message);
+        }
 
         // P2: pre_uninstall hooks (abort on failure) around the journal replay.
         var preHook = await HookRunner.RunAsync(

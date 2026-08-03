@@ -127,10 +127,19 @@ internal static class PathContainment
         {
             return (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
         }
-        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        catch (IOException)
         {
-            // A component that does not exist cannot redirect a write. Any other
-            // failure (access denied, I/O) propagates and fails the check closed.
+            // Nothing exists at this component — it was not found, or the name is
+            // one the filesystem cannot represent at all (the un-stamped runtime
+            // resolves to a literal "<unset>" directory, which raises
+            // ERROR_INVALID_NAME). Either way there is no reparse point here to
+            // redirect a write, and the textual containment check has already
+            // passed. FileNotFoundException / DirectoryNotFoundException derive
+            // from IOException and are covered by this.
+            //
+            // UnauthorizedAccessException is deliberately NOT caught: a component
+            // whose attributes we are not allowed to read is not provably free of
+            // a reparse point, so it propagates and fails the check closed.
             return false;
         }
     }

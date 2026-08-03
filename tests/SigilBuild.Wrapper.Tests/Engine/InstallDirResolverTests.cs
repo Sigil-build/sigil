@@ -10,6 +10,15 @@ namespace SigilBuild.Wrapper.Tests.Engine;
 /// Pins the <c>{install_dir}</c> default + override precedence and the
 /// <c>{scope_root}</c> / <c>{app.*}</c> token resolution (T13).
 /// </summary>
+/// <remarks>
+/// The precedence cases below deliberately use arbitrary absolute paths
+/// (<c>C:\Tools\Acme</c>, <c>D:\Existing\Acme</c>) to make "which source won"
+/// unmistakable. Since R3 those paths are outside the scope root, so they pass
+/// the <c>allowAnyRoot</c> escape hatch — these fixtures test PRECEDENCE, not
+/// containment; containment has its own suite in
+/// <see cref="InstallDirContainmentTests"/>. The production rule is untouched:
+/// the hatch is <c>internal</c> and no <c>src/</c> path can reach it.
+/// </remarks>
 public sealed class InstallDirResolverTests
 {
     private static string UserRoot => ScopeLayout.For(InstallScope.User).InstallRoot;
@@ -66,7 +75,8 @@ public sealed class InstallDirResolverTests
         var target = Path.Combine("C:", "Tools", "Acme");
         var resolved = InstallDirResolver.Resolve(
             InstallScope.User, appName: "Acme Studio", appId: "com.acme.Studio",
-            manifestInstallDir: "{scope_root}/Acme Studio", cliOverride: target);
+            manifestInstallDir: "{scope_root}/Acme Studio", cliOverride: target,
+            allowAnyRoot: true);
 
         resolved.Should().Be(Path.GetFullPath(target));
     }
@@ -79,7 +89,7 @@ public sealed class InstallDirResolverTests
 
         var resolved = InstallDirResolver.Resolve(
             InstallScope.User, appName: "Acme", appId: "id",
-            manifestInstallDir: null, cliOverride: cli, collected: wizard);
+            manifestInstallDir: null, cliOverride: cli, allowAnyRoot: true, collected: wizard);
 
         resolved.Should().Be(Path.GetFullPath(wizard));
     }
@@ -93,7 +103,7 @@ public sealed class InstallDirResolverTests
         var resolved = InstallDirResolver.Resolve(
             InstallScope.User, appName: "Acme Studio", appId: "com.acme.Studio",
             manifestInstallDir: "{scope_root}/Acme Studio", cliOverride: null,
-            collected: null, priorInstallDir: prior);
+            allowAnyRoot: true, collected: null, priorInstallDir: prior);
 
         resolved.Should().Be(Path.GetFullPath(prior));
     }
@@ -106,7 +116,7 @@ public sealed class InstallDirResolverTests
         var resolved = InstallDirResolver.Resolve(
             InstallScope.User, appName: "Acme", appId: "id",
             manifestInstallDir: null, cliOverride: cli,
-            collected: null, priorInstallDir: prior);
+            allowAnyRoot: true, collected: null, priorInstallDir: prior);
 
         resolved.Should().Be(Path.GetFullPath(cli));
     }
@@ -119,7 +129,7 @@ public sealed class InstallDirResolverTests
         var resolved = InstallDirResolver.Resolve(
             InstallScope.User, appName: "Acme", appId: "id",
             manifestInstallDir: null, cliOverride: null,
-            collected: wizard, priorInstallDir: prior);
+            allowAnyRoot: true, collected: wizard, priorInstallDir: prior);
 
         resolved.Should().Be(Path.GetFullPath(wizard));
     }

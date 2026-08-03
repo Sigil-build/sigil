@@ -53,6 +53,10 @@ public static class InstallDirResolver
     /// lands in the existing location (preserving user data), but loses to an explicit
     /// <c>/D=</c> or wizard-collected path. Absolute — carries no <c>{...}</c> tokens.
     /// </param>
+    /// <exception cref="InstallDirRejectedException">
+    /// The resolved directory falls outside the scope's containment root, or
+    /// reaches it through a reparse point (register row R3).
+    /// </exception>
     public static string Resolve(
         InstallScope scope,
         string? appName,
@@ -61,11 +65,93 @@ public static class InstallDirResolver
         string? cliOverride,
         string? collected = null,
         string? priorInstallDir = null)
+        => Resolve(
+            scope, appName, appId, manifestInstallDir, cliOverride,
+            allowAnyRoot: false, collected, priorInstallDir);
+
+    /// <summary>
+    /// <see cref="Resolve(InstallScope, string?, string, string?, string?, string?, string?)"/>
+    /// with an explicit containment opt-out.
+    /// </summary>
+    /// <param name="allowAnyRoot">
+    /// When <c>true</c>, skip the R3 scope-root containment check. This exists
+    /// for test fixtures that legitimately resolve into an OS temp directory —
+    /// it is <c>internal</c> precisely so no production path can reach it. Never
+    /// pass <c>true</c> from <c>src/</c>.
+    /// </param>
+    internal static string Resolve(
+        InstallScope scope,
+        string? appName,
+        string appId,
+        string? manifestInstallDir,
+        string? cliOverride,
+        bool allowAnyRoot,
+        string? collected = null,
+        string? priorInstallDir = null)
     {
-        var scopeRoot = ScopeLayout.For(scope).InstallRoot;
+        var layout = ScopeLayout.For(scope);
         var template = FirstNonBlank(collected, cliOverride, priorInstallDir, manifestInstallDir) ?? DefaultTemplate;
-        var resolved = SubstituteDirTokens(template, scopeRoot, appName, appId);
-        return Canonicalize(resolved);
+        var resolved = Canonicalize(SubstituteDirTokens(template, layout.InstallRoot, appName, appId));
+
+        if (!allowAnyRoot)
+        {
+            EnsureContained(layout, resolved);
+        }
+
+        return resolved;
+    }
+
+    /// <summary>
+    /// True when <paramref name="resolved"/> is inside the directory every
+    /// <c>install_dir</c> for <paramref name="layout"/> must stay within
+    /// (register row R3).
+    /// </summary>
+    /// <remarks>
+    /// Machine scope anchors on <c>%ProgramFiles%</c>: <c>{install_dir}</c> feeds
+    /// <c>scheduled_task_create.program</c> and <c>service_install.binary_path</c>,
+    /// which run as SYSTEM, so the destination must not be a directory an
+    /// unprivileged user can write.
+    /// <para>
+    /// User scope crosses no privilege boundary, so the root is widened from
+    /// <c>%LocalAppData%\Programs</c> to the whole user profile — a user writing
+    /// inside their own profile is not an escalation. The check is kept because
+    /// an unanchored user-scope install still lets a manifest write anywhere the
+    /// user can. <c>%LocalAppData%</c> can be redirected off the profile (folder
+    /// redirection), so the scope's own install root is accepted as well;
+    /// otherwise the DEFAULT install would be refused on such machines.
+    /// </para>
+    /// </remarks>
+    internal static bool IsContained(ScopeLayout layout, string resolved)
+    {
+        ArgumentNullException.ThrowIfNull(layout);
+
+        if (PathContainment.IsUnderWithoutTraversal(layout.InstallRoot, resolved))
+        {
+            return true;
+        }
+
+        return !layout.IsMachine
+            && PathContainment.IsUnderWithoutTraversal(UserContainmentRoot, resolved);
+    }
+
+    private static string UserContainmentRoot =>
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+    private static void EnsureContained(ScopeLayout layout, string resolved)
+    {
+        if (IsContained(layout, resolved))
+        {
+            return;
+        }
+
+        var root = layout.IsMachine ? layout.InstallRoot : UserContainmentRoot;
+
+        throw new InstallDirRejectedException(
+            string.Create(
+                System.Globalization.CultureInfo.InvariantCulture,
+                $"The install directory '{resolved}' is outside the {layout.Name} scope root '{root}' " +
+                $"(or reaches it through a directory junction). Refusing to install there — " +
+                $"{{install_dir}} feeds SYSTEM-level step targets. Nothing was installed."));
     }
 
     /// <summary>

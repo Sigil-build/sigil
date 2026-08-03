@@ -131,9 +131,40 @@ public static partial class Program
         // here, needs it). On an un-stamped dev run (no resource) this is a
         // no-op: the native DLLs already sit beside the exe. Idempotent across
         // re-runs (content-keyed cache dir + completion marker).
+        //
+        // R4: this runs INSIDE the elevated process (the elevation branch is above), so
+        // whatever lands on the DLL search path is loaded with administrator rights.
+        // NativeRuntimeBootstrap therefore verifies every file in the cache against the
+        // embedded archive and — elevated — requires an administrator-only root; when it
+        // cannot get one it throws rather than loading native code it cannot vouch for.
+        // The refusal is fatal here on purpose: this wizard IS Skia, so "carry on
+        // anyway" would crash a few frames later with a worse message, having already
+        // searched the untrusted directory.
         if (OperatingSystem.IsWindows())
         {
-            NativeRuntimeBootstrap.EnsureNativeDependenciesLoadable();
+            try
+            {
+                NativeRuntimeBootstrap.EnsureNativeDependenciesLoadable(
+                    (message, isError) =>
+                    {
+                        if (isError)
+                        {
+                            InstallerLog.Error(message);
+                        }
+                        else
+                        {
+                            InstallerLog.Info(message);
+                        }
+                    });
+            }
+            catch (NativeRuntimeTrustException ex)
+            {
+                InstallerLog.Error("native runtime bootstrap refused to run", ex);
+                AttachParentConsole();
+                Console.Error.WriteLine($"setup cannot start safely: {ex.Message}");
+                _ = MessageBoxW(IntPtr.Zero, ex.Message, "Setup cannot start safely", MB_OK | MB_ICONERROR);
+                return NativeRuntimeUntrustedExitCode;
+            }
         }
 
         // WinExe has no console — install a hard backstop so any unhandled
@@ -197,6 +228,15 @@ public static partial class Program
     private const uint ATTACH_PARENT_PROCESS = 0xFFFFFFFF;
     private const uint MB_OK = 0x0;
     private const uint MB_ICONINFORMATION = 0x40;
+    private const uint MB_ICONERROR = 0x10;
+
+    /// <summary>
+    /// Exit code for "the embedded native runtime could not be extracted to a directory
+    /// only an administrator can write" (register row R4). Distinct from a usage error
+    /// (64) and from an install failure so a scripted run can tell a refusal to start
+    /// from a failed install.
+    /// </summary>
+    private const int NativeRuntimeUntrustedExitCode = 78;
 
     [SupportedOSPlatform("windows")]
     [LibraryImport("kernel32.dll", SetLastError = true)]

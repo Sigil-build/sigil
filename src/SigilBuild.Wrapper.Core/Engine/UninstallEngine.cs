@@ -39,7 +39,24 @@ public sealed class UninstallEngine
     {
         ArgumentException.ThrowIfNullOrEmpty(appId);
 
-        var loaded = UninstallStateStore.TryLoad(appId, preferredScope);
+        // progress is threaded through so an R1 state refusal reaches the console,
+        // the wizard log pane and the /LOG file instead of vanishing.
+        var attempt = UninstallStateStore.Load(appId, preferredScope, progress);
+
+        // R1: a refusal is NOT an absence. Reporting "no uninstall state found" here
+        // would tell the operator the opposite of what happened — the brief's exact
+        // "reads as no prior install" failure mode — and would hide the attack from
+        // the one line an incident responder reads.
+        if (attempt.RefusalReason is not null)
+        {
+            return EngineResult.Failed(
+                new RollbackJournal(),
+                $"uninstall state for '{appId}' was found but REFUSED, not replayed: " +
+                $"{attempt.RefusalReason}. Nothing was uninstalled. Remove the directory as " +
+                "an administrator and reinstall, or investigate who created it.");
+        }
+
+        var loaded = attempt.State;
         if (loaded is null)
         {
             return EngineResult.Failed(

@@ -180,6 +180,19 @@ public sealed class InstallSession
     }
 
     /// <summary>
+    /// A log-only progress sink (R1). The state store reports its provenance
+    /// decisions — a refused machine-scope load, a repaired state-directory DACL —
+    /// on an <see cref="IProgress{T}"/>, so every call site that has no user-facing
+    /// progress stream of its own still has to hand it something or the refusal is
+    /// written to nowhere. Mirrors the existing sink built at
+    /// <see cref="RunUninstallAsync"/>: nothing reaches the console or the wizard,
+    /// but the <c>/LOG</c> file records it. <c>null</c> when <c>/LOG</c> was not
+    /// requested, in which case there is no sink to write to at all.
+    /// </summary>
+    private IProgress<StepProgress>? StateProgress =>
+        _log is null ? null : new LoggingProgress(null, _log);
+
+    /// <summary>
     /// Resolve the effective operating mode. The survivable <c>uninstall.exe</c>
     /// (T15) is a byte-for-byte copy of the setup exe, so double-clicking it — with
     /// no <c>/Uninstall</c> flag — must still uninstall. When no explicit mode flag
@@ -618,7 +631,10 @@ public sealed class InstallSession
             {
                 return false;
             }
-            return UninstallStateStore.TryLoad(_blob.AppId, _scope) is not null;
+            // R1: pass the log sink. Without it a refused machine-scope load would
+            // make this property answer false with no trace anywhere — literally
+            // "no prior install", which is the reading the brief forbids.
+            return UninstallStateStore.TryLoad(_blob.AppId, _scope, StateProgress) is not null;
         }
     }
 
@@ -870,7 +886,31 @@ public sealed class InstallSession
             // journal); this is the one call site PersistCompletion has.
             if (!_blob.IsDelegatingStub)
             {
-                PersistCompletion(result.Journal, ctx.SecretValues, ctx.InstallDir);
+                // R1: PersistCompletion runs AFTER every filesystem/registry mutation
+                // has committed and after the uninstaller copy, but BEFORE the ARP
+                // registration. An exception escaping here — e.g. a machine state
+                // directory an unprivileged user pre-created whose DACL cannot be
+                // repaired — would leave a fully installed app with no ARP row and no
+                // uninstall state: unremovable, and triggerable by any unprivileged
+                // user. Route it through the normal failure path instead.
+#pragma warning disable CA1031 // A completion failure must become a typed install failure, never an escape.
+                try
+                {
+                    PersistCompletion(result.Journal, ctx.SecretValues, ctx.InstallDir);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    var err =
+                        "the install completed but could not be registered for uninstall " +
+                        $"({ex.Message}); rolling it back so nothing is left behind";
+                    _log?.WriteLine($"result: failed — {ctx.Redact(err)}");
+                    Report(effectiveProgress, ctx, $"error: {err}", isError: true);
+                    // Best-effort by construction: UndoAsync swallows individual record
+                    // failures, so only cancellation can escape it.
+                    await result.Journal.UndoAsync(ct, effectiveProgress).ConfigureAwait(false);
+                    return new InstallOutcome(false, err);
+                }
+#pragma warning restore CA1031
             }
             // Install committed: a rollback can no longer be requested, so the
             // transient file_delete / directory_delete stashes (%TEMP%\sigil-fd-* /
@@ -915,10 +955,12 @@ public sealed class InstallSession
         {
             return;
         }
-        // UndoAsync + ARP.Remove + state delete. Progress is suppressed — the
-        // reinstall's own progress stream begins with the fresh install below.
+        // UndoAsync + ARP.Remove + state delete. User-facing progress is suppressed —
+        // the reinstall's own progress stream begins with the fresh install below —
+        // but the log-only sink is still passed so an R1 refusal (which would make
+        // this cleanup silently do nothing) is recorded in the /LOG file.
         await new UninstallEngine()
-            .RunAsync(_blob.AppId, _scope, progress: null, ct)
+            .RunAsync(_blob.AppId, _scope, progress: StateProgress, ct)
             .ConfigureAwait(false);
     }
 
@@ -1058,7 +1100,9 @@ public sealed class InstallSession
         // The scope is recorded so uninstall runs in the same scope (T12). Saved
         // AFTER the uninstaller-copy step is journaled so the RemoveUninstaller
         // record is part of the persisted, replay-on-uninstall journal.
-        UninstallStateStore.Save(_blob.AppId, journal, _scope, secretValues);
+        // StateProgress carries the R1 hardening trail (a repaired state-directory
+        // DACL) into the /LOG file; without a sink the repair would be invisible.
+        UninstallStateStore.Save(_blob.AppId, journal, _scope, secretValues, StateProgress);
         // T10: register the REAL manifest.App.* fields + packed size threaded through
         // the blob, not the former AppId / "1.0.0" / "Unknown" / 0 placeholders. The
         // fallbacks only fire for a (theoretical) blob that omitted them — a real

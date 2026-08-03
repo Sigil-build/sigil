@@ -608,6 +608,35 @@ public sealed class InstallSession
     /// <c>&lt;scope root&gt;\&lt;App.Name&gt;</c>. Does NOT consider a previously
     /// collected path, so re-toggling scope recomputes a clean default.
     /// </summary>
+    /// <summary>
+    /// R3 grandfather clause: a recovered <c>priorInstallDir</c> that resolves
+    /// outside the scope root is HONOURED (an install predating the containment
+    /// rule must stay upgradable and cleanly removable), but the exemption is
+    /// recorded in the <c>/LOG</c> naming the directory. A quiet allowance is how
+    /// an exemption becomes the norm.
+    /// </summary>
+    /// <remarks>
+    /// Only the prior directory is exempt. A <c>/D=</c> or wizard-collected
+    /// destination is a NEW, attacker-reachable choice and is still refused, so
+    /// pairing an out-of-root prior install with <c>/D=C:\Users\Public\evil</c>
+    /// does not become a bypass.
+    /// </remarks>
+    private void WarnGrandfatheredPriorInstallDir(string? collected)
+    {
+        var dir = InstallDirResolver.GrandfatheredPriorDir(
+            _scope, _blob.AppName, _blob.AppId, collected, _parsed.InstallDir, PriorInstallDirDefault);
+        if (dir is null)
+        {
+            return;
+        }
+
+        _log?.WriteLine(
+            $"install dir: honouring the prior install directory '{dir}', which is OUTSIDE the " +
+            $"{ScopeLayout.For(_scope).Name} scope root. It predates the install_dir containment rule (R3) " +
+            "and is honoured so this install stays upgradable and cleanly removable. " +
+            "A NEW destination outside the root is still refused.");
+    }
+
     public string ResolveDefaultInstallDir(InstallScope? scope = null)
     {
         var effective = scope ?? _scope;
@@ -798,6 +827,10 @@ public sealed class InstallSession
         // CLI override for it is silently ineffective — surface that in the log
         // rather than letting the author wonder why /P had no effect.
         WarnIgnoredLockedOverrides();
+
+        // R3 grandfather clause: an upgrade whose prior install lives outside the
+        // scope root is honoured rather than refused, but never silently.
+        WarnGrandfatheredPriorInstallDir(CollectedInstallDir);
 
         // P3 downgrade guard (defense-in-depth): the headless path already exits with
         // DowngradeBlockedExitCode and the wizard routes to a notice screen instead of

@@ -61,4 +61,38 @@ internal static class Junction
         catch { /* best-effort */ }
 #pragma warning restore CA1031
     }
+
+    /// <summary>
+    /// Best-effort sweep of stale junctions left in <paramref name="directory"/>
+    /// by an earlier run that was hard-killed between creation and its
+    /// <c>finally</c>. Only entries whose name starts with
+    /// <paramref name="prefix"/> AND which are actually reparse points are
+    /// removed, so a real directory sharing the prefix is never deleted.
+    /// </summary>
+    /// <remarks>
+    /// Junctions are the one test artifact where a leak is genuinely confusing
+    /// later — a stray link under <c>%LocalAppData%\Programs</c> looks like an
+    /// installed app. Call this at the start of any test that plants one.
+    /// </remarks>
+    public static void SweepStale(string directory, string prefix)
+    {
+        try
+        {
+            if (!Directory.Exists(directory))
+            {
+                return;
+            }
+
+            foreach (var entry in Directory.GetDirectories(directory, prefix + "*"))
+            {
+                if (File.GetAttributes(entry).HasFlag(FileAttributes.ReparsePoint))
+                {
+                    Remove(entry);
+                }
+            }
+        }
+#pragma warning disable CA1031 // Best-effort sweep; never fail a test because of it.
+        catch { /* best-effort */ }
+#pragma warning restore CA1031
+    }
 }

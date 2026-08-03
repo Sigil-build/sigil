@@ -106,12 +106,69 @@ public static class InstallDirResolver
         var template = FirstNonBlank(collected, cliOverride, priorInstallDir, manifestInstallDir) ?? DefaultTemplate;
         var resolved = Canonicalize(SubstituteDirTokens(template, layout.InstallRoot, appName, appId));
 
-        if (!allowAnyRoot)
+        if (!allowAnyRoot && !PriorDirWins(collected, cliOverride, priorInstallDir))
         {
             EnsureContained(layout, resolved);
         }
 
         return resolved;
+    }
+
+    /// <summary>
+    /// True when the recovered prior install directory is the source that wins
+    /// the precedence — i.e. no wizard-collected path and no <c>/D=</c> override
+    /// were supplied. Mirrors the ordering in
+    /// <see cref="FirstNonBlank"/>: collected → cliOverride → priorInstallDir →
+    /// manifestInstallDir.
+    /// </summary>
+    /// <remarks>
+    /// This is the <b>grandfather clause</b> for R3. An install that already
+    /// lives outside the scope root predates the containment rule; refusing it
+    /// would strand the user with an app that can be neither upgraded nor
+    /// cleanly removed, which is a worse outcome than the hole it closes. A
+    /// prior install directory is not attacker-supplied input — it is recovered
+    /// from the uninstall state that lane S1 now hardens and verifies.
+    /// <para>
+    /// It is deliberately NOT "a prior install exists, so skip containment".
+    /// The moment a caller supplies <c>collected</c> or <c>cliOverride</c>, that
+    /// NEW destination is attacker-reachable and is checked as normal — so the
+    /// grandfather clause cannot be used as a bypass by pairing
+    /// <c>/D=C:\Users\Public\evil</c> with any recorded prior install.
+    /// </para>
+    /// </remarks>
+    private static bool PriorDirWins(string? collected, string? cliOverride, string? priorInstallDir)
+        => string.IsNullOrWhiteSpace(collected)
+        && string.IsNullOrWhiteSpace(cliOverride)
+        && !string.IsNullOrWhiteSpace(priorInstallDir);
+
+    /// <summary>
+    /// The resolved prior install directory when it wins the precedence AND
+    /// falls outside the containment root — the grandfathered case that callers
+    /// must log. <c>null</c> when there is nothing to report.
+    /// </summary>
+    /// <remarks>
+    /// Exposed so <c>InstallSession</c> (which owns the <c>/LOG</c> sink) can
+    /// record the exemption. A quiet allowance is how an exemption becomes the
+    /// norm, so this path is never silent.
+    /// </remarks>
+    internal static string? GrandfatheredPriorDir(
+        InstallScope scope,
+        string? appName,
+        string appId,
+        string? collected,
+        string? cliOverride,
+        string? priorInstallDir)
+    {
+        if (!PriorDirWins(collected, cliOverride, priorInstallDir))
+        {
+            return null;
+        }
+
+        var layout = ScopeLayout.For(scope);
+        var resolved = Canonicalize(
+            SubstituteDirTokens(priorInstallDir!, layout.InstallRoot, appName, appId));
+
+        return IsContained(layout, resolved) ? null : resolved;
     }
 
     /// <summary>
@@ -145,10 +202,23 @@ public static class InstallDirResolver
     /// (register row R3).
     /// </summary>
     /// <remarks>
-    /// Machine scope anchors on <c>%ProgramFiles%</c>: <c>{install_dir}</c> feeds
-    /// <c>scheduled_task_create.program</c> and <c>service_install.binary_path</c>,
-    /// which run as SYSTEM, so the destination must not be a directory an
-    /// unprivileged user can write.
+    /// Machine scope anchors on the Program Files roots: <c>{install_dir}</c>
+    /// feeds <c>scheduled_task_create.program</c> and
+    /// <c>service_install.binary_path</c>, which run as SYSTEM, so the
+    /// destination must not be a directory an unprivileged user can write.
+    /// <b>Both</b> <c>%ProgramFiles%</c> and <c>%ProgramFiles(x86)%</c> are
+    /// accepted: both are admin-only and TrustedInstaller-owned, so containment
+    /// loses nothing, while refusing the x86 root would break the standard
+    /// 32-bit install shape on 64-bit Windows.
+    /// <para>
+    /// <see cref="ScopeLayout"/> models only ONE machine root
+    /// (<see cref="Environment.SpecialFolder.ProgramFiles"/>, see
+    /// <c>ScopeLayout.InstallRoot</c>), so the x86 root is added here rather
+    /// than there — <c>ScopeLayout</c> is shared surface and widening it is not
+    /// this lane's call. If it ever grows a root <i>set</i>, this method should
+    /// derive from it so the anchor and the installer's own notion of where
+    /// machine installs go cannot drift apart.
+    /// </para>
     /// <para>
     /// User scope crosses no privilege boundary, so the root is widened from
     /// <c>%LocalAppData%\Programs</c> to the whole user profile — a user writing
@@ -163,14 +233,31 @@ public static class InstallDirResolver
     {
         ArgumentNullException.ThrowIfNull(layout);
 
-        if (PathContainment.IsUnderWithoutTraversal(layout.InstallRoot, resolved))
+        foreach (var root in ContainmentRoots(layout))
         {
-            return true;
+            if (PathContainment.IsUnderWithoutTraversal(root, resolved))
+            {
+                return true;
+            }
         }
 
-        return !layout.IsMachine
-            && PathContainment.IsUnderWithoutTraversal(UserContainmentRoot, resolved);
+        return false;
     }
+
+    /// <summary>
+    /// Every root a resolved <c>install_dir</c> for <paramref name="layout"/>
+    /// may legitimately sit under. A blank entry (e.g. <c>%ProgramFiles(x86)%</c>
+    /// on a 32-bit-only OS) is harmless — <see cref="PathContainment.IsUnder"/>
+    /// rejects a blank root.
+    /// </summary>
+    private static string[] ContainmentRoots(ScopeLayout layout) => layout.IsMachine
+        ? new[]
+        {
+            layout.InstallRoot,
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+        }
+        : new[] { layout.InstallRoot, UserContainmentRoot };
 
     private static string UserContainmentRoot =>
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -182,14 +269,42 @@ public static class InstallDirResolver
             return;
         }
 
-        var root = layout.IsMachine ? layout.InstallRoot : UserContainmentRoot;
+        var roots = string.Join("', '", DistinctNonBlank(ContainmentRoots(layout)));
 
         throw new InstallDirRejectedException(
             string.Create(
                 System.Globalization.CultureInfo.InvariantCulture,
-                $"The install directory '{resolved}' is outside the {layout.Name} scope root '{root}' " +
+                $"The install directory '{resolved}' is outside the {layout.Name} scope root '{roots}' " +
                 $"(or reaches it through a directory junction). Refusing to install there — " +
                 $"{{install_dir}} feeds SYSTEM-level step targets. Nothing was installed."));
+    }
+
+    private static System.Collections.Generic.List<string> DistinctNonBlank(string[] roots)
+    {
+        var seen = new System.Collections.Generic.List<string>(roots.Length);
+        foreach (var r in roots)
+        {
+            if (string.IsNullOrWhiteSpace(r))
+            {
+                continue;
+            }
+
+            var duplicate = false;
+            foreach (var already in seen)
+            {
+                if (string.Equals(already, r, StringComparison.OrdinalIgnoreCase))
+                {
+                    duplicate = true;
+                    break;
+                }
+            }
+
+            if (!duplicate)
+            {
+                seen.Add(r);
+            }
+        }
+        return seen;
     }
 
     /// <summary>

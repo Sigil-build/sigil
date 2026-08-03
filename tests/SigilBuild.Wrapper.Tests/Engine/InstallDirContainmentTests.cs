@@ -18,6 +18,8 @@ using SigilBuild.Wrapper.Tests.Helpers;
 /// </summary>
 public sealed class InstallDirContainmentTests
 {
+    private const string JunctionPrefix = "sigil-s2-junction-";
+
     private static string MachineRoot => ScopeLayout.For(InstallScope.Machine).InstallRoot;
 
     [WindowsFact("Windows scope roots")]
@@ -81,20 +83,10 @@ public sealed class InstallDirContainmentTests
         act.Should().Throw<InstallDirRejectedException>().WithMessage("*outside*");
     }
 
-    [WindowsFact("Windows scope roots")]
-    public void Machine_scope_rejects_an_out_of_root_prior_install_dir()
-    {
-        var act = () => InstallDirResolver.Resolve(
-            InstallScope.Machine,
-            appName: "MyApp",
-            appId: "com.example.myapp",
-            manifestInstallDir: null,
-            cliOverride: null,
-            collected: null,
-            priorInstallDir: @"C:\Users\Public\evil");
-
-        act.Should().Throw<InstallDirRejectedException>().WithMessage("*outside*");
-    }
+    // NOTE: an out-of-root `priorInstallDir` was refused in the first cut of this
+    // lane. That was reversed by ruling — see the grandfather-clause section
+    // below. A recovered prior directory is not attacker-supplied input, and
+    // refusing it stranded installs that predate containment.
 
     [WindowsFact("Windows scope roots")]
     public void Machine_scope_rejects_a_traversal_escape_from_the_scope_root()
@@ -203,7 +195,12 @@ public sealed class InstallDirContainmentTests
         var installRoot = ScopeLayout.For(InstallScope.User).InstallRoot;
         Directory.CreateDirectory(installRoot);
 
-        var appName = "sigil-s2-junction-" + Guid.NewGuid().ToString("N");
+        // A hard kill between CreateOrFail and the finally below would strand a
+        // link here, and a stray junction under Programs looks like an installed
+        // app. Sweep any predecessor so repeated runs cannot accumulate them.
+        Junction.SweepStale(installRoot, JunctionPrefix);
+
+        var appName = JunctionPrefix + Guid.NewGuid().ToString("N");
         var scopeDefault = Path.Combine(installRoot, appName);
         using var outside = new TempDir();
         Junction.CreateOrFail(scopeDefault, outside.Path);
@@ -225,6 +222,168 @@ public sealed class InstallDirContainmentTests
         {
             Junction.Remove(scopeDefault);
         }
+    }
+
+    // ── Ruling 1: contain new installs, GRANDFATHER prior ones ────────────────
+    //
+    // An install that already lives outside the scope root predates R3. Refusing
+    // it strands the user with an app that can be neither upgraded nor cleanly
+    // removed — worse than the hole it closes, and a prior install dir is not
+    // attacker-supplied input. But the exemption must not become a bypass.
+
+    private const string OutOfRootPriorDir = @"C:\Apps\Acme";
+
+    private static WrapperBlob UpgradeBlob() => new(
+        AppId: "com.acme.Studio",
+        Parameters: Array.Empty<ParameterDefinition>(),
+        InstallSteps: Array.Empty<InstallStep>(),
+        PreInstall: Array.Empty<InstallStep>(),
+        PostInstall: Array.Empty<InstallStep>(),
+        UpdateSteps: Array.Empty<InstallStep>(),
+        AppName: "Acme",
+        Scope: InstallScope.User,
+        Version: "2.0.0");
+
+    private static UpgradeState PriorOutOfRoot() => new(
+        Found: true,
+        InstalledVersion: "1.0.0",
+        PriorInstallDir: OutOfRootPriorDir,
+        PriorUninstallExe: Path.Combine(OutOfRootPriorDir, "uninstall.exe"),
+        FoundScope: InstallScope.User);
+
+    [WindowsFact("Windows scope roots")]
+    public void Out_of_root_prior_install_dir_is_honoured()
+    {
+        // The grandfather clause: no /D=, no wizard pick — the recovered prior
+        // directory wins the precedence and is let through.
+        var resolved = InstallDirResolver.Resolve(
+            InstallScope.User,
+            appName: "Acme",
+            appId: "com.acme.Studio",
+            manifestInstallDir: null,
+            cliOverride: null,
+            collected: null,
+            priorInstallDir: OutOfRootPriorDir);
+
+        resolved.Should().Be(OutOfRootPriorDir,
+            "an install predating containment must stay upgradable and cleanly removable");
+    }
+
+    [WindowsFact("Windows scope roots")]
+    public async Task Out_of_root_prior_install_dir_is_logged_loudly()
+    {
+        using var tmp = new TempDir();
+        var logPath = Path.Combine(tmp.Path, "grandfather.log");
+
+        var blob = UpgradeBlob();
+        var session = InstallSession.ForTesting(
+            blob,
+            CommandLineParser.Parse(new[] { "/silent", $"/LOG={logPath}" }, blob.Parameters),
+            PriorOutOfRoot());
+
+        session.ResolveDefaultInstallDir().Should().Be(OutOfRootPriorDir);
+
+        // The run itself fails later (the fixture's prior uninstaller does not
+        // exist); the exemption is recorded before any of that.
+        await session.RunHeadlessAsync(new StringWriter(), new StringWriter());
+
+        var log = File.ReadAllText(logPath);
+        log.Should().Contain("honouring the prior install directory");
+        log.Should().Contain(OutOfRootPriorDir);
+        log.Should().Contain("OUTSIDE", "a quiet exemption is how the exemption becomes the norm");
+        log.Should().Contain("A NEW destination outside the root is still refused.");
+    }
+
+    [WindowsFact("Windows scope roots")]
+    public void Out_of_root_cli_override_is_still_refused_when_a_prior_install_exists()
+    {
+        // THE BYPASS TEST. The grandfather clause is gated on the prior dir
+        // WINNING the precedence — not on a prior install merely existing. A /D=
+        // outranks it, so this is a new attacker-reachable destination and stays
+        // refused even though an out-of-root prior install is recorded.
+        var act = () => InstallDirResolver.Resolve(
+            InstallScope.User,
+            appName: "Acme",
+            appId: "com.acme.Studio",
+            manifestInstallDir: null,
+            cliOverride: @"C:\Users\Public\evil",
+            collected: null,
+            priorInstallDir: OutOfRootPriorDir);
+
+        act.Should().Throw<InstallDirRejectedException>().WithMessage("*outside*");
+    }
+
+    [WindowsFact("Windows scope roots")]
+    public void Out_of_root_wizard_pick_is_still_refused_when_a_prior_install_exists()
+    {
+        // Same bypass, the other attacker-reachable source.
+        var act = () => InstallDirResolver.Resolve(
+            InstallScope.User,
+            appName: "Acme",
+            appId: "com.acme.Studio",
+            manifestInstallDir: null,
+            cliOverride: null,
+            collected: @"C:\Users\Public\evil",
+            priorInstallDir: OutOfRootPriorDir);
+
+        act.Should().Throw<InstallDirRejectedException>().WithMessage("*outside*");
+    }
+
+    [WindowsFact("Windows scope roots")]
+    public async Task Silent_run_still_refuses_an_out_of_root_D_despite_a_prior_install()
+    {
+        var blob = UpgradeBlob();
+        var session = InstallSession.ForTesting(
+            blob,
+            CommandLineParser.Parse(new[] { "/silent", @"/D=C:\Users\Public\evil" }, blob.Parameters),
+            PriorOutOfRoot());
+
+        var error = new StringWriter();
+        var code = await session.RunHeadlessAsync(new StringWriter(), error);
+
+        code.Should().Be(1);
+        error.ToString().Should().Contain("outside");
+    }
+
+    // ── Ruling 2: both Program Files roots are valid machine anchors ───────────
+
+    [WindowsFact("Windows scope roots")]
+    public void Machine_scope_accepts_the_x86_program_files_root()
+    {
+        var x86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+        x86.Should().NotBeNullOrWhiteSpace("64-bit Windows always exposes the x86 Program Files root");
+
+        var target = Path.Combine(x86, "MyApp");
+        var resolved = InstallDirResolver.Resolve(
+            InstallScope.Machine,
+            appName: "MyApp",
+            appId: "com.example.myapp",
+            manifestInstallDir: null,
+            cliOverride: target);
+
+        resolved.Should().Be(target,
+            "both Program Files roots are admin-only and TrustedInstaller-owned, " +
+            "and refusing x86 would break the standard 32-bit install shape");
+    }
+
+    [WindowsTheory("Windows scope roots")]
+    [InlineData(@"C:\Users\Public\evil")]
+    [InlineData(@"C:\ProgramData\evil")]
+    [InlineData(@"C:\Windows\Tracing\evil")]
+    public void Machine_scope_still_refuses_user_writable_roots(string target)
+    {
+        // Widening to two Program Files roots must not have widened anything
+        // else. Each of these is writable by a non-administrator (ProgramData
+        // grants BUILTIN\Users:(CI)(WD,AD,WEA,WA); Windows\Tracing grants
+        // BUILTIN\Users:(RX,W)), which is exactly R3's escalation.
+        var act = () => InstallDirResolver.Resolve(
+            InstallScope.Machine,
+            appName: "MyApp",
+            appId: "com.example.myapp",
+            manifestInstallDir: null,
+            cliOverride: target);
+
+        act.Should().Throw<InstallDirRejectedException>().WithMessage("*outside*");
     }
 
     // ── The test-only escape hatch ────────────────────────────────────────────

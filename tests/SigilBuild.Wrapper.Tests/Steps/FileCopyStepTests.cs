@@ -65,7 +65,7 @@ public class FileCopyStepTests
         await step.RunAsync(StepContext.Empty, journal, default);
         Directory.GetFiles(dst.Path).Should().HaveCount(2);
 
-        await journal.UndoAsync(default);
+        await journal.UndoAsync(ReplayAnchorage.InProcess);
 
         Directory.GetFiles(dst.Path).Should().BeEmpty();
     }
@@ -86,7 +86,7 @@ public class FileCopyStepTests
         await step.RunAsync(StepContext.Empty, journal, default);
         File.ReadAllText(preExisting).Should().Be("new");
 
-        await journal.UndoAsync(default);
+        await journal.UndoAsync(ReplayAnchorage.InProcess);
 
         File.Exists(preExisting).Should().BeTrue("pre-existing file must be restored");
         File.ReadAllText(preExisting).Should().Be("old");
@@ -105,9 +105,9 @@ public class FileCopyStepTests
         var journal = new RollbackJournal();
 
         await step.RunAsync(StepContext.Empty, journal, default);
-        await journal.UndoAsync(default);
+        await journal.UndoAsync(ReplayAnchorage.InProcess);
         // Second undo should not throw — the journal swallows individual failures.
-        await journal.UndoAsync(default);
+        await journal.UndoAsync(ReplayAnchorage.InProcess);
 
         Directory.GetFiles(dst.Path).Should().BeEmpty();
     }

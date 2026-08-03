@@ -35,70 +35,117 @@ using SigilBuild.Core.Manifest;
 internal sealed class ReplayAnchor
 {
     /// <summary>
-    /// Registry subtrees that are inside application-configuration space but are
-    /// auto-execution, policy or COM-activation surfaces. A manifest has no legitimate
-    /// need to have its uninstall write here, and an attacker very much does.
-    /// Compared segment-wise, case-insensitively, after <c>WOW6432Node</c> segments
-    /// have been folded away.
+    /// Registry subtrees that sit inside application-configuration space but are
+    /// auto-execution, policy, shell-verb or COM-activation surfaces. A manifest has no
+    /// legitimate need to have its uninstall write here, and an attacker very much
+    /// does — <c>Software\Classes\exefile\shell\open\command</c> and
+    /// <c>…\CurrentVersion\App Paths</c> are both machine-wide execution hijacks that a
+    /// bare "must be under Software\" rule would wave through.
     /// </summary>
+    /// <remarks>
+    /// Compared segment-wise, case-insensitively, after <c>WOW6432Node</c> segments
+    /// have been folded away and after <c>HKCR</c> has been rewritten to its
+    /// <c>Software\Classes</c> equivalent.
+    /// </remarks>
     private static readonly string[] DeniedRegistrySubtrees =
     {
+        // Auto-run, policy and shell-integration.
         @"Software\Microsoft\Windows\CurrentVersion\Run",
         @"Software\Microsoft\Windows\CurrentVersion\RunOnce",
         @"Software\Microsoft\Windows\CurrentVersion\RunOnceEx",
         @"Software\Microsoft\Windows\CurrentVersion\RunServices",
         @"Software\Microsoft\Windows\CurrentVersion\RunServicesOnce",
         @"Software\Microsoft\Windows\CurrentVersion\Policies",
+        @"Software\Microsoft\Windows\CurrentVersion\App Paths",
         @"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders",
         @"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders",
+        @"Software\Microsoft\Windows\CurrentVersion\Explorer\Browser Helper Objects",
+        @"Software\Microsoft\Windows\CurrentVersion\Explorer\ShellServiceObjectDelayLoad",
+        @"Software\Microsoft\Windows\CurrentVersion\Shell Extensions",
         @"Software\Microsoft\Windows NT\CurrentVersion\Windows",
         @"Software\Microsoft\Windows NT\CurrentVersion\Winlogon",
         @"Software\Microsoft\Windows NT\CurrentVersion\Image File Execution Options",
+        @"Software\Microsoft\Active Setup\Installed Components",
+        @"Software\Microsoft\Command Processor",
         @"Software\Policies",
+
+        // COM activation.
         @"Software\Classes\CLSID",
         @"Software\Classes\AppID",
+        @"Software\Classes\Interface",
+        @"Software\Classes\TypeLib",
+        @"Software\Classes\Protocols",
+
+        // OS-owned progids and pseudo-classes: their shell verbs are machine-wide
+        // execution. A manifest may register ITS OWN progid and file extension; it may
+        // not rewrite how Windows opens an executable, a folder, or every file.
+        @"Software\Classes\*",
+        @"Software\Classes\exefile",
+        @"Software\Classes\batfile",
+        @"Software\Classes\cmdfile",
+        @"Software\Classes\comfile",
+        @"Software\Classes\piffile",
+        @"Software\Classes\scrfile",
+        @"Software\Classes\regfile",
+        @"Software\Classes\htafile",
+        @"Software\Classes\htmlfile",
+        @"Software\Classes\Unknown",
+        @"Software\Classes\Directory",
+        @"Software\Classes\Folder",
+        @"Software\Classes\Drive",
+        @"Software\Classes\AllFilesystemObjects",
+        @"Software\Classes\.exe",
+        @"Software\Classes\.bat",
+        @"Software\Classes\.cmd",
+        @"Software\Classes\.com",
+        @"Software\Classes\.ps1",
+        @"Software\Classes\.vbs",
+        @"Software\Classes\.js",
+        @"Software\Classes\.msc",
+        @"Software\Classes\.scr",
     };
 
     private const string MachineEnvKey =
         @"System\CurrentControlSet\Control\Session Manager\Environment";
 
+    private const string UserEnvKey = "Environment";
+
     private const string ServicesKey = @"System\CurrentControlSet\Services";
 
-    private readonly string? _installDir;
-    private readonly string[] _roots;
+    private readonly string _installDir;
+    private readonly string[] _fileRoots;
 
-    private ReplayAnchor(string? installDir, string[] roots)
+    private ReplayAnchor(string installDir, string[] fileRoots)
     {
         _installDir = installDir;
-        _roots = roots;
+        _fileRoots = fileRoots;
     }
 
     /// <summary>
-    /// Build the anchor for a replay rooted at <paramref name="installDir"/>, or
-    /// <c>null</c> when <paramref name="installDir"/> is <c>null</c>/blank — which
-    /// means "this journal was built in memory by this process during this run", the
-    /// only case where there is nothing to anchor against. Any replay of PERSISTED
-    /// state must pass a real directory.
+    /// Build the anchor for <paramref name="anchorage"/>, or <c>null</c> when the
+    /// caller declared <see cref="ReplayAnchorage.InProcess"/>.
     /// </summary>
-    public static ReplayAnchor? For(string? installDir)
+    public static ReplayAnchor? For(ReplayAnchorage anchorage)
     {
-        if (string.IsNullOrWhiteSpace(installDir))
+        ArgumentNullException.ThrowIfNull(anchorage);
+        if (!anchorage.IsAnchored)
         {
             return null;
         }
 
-        var roots = new List<string>();
-        var normalizedInstallDir = Normalize(installDir);
-        if (normalizedInstallDir is not null)
-        {
-            roots.Add(normalizedInstallDir);
-        }
+        // A non-normalizable install dir yields an anchor whose install root is a
+        // sentinel nothing can be under — strictly stricter, never laxer. Failing open
+        // here would defeat the point.
+        var installDir = Normalize(anchorage.InstallDir)
+            ?? "\u0000:\\unresolvable-install-dir";
 
-        // The scope roots the installer legitimately writes outside install_dir:
-        // the shortcut folders a shortcut_create step targets, and the per-app state
-        // directory. Both scopes are included because an uninstall may legitimately
-        // be reversing either — and both are narrow, well-known locations, unlike the
-        // unbounded filesystem the records previously addressed.
+        var roots = new List<string> { installDir };
+
+        // The scope roots the installer legitimately writes OUTSIDE install_dir: the
+        // shortcut folders a shortcut_create step targets and the per-app state
+        // directory. FILESYSTEM records only — these are user-writable locations and
+        // must never be reused as an allowlist for a privileged primitive such as the
+        // machine PATH (see OwnedByThisInstall).
         foreach (var scope in new[] { InstallScope.User, InstallScope.Machine })
         {
             var layout = ScopeLayout.For(scope);
@@ -107,15 +154,13 @@ internal sealed class ReplayAnchor
             AddRoot(roots, SafeCombine(layout.StateRoot, "Sigil"));
         }
 
-        // A non-normalizable install dir yields an anchor with only the scope roots —
-        // strictly stricter, never laxer. Failing open here would defeat the point.
-        return new ReplayAnchor(normalizedInstallDir, roots.ToArray());
+        return new ReplayAnchor(installDir, roots.ToArray());
     }
 
     /// <summary>
     /// The verdict for one record: the record to actually replay (possibly re-derived
     /// from the install directory, as <c>unregister_com</c> is) and a non-<c>null</c>
-    /// <see cref="RefusalReason"/> when it must be skipped instead.
+    /// <see cref="Verdict.RefusalReason"/> when it must be skipped instead.
     /// </summary>
     public readonly record struct Verdict(RollbackRecord Record, string? RefusalReason);
 
@@ -182,10 +227,10 @@ internal sealed class ReplayAnchor
             : new Verdict(record, $"{type} refused: '{path}' {OutsideText()}");
 
     /// <summary>
-    /// True when <paramref name="path"/> resolves inside one of the anchored roots.
-    /// Normalizes first, so <c>&lt;install_dir&gt;\..\..\Windows</c> cannot pass, and
-    /// requires a directory separator after the root, so <c>C:\rootevil</c> cannot
-    /// pass as <c>C:\root</c>.
+    /// True when <paramref name="path"/> resolves inside one of the anchored
+    /// filesystem roots. Normalizes first, so <c>&lt;install_dir&gt;\..\..\Windows</c>
+    /// cannot pass, and requires a directory separator after the root, so
+    /// <c>C:\rootevil</c> cannot pass as <c>C:\root</c>.
     /// </summary>
     private bool IsAllowedPath(string? path)
     {
@@ -195,7 +240,7 @@ internal sealed class ReplayAnchor
             return false;
         }
 
-        foreach (var root in _roots)
+        foreach (var root in _fileRoots)
         {
             if (IsUnder(full, root))
             {
@@ -224,7 +269,8 @@ internal sealed class ReplayAnchor
 
     private static Verdict RegistryVerdict(RollbackRecord record, string type, string hive, string key)
     {
-        if (IsAllowedRegistryKey(key))
+        var effective = EffectiveRegistryPath(hive, key);
+        if (effective is not null && IsAllowedRegistryKey(effective))
         {
             return new Verdict(record, null);
         }
@@ -232,45 +278,70 @@ internal sealed class ReplayAnchor
         return new Verdict(
             record,
             $"{type} refused: '{hive}\\{key}' is outside the application-configuration " +
-            "subtree an installer may reverse (Software\\…, excluding the auto-run, " +
-            "policy and COM-activation surfaces)");
+            "subtree an installer may reverse (HKLM/HKCU Software\\…, excluding the " +
+            "auto-run, policy, shell-verb and COM-activation surfaces)");
+    }
+
+    /// <summary>
+    /// Fold a (hive, key) pair into the single canonical path the rules are written
+    /// against, or <c>null</c> when the hive itself is out of bounds.
+    /// </summary>
+    /// <remarks>
+    /// The hive is load-bearing. <c>HKLM</c> and <c>HKCU</c> are the two an installer
+    /// writes; <c>HKCR</c> is the merged view of <c>HKLM\Software\Classes</c> and
+    /// <c>HKCU\Software\Classes</c>, so it is rewritten into that form and judged by
+    /// the same rules — otherwise <c>HKCR\exefile\shell\open\command</c> would sidestep
+    /// the <c>Software\</c> prefix test entirely. <c>HKU</c>, <c>HKCC</c> and anything
+    /// unrecognized are refused outright: an installer's rollback has no business in
+    /// another user's hive or in the hardware profile.
+    /// </remarks>
+    private static string? EffectiveRegistryPath(string? hive, string? key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return null;
+        }
+
+        return hive switch
+        {
+            "HKLM" or "HKEY_LOCAL_MACHINE" or "HKCU" or "HKEY_CURRENT_USER" => FoldRegistryKey(key),
+            "HKCR" or "HKEY_CLASSES_ROOT" => FoldRegistryKey(@"Software\Classes\" + key),
+            _ => null,
+        };
     }
 
     /// <summary>
     /// A replayed registry write must sit under <c>Software\</c> — application
-    /// configuration space, in either hive — and outside
-    /// <see cref="DeniedRegistrySubtrees"/>. That is what stops the catalogue's
-    /// "arbitrary HKLM write": <c>SYSTEM\CurrentControlSet\Services\…</c> and
-    /// <c>SYSTEM\…\Session Manager\Environment</c> are no longer addressable at all.
+    /// configuration space — and outside <see cref="DeniedRegistrySubtrees"/>. That is
+    /// what stops the catalogue's "arbitrary HKLM write":
+    /// <c>SYSTEM\CurrentControlSet\Services\…</c> and
+    /// <c>SYSTEM\…\Session Manager\Environment</c> are no longer addressable at all,
+    /// and neither are the execution-hijack surfaces that do live under
+    /// <c>Software\</c>.
     /// </summary>
     /// <remarks>
     /// This is deliberately looser than "the app's own <c>Software\Publisher\App</c>
     /// key": a <c>registry_write</c> step may name any key the manifest author chose,
     /// and this process cannot know which of them the app owns without the manifest in
-    /// hand. Narrowing it further needs a manifest-declared key allowlist carried into
-    /// the journal — a change to the persisted schema, not to this predicate.
+    /// hand. Narrowing it to a true allowlist needs a manifest-declared key list
+    /// carried into the persisted journal — a wire-schema change, escalated separately,
+    /// not a change to this predicate.
     /// </remarks>
-    private static bool IsAllowedRegistryKey(string? key)
+    private static bool IsAllowedRegistryKey(string normalizedKey)
     {
-        if (string.IsNullOrWhiteSpace(key))
+        if (normalizedKey.Length == 0)
         {
             return false;
         }
 
-        var normalized = FoldRegistryKey(key);
-        if (normalized.Length == 0)
-        {
-            return false;
-        }
-
-        if (!IsUnderRegistryPrefix(normalized, "Software"))
+        if (!IsUnderRegistryPrefix(normalizedKey, "Software"))
         {
             return false;
         }
 
         foreach (var denied in DeniedRegistrySubtrees)
         {
-            if (IsUnderRegistryPrefix(normalized, denied))
+            if (IsUnderRegistryPrefix(normalizedKey, denied))
             {
                 return false;
             }
@@ -321,20 +392,32 @@ internal sealed class ReplayAnchor
     // --- environment ---
 
     /// <summary>
-    /// User-scope environment records touch HKCU, which the invoking user already owns
-    /// — replaying one grants nothing. Machine scope is the <c>PATH</c>-hijack
-    /// primitive, so it is allowed only when the write cannot introduce anything new:
-    /// every entry of the restored value must already be present in the variable's
-    /// current value, or live inside an anchored root. A legitimate uninstall restores
-    /// a value that is the current one minus the entry the install added, so it passes;
-    /// a planted record injecting <c>C:\evil</c> does not.
+    /// A <c>restore_env</c> replay writes an attacker-chosen string into an environment
+    /// variable. Machine scope is R1's named <c>PATH</c>-hijack primitive; user scope is
+    /// no safer during an ELEVATED replay, because HKCU is then the administrator's own
+    /// hive and a standard user planting the record would be hijacking it.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Both scopes therefore obey the same shape: a restore may only <em>remove</em>.
+    /// Every entry of the value being written must either already be present in the
+    /// variable's current value — which is what a genuine "put back what was there
+    /// before the install appended to it" restore looks like — or be a directory this
+    /// install owns.
+    /// </para>
+    /// <para>
+    /// "Owns" is deliberately narrower than the filesystem allowlist: the install
+    /// directory only, never the shortcut folders or the per-app state directory. Those
+    /// are user-writable, and treating a user-writable directory as an acceptable new
+    /// machine-<c>PATH</c> entry would leave the hijack primitive fully alive. For
+    /// machine scope the directory must additionally pass
+    /// <see cref="StateDirectorySecurity.IsAdminOnlyWritable"/>, so a machine install
+    /// redirected into a user-writable location cannot re-introduce it either.
+    /// </para>
+    /// </remarks>
     private Verdict EnvVerdict(RollbackRecord record, RollbackRecord.RestoreEnv r)
     {
-        if (!r.Scope.Equals("machine", StringComparison.OrdinalIgnoreCase))
-        {
-            return new Verdict(record, null);
-        }
+        var isMachine = r.Scope.Equals("machine", StringComparison.OrdinalIgnoreCase);
 
         if (!OperatingSystem.IsWindows())
         {
@@ -343,7 +426,7 @@ internal sealed class ReplayAnchor
             // that has never been checked.
             return new Verdict(
                 record,
-                $"restore_env refused: machine-scope '{r.Name}' cannot be verified off Windows");
+                $"restore_env refused: '{r.Name}' cannot be verified off Windows");
         }
 
         // PATH and friends are REG_EXPAND_SZ: the value on disk holds
@@ -351,47 +434,108 @@ internal sealed class ReplayAnchor
         // EnvSetStep captures the EXPANDED form into the journal. Compare against both
         // so a legitimate restore is not refused over a spelling difference — that
         // would break every real machine-scope uninstall.
-        var expanded = ReadMachineEnv(r.Name, expand: true);
-        var literal = ReadMachineEnv(r.Name, expand: false);
-        var restored = r.PreviouslyAbsent ? expanded ?? literal : r.PriorValue;
+        var expanded = ReadEnv(isMachine, r.Name, expand: true);
+        var literal = ReadEnv(isMachine, r.Name, expand: false);
 
-        // Deleting the variable the install created is the normal undo — but deleting
-        // one whose current content the app does not own (machine PATH, say) is a
-        // destructive primitive in its own right, so the same test applies to it.
-        if (restored is null)
+        if (r.PreviouslyAbsent)
         {
+            // The undo DELETES the variable, on the record's claim that the install
+            // created it. For an ordinary application variable that claim is cheap to
+            // honour and expensive to refuse: an installer legitimately sets things like
+            // ACME_HOME to a data directory outside install_dir, and refusing to remove
+            // it would leave a stale variable behind after every real uninstall. A false
+            // claim there costs one deleted application variable — a nuisance, not a
+            // privilege.
+            //
+            // For a variable the OS itself depends on, deleting it is a destructive
+            // primitive in its own right: "restore machine PATH to absent" would break
+            // the box. Those may only be removed if this install owns every entry in
+            // them, which in practice means never for PATH.
+            //
+            // Note the ownership test cannot be expressed by comparing the current value
+            // against itself: that tautology would make this branch incapable of ever
+            // refusing anything.
+            if (!IsSystemCriticalVariable(r.Name))
+            {
+                return new Verdict(record, null);
+            }
+
+            var live = SplitEntries(expanded);
+            live.UnionWith(SplitEntries(literal));
+            foreach (var entry in live)
+            {
+                if (OwnedByThisInstall(entry, isMachine))
+                {
+                    continue;
+                }
+                return new Verdict(
+                    record,
+                    $"restore_env refused: deleting {r.Scope}-scope '{r.Name}' would discard " +
+                    $"'{entry}', which this install does not own");
+            }
+            return new Verdict(record, null);
+        }
+
+        if (r.PriorValue is null)
+        {
+            // Nothing is written and nothing is deleted.
             return new Verdict(record, null);
         }
 
         var currentEntries = SplitEntries(expanded);
         currentEntries.UnionWith(SplitEntries(literal));
 
-        foreach (var entry in SplitEntries(restored))
+        foreach (var entry in SplitEntries(r.PriorValue))
         {
             var alternate = ExpandSafely(entry);
             if (currentEntries.Contains(entry) ||
                 currentEntries.Contains(alternate) ||
-                IsAllowedPath(entry) ||
-                IsAllowedPath(alternate))
+                OwnedByThisInstall(entry, isMachine) ||
+                OwnedByThisInstall(alternate, isMachine))
             {
                 continue;
             }
             return new Verdict(
                 record,
-                $"restore_env refused: machine-scope '{r.Name}' would introduce '{entry}', " +
-                "which is neither already present in the variable nor inside the install " +
-                "directory — a restore may only remove what the install added");
+                $"restore_env refused: {r.Scope}-scope '{r.Name}' would introduce '{entry}', " +
+                "which is neither already present in the variable nor a directory this " +
+                "install owns — a restore may only remove what the install added");
         }
         return new Verdict(record, null);
     }
 
+    /// <summary>
+    /// A directory this install may legitimately name in an environment variable: the
+    /// install directory itself, and — for machine scope — only when no
+    /// non-administrator can write it. The filesystem scope roots are excluded on
+    /// purpose; they are user-writable, and a user-writable entry on the machine
+    /// <c>PATH</c> is the hijack.
+    /// </summary>
+    private bool OwnedByThisInstall(string? path, bool isMachine)
+    {
+        var full = Normalize(path);
+        if (full is null || !IsUnder(full, _installDir))
+        {
+            return false;
+        }
+
+        if (!isMachine)
+        {
+            return true;
+        }
+
+        return OperatingSystem.IsWindows() && StateDirectorySecurity.IsAdminOnlyWritable(full);
+    }
+
     [SupportedOSPlatform("windows")]
-    private static string? ReadMachineEnv(string name, bool expand)
+    private static string? ReadEnv(bool isMachine, string name, bool expand)
     {
 #pragma warning disable CA1031 // Fail closed: an unreadable value must not be treated as "matches".
         try
         {
-            using var key = Registry.LocalMachine.OpenSubKey(MachineEnvKey, writable: false);
+            using var key = isMachine
+                ? Registry.LocalMachine.OpenSubKey(MachineEnvKey, writable: false)
+                : Registry.CurrentUser.OpenSubKey(UserEnvKey, writable: false);
             var options = expand
                 ? RegistryValueOptions.None
                 : RegistryValueOptions.DoNotExpandEnvironmentNames;
@@ -417,6 +561,27 @@ internal sealed class ReplayAnchor
         }
 #pragma warning restore CA1031
     }
+
+    /// <summary>
+    /// Environment variables whose removal breaks the machine or the session rather
+    /// than merely un-configuring an application. Deleting one of these is treated as
+    /// a destructive primitive and requires that this install own everything in it.
+    /// </summary>
+    private static bool IsSystemCriticalVariable(string name) =>
+        Array.Exists(
+            SystemCriticalVariables,
+            v => v.Equals(name, StringComparison.OrdinalIgnoreCase));
+
+    private static readonly string[] SystemCriticalVariables =
+    {
+        "Path", "PATHEXT", "ComSpec", "windir", "SystemRoot", "SystemDrive",
+        "TEMP", "TMP", "OS", "PSModulePath", "DriverData",
+        "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE", "PROCESSOR_IDENTIFIER",
+        "PROCESSOR_LEVEL", "PROCESSOR_REVISION",
+        "USERNAME", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
+        "HOMEDRIVE", "HOMEPATH", "ProgramData", "ALLUSERSPROFILE",
+        "ProgramFiles", "CommonProgramFiles",
+    };
 
     private static HashSet<string> SplitEntries(string? value)
     {
@@ -462,7 +627,7 @@ internal sealed class ReplayAnchor
             return new Verdict(record, null);
         }
 
-        if (ImagePathIsInsideInstallDir(imagePath))
+        if (ImagePathIsInside(imagePath, _installDir))
         {
             return new Verdict(record, null);
         }
@@ -500,14 +665,25 @@ internal sealed class ReplayAnchor
     }
 
     /// <summary>
+    /// True when a service <c>ImagePath</c> runs a binary inside
+    /// <paramref name="installDir"/>.
+    /// </summary>
+    /// <remarks>
     /// An <c>ImagePath</c> is a command line, not a path: it may be quoted, carry
     /// arguments, and use the <c>\??\</c> NT prefix. Both the parsed executable and the
     /// raw remainder are tested so an unquoted path containing spaces (the shape
-    /// <c>C:\Program Files\App\svc.exe -k net</c>) is not misread as
-    /// <c>C:\Program</c> and refused for a legitimate uninstall.
-    /// </summary>
-    private bool ImagePathIsInsideInstallDir(string imagePath)
+    /// <c>C:\Program Files\App\svc.exe -k net</c>) is not misread as <c>C:\Program</c>
+    /// and a legitimate service teardown refused. <c>internal</c> so the parsing — the
+    /// part that decides whether a real uninstall survives — can be tested directly.
+    /// </remarks>
+    internal static bool ImagePathIsInside(string? imagePath, string installDir)
     {
+        var root = Normalize(installDir);
+        if (root is null || string.IsNullOrWhiteSpace(imagePath))
+        {
+            return false;
+        }
+
         var value = imagePath.Trim();
         if (value.StartsWith(@"\??\", StringComparison.Ordinal))
         {
@@ -527,15 +703,16 @@ internal sealed class ReplayAnchor
             executable = space > 0 ? value.Substring(0, space) : value;
         }
 
-        if (IsInsideInstallDir(executable))
+        var exeFull = Normalize(executable);
+        if (exeFull is not null && IsUnder(exeFull, root))
         {
             return true;
         }
 
         // Unquoted-with-arguments fallback: the whole remainder still begins with the
         // install directory.
-        return _installDir is not null && IsUnder(
-            Path.TrimEndingDirectorySeparator(value), _installDir);
+        var rawFull = Normalize(value);
+        return rawFull is not null && IsUnder(rawFull, root);
     }
 
     // --- COM ---
@@ -568,11 +745,6 @@ internal sealed class ReplayAnchor
     /// </summary>
     private string? ReDeriveInsideInstallDir(string? recordedPath)
     {
-        if (_installDir is null)
-        {
-            return null;
-        }
-
         var full = Normalize(recordedPath);
         if (full is null || !IsUnder(full, _installDir))
         {
@@ -593,16 +765,9 @@ internal sealed class ReplayAnchor
 #pragma warning restore CA1031
     }
 
-    private bool IsInsideInstallDir(string? path)
-    {
-        var full = Normalize(path);
-        return full is not null && _installDir is not null && IsUnder(full, _installDir);
-    }
-
-    private string OutsideText() => _installDir is null
-        ? "is outside the roots this replay is anchored to"
-        : $"is outside the install directory '{_installDir}' and the scope roots the " +
-          "installer legitimately writes";
+    private string OutsideText() =>
+        $"is outside the install directory '{_installDir}' and the scope roots the " +
+        "installer legitimately writes";
 
     private static void AddRoot(List<string> roots, string? candidate)
     {

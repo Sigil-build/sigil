@@ -94,13 +94,18 @@ public sealed class InstallEngine
             // per-record line (delete / rmdir / path - / reg -) so the rollback
             // trail lands in the /LOG file and the wizard log pane, not just the
             // summary line above.
-            await journal.UndoAsync(ct, progress).ConfigureAwait(false);
+            // InProcess (R1): every record here was authored moments ago by the loop
+            // above, from the signed manifest. Nothing has round-tripped through a file
+            // an attacker can write, and anchoring it would refuse legitimate reversals
+            // of manifest-declared work outside the install directory.
+            await journal.UndoAsync(ReplayAnchorage.InProcess, progress, ct).ConfigureAwait(false);
             return EngineResult.Failed(journal, ex.Message);
         }
         catch (System.OperationCanceledException)
         {
             reporter?.ReportMessage("rollback: reverting changes", isError: true);
-            await journal.UndoAsync(CancellationToken.None, progress).ConfigureAwait(false);
+            await journal.UndoAsync(ReplayAnchorage.InProcess, progress, CancellationToken.None)
+                .ConfigureAwait(false);
             throw;
         }
     }

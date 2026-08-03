@@ -27,18 +27,28 @@ public sealed class UninstallEngine
     /// the directory the state was found in drives ARP-hive and state-dir selection
     /// (R1 — never the <c>scope</c> field inside the file).
     /// </summary>
+    /// <param name="fallbackInstallDir">
+    /// The install directory resolved for the CURRENT run (manifest / <c>/D=</c> /
+    /// default). Required and non-optional so this entry point — the only one that
+    /// replays persisted state — cannot be called without an anchor. It is only a
+    /// fallback: the replay anchors to the directory RECORDED in the state file, which
+    /// is the one the install actually used. A recomputed default silently refuses
+    /// every file record of any install that used a wizard-chosen or <c>/D=</c>
+    /// destination, because the ARP <c>UninstallString</c> carries no <c>/D=</c>.
+    /// </param>
     [System.Diagnostics.CodeAnalysis.SuppressMessage(
         "Performance",
         "CA1822:Mark members as static",
         Justification = "Public engine surface is intentionally instance-based, mirroring InstallEngine.")]
     public async Task<EngineResult> RunAsync(
         string appId,
+        string fallbackInstallDir,
         InstallScope preferredScope = InstallScope.User,
         IProgress<StepProgress>? progress = null,
-        string? installDir = null,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(appId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(fallbackInstallDir);
 
         // progress is threaded through so an R1 state refusal reaches the console,
         // the wizard log pane and the /LOG file instead of vanishing.
@@ -65,12 +75,19 @@ public sealed class UninstallEngine
                 $"no uninstall state found for '{appId}' (expected at {UninstallStateStore.PathFor(appId, preferredScope)})");
         }
 
-        // R1 clause (c): this journal came off disk. Anchor the replay to the install
-        // directory the caller resolved from the signed blob / command line, so a
-        // planted record cannot aim the elevated process at System32, HKLM\SYSTEM, a
-        // service the app never installed, or a DLL of the attacker's choosing.
+        // R1 clause (c): this journal came off disk, so anchor the replay — a planted
+        // record must not be able to aim the elevated process at System32, HKLM\SYSTEM,
+        // a service the app never installed, or a DLL of the attacker's choosing.
+        //
+        // Anchor to the RECORDED install dir, not to a recomputed default. The default
+        // is wrong for every install that used /D= or a wizard-chosen destination (the
+        // ARP UninstallString carries no /D=), and anchoring to it would refuse all of
+        // that install's file records while still removing the ARP row and the state —
+        // leaving the app unremovable with its files on disk.
+        var anchorDir = ChooseAnchorDirectory(loaded.InstallDir, fallbackInstallDir, progress);
+
         var undo = await loaded.Journal
-            .UndoAsync(ct, progress, installDir)
+            .UndoAsync(ReplayAnchorage.ForInstallDir(anchorDir), progress, ct)
             .ConfigureAwait(false);
 
         if (undo.RefusedRecords.Count > 0)
@@ -95,5 +112,101 @@ public sealed class UninstallEngine
 
         UninstallStateStore.Delete(appId, loaded.Scope);
         return EngineResult.Ok(loaded.Journal);
+    }
+
+    /// <summary>
+    /// Directories that can never be an install directory, and so can never be accepted
+    /// as an anchor. Anchoring to any of them would make the anchor vacuous — every
+    /// record under it would pass.
+    /// </summary>
+    private static string[] ForbiddenAnchors() => new[]
+    {
+        Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+        Environment.GetFolderPath(Environment.SpecialFolder.System),
+        Environment.GetFolderPath(Environment.SpecialFolder.SystemX86),
+        Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+        Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory),
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonStartMenu),
+    };
+
+    /// <summary>
+    /// Prefer the install directory recorded in the state file; fall back to the one
+    /// resolved for this run when the state predates the field or names something no
+    /// install could ever have used.
+    /// </summary>
+    /// <remarks>
+    /// The recorded value comes out of the state file, so it is only as trustworthy as
+    /// the file: for machine scope that is "admin-authored", because the file has
+    /// already passed <c>StateDirectorySecurity</c>'s provenance gate before this runs;
+    /// for user scope it is the user's own. The sanity floor below is what stops the
+    /// remaining case — a value chosen to make the anchor meaningless, such as
+    /// <c>C:\</c>, <c>%WINDIR%</c> or <c>%ProgramFiles%</c> itself. It is a floor, not a
+    /// whitelist: any real install directory, including a <c>/D=</c> path anywhere on
+    /// the volume, passes it.
+    /// </remarks>
+    private static string ChooseAnchorDirectory(
+        string? recorded, string fallback, IProgress<StepProgress>? progress)
+    {
+        if (string.IsNullOrWhiteSpace(recorded))
+        {
+            // Pre-fix state: the field did not exist when it was written.
+            return fallback;
+        }
+
+        if (IsPlausibleInstallDirectory(recorded))
+        {
+            return recorded;
+        }
+
+        progress?.Report(new StepProgress(
+            0,
+            0,
+            $"the recorded install directory '{recorded}' is not a directory any install " +
+            $"could have used; anchoring the replay to '{fallback}' instead",
+            IsError: true));
+        return fallback;
+    }
+
+    private static bool IsPlausibleInstallDirectory(string candidate)
+    {
+#pragma warning disable CA1031 // Fail closed: an unparseable value is never an acceptable anchor.
+        try
+        {
+            var full = System.IO.Path.TrimEndingDirectorySeparator(
+                System.IO.Path.GetFullPath(candidate));
+
+            // A volume root anchors nothing.
+            var root = System.IO.Path.GetPathRoot(full);
+            if (string.IsNullOrEmpty(root) ||
+                full.Equals(System.IO.Path.TrimEndingDirectorySeparator(root), StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            foreach (var forbidden in ForbiddenAnchors())
+            {
+                if (string.IsNullOrEmpty(forbidden))
+                {
+                    continue;
+                }
+                var normalized = System.IO.Path.TrimEndingDirectorySeparator(
+                    System.IO.Path.GetFullPath(forbidden));
+                if (full.Equals(normalized, StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+#pragma warning restore CA1031
     }
 }

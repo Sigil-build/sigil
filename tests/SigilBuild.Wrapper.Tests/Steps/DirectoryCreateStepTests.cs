@@ -57,7 +57,7 @@ public class DirectoryCreateStepTests
         await step.RunAsync(StepContext.Empty, journal, default);
         Directory.Exists(target).Should().BeTrue();
 
-        await journal.UndoAsync(default);
+        await journal.UndoAsync(ReplayAnchorage.InProcess);
 
         Directory.Exists(target).Should().BeFalse("empty newly-created dir must be removed");
     }
@@ -75,7 +75,7 @@ public class DirectoryCreateStepTests
         await step.RunAsync(StepContext.Empty, journal, default);
         File.WriteAllText(Path.Combine(target, "stranger.txt"), "x");
 
-        await journal.UndoAsync(default);
+        await journal.UndoAsync(ReplayAnchorage.InProcess);
 
         Directory.Exists(target).Should().BeTrue("non-empty dir must not be removed by rollback");
     }

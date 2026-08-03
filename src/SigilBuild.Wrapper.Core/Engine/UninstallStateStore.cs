@@ -48,7 +48,14 @@ internal static class UninstallStateStore
     /// the <paramref name="Scope"/> the install was recorded under (which drives
     /// ARP-hive and state-dir selection on uninstall).
     /// </summary>
-    public sealed record LoadedState(RollbackJournal Journal, InstallScope Scope);
+    /// <param name="InstallDir">
+    /// The directory the install actually landed in, as recorded at save time, or
+    /// <c>null</c> for state written before the field existed. This — not a recomputed
+    /// default — is what the caller anchors the replay to (R1 clause (c)); a wizard- or
+    /// <c>/D=</c>-chosen destination is not recoverable any other way at uninstall time.
+    /// </param>
+    public sealed record LoadedState(
+        RollbackJournal Journal, InstallScope Scope, string? InstallDir);
 
     /// <summary>
     /// The outcome of a load attempt. <paramref name="State"/> is the rehydrated
@@ -65,13 +72,16 @@ internal static class UninstallStateStore
     /// <paramref name="scope"/> in the file (T12). <paramref name="progress"/>
     /// carries the R1 hardening trail (e.g. a repaired state-directory DACL) into
     /// the console / wizard log / <c>/LOG</c> file; the store has no logger of its own.
+    /// <paramref name="installDir"/> is the directory the install actually landed in and
+    /// is recorded so the uninstall can anchor its replay to it (R1 clause (c)).
     /// </summary>
     public static void Save(
         string appId,
         RollbackJournal journal,
         InstallScope scope,
         System.Collections.Generic.IReadOnlyList<string>? secretValues = null,
-        IProgress<StepProgress>? progress = null)
+        IProgress<StepProgress>? progress = null,
+        string? installDir = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(appId);
         ArgumentNullException.ThrowIfNull(journal);
@@ -104,6 +114,7 @@ internal static class UninstallStateStore
             AppId = appId,
             Version = "1",
             Scope = scope,
+            InstallDir = string.IsNullOrWhiteSpace(installDir) ? null : installDir,
             Records = records,
         };
 
@@ -326,7 +337,7 @@ internal static class UninstallStateStore
         // that object is handled with. The field stays on the wire DTO for backward
         // compatibility with state written before this fix — reading it back must never
         // be reintroduced.
-        return new LoadAttempt(new LoadedState(journal, dirScope), null);
+        return new LoadAttempt(new LoadedState(journal, dirScope, s.InstallDir), null);
     }
 
     /// <summary>

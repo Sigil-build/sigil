@@ -79,7 +79,7 @@ public class EnvSetStepTests
             Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.User)
                 .Should().Be("hello");
 
-            await journal.UndoAsync(default);
+            await journal.UndoAsync(ReplayAnchorage.InProcess);
 
             Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.User)
                 .Should().BeNull("rollback should remove a previously-absent variable");
@@ -125,7 +125,7 @@ public class EnvSetStepTests
             Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.User)
                 .Should().Be("C:/prior;C:/added");
 
-            await journal.UndoAsync(default);
+            await journal.UndoAsync(ReplayAnchorage.InProcess);
 
             Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.User)
                 .Should().Be("C:/prior", "rollback must restore the prior value verbatim");

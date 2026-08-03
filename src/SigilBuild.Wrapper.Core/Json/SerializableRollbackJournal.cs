@@ -32,6 +32,18 @@ internal sealed record SerializableRollbackJournal
     /// </summary>
     public InstallScope Scope { get; init; } = InstallScope.User;
 
+    /// <summary>
+    /// The directory this install actually landed in — <c>StepContext.InstallDir</c>,
+    /// i.e. the resolved <c>/D=</c> / manifest / wizard / default destination, and the
+    /// same value written to the ARP <c>InstallLocation</c>. Recorded so the uninstall
+    /// can anchor the replay to where the files really are (R1 clause (c)) rather than
+    /// recomputing a default: an install into a wizard-chosen or <c>/D=</c> directory
+    /// would otherwise have every one of its file records refused and become silently
+    /// unremovable. <c>null</c> for state written before this field existed; the reader
+    /// then falls back to the directory it resolved for the current run.
+    /// </summary>
+    public string? InstallDir { get; init; }
+
     public SerializableRollbackRecord[] Records { get; init; }
         = Array.Empty<SerializableRollbackRecord>();
 }

@@ -48,12 +48,15 @@ public class UninstallEngineTests
             File.Exists(Path.Combine(dst.Path, "x.txt")).Should().BeTrue();
             Directory.Exists(Path.Combine(dst.Path, "sub")).Should().BeTrue();
 
-            // Persist journal — this is what Program.Main does on install success.
-            UninstallStateStore.Save(appId, installResult.Journal, InstallScope.User);
+            // Persist journal — this is what Program.Main does on install success. The
+            // install dir is recorded so the uninstall can anchor its replay to it (R1).
+            UninstallStateStore.Save(
+                appId, installResult.Journal, InstallScope.User,
+                secretValues: null, progress: null, installDir: dst.Path);
             File.Exists(UninstallStateStore.PathFor(appId, InstallScope.User)).Should().BeTrue();
 
             // Uninstall: rehydrate + UndoAsync in reverse.
-            var uninstallResult = await new UninstallEngine().RunAsync(appId, InstallScope.User);
+            var uninstallResult = await new UninstallEngine().RunAsync(appId, dst.Path, InstallScope.User);
             uninstallResult.Success.Should().BeTrue();
 
             // Verify state is restored: copied file gone, created dir gone.
@@ -85,8 +88,9 @@ public class UninstallEngineTests
     [Fact]
     public async Task Uninstall_with_missing_state_returns_clear_error()
     {
+        using var installDir = new TempDir();
         var result = await new UninstallEngine().RunAsync(
-            "sigil.bogus." + Guid.NewGuid().ToString("N"));
+            "sigil.bogus." + Guid.NewGuid().ToString("N"), installDir.Path);
         result.Success.Should().BeFalse();
         result.Error.Should().NotBeNull();
         result.Error!.Should().Contain("no uninstall state found");

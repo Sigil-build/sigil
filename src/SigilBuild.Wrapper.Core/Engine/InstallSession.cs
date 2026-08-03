@@ -906,8 +906,11 @@ public sealed class InstallSession
                     _log?.WriteLine($"result: failed — {ctx.Redact(err)}");
                     Report(effectiveProgress, ctx, $"error: {err}", isError: true);
                     // Best-effort by construction: UndoAsync swallows individual record
-                    // failures, so only cancellation can escape it.
-                    await result.Journal.UndoAsync(ct, effectiveProgress).ConfigureAwait(false);
+                    // failures, so only cancellation can escape it. InProcess (R1): this
+                    // is the journal this run just built, not one read back from disk.
+                    await result.Journal
+                        .UndoAsync(ReplayAnchorage.InProcess, effectiveProgress, ct)
+                        .ConfigureAwait(false);
                     return new InstallOutcome(false, err);
                 }
 #pragma warning restore CA1031
@@ -949,7 +952,7 @@ public sealed class InstallSession
     /// the outcome is intentionally ignored. No-op for the un-stamped runtime and
     /// off Windows.
     /// </summary>
-    private async Task PerformReinstallCleanupAsync(string? installDir, CancellationToken ct)
+    private async Task PerformReinstallCleanupAsync(string? resolvedInstallDir, CancellationToken ct)
     {
         if (!ExistingInstallDetected)
         {
@@ -960,11 +963,16 @@ public sealed class InstallSession
         // but the log-only sink is still passed so an R1 refusal (which would make
         // this cleanup silently do nothing) is recorded in the /LOG file.
         //
-        // installDir comes from the resolved StepContext — the signed blob, the
-        // manifest and the command line — never from the persisted journal, and it is
-        // what anchors the replay (R1 clause (c)).
+        // This is only the FALLBACK anchor (R1 clause (c)): the prior install recorded
+        // where it actually landed, and UninstallEngine prefers that. This value —
+        // the destination THIS run resolved — is used only for state written before
+        // the recorded field existed.
+        var fallback = string.IsNullOrWhiteSpace(resolvedInstallDir)
+            ? Path.Combine(ScopeLayout.For(_scope).InstallRoot, _blob.AppId)
+            : resolvedInstallDir;
+
         await new UninstallEngine()
-            .RunAsync(_blob.AppId, _scope, progress: StateProgress, installDir, ct)
+            .RunAsync(_blob.AppId, fallback, _scope, StateProgress, ct)
             .ConfigureAwait(false);
     }
 
@@ -1106,7 +1114,12 @@ public sealed class InstallSession
         // record is part of the persisted, replay-on-uninstall journal.
         // StateProgress carries the R1 hardening trail (a repaired state-directory
         // DACL) into the /LOG file; without a sink the repair would be invisible.
-        UninstallStateStore.Save(_blob.AppId, journal, _scope, secretValues, StateProgress);
+        // uninstallDir is recorded in the state so the uninstall anchors its replay to
+        // where the files ACTUALLY landed (R1 clause (c)). Recomputing a default at
+        // uninstall time would refuse every file record of a /D= or wizard-chosen
+        // install and leave the app unremovable.
+        UninstallStateStore.Save(
+            _blob.AppId, journal, _scope, secretValues, StateProgress, uninstallDir);
         // T10: register the REAL manifest.App.* fields + packed size threaded through
         // the blob, not the former AppId / "1.0.0" / "Unknown" / 0 placeholders. The
         // fallbacks only fire for a (theoretical) blob that omitted them — a real
@@ -1248,7 +1261,7 @@ public sealed class InstallSession
         // R1 clause (c): ctx.InstallDir is resolved from the signed blob / manifest /
         // command line and anchors the replay of the persisted journal.
         var result = await new UninstallEngine()
-            .RunAsync(_blob.AppId, _scope, progress, ctx.InstallDir, ct)
+            .RunAsync(_blob.AppId, UninstallAnchorFallback(ctx), _scope, progress, ct)
             .ConfigureAwait(false);
         if (!result.Success)
         {
@@ -1276,6 +1289,32 @@ public sealed class InstallSession
     /// </summary>
     private StepContext BuildUninstallContext() =>
         StepContext.From(_blob, _parsed, payloadRoot: null, collected: null, scope: _scope);
+
+    /// <summary>
+    /// The FALLBACK anchor for a persisted-journal replay (R1 clause (c)) — used only
+    /// when the state file predates the recorded-install-dir field, since
+    /// <see cref="UninstallEngine"/> prefers the recorded value.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="BuildUninstallContext"/> resolves <c>InstallDir</c> from the manifest
+    /// and command line with no collected value and no prior dir, so it is the DEFAULT
+    /// destination, not necessarily the one the install used — the ARP
+    /// <c>UninstallString</c> carries no <c>/D=</c>. That is precisely why it must not
+    /// be the primary anchor. The directory holding the running <c>uninstall.exe</c> is
+    /// a better guess where available, because <c>PersistCompletion</c> copies it into
+    /// the real install directory.
+    /// </remarks>
+    private string UninstallAnchorFallback(StepContext ctx)
+    {
+        var imageDir = Path.GetDirectoryName(Environment.ProcessPath ?? string.Empty);
+        if (!string.IsNullOrWhiteSpace(imageDir))
+        {
+            return imageDir;
+        }
+        return string.IsNullOrWhiteSpace(ctx.InstallDir)
+            ? Path.Combine(ScopeLayout.For(_scope).InstallRoot, _blob.AppId)
+            : ctx.InstallDir;
+    }
 
     /// <summary>
     /// GUI entry point for the interactive uninstall flow (T15): drive
@@ -1308,7 +1347,7 @@ public sealed class InstallSession
 
         // R1 clause (c): anchored to the install dir resolved from the signed blob.
         var result = await new UninstallEngine()
-            .RunAsync(_blob.AppId, _scope, effectiveProgress, ctx.InstallDir, ct)
+            .RunAsync(_blob.AppId, UninstallAnchorFallback(ctx), _scope, effectiveProgress, ct)
             .ConfigureAwait(false);
 
         if (result.Success)

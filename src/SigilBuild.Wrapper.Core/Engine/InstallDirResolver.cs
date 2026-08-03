@@ -103,10 +103,9 @@ public static class InstallDirResolver
         string? priorInstallDir = null)
     {
         var layout = ScopeLayout.For(scope);
-        var template = FirstNonBlank(collected, cliOverride, priorInstallDir, manifestInstallDir) ?? DefaultTemplate;
-        var resolved = Canonicalize(SubstituteDirTokens(template, layout.InstallRoot, appName, appId));
+        var resolved = ResolveRaw(layout, appName, appId, manifestInstallDir, cliOverride, collected, priorInstallDir);
 
-        if (!allowAnyRoot && !PriorDirWins(collected, cliOverride, priorInstallDir))
+        if (!allowAnyRoot && !IsExistingInstallLocation(layout, appName, appId, priorInstallDir, resolved))
         {
             EnsureContained(layout, resolved);
         }
@@ -115,58 +114,111 @@ public static class InstallDirResolver
     }
 
     /// <summary>
-    /// True when the recovered prior install directory is the source that wins
-    /// the precedence — i.e. no wizard-collected path and no <c>/D=</c> override
-    /// were supplied. Mirrors the ordering in
-    /// <see cref="FirstNonBlank"/>: collected → cliOverride → priorInstallDir →
-    /// manifestInstallDir.
+    /// Apply the precedence and token substitution without any containment check.
+    /// Shared by <see cref="Resolve(InstallScope, string?, string, string?, string?, bool, string?, string?)"/>
+    /// and <see cref="GrandfatheredPriorDir"/> so the destination they reason
+    /// about is computed exactly once, the same way.
     /// </summary>
-    /// <remarks>
-    /// This is the <b>grandfather clause</b> for R3. An install that already
-    /// lives outside the scope root predates the containment rule; refusing it
-    /// would strand the user with an app that can be neither upgraded nor
-    /// cleanly removed, which is a worse outcome than the hole it closes. A
-    /// prior install directory is not attacker-supplied input — it is recovered
-    /// from the uninstall state that lane S1 now hardens and verifies.
-    /// <para>
-    /// It is deliberately NOT "a prior install exists, so skip containment".
-    /// The moment a caller supplies <c>collected</c> or <c>cliOverride</c>, that
-    /// NEW destination is attacker-reachable and is checked as normal — so the
-    /// grandfather clause cannot be used as a bypass by pairing
-    /// <c>/D=C:\Users\Public\evil</c> with any recorded prior install.
-    /// </para>
-    /// </remarks>
-    private static bool PriorDirWins(string? collected, string? cliOverride, string? priorInstallDir)
-        => string.IsNullOrWhiteSpace(collected)
-        && string.IsNullOrWhiteSpace(cliOverride)
-        && !string.IsNullOrWhiteSpace(priorInstallDir);
+    private static string ResolveRaw(
+        ScopeLayout layout,
+        string? appName,
+        string appId,
+        string? manifestInstallDir,
+        string? cliOverride,
+        string? collected,
+        string? priorInstallDir)
+    {
+        var template = FirstNonBlank(collected, cliOverride, priorInstallDir, manifestInstallDir) ?? DefaultTemplate;
+        return Canonicalize(SubstituteDirTokens(template, layout.InstallRoot, appName, appId));
+    }
 
     /// <summary>
-    /// The resolved prior install directory when it wins the precedence AND
-    /// falls outside the containment root — the grandfathered case that callers
-    /// must log. <c>null</c> when there is nothing to report.
+    /// True when the resolved destination IS the directory the application is
+    /// already installed in — the <b>grandfather clause</b> for R3.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An install that already lives outside the scope root predates the
+    /// containment rule. Refusing it strands the user with an app that can be
+    /// neither upgraded nor cleanly removed, which is worse than the hole it
+    /// closes — so re-installing over the app's own existing location is allowed
+    /// even when that location is out of root.
+    /// </para>
+    /// <para>
+    /// <b>Why this keys on the destination and not on which source won.</b> The
+    /// first cut asked "did <paramref name="priorInstallDir"/> win the
+    /// precedence?", which made the exemption unreachable through the wizard:
+    /// <c>App.axaml.cs</c> prefills the Destination screen with the prior
+    /// directory, and the install runner writes that value straight back as
+    /// <c>collected</c> on EVERY headed run. A prefill echoed back is not a user
+    /// choice, so the source-based test saw a "chosen" path and refused the very
+    /// upgrade the ruling exists to permit — silently, since the exemption never
+    /// fired and so never logged. Keying on the destination preserves the real
+    /// distinction ("this is where the app already is" versus "the user picked
+    /// somewhere new") no matter which field carried the value.
+    /// </para>
+    /// <para>
+    /// <b>Why it is not a blanket exemption.</b> It grants exactly one directory:
+    /// the app's current location. Any other out-of-root path — typed into the
+    /// wizard, passed as <c>/D=</c>, or declared in the manifest — resolves to
+    /// something different and is refused as before. Re-installing where the app
+    /// already is confers no capability an attacker does not already have: if a
+    /// SYSTEM-level step target points into that directory, it does so today.
+    /// </para>
+    /// <para>
+    /// <b>Provenance of <paramref name="priorInstallDir"/>.</b> It is read from
+    /// the ARP registry (<c>InstalledStateResolver</c>,
+    /// <c>HKLM|HKCU\...\Uninstall\&lt;appId&gt;\InstallLocation</c>) — not from
+    /// lane S1's persisted state file. Machine scope is protected by the HKLM
+    /// ACL together with <c>InstallSession</c>'s <c>FoundScope == _scope</c>
+    /// guard, so a user-writable HKCU value can never satisfy a machine-scope
+    /// run. User scope has no such gate but crosses no privilege boundary: a
+    /// user rewriting their own HKCU value gains nothing they could not already
+    /// do directly.
+    /// </para>
+    /// </remarks>
+    private static bool IsExistingInstallLocation(
+        ScopeLayout layout, string? appName, string appId, string? priorInstallDir, string resolved)
+    {
+        if (string.IsNullOrWhiteSpace(priorInstallDir))
+        {
+            return false;
+        }
+
+        var prior = Canonicalize(SubstituteDirTokens(priorInstallDir!, layout.InstallRoot, appName, appId));
+        return string.Equals(
+            Path.TrimEndingDirectorySeparator(prior),
+            Path.TrimEndingDirectorySeparator(resolved),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The resolved destination when it is the app's existing (grandfathered)
+    /// install location AND falls outside the containment root — the case
+    /// callers must log. <c>null</c> when there is nothing to report.
     /// </summary>
     /// <remarks>
     /// Exposed so <c>InstallSession</c> (which owns the <c>/LOG</c> sink) can
     /// record the exemption. A quiet allowance is how an exemption becomes the
-    /// norm, so this path is never silent.
+    /// norm, so this path is never silent — and because it keys on the same
+    /// destination test the resolver uses, it fires on the headed path too.
     /// </remarks>
     internal static string? GrandfatheredPriorDir(
         InstallScope scope,
         string? appName,
         string appId,
+        string? manifestInstallDir,
         string? collected,
         string? cliOverride,
         string? priorInstallDir)
     {
-        if (!PriorDirWins(collected, cliOverride, priorInstallDir))
+        var layout = ScopeLayout.For(scope);
+        var resolved = ResolveRaw(layout, appName, appId, manifestInstallDir, cliOverride, collected, priorInstallDir);
+
+        if (!IsExistingInstallLocation(layout, appName, appId, priorInstallDir, resolved))
         {
             return null;
         }
-
-        var layout = ScopeLayout.For(scope);
-        var resolved = Canonicalize(
-            SubstituteDirTokens(priorInstallDir!, layout.InstallRoot, appName, appId));
 
         return IsContained(layout, resolved) ? null : resolved;
     }

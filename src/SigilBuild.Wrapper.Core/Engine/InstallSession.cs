@@ -616,15 +616,19 @@ public sealed class InstallSession
     /// an exemption becomes the norm.
     /// </summary>
     /// <remarks>
-    /// Only the prior directory is exempt. A <c>/D=</c> or wizard-collected
-    /// destination is a NEW, attacker-reachable choice and is still refused, so
-    /// pairing an out-of-root prior install with <c>/D=C:\Users\Public\evil</c>
-    /// does not become a bypass.
+    /// Only the app's EXISTING location is exempt. Any other out-of-root
+    /// destination — typed into the wizard, passed as <c>/D=</c>, or declared in
+    /// the manifest — is still refused, so pairing an out-of-root prior install
+    /// with <c>/D=C:\Users\Public\evil</c> does not become a bypass. Because the
+    /// test keys on the destination rather than on which source supplied it, the
+    /// exemption (and this line) also fire on the headed path, where the wizard
+    /// echoes the prefilled prior directory back as the collected value.
     /// </remarks>
     private void WarnGrandfatheredPriorInstallDir(string? collected)
     {
         var dir = InstallDirResolver.GrandfatheredPriorDir(
-            _scope, _blob.AppName, _blob.AppId, collected, _parsed.InstallDir, PriorInstallDirDefault);
+            _scope, _blob.AppName, _blob.AppId, _blob.InstallDir,
+            collected, _parsed.InstallDir, PriorInstallDirDefault);
         if (dir is null)
         {
             return;

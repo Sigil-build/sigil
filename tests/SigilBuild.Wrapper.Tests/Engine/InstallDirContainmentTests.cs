@@ -345,6 +345,73 @@ public sealed class InstallDirContainmentTests
         error.ToString().Should().Contain("outside");
     }
 
+    // ── The wizard round-trip must not erase the exemption ────────────────────
+    //
+    // App.axaml.cs prefills the Destination screen with the grandfathered prior
+    // dir (ConfigureDestination -> InstallPath), and the install runner writes
+    // that value straight back as CollectedInstallDir on EVERY headed run. A
+    // prefill echoed back is not a user choice. Keying the exemption on which
+    // SOURCE won made it unreachable through the GUI: the silent path honoured
+    // it while the wizard refused the same upgrade, with no log line to say why.
+
+    [WindowsFact("Windows scope roots")]
+    public async Task Headed_upgrade_honours_the_grandfathered_dir_the_wizard_echoed_back()
+    {
+        using var tmp = new TempDir();
+        var logPath = Path.Combine(tmp.Path, "headed.log");
+
+        var blob = UpgradeBlob();
+        var session = InstallSession.ForTesting(
+            blob,
+            CommandLineParser.Parse(new[] { $"/LOG={logPath}" }, blob.Parameters),
+            PriorOutOfRoot());
+
+        // Exactly what App.axaml.cs does: prefill the screen, then hand the
+        // screen's value back to the session as the collected destination.
+        var prefill = session.ResolveDefaultInstallDir();
+        prefill.Should().Be(OutOfRootPriorDir, "the wizard prefills the app's existing location");
+        session.CollectedInstallDir = prefill;
+
+        var outcome = await session.RunInstallAsync(progress: null, CancellationToken.None);
+
+        // The run still fails later — the fixture's prior uninstaller does not
+        // exist — but it must NOT be refused for containment.
+        outcome.Error.Should().NotContain(
+            "outside", "the echoed prefill is the app's existing location, not a new choice");
+
+        var log = File.ReadAllText(logPath);
+        log.Should().Contain("honouring the prior install directory");
+        log.Should().Contain(OutOfRootPriorDir);
+    }
+
+    [WindowsFact("Windows scope roots")]
+    public async Task Headed_upgrade_still_refuses_a_different_out_of_root_path_the_user_typed()
+    {
+        // THE NEGATIVE. The fix must not become a blanket GUI exemption: a user
+        // who actively edits the Destination box to some OTHER out-of-root path
+        // is making a new choice, and it is refused exactly as before.
+        using var tmp = new TempDir();
+        var logPath = Path.Combine(tmp.Path, "headed-typed.log");
+
+        var blob = UpgradeBlob();
+        var session = InstallSession.ForTesting(
+            blob,
+            CommandLineParser.Parse(new[] { $"/LOG={logPath}" }, blob.Parameters),
+            PriorOutOfRoot());
+
+        session.ResolveDefaultInstallDir().Should().Be(OutOfRootPriorDir);
+        session.CollectedInstallDir = @"C:\Users\Public\evil";  // the user typed this
+
+        var outcome = await session.RunInstallAsync(progress: null, CancellationToken.None);
+
+        outcome.Success.Should().BeFalse();
+        outcome.Error.Should().Contain("outside");
+
+        File.ReadAllText(logPath).Should().NotContain(
+            "honouring the prior install directory",
+            "a typed path is not the grandfathered location, so the exemption must not fire");
+    }
+
     // ── Ruling 2: both Program Files roots are valid machine anchors ───────────
 
     [WindowsFact("Windows scope roots")]

@@ -84,7 +84,8 @@ public sealed class UninstallEngine
         // ARP UninstallString carries no /D=), and anchoring to it would refuse all of
         // that install's file records while still removing the ARP row and the state —
         // leaving the app unremovable with its files on disk.
-        var anchorDir = ChooseAnchorDirectory(loaded.InstallDir, fallbackInstallDir, progress);
+        var anchorDir = ChooseAnchorDirectory(
+            appId, loaded.Scope, loaded.InstallDir, fallbackInstallDir, progress);
 
         var undo = await loaded.Journal
             .UndoAsync(ReplayAnchorage.ForInstallDir(anchorDir), progress, ct)
@@ -135,40 +136,68 @@ public sealed class UninstallEngine
     };
 
     /// <summary>
-    /// Prefer the install directory recorded in the state file; fall back to the one
-    /// resolved for this run when the state predates the field or names something no
-    /// install could ever have used.
+    /// Pick the directory the replay is anchored to, in descending order of how
+    /// certainly it is where the app is actually installed:
+    /// <list type="number">
+    ///   <item>the directory RECORDED in the state file at install time;</item>
+    ///   <item>the ARP <c>InstallLocation</c> for this app in its own scope's hive;</item>
+    ///   <item>the directory the caller resolved for the current run.</item>
+    /// </list>
     /// </summary>
     /// <remarks>
-    /// The recorded value comes out of the state file, so it is only as trustworthy as
-    /// the file: for machine scope that is "admin-authored", because the file has
-    /// already passed <c>StateDirectorySecurity</c>'s provenance gate before this runs;
-    /// for user scope it is the user's own. The sanity floor below is what stops the
-    /// remaining case — a value chosen to make the anchor meaningless, such as
+    /// <para>
+    /// Step 2 exists for the installed base. State written before the recorded field
+    /// existed has no (1), and (3) is a RECOMPUTED DEFAULT — right only for installs
+    /// that took the default destination, because the ARP <c>UninstallString</c> carries
+    /// no <c>/D=</c>. Anchoring a <c>/D=</c> or wizard-chosen install to that default
+    /// refuses every one of its file records while the ARP row and the state are removed
+    /// anyway, which leaves the app on disk and unremovable. The ARP
+    /// <c>InstallLocation</c> is written by every install since P3 and is the one place
+    /// the real directory survives; for machine scope it lives in HKLM and is therefore
+    /// admin-authored.
+    /// </para>
+    /// <para>
+    /// Both (1) and (2) are read from data an install wrote, so both pass the sanity
+    /// floor first — it rejects a value chosen to make the anchor meaningless, such as
     /// <c>C:\</c>, <c>%WINDIR%</c> or <c>%ProgramFiles%</c> itself. It is a floor, not a
     /// whitelist: any real install directory, including a <c>/D=</c> path anywhere on
-    /// the volume, passes it.
+    /// the volume, passes it. (3) is trusted input from this process and is used as-is.
+    /// </para>
     /// </remarks>
     private static string ChooseAnchorDirectory(
-        string? recorded, string fallback, IProgress<StepProgress>? progress)
+        string appId,
+        InstallScope scope,
+        string? recorded,
+        string fallback,
+        IProgress<StepProgress>? progress)
     {
-        if (string.IsNullOrWhiteSpace(recorded))
+        if (!string.IsNullOrWhiteSpace(recorded))
         {
-            // Pre-fix state: the field did not exist when it was written.
-            return fallback;
+            if (IsPlausibleInstallDirectory(recorded))
+            {
+                return recorded;
+            }
+
+            progress?.Report(new StepProgress(
+                0,
+                0,
+                $"the recorded install directory '{recorded}' is not a directory any install " +
+                "could have used; falling back to the ARP InstallLocation or this run's " +
+                "resolved directory instead",
+                IsError: true));
         }
 
-        if (IsPlausibleInstallDirectory(recorded))
+        // Pre-fix state (or a rejected recorded value): recover the real directory from
+        // the ARP row this app wrote at install time.
+        if (OperatingSystem.IsWindows())
         {
-            return recorded;
+            var arp = ArpRegistration.TryGetInstallLocation(appId, scope);
+            if (!string.IsNullOrWhiteSpace(arp) && IsPlausibleInstallDirectory(arp))
+            {
+                return arp;
+            }
         }
 
-        progress?.Report(new StepProgress(
-            0,
-            0,
-            $"the recorded install directory '{recorded}' is not a directory any install " +
-            $"could have used; anchoring the replay to '{fallback}' instead",
-            IsError: true));
         return fallback;
     }
 

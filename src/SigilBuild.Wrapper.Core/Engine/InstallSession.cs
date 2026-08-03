@@ -1291,30 +1291,30 @@ public sealed class InstallSession
         StepContext.From(_blob, _parsed, payloadRoot: null, collected: null, scope: _scope);
 
     /// <summary>
-    /// The FALLBACK anchor for a persisted-journal replay (R1 clause (c)) — used only
-    /// when the state file predates the recorded-install-dir field, since
-    /// <see cref="UninstallEngine"/> prefers the recorded value.
+    /// The LAST-RESORT anchor for a persisted-journal replay (R1 clause (c)): the
+    /// destination this run resolved from the manifest and command line.
     /// </summary>
     /// <remarks>
-    /// <see cref="BuildUninstallContext"/> resolves <c>InstallDir</c> from the manifest
-    /// and command line with no collected value and no prior dir, so it is the DEFAULT
-    /// destination, not necessarily the one the install used — the ARP
-    /// <c>UninstallString</c> carries no <c>/D=</c>. That is precisely why it must not
-    /// be the primary anchor. The directory holding the running <c>uninstall.exe</c> is
-    /// a better guess where available, because <c>PersistCompletion</c> copies it into
-    /// the real install directory.
+    /// <para>
+    /// <see cref="UninstallEngine"/> prefers, in order, the directory recorded in the
+    /// state file and then the ARP <c>InstallLocation</c>; this value is reached only
+    /// when neither exists. It is a DEFAULT destination — <see cref="BuildUninstallContext"/>
+    /// resolves <c>InstallDir</c> with no collected value and no prior dir, and the ARP
+    /// <c>UninstallString</c> carries no <c>/D=</c> — so it is right for an install that
+    /// took the default and wrong for one that did not. That is why it is last.
+    /// </para>
+    /// <para>
+    /// Deliberately NOT the directory of the running image. <c>setup.exe /Uninstall</c>
+    /// is a documented flow (<c>docs/guides/uninstaller.md</c>) and the user typically
+    /// runs that exe from their downloads folder; anchoring there would refuse every
+    /// file record of every pre-fix install and leave the app unremovable — the exact
+    /// failure mode this clause exists to prevent.
+    /// </para>
     /// </remarks>
-    private string UninstallAnchorFallback(StepContext ctx)
-    {
-        var imageDir = Path.GetDirectoryName(Environment.ProcessPath ?? string.Empty);
-        if (!string.IsNullOrWhiteSpace(imageDir))
-        {
-            return imageDir;
-        }
-        return string.IsNullOrWhiteSpace(ctx.InstallDir)
+    private string UninstallAnchorFallback(StepContext ctx) =>
+        string.IsNullOrWhiteSpace(ctx.InstallDir)
             ? Path.Combine(ScopeLayout.For(_scope).InstallRoot, _blob.AppId)
             : ctx.InstallDir;
-    }
 
     /// <summary>
     /// GUI entry point for the interactive uninstall flow (T15): drive

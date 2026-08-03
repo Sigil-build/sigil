@@ -259,8 +259,23 @@ public class ReplayAnchoringTests
     [InlineData("HKLM", @"Software\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\sethc.exe")]
     [InlineData("HKLM", @"Software\Classes\CLSID\{00000000-0000-0000-0000-000000000000}\InprocServer32")]
     [InlineData("HKLM", @"Software\Classes\Directory\shell\evil\command")]
-    [InlineData("HKLM", @"Software\Classes\.exe")]
+    [InlineData("HKLM", @"Software\Classes\.exe\shell\open\command")]
     [InlineData("HKLM", @"Software\Policies\Microsoft\Windows\System")]
+    // The progids each successive review round turned up. They are refused by SHAPE —
+    // none of these names appears anywhere in ReplayAnchor — which is the point: the
+    // next unheard-of progid is covered too.
+    [InlineData("HKLM", @"Software\Classes\txtfile\shell\open\command")]
+    [InlineData("HKLM", @"Software\Classes\lnkfile\shell\open\command")]
+    [InlineData("HKLM", @"Software\Classes\mscfile\shell\open\command")]
+    [InlineData("HKLM", @"Software\Classes\batfile\shell\open\command")]
+    [InlineData("HKLM", @"Software\Classes\htmlfile\shell\open\command")]
+    [InlineData("HKLM", @"Software\Classes\SomeProgidWindowsShipsThatWeHaveNeverHeardOf\shell\print\command")]
+    [InlineData("HKLM", @"Software\Classes\Acme.Document\shell\open\ddeexec")]
+    [InlineData("HKLM", @"Software\Classes\Acme.Document\shellex\ContextMenuHandlers\Evil")]
+    [InlineData("HKLM", @"Software\Classes\Acme.Document\CLSID\{0}\LocalServer32")]
+    // Driver mapping — the other shape that hands Windows a module to load.
+    [InlineData("HKLM", @"Software\Microsoft\Windows NT\CurrentVersion\Drivers32")]
+    [InlineData("HKLM", @"Software\Microsoft\Windows NT\CurrentVersion\Drivers.desc")]
     // Hives an installer's rollback has no business in.
     [InlineData("HKU", @"Software\Acme\App")]
     [InlineData("HKCC", @"Software\Acme\App")]
@@ -300,6 +315,57 @@ public class ReplayAnchoringTests
 
         // Assert
         verdict.RefusalReason.Should().BeNull();
+    }
+
+    [WindowsFact("Windows registry semantics")]
+    public void An_app_restoring_its_own_file_association_to_its_own_binary_is_allowed()
+    {
+        // Arrange — THE positive for the shape rule, and the reason it is not simply
+        // "deny every shell\...\command". Registering a file type is what installers do;
+        // the command points at the app's own exe inside install_dir, quoted with the
+        // usual "%1" argument.
+        using var installDir = new TempDir();
+        var record = new RollbackRecord.RestoreRegistryValue(
+            "HKLM",
+            @"Software\Classes\Acme.Document\shell\open\command",
+            Name: "",
+            View: "default",
+            PriorTypeStr: "REG_SZ",
+            PriorValue: $"\"{Path.Combine(installDir.Path, "acme.exe")}\" \"%1\"",
+            PreviouslyAbsent: false);
+
+        // Act
+        var verdict = Anchor(installDir.Path).Check(record);
+
+        // Assert
+        verdict.RefusalReason.Should().BeNull(
+            "denying the shape outright would break every installer that registers a " +
+            "file type — the value must be checked, not the key alone");
+    }
+
+    [WindowsFact("Windows registry semantics")]
+    public void The_same_association_pointing_outside_the_install_dir_is_refused()
+    {
+        // Arrange — the negative twin: same key, same progid, attacker-chosen program.
+        // This is what makes the rule categorical: the progid is irrelevant, the target
+        // is what decides.
+        using var installDir = new TempDir();
+        using var elsewhere = new TempDir();
+        var record = new RollbackRecord.RestoreRegistryValue(
+            "HKLM",
+            @"Software\Classes\Acme.Document\shell\open\command",
+            Name: "",
+            View: "default",
+            PriorTypeStr: "REG_SZ",
+            PriorValue: $"\"{Path.Combine(elsewhere.Path, "evil.exe")}\" \"%1\"",
+            PreviouslyAbsent: false);
+
+        // Act
+        var verdict = Anchor(installDir.Path).Check(record);
+
+        // Assert
+        verdict.RefusalReason.Should().NotBeNull();
+        verdict.RefusalReason!.Should().Contain("evil.exe").And.Contain("execution mapping");
     }
 
     [WindowsFact("Windows registry semantics")]
@@ -403,6 +469,14 @@ public class ReplayAnchoringTests
         // "compare the current value against itself" the branch could never refuse
         // anything, and "restore PATH to absent" — which breaks the box — would be
         // permitted. Predicate only; the registry is read, never written.
+        //
+        // The assertion deliberately does NOT depend on the ambient profile. The user
+        // row previously required HKCU\Environment\Path to exist and would have gone red
+        // on a fresh profile or a clean CI runner. Rather than have the fixture write a
+        // real PATH value — precisely the kind of thing this file exists to avoid — the
+        // predicate now fails closed when a system-critical variable's current value
+        // cannot be read, so the refusal holds on every host. Both branches produce a
+        // reason beginning "deleting <scope>-scope 'Path'", which is what is asserted.
         using var installDir = new TempDir();
         var record = new RollbackRecord.RestoreEnv(
             scope, "Path", PriorValue: null, PreviouslyAbsent: true);
@@ -412,9 +486,30 @@ public class ReplayAnchoringTests
 
         // Assert
         verdict.RefusalReason.Should().NotBeNull();
-        verdict.RefusalReason!.Should().Contain("would discard",
+        verdict.RefusalReason!.Should().Contain($"deleting {scope}-scope 'Path'",
             "PATH's entries were not created by this install, and losing it breaks the " +
             "machine — a destructive primitive in its own right");
+    }
+
+    [WindowsFact("Windows registry semantics")]
+    public void Deleting_a_system_critical_variable_is_refused_even_when_it_is_absent()
+    {
+        // Arrange — the fresh-profile shape, pinned so the fail-closed branch cannot be
+        // removed unnoticed. `windir` is never present in HKCU\Environment on any
+        // profile, so the "current value could not be read" path is the one that runs,
+        // deterministically, on every host. Read-only.
+        using var installDir = new TempDir();
+        var record = new RollbackRecord.RestoreEnv(
+            "user", "windir", PriorValue: null, PreviouslyAbsent: true);
+
+        // Act
+        var verdict = Anchor(installDir.Path).Check(record);
+
+        // Assert
+        verdict.RefusalReason.Should().NotBeNull();
+        verdict.RefusalReason!.Should().Contain("could not be read",
+            "with nothing to run the ownership test against, the only safe answer for a " +
+            "variable the system depends on is to refuse");
     }
 
     [WindowsFact("Windows registry semantics")]

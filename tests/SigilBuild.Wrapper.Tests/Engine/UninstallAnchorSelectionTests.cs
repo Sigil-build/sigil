@@ -7,6 +7,7 @@ using System.Runtime.Versioning;
 using System.Threading.Tasks;
 using FluentAssertions;
 using SigilBuild.Core.Manifest;
+using SigilBuild.Wrapper.Cli;
 using SigilBuild.Wrapper.Engine;
 using SigilBuild.Wrapper.Tests.Helpers;
 
@@ -72,8 +73,9 @@ public class UninstallAnchorSelectionTests
     [WindowsFact("Windows-only state layout")]
     public async Task State_written_before_the_recorded_directory_existed_falls_back_to_the_caller()
     {
-        // Arrange — an upgrade from a build that never wrote the field. The fallback is
-        // the only anchor available, and it must be used rather than refusing everything.
+        // Arrange — an upgrade from a build that never wrote the field, with no ARP row
+        // either. The caller's directory is the only anchor left, and it must be used
+        // rather than refusing everything.
         using var installDir = new TempDir();
         var appId = "sigil.anchor." + Guid.NewGuid().ToString("N");
         var installed = Path.Combine(installDir.Path, "app.exe");
@@ -100,6 +102,130 @@ public class UninstallAnchorSelectionTests
         finally
         {
             UninstallStateStore.Delete(appId, InstallScope.User);
+        }
+    }
+
+    /// <summary>
+    /// The installed base, uninstalled through the documented <c>setup.exe /Uninstall</c>
+    /// flow (<c>docs/guides/uninstaller.md</c>). Its state predates the recorded
+    /// install-dir field, and the directory the current run resolves is a DEFAULT that is
+    /// wrong for any install that used <c>/D=</c> or a wizard-chosen destination — the ARP
+    /// <c>UninstallString</c> carries no <c>/D=</c>. The ARP <c>InstallLocation</c>, which
+    /// every install has written since P3, is the one place the real directory survives.
+    /// </summary>
+    [WindowsFact("Windows ARP registry")]
+    public async Task Pre_fix_state_recovers_the_install_dir_from_the_ARP_InstallLocation()
+    {
+        // Arrange — the app is installed in `real`; the uninstall run resolves
+        // `wrongDefault`, standing in for the downloads folder the user ran setup.exe
+        // from, or for a manifest default that never matched this install.
+        using var real = new TempDir();
+        using var wrongDefault = new TempDir();
+
+        var appId = "sigil.anchor." + Guid.NewGuid().ToString("N");
+        var installed = Path.Combine(real.Path, "app.exe");
+        File.WriteAllText(installed, "payload");
+
+        try
+        {
+            var journal = new RollbackJournal();
+            journal.Append(new RollbackRecord.RestoreFile(
+                installed, ExistedBefore: false, BackupPath: null));
+
+            // Pre-fix state: no recorded install dir.
+            UninstallStateStore.Save(appId, journal, InstallScope.User);
+            UninstallStateStore.TryLoad(appId, InstallScope.User)!.InstallDir.Should().BeNull();
+
+            // …but the install did write an ARP row naming where it went. HKCU, because
+            // this is a user-scope fixture: the app's own uniquely-named key, removed in
+            // the finally (and by UninstallEngine itself on success).
+            ArpRegistration.Register(
+                new ArpRegistration.Entry(
+                    AppId: appId,
+                    DisplayName: "Anchor Fixture",
+                    DisplayVersion: "1.0.0",
+                    Publisher: "Sigil Tests",
+                    UninstallString: "\"" + Path.Combine(real.Path, "uninstall.exe") + "\"",
+                    EstimatedSizeBytes: 0,
+                    InstallLocation: real.Path),
+                InstallScope.User);
+
+            // Act
+            var result = await new UninstallEngine()
+                .RunAsync(appId, wrongDefault.Path, InstallScope.User);
+
+            // Assert
+            result.Success.Should().BeTrue();
+            File.Exists(installed).Should().BeFalse(
+                "with no recorded install dir the anchor must come from the ARP " +
+                "InstallLocation; anchoring to the directory this run happened to resolve " +
+                "refuses every file record and leaves the installed base unremovable");
+        }
+        finally
+        {
+            UninstallStateStore.Delete(appId, InstallScope.User);
+            ArpRegistration.Remove(appId, InstallScope.User);
+        }
+    }
+
+    [WindowsFact("Windows ARP registry")]
+    public async Task An_ARP_InstallLocation_that_would_make_the_anchor_vacuous_is_rejected()
+    {
+        // Arrange — the ARP value gets the same sanity floor as the recorded one. For a
+        // user-scope install HKCU is the user's own hive, so this value is no more
+        // trustworthy than the state file and must not be able to disarm the anchor.
+        using var installDir = new TempDir();
+        using var elsewhere = new TempDir();
+        var appId = "sigil.anchor." + Guid.NewGuid().ToString("N");
+        var outside = Path.Combine(elsewhere.Path, "victim.txt");
+        File.WriteAllText(outside, "payload");
+
+        try
+        {
+            var journal = new RollbackJournal();
+            journal.Append(new RollbackRecord.RestoreFile(
+                outside, ExistedBefore: false, BackupPath: null));
+
+            UninstallStateStore.Save(appId, journal, InstallScope.User);
+
+            ArpRegistration.Register(
+                new ArpRegistration.Entry(
+                    AppId: appId,
+                    DisplayName: "Anchor Fixture",
+                    DisplayVersion: "1.0.0",
+                    Publisher: "Sigil Tests",
+                    UninstallString: "\"uninstall.exe\"",
+                    EstimatedSizeBytes: 0,
+                    InstallLocation: Path.GetPathRoot(
+                        Environment.GetFolderPath(Environment.SpecialFolder.System))!),
+                InstallScope.User);
+
+            // Act
+            var result = await new UninstallEngine()
+                .RunAsync(appId, installDir.Path, InstallScope.User);
+
+            // Assert
+            result.Success.Should().BeTrue();
+            File.Exists(outside).Should().BeTrue(
+                "a volume root in ARP must not be accepted as an anchor either");
+        }
+        finally
+        {
+            UninstallStateStore.Delete(appId, InstallScope.User);
+            ArpRegistration.Remove(appId, InstallScope.User);
+#pragma warning disable CA1031 // Best-effort cleanup of the test's own scratch file.
+            try
+            {
+                if (File.Exists(outside))
+                {
+                    File.Delete(outside);
+                }
+            }
+            catch
+            {
+                // Best-effort.
+            }
+#pragma warning restore CA1031
         }
     }
 

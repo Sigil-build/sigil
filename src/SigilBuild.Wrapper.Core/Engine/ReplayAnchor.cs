@@ -36,16 +36,25 @@ internal sealed class ReplayAnchor
 {
     /// <summary>
     /// Registry subtrees that sit inside application-configuration space but are
-    /// auto-execution, policy, shell-verb or COM-activation surfaces. A manifest has no
-    /// legitimate need to have its uninstall write here, and an attacker very much
-    /// does — <c>Software\Classes\exefile\shell\open\command</c> and
-    /// <c>…\CurrentVersion\App Paths</c> are both machine-wide execution hijacks that a
-    /// bare "must be under Software\" rule would wave through.
+    /// auto-execution, policy or COM-activation surfaces, and that no manifest has a
+    /// legitimate reason to write at all. Refused outright, in both directions — a
+    /// planted record must not be able to write them, and deleting one is destructive.
     /// </summary>
     /// <remarks>
-    /// Compared segment-wise, case-insensitively, after <c>WOW6432Node</c> segments
-    /// have been folded away and after <c>HKCR</c> has been rewritten to its
+    /// <para>
+    /// This list is deliberately NOT the defence against execution hijacking. Rounds 0,
+    /// 1 and 2 of review each turned up another progid whose <c>shell\…\command</c>
+    /// grants machine-wide execution (<c>exefile</c>, then <c>Directory</c>, then
+    /// <c>txtfile</c> / <c>lnkfile</c> / <c>mscfile</c>), which is what enumerating
+    /// names buys you. The shape is what is dangerous, so
+    /// <see cref="IsExecutionShapedKey"/> denies the shape and this list is reduced to
+    /// the coordinates that are categorically not application configuration.
+    /// </para>
+    /// <para>
+    /// Compared segment-wise, case-insensitively, after <c>WOW6432Node</c> segments have
+    /// been folded away and after <c>HKCR</c> has been rewritten to its
     /// <c>Software\Classes</c> equivalent.
+    /// </para>
     /// </remarks>
     private static readonly string[] DeniedRegistrySubtrees =
     {
@@ -76,33 +85,32 @@ internal sealed class ReplayAnchor
         @"Software\Classes\TypeLib",
         @"Software\Classes\Protocols",
 
-        // OS-owned progids and pseudo-classes: their shell verbs are machine-wide
-        // execution. A manifest may register ITS OWN progid and file extension; it may
-        // not rewrite how Windows opens an executable, a folder, or every file.
+        // OS-owned pseudo-classes: not an application's own progid under any reading,
+        // and their whole subtree governs how Windows treats every file or folder.
         @"Software\Classes\*",
-        @"Software\Classes\exefile",
-        @"Software\Classes\batfile",
-        @"Software\Classes\cmdfile",
-        @"Software\Classes\comfile",
-        @"Software\Classes\piffile",
-        @"Software\Classes\scrfile",
-        @"Software\Classes\regfile",
-        @"Software\Classes\htafile",
-        @"Software\Classes\htmlfile",
         @"Software\Classes\Unknown",
         @"Software\Classes\Directory",
         @"Software\Classes\Folder",
         @"Software\Classes\Drive",
         @"Software\Classes\AllFilesystemObjects",
-        @"Software\Classes\.exe",
-        @"Software\Classes\.bat",
-        @"Software\Classes\.cmd",
-        @"Software\Classes\.com",
-        @"Software\Classes\.ps1",
-        @"Software\Classes\.vbs",
-        @"Software\Classes\.js",
-        @"Software\Classes\.msc",
-        @"Software\Classes\.scr",
+    };
+
+    /// <summary>
+    /// Path segments that make a key an execution-mapping surface: whatever value lands
+    /// there is a command line or a module path that Windows will later run or load.
+    /// </summary>
+    /// <remarks>
+    /// Matched as segments anywhere in the key, so this covers
+    /// <c>&lt;anything&gt;\shell\&lt;verb&gt;\command</c>, <c>…\shell\&lt;verb&gt;\ddeexec</c>,
+    /// any <c>shellex</c> handler, the in-proc / local COM server mappings, and the
+    /// multimedia driver-mapping keys — without naming a single progid.
+    /// </remarks>
+    private static readonly string[] ExecutionMappingSegments =
+    {
+        "command", "ddeexec", "shellex",
+        "InprocServer32", "InprocServer", "LocalServer32", "LocalServer",
+        "InprocHandler32", "InprocHandler", "TreatAs",
+        "Drivers32", "Drivers.desc", "MCI32", "MCI Extensions", "drivers.desc",
     };
 
     private const string MachineEnvKey =
@@ -193,10 +201,23 @@ internal sealed class ReplayAnchor
                 return PathVerdict(record, "restore_config_file", r.OriginalPath);
 
             case RollbackRecord.RestoreRegistryValue r:
-                return RegistryVerdict(record, "restore_registry_value", r.Hive, r.Key);
+                // PreviouslyAbsent → the undo deletes the value it wrote; nothing of the
+                // record's choosing is written, so there is no command line to contain.
+                return RegistryVerdict(
+                    record,
+                    "restore_registry_value",
+                    r.Hive,
+                    r.Key,
+                    r.PreviouslyAbsent ? Array.Empty<object?>() : new[] { r.PriorValue });
 
             case RollbackRecord.RestoreRegistryKey r:
-                return RegistryVerdict(record, "restore_registry_key", r.Hive, r.Key);
+                // PreviouslyAbsent → RestoreRegistryKey.UndoAsync returns immediately.
+                return RegistryVerdict(
+                    record,
+                    "restore_registry_key",
+                    r.Hive,
+                    r.Key,
+                    r.PreviouslyAbsent ? Array.Empty<object?>() : ValuesOf(r.ValuesAtKeyLevel));
 
             case RollbackRecord.RestoreEnv r:
                 return EnvVerdict(record, r);
@@ -267,19 +288,102 @@ internal sealed class ReplayAnchor
 
     // --- registry ---
 
-    private static Verdict RegistryVerdict(RollbackRecord record, string type, string hive, string key)
+    private Verdict RegistryVerdict(
+        RollbackRecord record,
+        string type,
+        string hive,
+        string key,
+        IReadOnlyList<object?> writtenValues)
     {
         var effective = EffectiveRegistryPath(hive, key);
-        if (effective is not null && IsAllowedRegistryKey(effective))
+        if (effective is null || !IsAllowedRegistryKey(effective))
+        {
+            return new Verdict(
+                record,
+                $"{type} refused: '{hive}\\{key}' is outside the application-configuration " +
+                "subtree an installer may reverse (HKLM/HKCU Software\\…, excluding the " +
+                "auto-run, policy and COM-activation surfaces)");
+        }
+
+        // The key is ordinary application space — but if its SHAPE makes it an execution
+        // mapping, whatever is written there is a command line Windows will later run.
+        // An app registering its own file type legitimately writes
+        // Software\Classes\Acme.Document\shell\open\command; it writes its OWN exe there.
+        // Anything pointing outside install_dir is a hijack whatever the progid is called,
+        // which is why this tests the shape and the value rather than a list of names.
+        if (!IsExecutionShapedKey(effective))
         {
             return new Verdict(record, null);
         }
 
-        return new Verdict(
-            record,
-            $"{type} refused: '{hive}\\{key}' is outside the application-configuration " +
-            "subtree an installer may reverse (HKLM/HKCU Software\\…, excluding the " +
-            "auto-run, policy, shell-verb and COM-activation surfaces)");
+        foreach (var value in writtenValues)
+        {
+            if (value is null)
+            {
+                continue;
+            }
+
+            if (value is not string command)
+            {
+                return new Verdict(
+                    record,
+                    $"{type} refused: '{hive}\\{key}' is an execution mapping and the value " +
+                    "being restored is not a command line that can be checked");
+            }
+
+            if (!ImagePathIsInside(command, _installDir))
+            {
+                return new Verdict(
+                    record,
+                    $"{type} refused: '{hive}\\{key}' is an execution mapping and '{command}' " +
+                    $"{OutsideText()} — restoring it would hand Windows a program this " +
+                    "install does not own");
+            }
+        }
+
+        return new Verdict(record, null);
+    }
+
+    private static object?[] ValuesOf(
+        IReadOnlyList<RegistryValueSnapshot>? snapshots)
+    {
+        if (snapshots is null || snapshots.Count == 0)
+        {
+            return Array.Empty<object?>();
+        }
+        var values = new object?[snapshots.Count];
+        for (var i = 0; i < snapshots.Count; i++)
+        {
+            values[i] = snapshots[i].Value;
+        }
+        return values;
+    }
+
+    /// <summary>
+    /// True when the key's SHAPE makes it an execution mapping — a
+    /// <c>shell\&lt;verb&gt;\command</c>, a <c>shellex</c> handler, a COM server path, or a
+    /// multimedia driver mapping — regardless of which progid or component it belongs to.
+    /// </summary>
+    /// <remarks>
+    /// Deny the shape, not the instances. Enumerating progids does not converge:
+    /// <c>exefile</c>, <c>Directory</c>, <c>txtfile</c>, <c>lnkfile</c> and <c>mscfile</c>
+    /// all give machine-wide execution and each was found in a different review round.
+    /// Any progid — including one Windows ships that this code has never heard of — is
+    /// covered here, while an app restoring its own verb to its own binary still passes.
+    /// </remarks>
+    private static bool IsExecutionShapedKey(string normalizedKey)
+    {
+        foreach (var segment in normalizedKey.Split('\\'))
+        {
+            foreach (var marker in ExecutionMappingSegments)
+            {
+                if (segment.Equals(marker, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /// <summary>
@@ -462,6 +566,21 @@ internal sealed class ReplayAnchor
 
             var live = SplitEntries(expanded);
             live.UnionWith(SplitEntries(literal));
+
+            if (live.Count == 0)
+            {
+                // The variable is absent or unreadable, so the ownership test has nothing
+                // to run against. Fail closed rather than let the answer depend on the
+                // ambient profile: deleting something that is not there is a no-op, so
+                // refusing costs nothing, and it means the verdict for a system-critical
+                // variable is the same on a fresh profile as on a configured one.
+                return new Verdict(
+                    record,
+                    $"restore_env refused: deleting {r.Scope}-scope '{r.Name}' — its current " +
+                    "value could not be read, and a variable the system depends on is never " +
+                    "removed on an unverified claim");
+            }
+
             foreach (var entry in live)
             {
                 if (OwnedByThisInstall(entry, isMachine))

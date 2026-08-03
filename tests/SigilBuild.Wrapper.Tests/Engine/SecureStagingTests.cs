@@ -1,0 +1,310 @@
+namespace SigilBuild.Wrapper.Tests.Engine;
+
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Runtime.Versioning;
+using System.Security.AccessControl;
+using System.Security.Cryptography;
+using System.Security.Principal;
+using System.Text;
+using FluentAssertions;
+using SigilBuild.Wrapper.Engine;
+using SigilBuild.Wrapper.Tests.Helpers;
+using Xunit;
+
+/// <summary>
+/// R12's primitive: <see cref="SecureStaging"/> — a private per-run staging
+/// directory plus <c>OpenVerified</c>, which re-hashes a staged file from an open
+/// handle whose sharing mode denies write and delete and hands that handle back to
+/// be held across <c>Process.Start</c>.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The decisive case is
+/// <see cref="OpenVerified_throws_when_the_staged_file_changed_after_it_was_hashed"/>:
+/// stage a file, take its hash, overwrite it, then ask for it back under the
+/// original hash. That is exactly the swap R12 describes, and it must be a hard
+/// refusal.
+/// </para>
+/// <para>
+/// <b>This file runs UNELEVATED</b> (as the whole suite does). An unelevated process
+/// cannot create a directory it is itself unable to modify, so
+/// <c>IsAdminOnly</c>/<see cref="StateDirectorySecurity.IsAdminOnlyWritable"/> is
+/// asserted <b>false</b> here and the admin-only root
+/// (<c>%ProgramData%\Sigil\staging</c>) is never exercised locally — see
+/// <see cref="Staging_is_admin_only_exactly_when_the_process_is_elevated"/>, which
+/// asserts the branch it can actually reach and states the other. What does NOT
+/// depend on elevation — the protected DACL, and every <c>OpenVerified</c>
+/// guarantee — is asserted unconditionally.
+/// </para>
+/// <para>
+/// <c>[SupportedOSPlatform("windows")]</c> satisfies CA1416 for the ACL call sites
+/// (the pattern of <c>StateProvenanceTests</c>); <c>[WindowsFact]</c> is what makes
+/// the Windows-only cases report Skipped rather than pass vacuously off Windows.
+/// </para>
+/// </remarks>
+[SupportedOSPlatform("windows")]
+public sealed class SecureStagingTests
+{
+    private static string Sha256Hex(byte[] data) =>
+        Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
+
+    private static string Stage(SecureStaging staging, string fileName, byte[] bytes)
+    {
+        var path = staging.PathFor(fileName);
+        File.WriteAllBytes(path, bytes);
+        return path;
+    }
+
+    // ── The directory ─────────────────────────────────────────────────────────
+
+    [Fact]
+    public void Create_makes_a_fresh_private_directory_per_call()
+    {
+        using var root = new TempDir();
+
+        using var first = SecureStaging.Create("prereq", root.Path);
+        using var second = SecureStaging.Create("prereq", root.Path);
+
+        Directory.Exists(first.Directory).Should().BeTrue();
+        Directory.Exists(second.Directory).Should().BeTrue();
+        second.Directory.Should().NotBe(first.Directory, "each run stages into its own freshly-named directory");
+        Path.GetFileName(first.Directory).Should().StartWith("sigil-prereq-");
+        Directory.GetFileSystemEntries(first.Directory).Should().BeEmpty("a fresh staging directory starts empty");
+    }
+
+    [Fact]
+    public void Dispose_removes_the_staging_directory_and_its_contents()
+    {
+        using var root = new TempDir();
+        string directory;
+
+        using (var staging = SecureStaging.Create("update", root.Path))
+        {
+            directory = staging.Directory;
+            Stage(staging, "setup.exe", Encoding.UTF8.GetBytes("payload"));
+        }
+
+        Directory.Exists(directory).Should().BeFalse("the staging directory is removed with the staged file in it");
+    }
+
+    [Fact]
+    public void PathFor_refuses_a_name_that_would_escape_the_staging_directory()
+    {
+        using var root = new TempDir();
+        using var staging = SecureStaging.Create("prereq", root.Path);
+
+        var escape = () => staging.PathFor(Path.Combine("..", "elsewhere.exe"));
+        var rooted = () => staging.PathFor(Path.Combine(root.Path, "elsewhere.exe"));
+
+        escape.Should().Throw<ArgumentException>();
+        rooted.Should().Throw<ArgumentException>();
+        staging.PathFor("setup.exe").Should().Be(Path.Combine(staging.Directory, "setup.exe"));
+    }
+
+    [WindowsFact("Windows ACL APIs")]
+    public void Created_directory_carries_a_protected_non_inherited_dacl()
+    {
+        using var root = new TempDir();
+        using var staging = SecureStaging.Create("prereq", root.Path);
+
+        var security = new DirectoryInfo(staging.Directory)
+            .GetAccessControl(AccessControlSections.Access);
+
+        security.AreAccessRulesProtected.Should().BeTrue(
+            "the staging directory must discard whatever the parent (%TEMP% or a redirected root) grants");
+
+        // Every writer must be the current user, SYSTEM or BUILTIN\Administrators —
+        // nothing inherited, no CREATOR OWNER, no Users write.
+        var allowedWriters = new[]
+        {
+            WindowsIdentity.GetCurrent().User!,
+            new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
+            new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null),
+        };
+
+        foreach (FileSystemAccessRule rule in security.GetAccessRules(
+            includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier)))
+        {
+            rule.IsInherited.Should().BeFalse("a protected DACL leaves no inherited ACE behind");
+            if (rule.AccessControlType != AccessControlType.Allow)
+            {
+                continue;
+            }
+            var writes = (rule.FileSystemRights &
+                (FileSystemRights.WriteData | FileSystemRights.AppendData | FileSystemRights.Delete |
+                 FileSystemRights.DeleteSubdirectoriesAndFiles | FileSystemRights.ChangePermissions |
+                 FileSystemRights.TakeOwnership)) != 0;
+            if (!writes)
+            {
+                continue;
+            }
+            allowedWriters.Should().Contain(
+                (SecurityIdentifier)rule.IdentityReference,
+                "only the staging process, SYSTEM and administrators may write into a staging directory");
+        }
+    }
+
+    [WindowsFact("Windows ACL APIs")]
+    public void Staging_is_admin_only_exactly_when_the_process_is_elevated()
+    {
+        using var root = new TempDir();
+        using var staging = SecureStaging.Create("prereq", root.Path);
+
+        // The single frozen predicate (S1) is the only answer consulted — SecureStaging
+        // implements no second ACL check, so its own flag must agree with it.
+        staging.IsAdminOnly.Should().Be(StateDirectorySecurity.IsAdminOnlyWritable(staging.Directory));
+
+        if (Elevation.IsProcessElevated())
+        {
+            // ELEVATED: the admin-only root under %ProgramData%\Sigil\staging is
+            // reachable, so the directory must be admin-only writable. NOT exercised on
+            // the developer box that produced this file (unelevated); CI/an elevated run
+            // is the arbiter.
+            staging.IsAdminOnly.Should().BeTrue(
+                "an elevated run stages under %ProgramData%\\Sigil\\staging, which is admin-only");
+        }
+        else
+        {
+            // UNELEVATED: an admin-only directory is unreachable by construction — this
+            // process could not create something it cannot itself modify. The honest
+            // answer is false, not a pretended true; OpenVerified is what carries the
+            // guarantee in this branch.
+            staging.IsAdminOnly.Should().BeFalse(
+                "an unelevated process cannot create a directory only administrators can write");
+            staging.Directory.Should().StartWith(root.Path, "unelevated staging falls back to the caller's root");
+        }
+    }
+
+    // ── OpenVerified: case (b), the decisive one ──────────────────────────────
+
+    [Fact]
+    public void OpenVerified_throws_when_the_staged_file_changed_after_it_was_hashed()
+    {
+        using var root = new TempDir();
+        using var staging = SecureStaging.Create("prereq", root.Path);
+
+        // Stage a file and take the hash a downloader would have verified.
+        var genuine = Encoding.UTF8.GetBytes("the-genuine-installer-bytes");
+        var path = Stage(staging, "setup.exe", genuine);
+        var verifiedHash = Sha256Hex(genuine);
+
+        // The attacker's window: between the download's verify and the launch, the
+        // bytes are replaced. On the pre-fix code path nothing was holding the file
+        // and nothing looked at it again — it was simply executed.
+        File.WriteAllBytes(path, Encoding.UTF8.GetBytes("attacker-substituted-payload"));
+
+        var open = () => staging.OpenVerified("setup.exe", verifiedHash);
+
+        open.Should().Throw<StagedFileVerificationException>(
+                "a staged file whose bytes changed after verification must never be handed back for launch")
+            .WithMessage("*replaced after verification*");
+    }
+
+    [Fact]
+    public void OpenVerified_returns_a_readable_handle_positioned_at_zero_when_the_hash_still_matches()
+    {
+        using var root = new TempDir();
+        using var staging = SecureStaging.Create("prereq", root.Path);
+        var bytes = Encoding.UTF8.GetBytes("the-genuine-installer-bytes");
+        Stage(staging, "setup.exe", bytes);
+
+        using var handle = staging.OpenVerified("setup.exe", Sha256Hex(bytes));
+
+        handle.Position.Should().Be(0, "the handle is rewound after the re-hash so the caller can read it");
+        using var reader = new BinaryReader(handle, Encoding.UTF8, leaveOpen: true);
+        reader.ReadBytes(bytes.Length).Should().Equal(bytes);
+    }
+
+    [Fact]
+    public void OpenVerified_is_case_insensitive_about_the_expected_digest()
+    {
+        using var root = new TempDir();
+        using var staging = SecureStaging.Create("prereq", root.Path);
+        var bytes = Encoding.UTF8.GetBytes("case-insensitive-digest");
+        Stage(staging, "setup.exe", bytes);
+
+        using var handle = staging.OpenVerified("setup.exe", Sha256Hex(bytes).ToUpperInvariant());
+
+        handle.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void OpenVerified_refuses_a_file_with_no_expected_digest_at_all()
+    {
+        using var root = new TempDir();
+        using var staging = SecureStaging.Create("prereq", root.Path);
+        Stage(staging, "setup.exe", Encoding.UTF8.GetBytes("x"));
+
+        var open = () => staging.OpenVerified("setup.exe", "   ");
+
+        open.Should().Throw<StagedFileVerificationException>(
+            "an unverifiable staged binary is refused, never launched on trust");
+    }
+
+    // ── OpenVerified: case (c), the handle the caller holds ───────────────────
+
+    [WindowsFact("Windows file sharing semantics")]
+    public void The_returned_handle_denies_write_and_delete_but_still_admits_readers()
+    {
+        using var root = new TempDir();
+        using var staging = SecureStaging.Create("prereq", root.Path);
+        var bytes = Encoding.UTF8.GetBytes("held-across-the-launch");
+        var path = Stage(staging, "setup.exe", bytes);
+
+        using var handle = staging.OpenVerified("setup.exe", Sha256Hex(bytes));
+
+        // FileShare.Read denies FILE_WRITE_DATA and DELETE to everyone else …
+        var overwrite = () => File.WriteAllBytes(path, Encoding.UTF8.GetBytes("swapped"));
+        var delete = () => File.Delete(path);
+        overwrite.Should().Throw<IOException>("the held handle must deny write for as long as it lives");
+        delete.Should().Throw<IOException>("the held handle must deny delete too — a swap can be a delete + recreate");
+
+        // … while still admitting readers, which FileShare.None would have broken.
+        File.ReadAllBytes(path).Should().Equal(bytes);
+    }
+
+    [WindowsFact("spawns a real child process")]
+    public void The_held_handle_still_permits_the_staged_file_to_be_launched()
+    {
+        // The reason the sharing mode is FileShare.Read and not FileShare.None:
+        // CreateProcess opens the image for read+execute, which None would refuse with
+        // a sharing violation — the protection would break the launch it protects.
+        using var root = new TempDir();
+        using var staging = SecureStaging.Create("prereq", root.Path);
+
+        var source = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe");
+        var staged = staging.PathFor("staged.exe");
+        File.Copy(source, staged);
+        var hash = Sha256Hex(File.ReadAllBytes(staged));
+
+        using var handle = staging.OpenVerified("staged.exe", hash);
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = staged,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        psi.ArgumentList.Add("/c");
+        psi.ArgumentList.Add("exit /b 7");
+
+        using var process = Process.Start(psi);
+        process.Should().NotBeNull("holding the verified handle must not block the launch");
+        process!.WaitForExit();
+        process.ExitCode.Should().Be(7, "the launched child is the staged file whose bytes were verified");
+    }
+
+    [Fact]
+    public void OpenVerified_after_dispose_is_refused()
+    {
+        using var root = new TempDir();
+        var staging = SecureStaging.Create("prereq", root.Path);
+        staging.Dispose();
+
+        var open = () => staging.OpenVerified("setup.exe", new string('a', 64));
+
+        open.Should().Throw<ObjectDisposedException>();
+    }
+}

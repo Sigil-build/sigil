@@ -75,9 +75,22 @@ public static class InstallDirResolver
     /// </summary>
     /// <param name="allowAnyRoot">
     /// When <c>true</c>, skip the R3 scope-root containment check. This exists
-    /// for test fixtures that legitimately resolve into an OS temp directory —
-    /// it is <c>internal</c> precisely so no production path can reach it. Never
+    /// for test fixtures that legitimately resolve to an arbitrary absolute path
+    /// (the precedence suite in <c>InstallDirResolverTests</c>) — <b>never</b>
     /// pass <c>true</c> from <c>src/</c>.
+    /// <para>
+    /// <b>What <c>internal</c> does and does not guarantee here.</b> It keeps
+    /// this overload off the package's public API surface, so no consumer of
+    /// <c>SigilBuild.Wrapper.Core</c> can reach it. It does <b>not</b> fence off
+    /// production code inside this repo:
+    /// <c>SigilBuild.Wrapper.Core.csproj</c> grants <c>InternalsVisibleTo</c> to
+    /// <c>SigilBuild.Wrapper</c>, <c>SigilBuild.Installer.Host</c> and
+    /// <c>SigilBuild.Packaging</c> alongside the test assemblies, so any of those
+    /// three <i>could</i> call this. None does — every <c>src/</c> call site uses
+    /// the public seven-parameter overload, which hard-codes
+    /// <c>allowAnyRoot: false</c>. The guarantee is convention plus review, not
+    /// the compiler; treat a new <c>src/</c> caller as a security regression.
+    /// </para>
     /// </param>
     internal static string Resolve(
         InstallScope scope,
@@ -100,6 +113,31 @@ public static class InstallDirResolver
 
         return resolved;
     }
+
+    /// <summary>
+    /// The scope's built-in default destination
+    /// (<c>&lt;scope root&gt;\&lt;App.Name&gt;</c>), resolved WITHOUT the R3
+    /// containment check and therefore guaranteed not to throw.
+    /// </summary>
+    /// <remarks>
+    /// This exists for exactly one caller — <c>InstallSession.ResolveDefaultInstallDir</c>'s
+    /// fallback, which runs inside a <c>catch (InstallDirRejectedException)</c>
+    /// during Avalonia startup, before any window exists. Re-entering the
+    /// throwing overload from that catch could raise a SECOND rejection
+    /// (<c>&lt;InstallRoot&gt;\&lt;AppName&gt;</c> is itself junction-able), and
+    /// that exception would escape the very catch written to prevent it, killing
+    /// the wizard with no UI at all.
+    /// <para>
+    /// This is a DISPLAY value only and never reaches the engine: the
+    /// destination the user confirms is re-resolved through the checking path in
+    /// <c>InstallSession.RunInstallCoreAsync</c> and refused there. It is a
+    /// separate member rather than an <c>allowAnyRoot: true</c> call precisely so
+    /// that no <c>src/</c> code passes that flag.
+    /// </para>
+    /// </remarks>
+    internal static string ScopeDefault(InstallScope scope, string? appName, string appId)
+        => Canonicalize(
+            SubstituteDirTokens(DefaultTemplate, ScopeLayout.For(scope).InstallRoot, appName, appId));
 
     /// <summary>
     /// True when <paramref name="resolved"/> is inside the directory every

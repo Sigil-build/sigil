@@ -1,7 +1,6 @@
 namespace SigilBuild.Wrapper.Tests.Engine;
 
 using System;
-using System.Diagnostics;
 using System.IO;
 using FluentAssertions;
 using SigilBuild.Wrapper.Engine;
@@ -24,6 +23,13 @@ public sealed class PathContainmentTests
     [InlineData(@"C:\Program Files\App", @"C:\Windows\System32\a.dll", false)]
     [InlineData(@"C:\Program Files\App", @"C:\Program Files\AppEvil\a.exe", false)]
     [InlineData(@"C:\Program Files\App", @"\\server\share\a.exe", false)]
+    // A trailing separator on either side must not change the answer. /D= keeps a
+    // trailing '\' the operator typed, and S2.3 anchors on ctx.InstallDir.
+    [InlineData(@"C:\Program Files\App\", @"C:\Program Files\App\bin\a.exe", true)]
+    [InlineData(@"C:\Program Files\App\", @"C:\Program Files\App", true)]
+    [InlineData(@"C:\Program Files\App", @"C:\Program Files\App\", true)]
+    [InlineData(@"C:\Program Files\App\", @"C:\Program Files\App\", true)]
+    [InlineData(@"C:\Program Files\App\", @"C:\Program Files\AppEvil\a.exe", false)]
     public void IsUnder_contains_only_real_descendants(string root, string candidate, bool expected)
         => PathContainment.IsUnder(root, candidate).Should().Be(expected);
 
@@ -37,7 +43,7 @@ public sealed class PathContainmentTests
         // Directory junctions require no privilege — this is the realistic
         // redirection primitive, not symlinks (Directory.CreateSymbolicLink
         // throws for an unelevated session with Developer Mode off).
-        CreateJunctionOrFail(link, outside.Path);
+        Junction.CreateOrFail(link, outside.Path);
 
         var target = Path.Combine(link, "config.json");
 
@@ -61,36 +67,113 @@ public sealed class PathContainmentTests
             .Should().BeTrue();
     }
 
-    /// <summary>
-    /// Create a real NTFS directory junction (a reparse point) and assert it
-    /// exists. A test that silently degrades to "no junction" would pass
-    /// vacuously, which is precisely the defect this track exists to eliminate.
-    /// </summary>
-    private static void CreateJunctionOrFail(string link, string target)
+    // ── Trailing separators (fix round 1, Important 3) ────────────────────────
+
+    [WindowsFact("Windows directory junctions")]
+    public void IsUnderWithoutTraversal_is_unaffected_by_a_trailing_separator()
     {
-        var psi = new ProcessStartInfo("cmd.exe")
-        {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-        };
-        psi.ArgumentList.Add("/c");
-        psi.ArgumentList.Add("mklink");
-        psi.ArgumentList.Add("/J");
-        psi.ArgumentList.Add(link);
-        psi.ArgumentList.Add(target);
+        using var root = new TempDir();
+        var nested = Path.Combine(root.Path, "sub", "deeper");
+        Directory.CreateDirectory(nested);
 
-        using var proc = Process.Start(psi);
-        proc.Should().NotBeNull("cmd.exe must start so the junction can be created");
-        var stdout = proc!.StandardOutput.ReadToEnd();
-        var stderr = proc.StandardError.ReadToEnd();
-        proc.WaitForExit();
+        var rootWithSep = root.Path + Path.DirectorySeparatorChar;
 
-        proc.ExitCode.Should().Be(0,
-            $"'mklink /J' must succeed — junctions need no privilege. stdout: {stdout} stderr: {stderr}");
-        Directory.Exists(link).Should().BeTrue("the junction directory entry must exist");
-        File.GetAttributes(link).HasFlag(FileAttributes.ReparsePoint).Should().BeTrue(
-            "the test is vacuous unless a real reparse point was created");
+        // Before the fix this returned False: GetFullPath preserves the trailing
+        // separator while GetDirectoryName strips it, so the upward walk ran past
+        // the anchor to the volume root and refused a reparse-free descendant.
+        PathContainment.IsUnderWithoutTraversal(rootWithSep, nested).Should().BeTrue(
+            "a trailing separator on the root is a formatting detail, not an escape");
+        PathContainment.IsUnderWithoutTraversal(rootWithSep, nested + Path.DirectorySeparatorChar)
+            .Should().BeTrue("nor is one on the candidate");
+        PathContainment.IsUnderWithoutTraversal(rootWithSep, rootWithSep).Should().BeTrue(
+            "the root is contained in itself however it is spelled");
     }
+
+    [WindowsFact("Windows directory junctions")]
+    public void IsUnderWithoutTraversal_still_rejects_a_junction_under_a_trailing_separator_root()
+    {
+        using var root = new TempDir();
+        using var outside = new TempDir();
+        var link = Path.Combine(root.Path, "link");
+        Junction.CreateOrFail(link, outside.Path);
+
+        // The trailing-separator fix must not have loosened the actual guard.
+        PathContainment.IsUnderWithoutTraversal(
+            root.Path + Path.DirectorySeparatorChar, Path.Combine(link, "config.json"))
+            .Should().BeFalse();
+    }
+
+    // ── IsReparsePoint exception paths (fix round 1, Important 1) ─────────────
+
+    [WindowsFact("Windows reparse points")]
+    public void IsReparsePoint_is_true_only_for_an_actual_reparse_point()
+    {
+        using var root = new TempDir();
+        var plainDir = Path.Combine(root.Path, "plain");
+        Directory.CreateDirectory(plainDir);
+        var plainFile = Path.Combine(root.Path, "plain.txt");
+        File.WriteAllText(plainFile, "x");
+
+        using var outside = new TempDir();
+        var link = Path.Combine(root.Path, "link");
+        Junction.CreateOrFail(link, outside.Path);
+
+        PathContainment.IsReparsePoint(link).Should().BeTrue("a junction is a reparse point");
+        PathContainment.IsReparsePoint(plainDir).Should().BeFalse();
+        PathContainment.IsReparsePoint(plainFile).Should().BeFalse();
+    }
+
+    [WindowsFact("Windows reparse points")]
+    public void IsReparsePoint_swallows_only_the_three_nothing_is_here_conditions()
+    {
+        using var root = new TempDir();
+
+        // FileNotFoundException (0x80070002) — no such leaf.
+        PathContainment.IsReparsePoint(Path.Combine(root.Path, "no-such-file"))
+            .Should().BeFalse();
+
+        // DirectoryNotFoundException (0x80070003) — no such parent…
+        PathContainment.IsReparsePoint(Path.Combine(root.Path, "no-such-dir", "leaf.txt"))
+            .Should().BeFalse();
+
+        // …and the missing-volume case, which reports the same way.
+        PathContainment.IsReparsePoint(@"Z:\nope\file.txt").Should().BeFalse();
+
+        // IOException / ERROR_INVALID_NAME (0x8007007B) — a name the filesystem
+        // cannot represent. This is the un-stamped runtime's literal "<unset>"
+        // AppId directory, the case that made the catch necessary at all.
+        PathContainment.IsReparsePoint(Path.Combine(root.Path, "<unset>")).Should().BeFalse();
+
+        // …and an over-length single component, which reports the same way.
+        PathContainment.IsReparsePoint(Path.Combine(root.Path, new string('a', 400)))
+            .Should().BeFalse();
+    }
+
+    [WindowsFact("Windows reparse points")]
+    public void IsReparsePoint_propagates_anything_else_so_callers_fail_closed()
+    {
+        using var root = new TempDir();
+
+        // PathTooLongException (0x800700CE) derives from IOException and WAS
+        // swallowed by the previous blanket catch. It must now propagate.
+        var overlong = () => PathContainment.IsReparsePoint(
+            Path.Combine(root.Path, new string('a', 40000)));
+        overlong.Should().Throw<PathTooLongException>();
+
+        // A non-IOException is not caught either.
+        var embeddedNul = () => PathContainment.IsReparsePoint("bad\0path");
+        embeddedNul.Should().Throw<ArgumentException>();
+    }
+
+    [WindowsFact("Windows reparse points")]
+    public void IsUnderWithoutTraversal_fails_closed_when_a_component_cannot_be_read()
+    {
+        using var root = new TempDir();
+
+        // The propagating cases above must surface as "not contained" — never as
+        // an exception out of the containment helper, and never as True.
+        PathContainment.IsUnderWithoutTraversal(root.Path, Path.Combine(root.Path, new string('a', 40000)))
+            .Should().BeFalse("an uninterrogable component is not provably contained");
+    }
+
 }

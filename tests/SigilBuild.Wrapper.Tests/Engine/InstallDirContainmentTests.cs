@@ -144,14 +144,14 @@ public sealed class InstallDirContainmentTests
 
     // ── Neither entry path may let the refusal escape unhandled ───────────────
 
-    private static WrapperBlob EvilBlob() => new(
+    private static WrapperBlob EvilBlob(string appName = "MyApp") => new(
         AppId: "com.example.myapp",
         Parameters: Array.Empty<ParameterDefinition>(),
         InstallSteps: Array.Empty<InstallStep>(),
         PreInstall: Array.Empty<InstallStep>(),
         PostInstall: Array.Empty<InstallStep>(),
         UpdateSteps: Array.Empty<InstallStep>(),
-        AppName: "MyApp",
+        AppName: appName,
         Scope: InstallScope.User,
         InstallDir: @"C:\Windows\Temp\evil");
 
@@ -189,6 +189,42 @@ public sealed class InstallDirContainmentTests
 
         outcome.Success.Should().BeFalse();
         outcome.Error.Should().Contain("outside");
+    }
+
+    [WindowsFact("Windows directory junctions")]
+    public void Wizard_prefill_does_not_rethrow_when_the_scope_default_is_itself_a_junction()
+    {
+        // Fix round 1, Important 2. The fallback inside
+        // catch (InstallDirRejectedException) used to call the CHECKING overload
+        // again. If <InstallRoot>\<AppName> is itself a junction that second call
+        // also rejects — and the exception escapes the very catch written to stop
+        // the first one. App.axaml.cs has no try/catch, so the wizard would die
+        // with no window at all.
+        var installRoot = ScopeLayout.For(InstallScope.User).InstallRoot;
+        Directory.CreateDirectory(installRoot);
+
+        var appName = "sigil-s2-junction-" + Guid.NewGuid().ToString("N");
+        var scopeDefault = Path.Combine(installRoot, appName);
+        using var outside = new TempDir();
+        Junction.CreateOrFail(scopeDefault, outside.Path);
+
+        try
+        {
+            // The manifest install_dir is out of root, so the pre-fill takes the
+            // fallback; the fallback's own target is the junction above.
+            var blob = EvilBlob(appName);
+            var session = InstallSession.ForTesting(
+                blob, CommandLineParser.Parse(Array.Empty<string>(), blob.Parameters));
+
+            var act = () => session.ResolveDefaultInstallDir(InstallScope.User);
+
+            act.Should().NotThrow("the pre-fill runs before any window exists");
+            act().Should().Be(scopeDefault, "the scope default is a display value, resolved unchecked");
+        }
+        finally
+        {
+            Junction.Remove(scopeDefault);
+        }
     }
 
     // ── The test-only escape hatch ────────────────────────────────────────────

@@ -31,6 +31,14 @@ using System.IO;
 internal static class PathContainment
 {
     /// <summary>
+    /// <c>ERROR_INVALID_NAME</c> (Win32 123) as an <see cref="IOException"/>
+    /// HRESULT. Measured on .NET 10 / Windows: raised by
+    /// <see cref="File.GetAttributes(string)"/> for a name the filesystem cannot
+    /// represent at all.
+    /// </summary>
+    private const int HResultInvalidName = unchecked((int)0x8007007B);
+
+    /// <summary>
     /// True when <paramref name="candidate"/> resolves inside
     /// <paramref name="root"/> (or is <paramref name="root"/> itself).
     /// Canonicalizes both with <see cref="Path.GetFullPath(string)"/> BEFORE
@@ -48,8 +56,8 @@ internal static class PathContainment
 
         try
         {
-            var rootFull = Path.GetFullPath(root);
-            var candidateFull = Path.GetFullPath(candidate);
+            var rootFull = Canonicalize(root);
+            var candidateFull = Canonicalize(candidate);
 
             if (string.Equals(rootFull, candidateFull, StringComparison.OrdinalIgnoreCase))
             {
@@ -87,8 +95,8 @@ internal static class PathContainment
 
         try
         {
-            var rootFull = Path.GetFullPath(root);
-            var current = Path.GetFullPath(candidate);
+            var rootFull = Canonicalize(root);
+            var current = Canonicalize(candidate);
 
             // Walk upward from the candidate to (but excluding) the root. The
             // root itself is the anchor the caller already trusts; every link in
@@ -121,25 +129,60 @@ internal static class PathContainment
 #pragma warning restore CA1031
     }
 
-    private static bool IsReparsePoint(string path)
+    /// <summary>
+    /// <see cref="Path.GetFullPath(string)"/> with any trailing directory
+    /// separator removed (except on a volume/UNC root, where the separator is
+    /// part of the path).
+    /// </summary>
+    /// <remarks>
+    /// The trim matters for <see cref="IsUnderWithoutTraversal"/>, not for the
+    /// prefix compare. <c>GetFullPath</c> PRESERVES a trailing separator while
+    /// <see cref="Path.GetDirectoryName(string)"/> STRIPS it, so an untrimmed
+    /// root of <c>C:\App\</c> could never equal any value the upward walk
+    /// produces — the walk would run past the anchor to the volume root and
+    /// refuse a genuine, reparse-free descendant. Task S2.3 anchors on
+    /// <c>ctx.InstallDir</c>, which keeps the trailing <c>\</c> a user typed
+    /// after <c>/D=</c>, so the shape is reachable there even though S2.2 never
+    /// produces it.
+    /// </remarks>
+    private static string Canonicalize(string path)
+        => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+
+    /// <summary>
+    /// True when <paramref name="path"/> is a reparse point (junction or
+    /// symlink). A component that cannot exist is not one; anything we are
+    /// unable to interrogate throws, and the callers above fail closed on that.
+    /// </summary>
+    /// <remarks>
+    /// Exactly three conditions are treated as "nothing here to redirect a
+    /// write", each verified against .NET 10 on Windows:
+    /// <list type="bullet">
+    ///   <item><description><see cref="FileNotFoundException"/> (0x80070002) — no such file.</description></item>
+    ///   <item><description><see cref="DirectoryNotFoundException"/> (0x80070003) — no such parent, and the missing-volume case.</description></item>
+    ///   <item><description><see cref="IOException"/> with <c>ERROR_INVALID_NAME</c> (0x8007007B) — a name the filesystem cannot represent, e.g. the un-stamped runtime's literal <c>&lt;unset&gt;</c> directory or an over-length component.</description></item>
+    /// </list>
+    /// Everything else propagates and fails the containment check closed —
+    /// notably <see cref="UnauthorizedAccessException"/> (attributes we may not
+    /// read are not provably free of a reparse point), <see cref="PathTooLongException"/>
+    /// (0x800700CE), and lock / device-not-ready I/O errors. The previous
+    /// blanket <c>catch (IOException)</c> swallowed those last two as well.
+    /// </remarks>
+    internal static bool IsReparsePoint(string path)
     {
         try
         {
             return (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
         }
-        catch (IOException)
+        catch (FileNotFoundException)
         {
-            // Nothing exists at this component — it was not found, or the name is
-            // one the filesystem cannot represent at all (the un-stamped runtime
-            // resolves to a literal "<unset>" directory, which raises
-            // ERROR_INVALID_NAME). Either way there is no reparse point here to
-            // redirect a write, and the textual containment check has already
-            // passed. FileNotFoundException / DirectoryNotFoundException derive
-            // from IOException and are covered by this.
-            //
-            // UnauthorizedAccessException is deliberately NOT caught: a component
-            // whose attributes we are not allowed to read is not provably free of
-            // a reparse point, so it propagates and fails the check closed.
+            return false;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return false;
+        }
+        catch (IOException ex) when (ex.HResult == HResultInvalidName)
+        {
             return false;
         }
     }

@@ -633,13 +633,14 @@ public sealed class InstallSession
             // in the /LOG. The rule itself is not weakened: whatever the user
             // finally confirms is re-resolved through the checking path in
             // RunInstallCoreAsync, which refuses it there.
+            //
+            // ScopeDefault, NOT the checking overload: <InstallRoot>\<AppName> is
+            // itself junction-able, so re-entering Resolve here could throw a
+            // SECOND rejection straight out of the catch that exists to stop the
+            // first one — and App.axaml.cs has no try/catch, so the wizard would
+            // die with no window at all. ScopeDefault cannot throw.
             _log?.WriteLine($"install dir: {ex.Message} Falling back to the scope default.");
-            return InstallDirResolver.Resolve(
-                scope: effective,
-                appName: _blob.AppName,
-                appId: _blob.AppId,
-                manifestInstallDir: null,
-                cliOverride: null);
+            return InstallDirResolver.ScopeDefault(effective, _blob.AppName, _blob.AppId);
         }
     }
 

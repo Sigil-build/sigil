@@ -239,7 +239,17 @@ public sealed class ExeWrapperPackager : IPackager
                 TimeoutSeconds: null,
                 Retries: 3,
                 When: null,
-                OnFailure: OnFailure.Fail),
+                OnFailure: OnFailure.Fail)
+            {
+                // R16: every step destination is contained to install_dir. This
+                // one deliberately is not — the stub downloads the full package to
+                // a temp location and hands off to it; the stub itself installs
+                // nothing into install_dir. The download is SHA-256-verified
+                // before it is executed, which is what makes an out-of-tree
+                // destination defensible here, and stating it explicitly is the
+                // whole point of the opt-out being per-step and declared.
+                AllowOutsideInstallDir = true,
+            },
             new InstallStep.RunProgram(
                 Id: "web_installer_run",
                 Program: downloadDest,

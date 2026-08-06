@@ -29,7 +29,8 @@ internal sealed class XmlEditStep : IStep
 
         var result = ConfigFileEditor.Edit(
             ctx, journal, _spec.Path, _spec.CreateIfMissing,
-            current => XmlEditor.Set(current, xpath, attribute, value, _spec.CreateIfMissing));
+            current => XmlEditor.Set(current, xpath, attribute, value, _spec.CreateIfMissing),
+            "xml_edit", _spec.AllowOutsideInstallDir);
 
         return Task.FromResult(result);
     }

@@ -169,10 +169,17 @@ public sealed class OptionFlowTests
             Parameters: Array.Empty<ParameterDefinition>(),
             InstallSteps: new InstallStep[]
             {
+                // R16 contains file_copy's `to` to install_dir; these two copy
+                // into an OS temp directory, so the fixture declares the
+                // out-of-tree write with the production per-step opt-out rather
+                // than relaxing the rule. What is under test here is option
+                // gating, not containment.
                 new InstallStep.FileCopy("cpA", Path.Combine(srcA, "*"), dstA,
-                    Overwrite: true, When: "option.feature_a", OnFailure.Fail),
+                    Overwrite: true, When: "option.feature_a", OnFailure.Fail)
+                    { AllowOutsideInstallDir = true },
                 new InstallStep.FileCopy("cpB", Path.Combine(srcB, "*"), dstB,
-                    Overwrite: true, When: "option.feature_b", OnFailure.Fail),
+                    Overwrite: true, When: "option.feature_b", OnFailure.Fail)
+                    { AllowOutsideInstallDir = true },
             },
             PreInstall: Array.Empty<InstallStep>(),
             PostInstall: Array.Empty<InstallStep>(),

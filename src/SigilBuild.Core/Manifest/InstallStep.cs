@@ -25,6 +25,32 @@ public abstract record InstallStep(string Id, string? When, OnFailure OnFailure)
     /// </summary>
     public virtual bool RequiresMachineScope => false;
 
+    /// <summary>
+    /// Manifest <c>allow_outside_install_dir</c> (register row R16). Opts a single
+    /// step out of the destination-containment rule, for the installers that
+    /// legitimately write outside the installed application — a machine-wide
+    /// config under <c>%ProgramData%</c> is the common one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Declared on the base record rather than on each destination step: it is
+    /// parsed once, in the same place as <c>when</c> and <c>on_failure</c>, and
+    /// travels the blob wire as one field. Only the steps that actually write
+    /// somewhere consult it (<c>file_copy</c>, <c>file_delete</c>,
+    /// <c>directory_delete</c>, <c>http_download</c>, <c>ini_write</c>,
+    /// <c>json_edit</c>, <c>xml_edit</c>), and only those accept the key — every
+    /// other step type reports it as an unrecognized field.
+    /// </para>
+    /// <para>
+    /// It does NOT relax the privileged-target rule on <c>service_install</c>,
+    /// <c>scheduled_task_create</c>, <c>com_register</c> or <c>firewall_rule</c>
+    /// (rows R3/R9) — those targets run with SYSTEM authority and have no opt-out
+    /// — and it does not suppress the unresolved-token failure, which is a
+    /// manifest typo under any policy.
+    /// </para>
+    /// </remarks>
+    public bool AllowOutsideInstallDir { get; init; }
+
     public sealed record FileCopy(
         string Id,
         string From,

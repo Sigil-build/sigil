@@ -1126,20 +1126,25 @@ public static class ManifestParser
 
     // Per-step "known field" allowlists. Hoisted to static readonly fields so the
     // analyzer (CA1861) doesn't fault us for allocating them on every step parse.
-    private static readonly string[] FileCopyFields = { "id", "type", "when", "on_failure", "from", "to", "overwrite" };
+    // R16: `allow_outside_install_dir` is accepted only by the step types whose
+    // destination is contained — the ones that actually write somewhere. On any
+    // other type it stays an unrecognized field, so a manifest that expects it to
+    // relax e.g. a scheduled_task_create target is told so rather than silently
+    // ignored.
+    private static readonly string[] FileCopyFields = { "id", "type", "when", "on_failure", "allow_outside_install_dir", "from", "to", "overwrite" };
     private static readonly string[] DirectoryCreateFields = { "id", "type", "when", "on_failure", "path" };
-    private static readonly string[] FileDeleteFields = { "id", "type", "when", "on_failure", "path", "if_missing" };
-    private static readonly string[] DirectoryDeleteFields = { "id", "type", "when", "on_failure", "path", "recursive" };
+    private static readonly string[] FileDeleteFields = { "id", "type", "when", "on_failure", "allow_outside_install_dir", "path", "if_missing" };
+    private static readonly string[] DirectoryDeleteFields = { "id", "type", "when", "on_failure", "allow_outside_install_dir", "path", "recursive" };
     private static readonly string[] RegistryWriteFields = { "id", "type", "when", "on_failure", "hive", "key", "name", "type_value", "value_type", "value", "view" };
     private static readonly string[] RegistryDeleteValueFields = { "id", "type", "when", "on_failure", "hive", "key", "name", "view" };
     private static readonly string[] RegistryDeleteKeyFields = { "id", "type", "when", "on_failure", "hive", "key", "recursive", "view" };
     private static readonly string[] ShortcutCreateFields = { "id", "type", "when", "on_failure", "target", "location", "name", "args", "working_dir", "icon", "description" };
     private static readonly string[] EnvSetFields = { "id", "type", "when", "on_failure", "name", "value", "scope", "action", "separator" };
     private static readonly string[] RunProgramFields = { "id", "type", "when", "on_failure", "program", "args", "wait", "cwd", "expected_exit_codes", "timeout_seconds" };
-    private static readonly string[] HttpDownloadFields = { "id", "type", "when", "on_failure", "url", "dest", "sha256", "timeout_seconds", "retries" };
-    private static readonly string[] IniWriteFields = { "id", "type", "when", "on_failure", "path", "section", "key", "value", "create_if_missing" };
-    private static readonly string[] JsonEditFields = { "id", "type", "when", "on_failure", "path", "pointer", "value", "create_if_missing" };
-    private static readonly string[] XmlEditFields = { "id", "type", "when", "on_failure", "path", "xpath", "attribute", "value", "create_if_missing" };
+    private static readonly string[] HttpDownloadFields = { "id", "type", "when", "on_failure", "allow_outside_install_dir", "url", "dest", "sha256", "timeout_seconds", "retries" };
+    private static readonly string[] IniWriteFields = { "id", "type", "when", "on_failure", "allow_outside_install_dir", "path", "section", "key", "value", "create_if_missing" };
+    private static readonly string[] JsonEditFields = { "id", "type", "when", "on_failure", "allow_outside_install_dir", "path", "pointer", "value", "create_if_missing" };
+    private static readonly string[] XmlEditFields = { "id", "type", "when", "on_failure", "allow_outside_install_dir", "path", "xpath", "attribute", "value", "create_if_missing" };
 
     private static List<InstallStep>? ParseInstallSteps(
         List<YamlMappingNode>? nodes, InstallScope scope, List<Diagnostic> diagnostics, string fileName,
@@ -1214,6 +1219,17 @@ public static class ManifestParser
             "firewall_rule" => BuildFirewallRule(node, id!, when, onFailure, diagnostics, loc),
             _ => ReportUnknownStepType(id!, typeStr!, loc, diagnostics),
         };
+
+        // R16: the destination-containment opt-out is a common envelope field,
+        // parsed here alongside `when` / `on_failure` rather than in each of the
+        // seven Build* methods that would otherwise have to repeat it. Steps that
+        // do not write anywhere never read it, and their known-field lists do not
+        // accept the key, so setting it on e.g. registry_write is still reported
+        // as an unrecognized field.
+        if (step is not null && GetBool(node, "allow_outside_install_dir", defaultValue: false))
+        {
+            step = step with { AllowOutsideInstallDir = true };
+        }
 
         // P11: guard machine-scope-only steps (SIG0310) right here, at the same
         // call site that already holds this step's own precise node `loc` — the

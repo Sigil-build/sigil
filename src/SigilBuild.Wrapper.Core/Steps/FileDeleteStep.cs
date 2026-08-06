@@ -29,6 +29,16 @@ internal sealed class FileDeleteStep : IStep
     {
         var path = ctx.ResolvePath(_spec.Path);
 
+        // R16: a delete is a destination too — an unanchored path lets a manifest
+        // (or a junction planted inside install_dir) remove files anywhere the
+        // elevated installer can reach.
+        var refusal = StepDestinationGuard.Check(
+            ctx.InstallDir, "file_delete", "path", path, _spec.AllowOutsideInstallDir);
+        if (refusal is not null)
+        {
+            return Task.FromResult(StepResult.Failed(refusal));
+        }
+
         if (!File.Exists(path))
         {
             return _spec.IfMissing.Equals("skip", System.StringComparison.OrdinalIgnoreCase)

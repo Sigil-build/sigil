@@ -73,7 +73,8 @@
           ]
         },
         "when": { "type": "string" },
-        "on_failure": { "type": "string", "enum": ["rollback", "continue", "fail"] }
+        "on_failure": { "type": "string", "enum": ["rollback", "continue", "fail"] },
+        "allow_outside_install_dir": { "type": "boolean", "description": "Opt this step out of the install_dir destination-containment rule (register row R16). Accepted only by the step types that write somewhere: file_copy, file_delete, directory_delete, http_download, ini_write, json_edit, xml_edit. Use it for deliberate out-of-tree writes such as a machine-wide config under %ProgramData%. It does NOT relax the privileged-target rule on service_install / scheduled_task_create / com_register / firewall_rule, and it does not suppress the unresolved-token failure." }
       }
     },
     "InstallStepList": {
@@ -93,7 +94,8 @@
             ]
           },
           "when": { "type": "string" },
-          "on_failure": { "type": "string", "enum": ["rollback", "continue", "fail"] }
+          "on_failure": { "type": "string", "enum": ["rollback", "continue", "fail"] },
+          "allow_outside_install_dir": { "type": "boolean", "description": "Opt this step out of the install_dir destination-containment rule (register row R16). Accepted only by the step types that write somewhere: file_copy, file_delete, directory_delete, http_download, ini_write, json_edit, xml_edit. Use it for deliberate out-of-tree writes such as a machine-wide config under %ProgramData%. It does NOT relax the privileged-target rule on service_install / scheduled_task_create / com_register / firewall_rule, and it does not suppress the unresolved-token failure." }
         }
       }
     },
@@ -648,7 +650,8 @@
             ]
           },
           "when": { "type": "string" },
-          "on_failure": { "type": "string", "enum": ["rollback", "continue", "fail"] }
+          "on_failure": { "type": "string", "enum": ["rollback", "continue", "fail"] },
+          "allow_outside_install_dir": { "type": "boolean", "description": "Opt this step out of the install_dir destination-containment rule (register row R16). Accepted only by the step types that write somewhere: file_copy, file_delete, directory_delete, http_download, ini_write, json_edit, xml_edit. Use it for deliberate out-of-tree writes such as a machine-wide config under %ProgramData%. It does NOT relax the privileged-target rule on service_install / scheduled_task_create / com_register / firewall_rule, and it does not suppress the unresolved-token failure." }
         }
       }
     },
@@ -670,7 +673,8 @@
             ]
           },
           "when": { "type": "string" },
-          "on_failure": { "type": "string", "enum": ["rollback", "continue", "fail"] }
+          "on_failure": { "type": "string", "enum": ["rollback", "continue", "fail"] },
+          "allow_outside_install_dir": { "type": "boolean", "description": "Opt this step out of the install_dir destination-containment rule (register row R16). Accepted only by the step types that write somewhere: file_copy, file_delete, directory_delete, http_download, ini_write, json_edit, xml_edit. Use it for deliberate out-of-tree writes such as a machine-wide config under %ProgramData%. It does NOT relax the privileged-target rule on service_install / scheduled_task_create / com_register / firewall_rule, and it does not suppress the unresolved-token failure." }
         }
       }
     },
@@ -692,7 +696,8 @@
             ]
           },
           "when": { "type": "string" },
-          "on_failure": { "type": "string", "enum": ["rollback", "continue", "fail"] }
+          "on_failure": { "type": "string", "enum": ["rollback", "continue", "fail"] },
+          "allow_outside_install_dir": { "type": "boolean", "description": "Opt this step out of the install_dir destination-containment rule (register row R16). Accepted only by the step types that write somewhere: file_copy, file_delete, directory_delete, http_download, ini_write, json_edit, xml_edit. Use it for deliberate out-of-tree writes such as a machine-wide config under %ProgramData%. It does NOT relax the privileged-target rule on service_install / scheduled_task_create / com_register / firewall_rule, and it does not suppress the unresolved-token failure." }
         }
       }
     },
@@ -714,7 +719,8 @@
             ]
           },
           "when": { "type": "string" },
-          "on_failure": { "type": "string", "enum": ["rollback", "continue", "fail"] }
+          "on_failure": { "type": "string", "enum": ["rollback", "continue", "fail"] },
+          "allow_outside_install_dir": { "type": "boolean", "description": "Opt this step out of the install_dir destination-containment rule (register row R16). Accepted only by the step types that write somewhere: file_copy, file_delete, directory_delete, http_download, ini_write, json_edit, xml_edit. Use it for deliberate out-of-tree writes such as a machine-wide config under %ProgramData%. It does NOT relax the privileged-target rule on service_install / scheduled_task_create / com_register / firewall_rule, and it does not suppress the unresolved-token failure." }
         }
       }
     }

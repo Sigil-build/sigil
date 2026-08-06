@@ -30,8 +30,17 @@ public sealed class HttpDownloadIntegrationTests
     private static string Sha256Hex(byte[] data) =>
         Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
 
+    // R16 contains http_download's `dest` to install_dir. Every case here
+    // downloads into an OS temp directory, which no real install resolves as
+    // install_dir, so the fixture declares the out-of-tree write with the
+    // production per-step opt-out — the same one the web-installer stub's
+    // synthesized download uses. Containment itself is exercised by
+    // StepDestinationContainmentTests.
     private static InstallStep.HttpDownload Step(string url, string dest, string sha256, int? timeout = null, int? retries = null)
-        => new("dl", url, dest, sha256, timeout, retries, When: null, OnFailure.Rollback);
+        => new("dl", url, dest, sha256, timeout, retries, When: null, OnFailure.Rollback)
+        {
+            AllowOutsideInstallDir = true,
+        };
 
     private static IDisposable TrustServer(TlsHttpServer server)
     {

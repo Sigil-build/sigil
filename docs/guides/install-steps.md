@@ -308,6 +308,31 @@ Every step accepts the same envelope:
 |`type`|yes|-|One of the step types above.|
 |`when`|-|-|Expression gating execution. See [Conditional installs](conditional-installs.md).|
 |`on_failure`|-|`fail`|`rollback` (undo journaled steps), `continue` (log + proceed), or `fail` (abort without rollback).|
+|`allow_outside_install_dir`|-|`false`|Opts this step out of destination containment (below). Accepted only by `file_copy`, `file_delete`, `directory_delete`, `http_download`, `ini_write`, `json_edit` and `xml_edit`; on any other step type it is an unrecognized field.|
+
+## Every step destination is contained to `install_dir`
+
+The steps that write, download or delete — `file_copy` (`to`), `file_delete` (`path`), `directory_delete` (`path`), `http_download` (`dest`), `ini_write` / `json_edit` / `xml_edit` (`path`) — resolve their destination and then require it to be **inside `install_dir`**, with no directory junction anywhere on the way down.
+
+Two things this stops. A path that escapes the install directory (`..\..`, an absolute path elsewhere, a junction planted inside `install_dir`) is refused rather than followed; and because `File.WriteAllText` truncates an existing file **in place**, keeping its owner and its access control list, a config edit that landed on an attacker-created placeholder would leave that file attacker-writable after your elevated installer wrote to it.
+
+If a step genuinely needs to write outside the installed application — a machine-wide configuration file under `%ProgramData%` is the usual case — say so on that step:
+
+```yaml
+- id: write-machine-config
+  type: ini_write
+  allow_outside_install_dir: true
+  path: "%ProgramData%\\MyApp\\machine.ini"
+  section: service
+  key: endpoint
+  value: "https://api.example.com"
+```
+
+The opt-out is per step and deliberate: it is a declaration that this particular write is meant to leave the install tree, not a global switch. It does **not** relax the [privileged-target rules](#privileged-step-targets-are-anchored--read-this-before-the-next-four-steps) on `service_install`, `scheduled_task_create`, `com_register` or `firewall_rule` — those have no opt-out.
+
+### An unresolved token in a path fails the step
+
+A `{token}` that is still present in a path after substitution — `{var.instal_dir}` for a typo'd `installer.vars` entry, say — **fails the step**. It is never written to disk. Previously an unknown brace token was left literal, so a single typo silently created a directory named `{var.instal_dir}` and the install "succeeded". `allow_outside_install_dir` does not suppress this: an unresolved token is a manifest mistake under any containment policy.
 
 ## See also
 

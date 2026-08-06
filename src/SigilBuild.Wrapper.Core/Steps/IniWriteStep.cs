@@ -26,7 +26,8 @@ internal sealed class IniWriteStep : IStep
 
         var result = ConfigFileEditor.Edit(
             ctx, journal, _spec.Path, _spec.CreateIfMissing,
-            current => IniEditor.Set(current, section, key, value));
+            current => IniEditor.Set(current, section, key, value),
+            "ini_write", _spec.AllowOutsideInstallDir);
 
         return Task.FromResult(result);
     }

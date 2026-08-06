@@ -90,6 +90,11 @@ internal sealed class HttpDownloadStep : IStep
 
         if (result.Success)
         {
+            // R5: hand the confirmed digest to the context so that a later run_program of
+            // this exact path re-checks it under a held handle instead of trusting that
+            // nothing touched the file in between. The SHA-256 above protected the
+            // download; on its own it protects nothing about the execution.
+            ctx.RecordVerifiedDownload(dest, expected);
             ctx.ProgressSink?.Report(new StepProgress(0, 0, $"download: verified {Path.GetFileName(dest)}", false));
             return new StepResult(true, null);
         }

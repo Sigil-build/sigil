@@ -328,17 +328,17 @@ public sealed class SecureStagingTests
         process.ExitCode.Should().Be(7, "the launched child is the staged file whose bytes were verified");
     }
 
-    // ── The elevated degrade must be loud, and must not repair S1's state root ──
+    // ── The elevated run refuses, loudly, and never repairs S1's state root ──
 
     /// <summary>
     /// <c>TryResolveAdminOnlyRoot</c> takes the state-root base as a parameter precisely
-    /// so these three can run unelevated against a throwaway directory instead of the
-    /// real <c>%ProgramData%</c>. Unelevated, a directory this process creates is owned
-    /// by this process, so the admin-only check fails — which is the degrade case, and
-    /// is exactly what has to be observable.
+    /// so these can run unelevated against a throwaway directory instead of the real
+    /// <c>%ProgramData%</c>. Unelevated, a directory this process creates is owned by
+    /// this process, so the admin-only check fails — which is the refusal case, and is
+    /// exactly what has to be observable.
     /// </summary>
     [WindowsFact("Windows ACL APIs")]
-    public void An_elevated_run_that_cannot_get_an_admin_only_root_reports_the_degrade()
+    public void An_elevated_run_that_cannot_get_an_admin_only_root_reports_why()
     {
         using var root = new TempDir();
         var reported = new List<(string Message, bool IsError)>();
@@ -348,13 +348,78 @@ public sealed class SecureStagingTests
 
         resolved.Should().BeNull("this process is not elevated, so it cannot own an admin-only root");
         reported.Should().ContainSingle(
-            "a degrade that says nothing reads as success — the whole point of the report");
-        reported[0].IsError.Should().BeTrue("a downgrade of containment is not an informational line");
-        reported[0].Message.Should().Contain("SECURITY DEGRADED");
+            "a refusal that says nothing is indistinguishable from an unrelated failure");
+        reported[0].IsError.Should().BeTrue("losing containment is not an informational line");
+        reported[0].Message.Should().Contain("REFUSED");
         reported[0].Message.Should().Contain(
-            "the current user can also write", "the report must say what the staging location now is");
+            "substitute what this process launches", "the report must say what the risk actually is");
         reported[0].Message.Should().Contain(
             Path.Combine(root.Path, "Sigil"), "the report must name the directory that failed the check");
+    }
+
+    /// <summary>
+    /// The routed R5 residual, and the policy decision made for it: an <b>elevated</b>
+    /// run that cannot obtain an administrator-only staging root <b>refuses</b> rather
+    /// than staging in a directory the current user can also write.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ResolveRoot</c> takes <c>elevated</c> and <c>commonAppData</c> as parameters so
+    /// the elevated branch is reachable from this unelevated test process — the only way
+    /// to assert the refusal on a developer box or an unelevated runner, since the real
+    /// branch depends on a token this process does not have.
+    /// </para>
+    /// <para>
+    /// Pre-fix, this path reported a degrade and handed back <c>%TEMP%</c>; the negative
+    /// assertion is that it no longer returns anything at all.
+    /// </para>
+    /// </remarks>
+    [WindowsFact("Windows ACL APIs")]
+    public void An_elevated_run_refuses_to_stage_when_it_cannot_get_an_admin_only_root()
+    {
+        using var root = new TempDir();
+        var reported = new List<(string Message, bool IsError)>();
+
+        var resolve = () => SecureStaging.ResolveRoot(
+            fallbackRoot: root.Path,
+            report: (m, e) => reported.Add((m, e)),
+            elevated: true,
+            commonAppData: root.Path);
+
+        resolve.Should()
+            .Throw<StagingSecurityException>(
+                "an elevated process that stages a downloaded executable where an unprivileged process can " +
+                "also write it is handing that process an elevated launch — there is no weakened-but-useful " +
+                "version of that, so it refuses")
+            .WithMessage("*not administrator-only writable*",
+                "the thrown message must carry the cause, because a call site with no progress sink attached " +
+                "would otherwise lose it entirely");
+
+        reported.Should().ContainSingle("the reason is reported as well as thrown");
+        reported[0].IsError.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// The other side of the same policy: staging in <c>%TEMP%</c> <b>un</b>elevated is
+    /// the only option there is, not a downgrade. It must neither throw nor report —
+    /// crying wolf here would train an operator to ignore the line that does matter.
+    /// </summary>
+    [Fact]
+    public void An_unelevated_run_stages_in_the_fallback_root_silently()
+    {
+        using var root = new TempDir();
+        var reported = new List<(string Message, bool IsError)>();
+
+        var (resolved, isAdminOnly) = SecureStaging.ResolveRoot(
+            fallbackRoot: root.Path,
+            report: (m, e) => reported.Add((m, e)),
+            elevated: false,
+            commonAppData: root.Path);
+
+        resolved.Should().Be(root.Path);
+        isAdminOnly.Should().BeFalse(
+            "an unelevated process cannot create a directory only administrators can write");
+        reported.Should().BeEmpty();
     }
 
     [WindowsFact("Windows ACL APIs")]

@@ -64,11 +64,30 @@ using System.Security.Principal;
 /// <see cref="OpenVerified"/>, not the directory ACL, is the load-bearing half.
 /// </para>
 /// <para>
-/// <b>An elevated run that cannot get its admin-only root still stages, but says so.</b>
-/// The fallback is announced on the <c>report</c> callback as an error naming what
-/// failed, exception type and message included. Whether an elevated run should refuse
-/// outright rather than degrade is a policy question owned elsewhere; what is not
-/// negotiable is that the degrade is visible, because a silent one reads as success.
+/// <b>An elevated run that cannot get its admin-only root refuses.</b> It does not
+/// stage in a user-writable directory and carry on. The reason is announced on the
+/// <c>report</c> callback first — exception type and message included — and the same
+/// text is carried by the thrown <see cref="StagingSecurityException"/>, so the cause
+/// survives even where no sink is attached.
+/// </para>
+/// <para>
+/// That is a policy decision, and the argument for it is that the alternative is not
+/// checkable. A degraded elevated run is <em>survivable</em> as long as every caller
+/// holds the <see cref="OpenVerified"/> handle across the launch — but that is a
+/// per-call-site invariant, invisible at this type's boundary and easy for the next
+/// consumer to miss. Register row R5's own stub is exactly such a consumer: two
+/// independent steps with a gap between them. Combined with a download that wrote with
+/// <c>FileMode.Create</c>, an attacker who forced the degrade and won the create race
+/// got a write through a planted hardlink or reparse point from an elevated process.
+/// Both halves are closed here: this refuses, and <c>SigilDownloader</c> removes the
+/// destination name before creating it. The cost is a denial of service — a
+/// non-administrator who squats <c>%ProgramData%\Sigil</c> can stop an elevated run
+/// staging a download — which is the better of the two failures by a wide margin.
+/// </para>
+/// <para>
+/// <b>Unelevated is not a degrade.</b> There is no admin-only location an unelevated
+/// process can reach, so <c>%TEMP%</c> is the only option there is, not a downgrade; it
+/// is taken silently and <see cref="OpenVerified"/> carries the guarantee.
 /// </para>
 /// </remarks>
 internal sealed class SecureStaging : IDisposable
@@ -105,9 +124,9 @@ internal sealed class SecureStaging : IDisposable
     /// <param name="purpose">Short tag for the directory name, e.g. <c>prereq</c>.</param>
     /// <param name="report">
     /// Receives <c>(message, isError)</c> lines. An <em>elevated</em> run that cannot
-    /// establish its admin-only root still stages — but the degrade is announced here
-    /// as an error, never swallowed. An elevated process quietly downgrading its own
-    /// containment is the failure mode that reads as success.
+    /// establish its admin-only root reports why here as an error and then <b>refuses</b>
+    /// — it never stages in a user-writable directory instead. An elevated process
+    /// quietly downgrading its own containment is the failure mode that reads as success.
     /// <para>
     /// <b>Required, and deliberately not defaulted.</b> An optional reporting parameter
     /// reintroduces that exact failure by omission — a future call site that simply does
@@ -177,15 +196,31 @@ internal sealed class SecureStaging : IDisposable
     public FileStream OpenVerified(string fileName, string expectedSha256)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        return OpenVerified(PathFor(fileName), expectedSha256, fileName);
+    }
 
+    /// <summary>
+    /// The verify-and-hold primitive over an arbitrary absolute path, for a caller that
+    /// did not stage the file through a <see cref="SecureStaging"/> instance — register
+    /// row R5's <c>http_download</c> → <c>run_program</c> pair, where the download step
+    /// chose the destination and the run step must re-confirm it. Identical guarantees:
+    /// <see cref="FileShare.Read"/>, and the hash taken from the returned handle rather
+    /// than from the path.
+    /// </summary>
+    /// <exception cref="StagedFileVerificationException">
+    /// The bytes no longer hash to <paramref name="expectedSha256"/>.
+    /// </exception>
+    public static FileStream OpenVerifiedFile(string path, string expectedSha256) =>
+        OpenVerified(path, expectedSha256, Path.GetFileName(path));
+
+    private static FileStream OpenVerified(string path, string expectedSha256, string displayName)
+    {
         var expected = (expectedSha256 ?? string.Empty).Trim();
         if (expected.Length == 0)
         {
             throw new StagedFileVerificationException(
-                $"staged file '{fileName}' cannot be verified: no expected sha256 was supplied");
+                $"staged file '{displayName}' cannot be verified: no expected sha256 was supplied");
         }
-
-        var path = PathFor(fileName);
 
         // FileShare.Read, not None (which would fail CreateProcess) and not ReadWrite
         // (which would permit the swap). See the class remarks.
@@ -199,7 +234,7 @@ internal sealed class SecureStaging : IDisposable
             if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
             {
                 throw new StagedFileVerificationException(
-                    $"staged file '{fileName}' no longer matches its verified sha256 " +
+                    $"staged file '{displayName}' no longer matches its verified sha256 " +
                     $"(expected {expected}, got {actual}) — it was replaced after verification; refusing to run it");
             }
 
@@ -242,24 +277,58 @@ internal sealed class SecureStaging : IDisposable
     }
 
     /// <summary>
-    /// The staging root: an admin-only one when this process is elevated and one can
-    /// be established, otherwise the caller's fallback (or <c>%TEMP%</c>). The bool is
-    /// whether the returned root passed
-    /// <see cref="StateDirectorySecurity.IsAdminOnlyWritable"/>.
+    /// The staging root: an admin-only one when this process is elevated, otherwise the
+    /// caller's fallback (or <c>%TEMP%</c>). The bool is whether the returned root
+    /// passed <see cref="StateDirectorySecurity.IsAdminOnlyWritable"/>.
     /// </summary>
-    private static (string Root, bool IsAdminOnly) ResolveRoot(string? fallbackRoot, Action<string, bool> report)
+    private static (string Root, bool IsAdminOnly) ResolveRoot(string? fallbackRoot, Action<string, bool> report) =>
+        ResolveRoot(
+            fallbackRoot,
+            report,
+            elevated: OperatingSystem.IsWindows() && Elevation.IsProcessElevated(),
+            commonAppData: Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData));
+
+    /// <summary>
+    /// The decision itself, with the two facts it depends on passed in so the elevated
+    /// branch is reachable from an unelevated test process — the only way to assert the
+    /// refusal on a developer box or an unelevated runner.
+    /// </summary>
+    /// <exception cref="StagingSecurityException">
+    /// This process is elevated and no administrator-only root could be established.
+    /// See the type remarks for why that is a refusal rather than a fallback.
+    /// </exception>
+    internal static (string Root, bool IsAdminOnly) ResolveRoot(
+        string? fallbackRoot, Action<string, bool> report, bool elevated, string commonAppData)
     {
-        // Only an ELEVATED run can reach an admin-only root, and only an elevated run
-        // that fails to is degrading: staging in %TEMP% unelevated is the only option
-        // there is, not a downgrade, and must not cry wolf.
-        if (OperatingSystem.IsWindows() && Elevation.IsProcessElevated())
+        // Only an ELEVATED run can reach an admin-only root, and only an elevated run is
+        // giving anything up by not having one: staging in %TEMP% unelevated is the only
+        // option there is, not a downgrade, and must not cry wolf.
+        if (elevated)
         {
+            if (!OperatingSystem.IsWindows())
+            {
+                throw new StagingSecurityException(
+                    "an administrator-only staging directory is a Windows-only concept, so this elevated " +
+                    "run cannot stage a downloaded executable safely");
+            }
+
+            // The reason is both reported and carried by the exception: a call site with
+            // no progress sink attached must still be able to say what went wrong.
+            string? cause = null;
             var adminRoot = TryResolveAdminOnlyRoot(
-                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), report);
+                commonAppData,
+                (message, isError) =>
+                {
+                    cause = message;
+                    report(message, isError);
+                });
             if (adminRoot is not null)
             {
                 return (adminRoot, true);
             }
+
+            throw new StagingSecurityException(
+                cause ?? "this elevated process could not establish an administrator-only staging directory");
         }
 
         var root = string.IsNullOrWhiteSpace(fallbackRoot) ? Path.GetTempPath() : fallbackRoot!;
@@ -281,8 +350,8 @@ internal sealed class SecureStaging : IDisposable
     /// found: re-permissioning it, or taking ownership of it, as a side effect of
     /// staging a downloaded prerequisite is far too broad a repair for this call site.
     /// Healing that directory is <c>UninstallStateStore</c>'s job on the install path,
-    /// where the decision belongs. Here an untrusted parent is simply the degrade case —
-    /// reported, then fallen back from.
+    /// where the decision belongs. Here an untrusted parent is simply the refusal case —
+    /// reported, then declined.
     /// </para>
     /// <para>
     /// <paramref name="commonAppData"/> is a parameter rather than a direct read of
@@ -312,7 +381,7 @@ internal sealed class SecureStaging : IDisposable
             // answer used anywhere in the engine — deliberately not re-implemented.
             if (!StateDirectorySecurity.IsAdminOnlyWritable(sigil))
             {
-                Degrade(
+                Refuse(
                     report,
                     $"the state root '{sigil}' is not administrator-only writable, and it is deliberately " +
                     "not repaired from the staging path — that directory belongs to the install state store");
@@ -325,7 +394,7 @@ internal sealed class SecureStaging : IDisposable
             StateDirectorySecurity.CreateHardened(staging);
             if (!StateDirectorySecurity.IsAdminOnlyWritable(staging))
             {
-                Degrade(report, $"the staging root '{staging}' could not be made administrator-only writable");
+                Refuse(report, $"the staging root '{staging}' could not be made administrator-only writable");
                 return null;
             }
 
@@ -336,23 +405,24 @@ internal sealed class SecureStaging : IDisposable
             // The exception is NOT swallowed: its type and message are what tell an
             // operator whether this was a redirected %ProgramData%, a denied ACL write,
             // or something an attacker provoked.
-            Degrade(report, $"'{staging}' could not be established — {ex.GetType().Name}: {ex.Message}");
+            Refuse(report, $"'{staging}' could not be established — {ex.GetType().Name}: {ex.Message}");
             return null;
         }
 #pragma warning restore CA1031
     }
 
     /// <summary>
-    /// Announce that an elevated run failed to obtain an administrator-only staging
-    /// root and is proceeding in a user-writable one. Reported as an error: a silent
-    /// degrade reads as success, which is exactly the failure this stage exists to
-    /// remove.
+    /// Announce that an elevated run failed to obtain an administrator-only staging root
+    /// and is therefore refusing to stage at all. Reported as an error, and the same text
+    /// is re-thrown by <see cref="ResolveRoot(string?, Action{string, bool}, bool, string)"/>
+    /// so the cause reaches a caller with no sink attached.
     /// </summary>
-    private static void Degrade(Action<string, bool> report, string reason) =>
+    private static void Refuse(Action<string, bool> report, string reason) =>
         report(
-            "staging: SECURITY DEGRADED — this elevated process could not create an " +
-            "administrator-only staging directory, so the download will be staged in a " +
-            $"location the current user can also write ({reason})",
+            "staging: REFUSED — this elevated process could not create an " +
+            "administrator-only staging directory, and staging a downloaded executable " +
+            "in a location the current user can also write would let an unprivileged " +
+            $"process substitute what this process launches ({reason})",
             true);
 
     /// <summary>
@@ -414,6 +484,28 @@ internal sealed class SecureStaging : IDisposable
             buffer[n++] = char.IsAsciiLetterOrDigit(c) || c is '-' or '_' ? c : '-';
         }
         return n == 0 ? "staging" : new string(buffer[..n]);
+    }
+}
+
+/// <summary>
+/// An elevated run could not obtain an administrator-only staging directory, so nothing
+/// was staged. The message carries the underlying cause, because the sink that would
+/// otherwise have reported it may not be attached at every call site.
+/// </summary>
+internal sealed class StagingSecurityException : Exception
+{
+    public StagingSecurityException(string message)
+        : base(message)
+    {
+    }
+
+    public StagingSecurityException()
+    {
+    }
+
+    public StagingSecurityException(string message, Exception innerException)
+        : base(message, innerException)
+    {
     }
 }
 

@@ -123,7 +123,20 @@ public static class SigilDownloader
         var src = await resp.Content.ReadAsStreamAsync(token).ConfigureAwait(false);
         await using (src.ConfigureAwait(false))
         {
-            var file = new FileStream(dest, FileMode.Create, FileAccess.Write, FileShare.None);
+            // R5's residual: never write THROUGH whatever already holds this name.
+            // FileMode.Create opens an existing entry — including a hardlink or a file
+            // reparse point an attacker planted at a predictable destination — and
+            // truncates its TARGET, which from an elevated process is an arbitrary-file
+            // -write primitive. Deleting the name first drops the attacker's link (a
+            // hardlink's other names, and a junction's target, are left alone), and
+            // CreateNew then makes a brand-new file inheriting the directory's DACL.
+            // A directory or directory junction squatting the name survives the delete
+            // and makes CreateNew throw, which is the correct loud failure; so does
+            // anything that re-creates the name in the gap. Overwriting a genuine
+            // pre-existing file still works — HttpDownloadStep has already journaled a
+            // backup of it by this point.
+            DeleteDestinationName(dest);
+            var file = new FileStream(dest, FileMode.CreateNew, FileAccess.Write, FileShare.None);
             await using (file.ConfigureAwait(false))
             {
                 var buffer = new byte[81920];
@@ -149,6 +162,24 @@ public static class SigilDownloader
         }
 
         return Convert.ToHexString(hasher.GetHashAndReset()).ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Remove whatever currently answers to <paramref name="dest"/>, so the download
+    /// creates a file rather than opening someone else's. <see cref="File.Delete"/>
+    /// unlinks the <em>name</em>: a hardlink's other names and a symlink's target are
+    /// untouched, which is exactly the wanted behaviour — the attacker's alias goes
+    /// away, the file it pointed at does not. A directory (or a directory junction
+    /// posing as one) is deliberately not removed: <see cref="File.Exists"/> answers
+    /// false for it, and the subsequent <see cref="FileMode.CreateNew"/> then fails
+    /// loudly instead of this method quietly deleting a tree.
+    /// </summary>
+    private static void DeleteDestinationName(string dest)
+    {
+        if (File.Exists(dest))
+        {
+            File.Delete(dest);
+        }
     }
 
     // Only network/timeout/5xx are worth retrying; a 4xx or a checksum mismatch is

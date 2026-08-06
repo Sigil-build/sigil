@@ -2,6 +2,7 @@ namespace SigilBuild.Wrapper.Steps;
 
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -39,6 +40,29 @@ internal sealed class RunProgramStep : IStep
 
         // Program / working dir may reference the extracted payload (payload://).
         var program = ctx.ResolvePath(_spec.Program);
+
+        // R5: when THIS run downloaded and hash-verified exactly this file, re-confirm
+        // it here — from a handle opened with FileShare.Read, which denies write and
+        // delete — and keep that handle open across Process.Start. The web-installer
+        // stub is an http_download followed by a run_program of the same path, and the
+        // gap between the two was the bug: the download's checksum said nothing about
+        // what would be executed a moment later. `verified` is null for everything this
+        // run did not download (payload binaries, system tools), which is unchanged.
+        FileStream? verified;
+        try
+        {
+            verified = ctx.OpenVerifiedForLaunch(program);
+        }
+        catch (Exception ex) when (
+            ex is StagedFileVerificationException or IOException or UnauthorizedAccessException)
+        {
+            // Fail closed: a downloaded binary that cannot be re-confirmed immediately
+            // before the launch is never launched.
+            return StepResult.Failed($"'{program}' was not started: {ex.Message}");
+        }
+
+        using var verifiedHandle = verified;
+
         var psi = new ProcessStartInfo
         {
             FileName = program,

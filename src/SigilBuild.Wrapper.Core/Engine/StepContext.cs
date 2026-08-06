@@ -19,6 +19,18 @@ public sealed class StepContext
     private readonly string? _appName;
     private readonly string _appId;
 
+    /// <summary>
+    /// Full path → the SHA-256 an <c>http_download</c> step in THIS run confirmed the
+    /// file's bytes against. Read by <see cref="Steps.RunProgramStep"/>, which re-checks
+    /// it under a held handle before launching. See
+    /// <see cref="OpenVerifiedForLaunch"/>.
+    /// </summary>
+    private readonly System.Collections.Generic.Dictionary<string, string> _verifiedDownloads =
+        new(System.StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Backing store for <c>{staging_dir}</c>; created on first use only.</summary>
+    private SecureStaging? _staging;
+
     public StepContext(
         System.Collections.Generic.IReadOnlyDictionary<string, object?> values,
         string? payloadRoot = null,
@@ -59,6 +71,94 @@ public sealed class StepContext
     /// <c>Total = 0</c> so they never move the overall progress bar.
     /// </summary>
     internal System.IProgress<StepProgress>? ProgressSink { get; set; }
+
+    /// <summary>
+    /// The directory <c>{staging_dir}</c> expands to: a freshly created, randomly named
+    /// private directory for this run, administrator-only when the process is elevated
+    /// (see <see cref="SecureStaging"/>). Created on first use and reused for the rest
+    /// of the engine run, so an <c>http_download</c> writing
+    /// <c>{staging_dir}/Setup.exe</c> and a <c>run_program</c> launching the same token
+    /// address the same file.
+    /// </summary>
+    /// <remarks>
+    /// This is the destination half of register row R5. The web-installer stub used to
+    /// download to <c>{temp_dir}/&lt;App&gt;-&lt;ver&gt;-&lt;arch&gt;-Setup.exe</c> — a
+    /// pack-time constant derived from the public artifact name, so the path was known
+    /// to anyone holding the installer and could be pre-planted before the download and
+    /// swapped after it. A per-run GUID directory removes the "pre-planted" half;
+    /// <see cref="OpenVerifiedForLaunch"/> removes the "swapped after" half.
+    /// </remarks>
+    /// <exception cref="StagingSecurityException">
+    /// This process is elevated and no administrator-only staging root could be
+    /// established. Refusing is the policy — see <see cref="SecureStaging"/>.
+    /// </exception>
+    internal string StagingDirectory =>
+        (_staging ??= SecureStaging.Create("stage", ReportStagingLine)).Directory;
+
+    /// <summary>
+    /// The engine's own progress channel, which is where every other engine component
+    /// reports. Deliberately not a discarding lambda: <c>SecureStaging</c> makes its
+    /// report parameter required precisely so a call site cannot drop the line that says
+    /// an elevated run refused to stage.
+    /// </summary>
+    private void ReportStagingLine(string message, bool isError) =>
+        ProgressSink?.Report(new StepProgress(0, 0, message, isError));
+
+    /// <summary>
+    /// Record that an <c>http_download</c> step in this run wrote
+    /// <paramref name="path"/> and confirmed its bytes hash to
+    /// <paramref name="sha256"/>.
+    /// </summary>
+    internal void RecordVerifiedDownload(string path, string sha256)
+    {
+        if (!string.IsNullOrEmpty(path) && !string.IsNullOrWhiteSpace(sha256))
+        {
+            _verifiedDownloads[System.IO.Path.GetFullPath(path)] = sha256.Trim();
+        }
+    }
+
+    /// <summary>
+    /// If <paramref name="program"/> is a file this run downloaded and verified, re-open
+    /// it with <see cref="System.IO.FileShare.Read"/> (denying write and delete),
+    /// re-hash it <em>from that handle</em>, and return the handle for the caller to hold
+    /// across <c>Process.Start</c>. Returns <c>null</c> for anything this run did not
+    /// download — a <c>run_program</c> of a payload binary or a system tool is unchanged.
+    /// </summary>
+    /// <remarks>
+    /// This is the second half of register row R5. A verify step and a launch step with a
+    /// gap between them is the bug: the SHA-256 protected the download, not the
+    /// execution. Re-doing the check adjacent to the launch, from a handle that survives
+    /// it, is what closes the gap.
+    /// </remarks>
+    /// <exception cref="StagedFileVerificationException">
+    /// The bytes changed after they were verified — refuse the launch.
+    /// </exception>
+    internal System.IO.FileStream? OpenVerifiedForLaunch(string program)
+    {
+        if (string.IsNullOrEmpty(program) || _verifiedDownloads.Count == 0)
+        {
+            return null;
+        }
+
+        var full = System.IO.Path.GetFullPath(program);
+        return _verifiedDownloads.TryGetValue(full, out var sha256)
+            ? SecureStaging.OpenVerifiedFile(full, sha256)
+            : null;
+    }
+
+    /// <summary>
+    /// Delete this run's <c>{staging_dir}</c> and forget its verified downloads. Called
+    /// by <see cref="InstallEngine"/> once the run is over (success, failure or
+    /// rollback); a no-op when the run never used the token. Best-effort — a staged file
+    /// still held open by a launched child stays behind for the OS temp sweeper.
+    /// </summary>
+    internal void ReleaseStaging()
+    {
+        _verifiedDownloads.Clear();
+        var staging = _staging;
+        _staging = null;
+        staging?.Dispose();
+    }
 
     /// <summary>
     /// The resolved per-scope layout for this run (T12): install root, ARP hive,
@@ -397,7 +497,8 @@ public sealed class StepContext
 
     /// <summary>
     /// Substitute the single-brace runtime tokens — <c>{install_dir}</c>,
-    /// <c>{scope_root}</c>, <c>{app.name}</c>, <c>{app.id}</c>, <c>{temp_dir}</c> —
+    /// <c>{scope_root}</c>, <c>{app.name}</c>, <c>{app.id}</c>, <c>{temp_dir}</c>,
+    /// <c>{staging_dir}</c> —
     /// that step paths and <c>when</c> expressions use (distinct from the
     /// <c>${...}</c> parameter templates handled by <see cref="Resolve"/>). This is
     /// what turns a step <c>to: "{install_dir}/app.txt"</c> into a real directory
@@ -435,6 +536,20 @@ public sealed class StepContext
             var tempDir = System.IO.Path.GetTempPath()
                 .TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
             result = result.Replace("{temp_dir}", tempDir, System.StringComparison.Ordinal);
+        }
+        // R5: the web-installer stub's download destination. Same determinism property
+        // as {temp_dir} — the packed step string stays a literal token, so two packs of
+        // the same manifest are byte-identical — but it resolves at INSTALL time to a
+        // freshly created GUID-named private directory instead of a predictable name in
+        // the shared %TEMP% root. Substituted last of the fixed tokens because, unlike
+        // the others, resolving it has a side effect: the directory is created.
+        if (result.Contains("{staging_dir}", System.StringComparison.Ordinal))
+        {
+            result = result.Replace(
+                "{staging_dir}",
+                StagingDirectory.TrimEnd(
+                    System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar),
+                System.StringComparison.Ordinal);
         }
         result = ReplaceVarTokens(result);
         return result;

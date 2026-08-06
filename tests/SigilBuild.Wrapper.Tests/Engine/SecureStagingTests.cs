@@ -32,8 +32,9 @@ using Xunit;
 /// <b>This file runs UNELEVATED</b> (as the whole suite does). An unelevated process
 /// cannot create a directory it is itself unable to modify, so
 /// <c>IsAdminOnly</c>/<see cref="StateDirectorySecurity.IsAdminOnlyWritable"/> is
-/// asserted <b>false</b> here and the admin-only root
-/// (<c>%ProgramData%\Sigil\staging</c>) is never exercised locally — see
+/// asserted <b>false</b> here and the elevated siting
+/// (<c>%ProgramData%\sigil-{purpose}-{guid}</c>) is never exercised positively
+/// locally — see
 /// <see cref="Staging_is_admin_only_exactly_when_the_process_is_elevated"/>, which
 /// asserts the branch it can actually reach and states the other. What does NOT
 /// depend on elevation — the protected DACL, and every <c>OpenVerified</c>
@@ -182,12 +183,12 @@ public sealed class SecureStagingTests
 
         if (Elevation.IsProcessElevated())
         {
-            // ELEVATED: the admin-only root under %ProgramData%\Sigil\staging is
-            // reachable, so the directory must be admin-only writable. NOT exercised on
-            // the developer box that produced this file (unelevated); CI/an elevated run
-            // is the arbiter.
+            // ELEVATED: the directory is created hardened as a direct child of
+            // %ProgramData% and confirmed, so it must be admin-only writable. NOT
+            // exercised on the developer box that produced this file (unelevated);
+            // CI/an elevated run is the arbiter.
             staging.IsAdminOnly.Should().BeTrue(
-                "an elevated run stages under %ProgramData%\\Sigil\\staging, which is admin-only");
+                "an elevated run stages in %ProgramData%\\sigil-<purpose>-<guid>, created hardened");
         }
         else
         {
@@ -328,81 +329,149 @@ public sealed class SecureStagingTests
         process.ExitCode.Should().Be(7, "the launched child is the staged file whose bytes were verified");
     }
 
-    // ── The elevated run refuses, loudly, and never repairs S1's state root ──
+    // ── Where an elevated run stages, and what it refuses ─────────────────────
 
     /// <summary>
-    /// <c>TryResolveAdminOnlyRoot</c> takes the state-root base as a parameter precisely
-    /// so these can run unelevated against a throwaway directory instead of the real
-    /// <c>%ProgramData%</c>. Unelevated, a directory this process creates is owned by
-    /// this process, so the admin-only check fails — which is the refusal case, and is
-    /// exactly what has to be observable.
-    /// </summary>
-    [WindowsFact("Windows ACL APIs")]
-    public void An_elevated_run_that_cannot_get_an_admin_only_root_reports_why()
-    {
-        using var root = new TempDir();
-        var reported = new List<(string Message, bool IsError)>();
-
-        var resolved = SecureStaging.TryResolveAdminOnlyRoot(
-            root.Path, (m, e) => reported.Add((m, e)));
-
-        resolved.Should().BeNull("this process is not elevated, so it cannot own an admin-only root");
-        reported.Should().ContainSingle(
-            "a refusal that says nothing is indistinguishable from an unrelated failure");
-        reported[0].IsError.Should().BeTrue("losing containment is not an informational line");
-        reported[0].Message.Should().Contain("REFUSED");
-        reported[0].Message.Should().Contain(
-            "substitute what this process launches", "the report must say what the risk actually is");
-        reported[0].Message.Should().Contain(
-            Path.Combine(root.Path, "Sigil"), "the report must name the directory that failed the check");
-    }
-
-    /// <summary>
-    /// The routed R5 residual, and the policy decision made for it: an <b>elevated</b>
-    /// run that cannot obtain an administrator-only staging root <b>refuses</b> rather
-    /// than staging in a directory the current user can also write.
+    /// The routed R5 residual and its policy: an <b>elevated</b> run that cannot obtain
+    /// an administrator-only staging directory <b>refuses</b> rather than staging where
+    /// the current user can also write.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <c>ResolveRoot</c> takes <c>elevated</c> and <c>commonAppData</c> as parameters so
-    /// the elevated branch is reachable from this unelevated test process — the only way
-    /// to assert the refusal on a developer box or an unelevated runner, since the real
-    /// branch depends on a token this process does not have.
+    /// The internal <c>Create</c> overload takes <c>elevated</c> and <c>commonAppData</c>
+    /// so the elevated branch is reachable from this unelevated test process — the only
+    /// way to assert the refusal on a developer box or an unelevated runner, since the
+    /// real branch depends on a token this process does not have. Unelevated, the
+    /// directory this process creates is owned by this process, so the confirmation
+    /// fails: exactly the refusal case.
     /// </para>
     /// <para>
-    /// Pre-fix, this path reported a degrade and handed back <c>%TEMP%</c>; the negative
-    /// assertion is that it no longer returns anything at all.
+    /// Pre-fix this path reported a degrade and handed back <c>%TEMP%</c>; the negative
+    /// assertion is that it now hands back nothing at all, and leaves nothing behind.
     /// </para>
     /// </remarks>
     [WindowsFact("Windows ACL APIs")]
-    public void An_elevated_run_refuses_to_stage_when_it_cannot_get_an_admin_only_root()
+    public void An_elevated_run_refuses_to_stage_when_the_directory_is_not_administrator_only()
     {
         using var root = new TempDir();
         var reported = new List<(string Message, bool IsError)>();
 
-        var resolve = () => SecureStaging.ResolveRoot(
-            fallbackRoot: root.Path,
-            report: (m, e) => reported.Add((m, e)),
+        var create = () => SecureStaging.Create(
+            "prereq",
+            (m, e) => reported.Add((m, e)),
+            fallbackRoot: null,
             elevated: true,
             commonAppData: root.Path);
 
-        resolve.Should()
+        create.Should()
             .Throw<StagingSecurityException>(
                 "an elevated process that stages a downloaded executable where an unprivileged process can " +
                 "also write it is handing that process an elevated launch — there is no weakened-but-useful " +
                 "version of that, so it refuses")
-            .WithMessage("*not administrator-only writable*",
+            .WithMessage("*administrator-only writable*",
                 "the thrown message must carry the cause, because a call site with no progress sink attached " +
                 "would otherwise lose it entirely");
 
-        reported.Should().ContainSingle("the reason is reported as well as thrown");
-        reported[0].IsError.Should().BeTrue();
+        reported.Should().Contain(
+            r => r.IsError && r.Message.Contains("REFUSED", StringComparison.Ordinal),
+            "a refusal that says nothing is indistinguishable from an unrelated failure");
+        Directory.GetDirectories(root.Path).Should().BeEmpty(
+            "a directory that failed the confirmation is removed again — nothing was staged in it");
     }
 
     /// <summary>
-    /// The other side of the same policy: staging in <c>%TEMP%</c> <b>un</b>elevated is
-    /// the only option there is, not a downgrade. It must neither throw nor report —
-    /// crying wolf here would train an operator to ignore the line that does matter.
+    /// The denial of service that an earlier revision of this type created, and that this
+    /// siting removes. Staging used to live at <c>%ProgramData%\Sigil\staging</c> and
+    /// refuse when the intermediate <c>Sigil</c> directory was not administrator-only —
+    /// but that directory is the install-state store's (so this type must not repair it)
+    /// and <b>any unprivileged user can create it</b>, which made the refusal above a
+    /// lever anyone could pull against every elevated install.
+    /// </summary>
+    [WindowsFact("Windows ACL APIs")]
+    public void A_squatted_state_root_neither_blocks_an_elevated_run_nor_is_touched_by_it()
+    {
+        using var root = new TempDir();
+
+        // The squat: an ordinary, this-user-owned, inheriting directory — exactly what a
+        // non-administrator can create under the real %ProgramData% with no privilege at
+        // all. Under the previous siting this alone made every elevated run refuse.
+        var sigil = Path.Combine(root.Path, "Sigil");
+        Directory.CreateDirectory(sigil);
+        new DirectoryInfo(sigil).GetAccessControl(AccessControlSections.Access)
+            .AreAccessRulesProtected.Should().BeFalse("precondition: the squatted directory inherits its ACL");
+
+        var reported = new List<(string Message, bool IsError)>();
+        var (resolved, adminOnly) = SecureStaging.ResolveRoot(
+            fallbackRoot: null,
+            report: (m, e) => reported.Add((m, e)),
+            elevated: true,
+            commonAppData: root.Path);
+
+        resolved.Should().Be(
+            root.Path,
+            "the per-run directory is created as a DIRECT child of %ProgramData% — it descends through no " +
+            "fixed name an unprivileged user could have created first");
+        adminOnly.Should().BeTrue();
+        reported.Should().BeEmpty(
+            "a squatted state root is no longer a reason to refuse, so there is nothing to report");
+
+        Directory.GetFileSystemEntries(sigil).Should().BeEmpty(
+            "the install-state store's root is neither repaired nor written to from the staging path");
+        new DirectoryInfo(sigil).GetAccessControl(AccessControlSections.Access)
+            .AreAccessRulesProtected.Should().BeFalse(
+                "it must be left exactly as found — re-permissioning it here would be the state store's " +
+                "repair happening as a side effect of staging a download");
+        Directory.GetDirectories(root.Path).Should().BeEquivalentTo(
+            new[] { sigil },
+            "resolving the elevated root creates nothing of its own — in particular nothing named Sigil");
+    }
+
+    /// <summary>
+    /// The other half of the same property: the per-run directory's name carries a GUID,
+    /// so there is no path an attacker can pre-create and have adopted. Every plausible
+    /// fixed name is planted here and none of them is used.
+    /// </summary>
+    [Fact]
+    public void The_staging_directory_is_unpredictable_and_no_pre_created_one_is_adopted()
+    {
+        using var root = new TempDir();
+
+        var predictable = new[]
+        {
+            Path.Combine(root.Path, "Sigil"),
+            Path.Combine(root.Path, "Sigil", "staging"),
+            Path.Combine(root.Path, "staging"),
+            Path.Combine(root.Path, "sigil-prereq"),
+            Path.Combine(root.Path, "sigil-prereq-0"),
+        };
+        foreach (var path in predictable)
+        {
+            Directory.CreateDirectory(path);
+            File.WriteAllText(Path.Combine(path, "planted.exe"), "attacker payload");
+        }
+
+        using var staging = Staging("prereq", root.Path);
+
+        predictable.Should().NotContain(
+            staging.Directory, "a directory an attacker could have created first must never be adopted");
+        Path.GetFileName(staging.Directory).Should().MatchRegex(
+            "^sigil-prereq-[0-9a-f]{32}$",
+            "the per-run GUID is the whole reason a pre-planted path cannot be hit — %ProgramData% lets any " +
+            "user CREATE a child, so only an unguessable name is safe there");
+        Directory.GetFileSystemEntries(staging.Directory).Should().BeEmpty(
+            "the staging directory is freshly created, never an existing one that happened to be there");
+
+        foreach (var path in predictable)
+        {
+            File.Exists(Path.Combine(path, "planted.exe")).Should().BeTrue(
+                "staging neither adopts nor disturbs directories it did not create");
+        }
+    }
+
+    /// <summary>
+    /// Staging in <c>%TEMP%</c> <b>un</b>elevated is the only option there is, not a
+    /// downgrade. It must neither throw nor report — crying wolf here would train an
+    /// operator to ignore the line that does matter.
     /// </summary>
     [Fact]
     public void An_unelevated_run_stages_in_the_fallback_root_silently()
@@ -410,66 +479,45 @@ public sealed class SecureStagingTests
         using var root = new TempDir();
         var reported = new List<(string Message, bool IsError)>();
 
-        var (resolved, isAdminOnly) = SecureStaging.ResolveRoot(
-            fallbackRoot: root.Path,
-            report: (m, e) => reported.Add((m, e)),
-            elevated: false,
-            commonAppData: root.Path);
+        using var staging = SecureStaging.Create(
+            "prereq", (m, e) => reported.Add((m, e)), root.Path, elevated: false, commonAppData: root.Path);
 
-        resolved.Should().Be(root.Path);
-        isAdminOnly.Should().BeFalse(
+        Path.GetDirectoryName(staging.Directory).Should().Be(root.Path);
+        staging.IsAdminOnly.Should().BeFalse(
             "an unelevated process cannot create a directory only administrators can write");
         reported.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// <c>%ProgramData%</c> is an OS directory and is never created here. If it is
+    /// missing, or is a file, the environment is broken enough that guessing is worse
+    /// than refusing — and the cause must reach both the report and the exception.
+    /// </summary>
     [WindowsFact("Windows ACL APIs")]
-    public void An_existing_untrusted_state_root_is_reported_and_left_unrepaired()
+    public void An_elevated_run_refuses_when_the_machine_wide_root_is_not_a_directory()
     {
-        // %ProgramData%\Sigil is lane S1's install-state root. Staging a download must
-        // never re-permission it or take ownership of it as a side effect — that repair
-        // belongs to the install path, where the decision is made deliberately.
-        using var root = new TempDir();
-        var sigil = Path.Combine(root.Path, "Sigil");
-        Directory.CreateDirectory(sigil); // plain, inheriting, this-user-owned
-        var before = new DirectoryInfo(sigil).GetAccessControl(AccessControlSections.Access);
-        before.AreAccessRulesProtected.Should().BeFalse("precondition: the pre-existing root inherits its ACL");
-
-        var reported = new List<(string Message, bool IsError)>();
-        var resolved = SecureStaging.TryResolveAdminOnlyRoot(root.Path, (m, e) => reported.Add((m, e)));
-
-        resolved.Should().BeNull();
-        reported.Should().ContainSingle();
-        reported[0].Message.Should().Contain("not repaired");
-        reported[0].Message.Should().Contain("install state store");
-
-        var after = new DirectoryInfo(sigil).GetAccessControl(AccessControlSections.Access);
-        after.AreAccessRulesProtected.Should().BeFalse(
-            "an existing state root must be left exactly as found — hardening it here would be S1's repair " +
-            "happening as a side effect of staging a download");
-        Directory.Exists(Path.Combine(sigil, "staging")).Should().BeFalse(
-            "nothing is created underneath a state root that failed the check");
-    }
-
-    [WindowsFact("Windows ACL APIs")]
-    public void The_degrade_report_names_the_exception_type_and_message_when_the_root_cannot_be_created()
-    {
-        // A state-root base that is a FILE, not a directory — the creation throws, and
-        // the cause must survive into the report rather than being swallowed.
         using var root = new TempDir();
         var notADirectory = Path.Combine(root.Path, "not-a-directory");
         File.WriteAllText(notADirectory, "x");
 
         var reported = new List<(string Message, bool IsError)>();
-        var resolved = SecureStaging.TryResolveAdminOnlyRoot(notADirectory, (m, e) => reported.Add((m, e)));
+        var create = () => SecureStaging.Create(
+            "prereq",
+            (m, e) => reported.Add((m, e)),
+            fallbackRoot: null,
+            elevated: true,
+            commonAppData: notADirectory);
 
-        resolved.Should().BeNull();
+        create.Should().Throw<StagingSecurityException>()
+            .WithMessage("*does not exist as a directory*");
+
         reported.Should().ContainSingle();
         reported[0].IsError.Should().BeTrue();
-        reported[0].Message.Should().Contain("could not be established");
-        reported[0].Message.Should().MatchRegex(
-            @"[A-Za-z]+Exception: .+",
-            "the swallowed cause is what tells an operator whether this was a redirected root, a denied " +
-            "ACL write, or something provoked deliberately — its type AND message must be recorded");
+        reported[0].Message.Should().Contain("REFUSED");
+        reported[0].Message.Should().Contain(
+            "substitute what this process launches", "the report must say what the risk actually is");
+        reported[0].Message.Should().Contain(
+            notADirectory, "the report must name the location that failed the check");
     }
 
     [Fact]

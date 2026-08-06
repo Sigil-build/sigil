@@ -201,7 +201,7 @@ public sealed class NativeRuntimeCacheTrustTests
             prepare.Should().Throw<NativeRuntimeTrustException>(
                     "an elevated run that cannot site its cache where only administrators can write must refuse, " +
                     "not extract into a directory a non-administrator can rewrite between the check and the load")
-                .WithMessage("*not administrator-only writable*");
+                .WithMessage("*administrator-only writable*");
         }
         else
         {
@@ -213,19 +213,62 @@ public sealed class NativeRuntimeCacheTrustTests
             "nothing is extracted into a root that failed the check");
     }
 
+    /// <summary>
+    /// The elevated cache root is a <b>direct child of <c>%ProgramData%</c></b> and is
+    /// deliberately not under <c>%ProgramData%\Sigil</c>.
+    /// </summary>
+    /// <remarks>
+    /// That path is the install-state store's root, must not be repaired from here, and
+    /// can be created by any unprivileged user (register row R1's attack) — so depending
+    /// on it turned this component's refusal into a denial of service anyone could
+    /// trigger against every elevated GUI install. <c>sigil-runtime</c> is this
+    /// component's own directory, which a hardened create may repair and take ownership
+    /// of, so a squat costs nothing. <c>%ProgramData%</c> grants <c>BUILTIN\Users</c>
+    /// create-child but not delete-child, so a directory that is ours stays ours.
+    /// </remarks>
     [Fact]
-    public void The_unelevated_cache_root_is_per_user_and_the_elevated_one_is_machine_wide()
+    public void The_elevated_cache_root_does_not_depend_on_the_squattable_state_root()
     {
+        var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+
+        var elevated = NativeRuntimeBootstrap.ResolveCacheRoot(elevated: true);
+
+        elevated.Should().Be(Path.Combine(programData, "sigil-runtime"));
+        Path.GetDirectoryName(elevated).Should().Be(
+            programData,
+            "a direct child of %ProgramData% descends through no directory a non-administrator could have " +
+            "created first");
+        elevated.Should().NotStartWith(
+            Path.Combine(programData, "Sigil") + Path.DirectorySeparatorChar,
+            "%ProgramData%\\Sigil belongs to the install-state store: this component may not repair it, and " +
+            "any user can create it, so requiring it to be trusted would be a denial of service on demand");
+
         NativeRuntimeBootstrap.ResolveCacheRoot(elevated: false).Should().Be(
             Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "Sigil", "runtime"));
-
-        NativeRuntimeBootstrap.ResolveCacheRoot(elevated: true).Should().Be(
-            Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
                 "Sigil", "runtime"),
-            "an elevated run must not extract native DLLs into a directory its own unprivileged user can write");
+            "unelevated there is no privilege boundary, so the historical per-user cache is unchanged");
+    }
+
+    [Fact]
+    public void A_squatted_state_root_is_neither_consulted_nor_touched()
+    {
+        using var scratch = new Scratch();
+        var (archive, skia, _) = Archive(scratch.Path);
+
+        // The squat, as an unprivileged user would leave it: a plain, this-user-owned
+        // directory named Sigil beside where the cache root goes.
+        var sigil = Path.Combine(scratch.Path, "Sigil");
+        Directory.CreateDirectory(sigil);
+
+        var root = Path.Combine(scratch.Path, "sigil-runtime");
+        var prepared = NativeRuntimeBootstrap.PrepareCacheDirectory(
+            archive, root, requireAdminOnlyRoot: false, Report);
+
+        File.ReadAllBytes(Path.Combine(prepared, SkiaName)).Should().Equal(
+            skia, "the extraction proceeds — a squatted state root is not on this path at all");
+        Directory.GetFileSystemEntries(sigil).Should().BeEmpty(
+            "the state root is neither written to nor repaired by the native runtime bootstrap");
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────

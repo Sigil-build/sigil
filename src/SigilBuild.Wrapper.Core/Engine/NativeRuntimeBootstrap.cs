@@ -94,24 +94,40 @@ public static partial class NativeRuntimeBootstrap
 
     /// <summary>
     /// The root the content-keyed cache directories live under:
-    /// <c>%ProgramData%\Sigil\runtime</c> for an elevated run (established
+    /// <c>%ProgramData%\sigil-runtime</c> for an elevated run (established
     /// administrator-only by <see cref="PrepareCacheDirectory"/>), the historical
     /// <c>%LocalAppData%\Sigil\runtime</c> otherwise.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <c>%LocalAppData%</c> is per-user, so unelevated there is no privilege boundary
     /// to cross and no better location exists — the attacker and the victim are the same
     /// account. Elevated there very much is one, and <c>%LocalAppData%</c> is on the
     /// wrong side of it: that is register row R4.
+    /// </para>
+    /// <para>
+    /// <b>Deliberately a direct child of <c>%ProgramData%</c>, and deliberately not
+    /// under <c>%ProgramData%\Sigil</c>.</b> That path is the install-state store's root
+    /// and must not be repaired from here; depending on it instead meant that any
+    /// non-administrator who pre-created it — register row R1's attack, which needs no
+    /// privilege — blocked every elevated GUI install, because this bootstrap would then
+    /// refuse. <c>sigil-runtime</c> is this component's own directory, so
+    /// <see cref="StateDirectorySecurity.CreateHardened"/> may re-permission and take
+    /// ownership of a squatted one, which turns that denial of service back into a
+    /// no-op. <c>%ProgramData%</c> itself grants <c>BUILTIN\Users</c> <c>(CI)(WD,AD)</c>
+    /// but <b>not</b> <c>DC</c>, so a non-administrator can create a sibling there and
+    /// can never delete or replace this one once it is ours.
+    /// </para>
     /// </remarks>
     public static string ResolveCacheRoot(bool elevated) =>
-        Path.Combine(
-            Environment.GetFolderPath(
-                elevated
-                    ? Environment.SpecialFolder.CommonApplicationData
-                    : Environment.SpecialFolder.LocalApplicationData),
-            "Sigil",
-            "runtime");
+        elevated
+            ? Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                "sigil-runtime")
+            : Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Sigil",
+                "runtime");
 
     /// <summary>
     /// Resolve the stable cache directory for an archive: keyed by the archive's
@@ -164,9 +180,19 @@ public static partial class NativeRuntimeBootstrap
     /// <para>
     /// <b>Why an elevated run refuses rather than degrades.</b> Continuing means
     /// executing attacker-replaceable native code as administrator; there is no
-    /// weakened-but-useful version of that. The cost is that a non-administrator who
-    /// squats <c>%ProgramData%\Sigil</c> can block elevated GUI installs — a denial of
-    /// service, which is the strictly better failure of the two.
+    /// weakened-but-useful version of that.
+    /// </para>
+    /// <para>
+    /// <b>And why that refusal is not a squatting lever.</b> The root and the cache
+    /// directory are both this component's own (<c>%ProgramData%\sigil-runtime\…</c>,
+    /// never <c>%ProgramData%\Sigil</c>), so a pre-created one is <em>repaired</em> —
+    /// <see cref="StateDirectorySecurity.CreateHardened"/> re-applies the protected DACL
+    /// and hands ownership to <c>BUILTIN\Administrators</c>, which an elevated caller
+    /// can do — and the run continues. Nothing an unprivileged user can create makes
+    /// this refuse; only a genuinely broken or hostile environment does. The parent
+    /// <c>%ProgramData%</c> is deliberately <b>not</b> required to be administrator-only:
+    /// it grants <c>BUILTIN\Users</c> <c>(CI)(WD,AD)</c> but not <c>DC</c>, so a
+    /// non-administrator can add siblings and can never delete or replace ours.
     /// </para>
     /// </remarks>
     public static string PrepareCacheDirectory(
@@ -244,37 +270,32 @@ public static partial class NativeRuntimeBootstrap
         || (OperatingSystem.IsWindows() && StateDirectorySecurity.IsAdminOnlyWritable(directory));
 
     /// <summary>
-    /// Establish <paramref name="cacheRoot"/> (<c>%ProgramData%\Sigil\runtime</c>) as an
+    /// Establish <paramref name="cacheRoot"/> (<c>%ProgramData%\sigil-runtime</c>) as an
     /// administrator-only directory, or throw.
     /// </summary>
     /// <remarks>
-    /// <c>%ProgramData%\Sigil</c> is the install-state root and is <b>not repaired</b>
-    /// from here — it is created when simply absent, but an existing permissive one is
-    /// left exactly as found and refused, because re-permissioning and taking ownership
-    /// of the state store's directory as a side effect of extracting native DLLs is far
-    /// too broad a repair for this call site. The <c>runtime</c> directory underneath it
-    /// <em>is</em> this component's own, so creating it hardened — and repairing it when
-    /// a previous run or an attacker left it permissive — is in scope here.
+    /// <para>
+    /// <c>cacheRoot</c> is <b>this component's own</b> directory, so a pre-existing
+    /// permissive one is <em>repaired</em> rather than refused:
+    /// <see cref="StateDirectorySecurity.CreateHardened"/> re-applies the protected DACL
+    /// and hands ownership to <c>BUILTIN\Administrators</c>. That is what keeps a
+    /// non-administrator from turning this refusal into a denial of service by simply
+    /// creating the directory first. It is also why the root deliberately does not live
+    /// under <c>%ProgramData%\Sigil</c>: that one belongs to the install-state store and
+    /// repairing it as a side effect of extracting native DLLs would be far too broad.
+    /// </para>
+    /// <para>
+    /// The <b>parent</b> is not checked, on purpose. <c>%ProgramData%</c> grants
+    /// <c>BUILTIN\Users</c> <c>(CI)(WD,AD,WEA,WA)</c> — create-child — but not
+    /// <c>DC</c> (delete-child), so a non-administrator can add siblings and can neither
+    /// delete nor replace a directory it does not own. Requiring the parent to be
+    /// administrator-only would fail for <c>%ProgramData%</c> itself and refuse every
+    /// legitimate elevated install.
+    /// </para>
     /// </remarks>
     [SupportedOSPlatform("windows")]
     private static void EstablishAdminOnlyRoot(string cacheRoot)
     {
-        var parent = Path.GetDirectoryName(cacheRoot);
-        if (!string.IsNullOrEmpty(parent))
-        {
-            if (!Directory.Exists(parent))
-            {
-                StateDirectorySecurity.CreateHardened(parent);
-            }
-
-            if (!StateDirectorySecurity.IsAdminOnlyWritable(parent))
-            {
-                throw new NativeRuntimeTrustException(
-                    $"'{parent}' is not administrator-only writable, so anything created under it could be " +
-                    "deleted and replaced by a non-administrator; refusing to extract the native runtime there");
-            }
-        }
-
         StateDirectorySecurity.CreateHardened(cacheRoot);
         if (!StateDirectorySecurity.IsAdminOnlyWritable(cacheRoot))
         {

@@ -318,15 +318,17 @@ public class ReplayAnchoringTests
     }
 
     [WindowsFact("Windows registry semantics")]
-    public void An_app_restoring_its_own_file_association_to_its_own_binary_is_allowed()
+    public void A_per_user_app_restoring_its_own_file_association_is_allowed()
     {
         // Arrange — THE positive for the shape rule, and the reason it is not simply
         // "deny every shell\...\command". Registering a file type is what installers do;
         // the command points at the app's own exe inside install_dir, quoted with the
-        // usual "%1" argument.
+        // usual "%1" argument. HKCU, because a per-user install legitimately lands in a
+        // user-writable directory (%LocalAppData%\Programs) — requiring admin-only there
+        // would refuse every per-user association on uninstall.
         using var installDir = new TempDir();
         var record = new RollbackRecord.RestoreRegistryValue(
-            "HKLM",
+            "HKCU",
             @"Software\Classes\Acme.Document\shell\open\command",
             Name: "",
             View: "default",
@@ -341,6 +343,106 @@ public class ReplayAnchoringTests
         verdict.RefusalReason.Should().BeNull(
             "denying the shape outright would break every installer that registers a " +
             "file type — the value must be checked, not the key alone");
+    }
+
+    [WindowsFact("Windows registry semantics")]
+    public void A_machine_app_restoring_its_own_file_association_from_an_admin_only_dir_is_allowed()
+    {
+        // Arrange — the machine-hive positive. %ProgramFiles% stands in for a real
+        // machine install directory: admin-only writable, which is what a machine-wide
+        // execution mapping is required to point into. Read-only; no file is created.
+        var installDir = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        StateDirectorySecurity.IsAdminOnlyWritable(installDir).Should().BeTrue(
+            "the fixture needs a genuinely admin-only install directory");
+
+        var record = new RollbackRecord.RestoreRegistryValue(
+            "HKLM",
+            @"Software\Classes\Acme.Document\shell\open\command",
+            Name: "",
+            View: "default",
+            PriorTypeStr: "REG_SZ",
+            PriorValue: $"\"{Path.Combine(installDir, "acme.exe")}\" \"%1\"",
+            PreviouslyAbsent: false);
+
+        // Act
+        var verdict = Anchor(installDir).Check(record);
+
+        // Assert
+        verdict.RefusalReason.Should().BeNull(
+            "a machine install reversing its own association to its own binary in an " +
+            "admin-only directory is the ordinary case and must replay");
+    }
+
+    [WindowsFact("Windows registry semantics")]
+    public void A_machine_execution_mapping_into_a_user_writable_install_dir_is_refused()
+    {
+        // Arrange — the hole the categorical rewrite opened. Once the progid deny-list
+        // went away, an execution mapping was accepted on containment alone, so a value
+        // INSIDE the anchor passed. If the anchor is a directory an unprivileged user can
+        // write — a /D= into %TEMP%, or a recorded install dir that squeaks past the
+        // anchor floor — that hands exefile\shell\open\command to an exe that user
+        // controls, machine-wide. An execution mapping names a binary the system will
+        // run, exactly like a machine PATH entry, so it must meet the same standard.
+        // Predicate only; HKLM is never opened.
+        using var installDir = new TempDir();
+        StateDirectorySecurity.IsAdminOnlyWritable(installDir.Path).Should().BeFalse(
+            "the fixture must really be a user-writable directory, or this proves nothing");
+
+        var evil = Path.Combine(installDir.Path, "evil.exe");
+        var record = new RollbackRecord.RestoreRegistryValue(
+            "HKLM",
+            @"Software\Classes\exefile\shell\open\command",
+            Name: "",
+            View: "default",
+            PriorTypeStr: "REG_SZ",
+            PriorValue: $"\"{evil}\" \"%1\"",
+            PreviouslyAbsent: false);
+
+        // Act
+        var verdict = Anchor(installDir.Path).Check(record);
+
+        // Assert
+        verdict.RefusalReason.Should().NotBeNull();
+        verdict.RefusalReason!.Should().Contain("evil.exe").And.Contain("administrators",
+            "being inside the anchor is not enough for a machine-wide execution mapping; " +
+            "the target must also be one no non-administrator can rewrite");
+    }
+
+    [WindowsTheory("Windows registry semantics")]
+    // A subkey or value name that happens to be spelled like an execution-mapping
+    // segment, in ordinary application space. None of these has execution semantics, and
+    // refusing them strands a value on every legitimate uninstall AND pollutes the
+    // RefusedRecords list lane S5 reads for R15.
+    [InlineData(@"Software\Acme\App\command")]
+    [InlineData(@"Software\Acme\App\TreatAs")]
+    [InlineData(@"Software\Acme\App\LocalServer")]
+    [InlineData(@"Software\Acme\App\MCI32")]
+    [InlineData(@"Software\Acme\App\Drivers32")]
+    [InlineData(@"Software\Acme\App\shellex")]
+    [InlineData(@"Software\Acme\shell\App")]
+    public void An_ordinary_key_that_merely_spells_like_an_execution_mapping_is_not_one(string key)
+    {
+        // Arrange — the value points OUTSIDE the install dir on purpose: if the key were
+        // wrongly classified as an execution mapping, the value check would refuse it,
+        // so this fails loudly rather than passing for the wrong reason.
+        using var installDir = new TempDir();
+        using var elsewhere = new TempDir();
+        var record = new RollbackRecord.RestoreRegistryValue(
+            "HKLM",
+            key,
+            Name: "",
+            View: "default",
+            PriorTypeStr: "REG_SZ",
+            PriorValue: Path.Combine(elsewhere.Path, "data.txt"),
+            PreviouslyAbsent: false);
+
+        // Act
+        var verdict = Anchor(installDir.Path).Check(record);
+
+        // Assert
+        verdict.RefusalReason.Should().BeNull(
+            "the shape must be matched by structural position, not by the word: a plain " +
+            "application key carries no execution semantics and must replay");
     }
 
     [WindowsFact("Windows registry semantics")]

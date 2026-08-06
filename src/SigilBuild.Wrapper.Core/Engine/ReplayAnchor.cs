@@ -96,22 +96,34 @@ internal sealed class ReplayAnchor
     };
 
     /// <summary>
-    /// Path segments that make a key an execution-mapping surface: whatever value lands
-    /// there is a command line or a module path that Windows will later run or load.
+    /// The leaf of a shell-verb definition. Dangerous only when the key is actually
+    /// defining a verb — i.e. some earlier segment is <c>shell</c>.
     /// </summary>
-    /// <remarks>
-    /// Matched as segments anywhere in the key, so this covers
-    /// <c>&lt;anything&gt;\shell\&lt;verb&gt;\command</c>, <c>…\shell\&lt;verb&gt;\ddeexec</c>,
-    /// any <c>shellex</c> handler, the in-proc / local COM server mappings, and the
-    /// multimedia driver-mapping keys — without naming a single progid.
-    /// </remarks>
-    private static readonly string[] ExecutionMappingSegments =
+    private static readonly string[] ShellVerbLeaves = { "command", "ddeexec" };
+
+    /// <summary>
+    /// Class-registration segments that name a module for Windows to load. Dangerous
+    /// only <em>under</em> <c>Software\Classes</c>, which is where they mean something.
+    /// </summary>
+    private static readonly string[] ClassRegistrationSegments =
     {
-        "command", "ddeexec", "shellex",
+        "shellex",
         "InprocServer32", "InprocServer", "LocalServer32", "LocalServer",
         "InprocHandler32", "InprocHandler", "TreatAs",
-        "Drivers32", "Drivers.desc", "MCI32", "MCI Extensions", "drivers.desc",
     };
+
+    /// <summary>
+    /// Multimedia / driver mapping keys, which live at a fixed place in the hive.
+    /// </summary>
+    private static readonly string[] DriverMappingSegments =
+    {
+        "Drivers32", "Drivers.desc", "MCI32", "MCI Extensions",
+    };
+
+    private const string ClassesPrefix = @"Software\Classes";
+
+    private const string WindowsNtCurrentVersionPrefix =
+        @"Software\Microsoft\Windows NT\CurrentVersion";
 
     private const string MachineEnvKey =
         @"System\CurrentControlSet\Control\Session Manager\Environment";
@@ -309,12 +321,24 @@ internal sealed class ReplayAnchor
         // mapping, whatever is written there is a command line Windows will later run.
         // An app registering its own file type legitimately writes
         // Software\Classes\Acme.Document\shell\open\command; it writes its OWN exe there.
-        // Anything pointing outside install_dir is a hijack whatever the progid is called,
-        // which is why this tests the shape and the value rather than a list of names.
+        // Anything pointing somewhere this install does not own is a hijack whatever the
+        // progid is called, which is why this tests the shape and the value rather than a
+        // list of names.
         if (!IsExecutionShapedKey(effective))
         {
             return new Verdict(record, null);
         }
+
+        // An execution mapping in a MACHINE hive is the same primitive as an entry on the
+        // machine PATH — it names a binary the system will run for every user — so it is
+        // held to the same standard: inside install_dir AND writable by administrators
+        // only. Without the second half, an install directory an unprivileged user can
+        // write (a /D= into %TEMP%, a recorded value that squeaks past the anchor floor)
+        // would let a planted record point exefile\shell\open\command at an exe that user
+        // controls. HKCU is judged as user scope, because a per-user install legitimately
+        // lands in a user-writable directory and requiring otherwise would refuse every
+        // per-user file association on uninstall.
+        var isMachineHive = IsMachineHive(hive);
 
         foreach (var value in writtenValues)
         {
@@ -331,17 +355,45 @@ internal sealed class ReplayAnchor
                     "being restored is not a command line that can be checked");
             }
 
-            if (!ImagePathIsInside(command, _installDir))
+            if (!ProgramIsOwnedByThisInstall(command, isMachineHive))
             {
                 return new Verdict(
                     record,
                     $"{type} refused: '{hive}\\{key}' is an execution mapping and '{command}' " +
-                    $"{OutsideText()} — restoring it would hand Windows a program this " +
-                    "install does not own");
+                    $"{(isMachineHive ? "is not a program inside the install directory " +
+                        $"'{_installDir}' that only administrators can write" : OutsideText())}" +
+                    " — restoring it would hand Windows a program this install does not own");
             }
         }
 
         return new Verdict(record, null);
+    }
+
+    /// <summary>
+    /// Machine-visible hives. <c>HKCR</c> counts: writes through it land in
+    /// <c>HKLM\Software\Classes</c>, so a value restored there affects every user.
+    /// </summary>
+    private static bool IsMachineHive(string? hive) => hive switch
+    {
+        "HKLM" or "HKEY_LOCAL_MACHINE" or "HKCR" or "HKEY_CLASSES_ROOT" => true,
+        _ => false,
+    };
+
+    /// <summary>
+    /// True when the program named by <paramref name="commandLine"/> is one this install
+    /// owns — the same test <see cref="OwnedByThisInstall"/> applies to a
+    /// <c>PATH</c> entry, applied to the executable a command line names.
+    /// </summary>
+    private bool ProgramIsOwnedByThisInstall(string commandLine, bool isMachine)
+    {
+        foreach (var candidate in ProgramPathCandidates(commandLine))
+        {
+            if (OwnedByThisInstall(candidate, isMachine))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static object?[] ValuesOf(
@@ -365,22 +417,75 @@ internal sealed class ReplayAnchor
     /// multimedia driver mapping — regardless of which progid or component it belongs to.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Deny the shape, not the instances. Enumerating progids does not converge:
     /// <c>exefile</c>, <c>Directory</c>, <c>txtfile</c>, <c>lnkfile</c> and <c>mscfile</c>
     /// all give machine-wide execution and each was found in a different review round.
     /// Any progid — including one Windows ships that this code has never heard of — is
     /// covered here, while an app restoring its own verb to its own binary still passes.
+    /// </para>
+    /// <para>
+    /// The match is anchored to the STRUCTURAL POSITION, not to the word. <c>command</c>
+    /// counts only when the key is actually defining a shell verb (some earlier segment
+    /// is <c>shell</c>), which catches <c>&lt;progid&gt;\shell\&lt;verb&gt;\command</c> and
+    /// <c>…\Explorer\CommandStore\shell\&lt;verb&gt;\command</c> alike; the
+    /// class-registration segments count only under <c>Software\Classes</c>; the driver
+    /// maps only under <c>Software\Microsoft\Windows NT\CurrentVersion</c>. A plain
+    /// application key that happens to contain a segment called <c>command</c>,
+    /// <c>LocalServer</c> or <c>MCI32</c> — <c>Software\Acme\App\command</c> — carries no
+    /// execution semantics and must replay normally, or a legitimate uninstall leaves a
+    /// stale value behind and pollutes the refusal list S5 reads for R15.
+    /// </para>
     /// </remarks>
     private static bool IsExecutionShapedKey(string normalizedKey)
     {
-        foreach (var segment in normalizedKey.Split('\\'))
+        var segments = normalizedKey.Split('\\');
+
+        // shell\<verb>\command | ...\ddeexec — a verb definition, wherever it lives.
+        for (var i = 0; i < segments.Length; i++)
         {
-            foreach (var marker in ExecutionMappingSegments)
+            if (!MatchesAny(segments[i], ShellVerbLeaves))
             {
-                if (segment.Equals(marker, StringComparison.OrdinalIgnoreCase))
+                continue;
+            }
+            for (var j = 0; j < i; j++)
+            {
+                if (segments[j].Equals("shell", StringComparison.OrdinalIgnoreCase))
                 {
                     return true;
                 }
+            }
+        }
+
+        if (IsUnderRegistryPrefix(normalizedKey, ClassesPrefix) &&
+            AnySegmentMatches(segments, ClassRegistrationSegments))
+        {
+            return true;
+        }
+
+        return IsUnderRegistryPrefix(normalizedKey, WindowsNtCurrentVersionPrefix)
+            && AnySegmentMatches(segments, DriverMappingSegments);
+    }
+
+    private static bool AnySegmentMatches(string[] segments, string[] markers)
+    {
+        foreach (var segment in segments)
+        {
+            if (MatchesAny(segment, markers))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool MatchesAny(string segment, string[] markers)
+    {
+        foreach (var marker in markers)
+        {
+            if (segment.Equals(marker, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
             }
         }
         return false;
@@ -624,11 +729,11 @@ internal sealed class ReplayAnchor
     }
 
     /// <summary>
-    /// A directory this install may legitimately name in an environment variable: the
-    /// install directory itself, and — for machine scope — only when no
+    /// A path this install may legitimately hand to the system as a place to load or run
+    /// from: inside the install directory, and — for machine scope — only when no
     /// non-administrator can write it. The filesystem scope roots are excluded on
     /// purpose; they are user-writable, and a user-writable entry on the machine
-    /// <c>PATH</c> is the hijack.
+    /// <c>PATH</c> — or in a machine-wide execution mapping — is the hijack.
     /// </summary>
     private bool OwnedByThisInstall(string? path, bool isMachine)
     {
@@ -798,40 +903,57 @@ internal sealed class ReplayAnchor
     internal static bool ImagePathIsInside(string? imagePath, string installDir)
     {
         var root = Normalize(installDir);
-        if (root is null || string.IsNullOrWhiteSpace(imagePath))
+        if (root is null)
         {
             return false;
         }
 
-        var value = imagePath.Trim();
+        foreach (var candidate in ProgramPathCandidates(imagePath))
+        {
+            var full = Normalize(candidate);
+            if (full is not null && IsUnder(full, root))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// The path(s) a command line could be naming as its program, most specific first.
+    /// </summary>
+    /// <remarks>
+    /// A service <c>ImagePath</c> and a shell-verb <c>command</c> are both command lines,
+    /// not paths: quoted or not, with or without arguments, occasionally carrying the
+    /// <c>\??\</c> NT prefix. Both the parsed executable and the raw remainder are
+    /// returned, so an unquoted path containing spaces — <c>C:\Program Files\App\svc.exe
+    /// -k net</c> — is not misread as <c>C:\Program</c> and a legitimate teardown refused.
+    /// Shared by the service rule and the execution-mapping rule so the two cannot drift.
+    /// </remarks>
+    private static string[] ProgramPathCandidates(string? commandLine)
+    {
+        if (string.IsNullOrWhiteSpace(commandLine))
+        {
+            return Array.Empty<string>();
+        }
+
+        var value = commandLine.Trim();
         if (value.StartsWith(@"\??\", StringComparison.Ordinal))
         {
             value = value.Substring(4);
         }
 
-        string executable;
         if (value.StartsWith('"'))
         {
             var close = value.IndexOf('"', 1);
-            executable = close > 1 ? value.Substring(1, close - 1) : value.Trim('"');
-            value = executable;
-        }
-        else
-        {
-            var space = value.IndexOf(' ', StringComparison.Ordinal);
-            executable = space > 0 ? value.Substring(0, space) : value;
+            var quoted = close > 1 ? value.Substring(1, close - 1) : value.Trim('"');
+            return new[] { quoted };
         }
 
-        var exeFull = Normalize(executable);
-        if (exeFull is not null && IsUnder(exeFull, root))
-        {
-            return true;
-        }
-
-        // Unquoted-with-arguments fallback: the whole remainder still begins with the
-        // install directory.
-        var rawFull = Normalize(value);
-        return rawFull is not null && IsUnder(rawFull, root);
+        var space = value.IndexOf(' ', StringComparison.Ordinal);
+        return space > 0
+            ? new[] { value.Substring(0, space), value }
+            : new[] { value };
     }
 
     // --- COM ---

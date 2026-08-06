@@ -282,8 +282,11 @@ public static class PrerequisiteRunner
         {
             var temp = staging.PathFor(StagedInstallerName);
             var timeout = TimeSpan.FromSeconds(p.TimeoutSeconds is int t and > 0 ? t : DefaultTimeoutSeconds);
+            // R10: bounded by the absolute file-download backstop. A prerequisite is a
+            // redistributable — tens of megabytes at the top end — so the ceiling only
+            // ever fires on an origin that is misbehaving.
             var result = await SigilDownloader.DownloadVerifiedAsync(
-                url, temp, sha, timeout, DownloadAttempts,
+                url, temp, sha, timeout, DownloadAttempts, SigilDownloader.DefaultMaxBytes,
                 report: (msg, isErr) => Report(progress, ctx, msg, isErr),
                 ct).ConfigureAwait(false);
 

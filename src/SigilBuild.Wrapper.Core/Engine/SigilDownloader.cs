@@ -19,6 +19,24 @@ using System.Threading.Tasks;
 /// </summary>
 public static class SigilDownloader
 {
+    /// <summary>
+    /// The ceiling a downloaded <em>file</em> (an install payload, a prerequisite
+    /// installer, an update package) may not exceed: 2 GiB. Register row R10 —
+    /// <c>Content-Length</c> was read for a progress percentage and never enforced,
+    /// and the read loop had no cap at all, so a hostile or compromised origin could
+    /// drip an unbounded body into the destination. A per-request timeout does not
+    /// bound that: a slow-drip body resets nothing but the clock on each read.
+    /// </summary>
+    /// <remarks>
+    /// This is an absolute backstop, not a policy: it is deliberately far above any
+    /// legitimate redistributable or stamped <c>Setup.exe</c> so that raising it is
+    /// never the fix for a real package. The load-bearing cap is
+    /// <see cref="Update.HttpUpdateResourceFetcher"/>'s, which is three orders of
+    /// magnitude smaller because that buffer is filled BEFORE anything about its
+    /// contents has been authenticated.
+    /// </remarks>
+    public const long DefaultMaxBytes = 2L * 1024 * 1024 * 1024;
+
     /// <summary>The classification of a verified-download attempt.</summary>
     public enum DownloadStatus
     {
@@ -30,6 +48,12 @@ public static class SigilDownloader
 
         /// <summary>The download itself failed (after any retries).</summary>
         Failed,
+
+        /// <summary>
+        /// The response declared, or streamed, more than the caller's <c>maxBytes</c>
+        /// ceiling. Never retried — a body that is too big does not shrink.
+        /// </summary>
+        TooLarge,
     }
 
     /// <summary>Result of <see cref="DownloadVerifiedAsync"/>.</summary>
@@ -45,12 +69,24 @@ public static class SigilDownloader
     /// <paramref name="report"/> receives progress / retry lines (message, isError).
     /// Genuine user cancellation propagates as <see cref="OperationCanceledException"/>.
     /// </summary>
+    /// <param name="maxBytes">
+    /// Hard ceiling on the response body, in bytes. Enforced TWICE and both halves
+    /// matter (register row R10): a declared <c>Content-Length</c> above it is refused
+    /// before a single body byte is read or the destination file is created — cheap,
+    /// and it costs the attacker nothing to avoid — and the read loop itself aborts the
+    /// moment the transferred count would pass it, which is the defence that actually
+    /// holds against a server that declares nothing (or lies) and drips. Required, and
+    /// deliberately not defaulted: a new download site must state its own ceiling
+    /// rather than inherit one silently. <see cref="DefaultMaxBytes"/> is the
+    /// file-download backstop.
+    /// </param>
     public static async Task<DownloadResult> DownloadVerifiedAsync(
         string url,
         string dest,
         string expectedSha256,
         TimeSpan timeout,
         int maxAttempts,
+        long maxBytes,
         Action<string, bool>? report,
         CancellationToken ct)
     {
@@ -59,6 +95,7 @@ public static class SigilDownloader
         {
             maxAttempts = 1;
         }
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxBytes);
 
         Exception? lastTransient = null;
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
@@ -66,7 +103,7 @@ public static class SigilDownloader
             ct.ThrowIfCancellationRequested();
             try
             {
-                var actual = await DownloadAndHashAsync(url, dest, timeout, report, ct).ConfigureAwait(false);
+                var actual = await DownloadAndHashAsync(url, dest, timeout, maxBytes, report, ct).ConfigureAwait(false);
                 if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
                 {
                     // A wrong/corrupt file won't heal on retry — fail now.
@@ -78,6 +115,13 @@ public static class SigilDownloader
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 throw; // genuine user cancel — propagate.
+            }
+            catch (DownloadTooLargeException ex)
+            {
+                // Caught BEFORE the transient filter on purpose. An oversized body is
+                // permanent — retrying re-fetches the same body from the same origin and
+                // is exactly the amplification an attacker would want.
+                return new DownloadResult(DownloadStatus.TooLarge, null, $"download of '{url}' refused: {ex.Message}");
             }
             catch (Exception ex) when (IsTransient(ex))
             {
@@ -102,7 +146,7 @@ public static class SigilDownloader
     }
 
     private static async Task<string> DownloadAndHashAsync(
-        string url, string dest, TimeSpan timeout, Action<string, bool>? report, CancellationToken ct)
+        string url, string dest, TimeSpan timeout, long maxBytes, Action<string, bool>? report, CancellationToken ct)
     {
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(timeout);
@@ -116,6 +160,18 @@ public static class SigilDownloader
         }
 
         var total = resp.Content.Headers.ContentLength;
+
+        // R10, first half: refuse a declared oversize BEFORE the body stream is opened
+        // and before the destination file is created — so a hostile Content-Length costs
+        // this process one request and nothing on disk. Cheap and honest, but it is only
+        // the half an attacker can trivially skip by declaring nothing; the loop below is
+        // the half that holds.
+        if (total is long declared && declared > maxBytes)
+        {
+            throw new DownloadTooLargeException(
+                $"the server declared a body of {declared} bytes, above the {maxBytes}-byte ceiling for this download");
+        }
+
         var name = Path.GetFileName(dest);
         report?.Invoke($"download: {name} …", false);
 
@@ -145,6 +201,20 @@ public static class SigilDownloader
                 int n;
                 while ((n = await src.ReadAsync(buffer.AsMemory(0, buffer.Length), token).ConfigureAwait(false)) > 0)
                 {
+                    // R10, second half — the one that matters. Checked BEFORE the write, so
+                    // not one byte past the ceiling ever reaches the disk. A response framed
+                    // by connection-close carries no Content-Length at all, so the check
+                    // above never fires for it and this is the only thing standing between a
+                    // slow-drip origin and an unbounded file; the per-request timeout is not
+                    // that thing, because a body that keeps arriving keeps the request alive.
+                    if (read + n > maxBytes)
+                    {
+                        throw new DownloadTooLargeException(
+                            $"the response exceeded the {maxBytes}-byte ceiling for this download " +
+                            $"(stopped after {read} bytes; the server declared " +
+                            $"{(total is long t2 ? t2.ToString(System.Globalization.CultureInfo.InvariantCulture) : "no Content-Length")})");
+                    }
+
                     await file.WriteAsync(buffer.AsMemory(0, n), token).ConfigureAwait(false);
                     hasher.AppendData(buffer, 0, n);
                     read += n;
@@ -200,5 +270,19 @@ public static class SigilDownloader
 
         public DownloadException(int statusCode) : base($"HTTP {statusCode}")
             => Transient = statusCode is 408 or 429 || statusCode >= 500;
+    }
+
+    /// <summary>
+    /// The response declared or streamed more than the caller's ceiling. Deliberately
+    /// derived from <see cref="Exception"/> and NOT from <see cref="IOException"/>,
+    /// which <see cref="IsTransient"/> retries: an oversized body is a permanent
+    /// property of the origin, and retrying it would multiply the very transfer being
+    /// refused.
+    /// </summary>
+    private sealed class DownloadTooLargeException : Exception
+    {
+        public DownloadTooLargeException(string message) : base(message)
+        {
+        }
     }
 }

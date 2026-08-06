@@ -83,8 +83,12 @@ internal sealed class HttpDownloadStep : IStep
         // Shared verified-download plumbing (P4/P5): retry + hash-verify over the one
         // proxy-aware HttpClient. This step owns the journaling above; the helper owns
         // the transfer. A genuine user cancel propagates for the engine's rollback.
+        // R10: an install payload is bounded by the absolute file-download backstop. The
+        // manifest carries no per-step size, so this is the only ceiling there is — its
+        // job is to stop an unbounded slow-drip body filling the disk, not to second-guess
+        // a legitimate package.
         var result = await SigilDownloader.DownloadVerifiedAsync(
-            url, dest, expected, timeout, maxAttempts,
+            url, dest, expected, timeout, maxAttempts, SigilDownloader.DefaultMaxBytes,
             report: (msg, isErr) => ctx.ProgressSink?.Report(new StepProgress(0, 0, msg, isErr)),
             ct).ConfigureAwait(false);
 

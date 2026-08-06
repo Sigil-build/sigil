@@ -1003,6 +1003,20 @@ public sealed class InstallSession
                 $"cannot upgrade: the previous version's uninstaller was not found at '{exe}'. No changes were made.");
         }
 
+        // R2: `exe` came out of an ARP UninstallString — registry data — and this
+        // process is already elevated. File.Exists is not a trust decision. Refuse
+        // loudly rather than continue silently: silently continuing is exactly the
+        // behaviour that made this exploitable.
+        if (!IsPriorUninstallerTrusted(exe))
+        {
+            return new InstallOutcome(
+                false,
+                $"cannot upgrade: the previous version's uninstaller at '{exe}' is not verified — " +
+                "it is neither Authenticode-signed nor located in a directory only administrators " +
+                "can write, so running it from this elevated process would let an unprivileged " +
+                "user choose what runs as administrator. No changes were made.");
+        }
+
         // Remove the prior version in ITS OWN scope (where it physically lives), which
         // can differ from the new effective scope on a cross-scope re-install (e.g.
         // /allusers over a per-user install). Keying the flag off _scope would tell the
@@ -1049,6 +1063,62 @@ public sealed class InstallSession
         }
 
         return new InstallOutcome(true, null);
+    }
+
+    /// <summary>
+    /// R2: may this already-elevated process spawn <paramref name="exe"/>, a path that
+    /// came from an Add/Remove-Programs <c>UninstallString</c>? True only when the file
+    /// is Authenticode-valid <em>or</em> lives in a directory only administrators can
+    /// write.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Either condition alone is a sufficient proof that an unprivileged user did not
+    /// choose the bytes that are about to run at high integrity: a valid Authenticode
+    /// signature means the file is intact and chains to a trusted publisher wherever it
+    /// sits, and an admin-only-writable directory means nobody unprivileged could have
+    /// put a file there or replaced one. Requiring <em>both</em> would refuse the
+    /// ordinary unsigned-uninstaller-in-<c>%ProgramFiles%</c> case and every legitimate
+    /// upgrade of a per-user install whose publisher does not sign
+    /// <c>uninstall.exe</c>; requiring neither is the bug.
+    /// </para>
+    /// <para>
+    /// The directory half is deliberately
+    /// <see cref="StateDirectorySecurity.IsAdminOnlyWritable"/> — the frozen, shared
+    /// predicate (owner ∈ {LocalSystem, Administrators, TrustedInstaller} AND no
+    /// non-admin holds a write-class right on the containing directory itself). Do not
+    /// grow a second ACL check here.
+    /// </para>
+    /// <para>
+    /// A TOCTOU window remains between this check and
+    /// <see cref="System.Diagnostics.Process.Start(System.Diagnostics.ProcessStartInfo)"/>:
+    /// closing it needs the file opened with a deny-write share and launched from that
+    /// handle, which is register row R12's fix and is not in scope here. This check
+    /// still removes the entire trivially-reachable attack — an attacker who can win
+    /// that race can already write the directory.
+    /// </para>
+    /// <para>
+    /// <c>internal</c> is the test seam (<c>InternalsVisibleTo</c>): it lets the
+    /// refusal <em>and</em> the acceptance be asserted without a process ever being
+    /// started. It is not part of the public engine surface.
+    /// </para>
+    /// </remarks>
+    internal static bool IsPriorUninstallerTrusted(string exe)
+    {
+        if (string.IsNullOrEmpty(exe))
+        {
+            return false;
+        }
+
+        if (AuthenticodeVerifier.VerifyFile(exe))
+        {
+            return true;
+        }
+
+        // Off Windows there is no Authenticode and no ACL to inspect, so this fails
+        // closed. The upgrade teardown path spawns a Windows uninstall.exe and is
+        // Windows-only in practice.
+        return OperatingSystem.IsWindows() && StateDirectorySecurity.IsAdminOnlyWritable(exe);
     }
 
     /// <summary>

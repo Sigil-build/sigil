@@ -10,12 +10,17 @@ using SigilBuild.Core.Manifest;
 /// Reads the scope-correct Add/Remove-Programs entry for an app id to resolve the
 /// installed state feeding the P3 version-aware upgrade decision (gap G3): the
 /// installed <c>DisplayVersion</c>, the prior install directory, and the prior
-/// <c>uninstall.exe</c> path. Probes the tentative scope's hive first, then the
-/// other hive, so an existing install's scope is discovered even when it differs
-/// from an auto-resolved scope (the existing scope then wins — see
-/// <see cref="InstallSession"/>). Read-only; returns <see cref="UpgradeState.None"/>
-/// off Windows or when no entry exists in either hive.
+/// <c>uninstall.exe</c> path. Read-only; returns <see cref="UpgradeState.None"/>
+/// off Windows or when no entry is found.
 /// </summary>
+/// <remarks>
+/// A <b>user</b>-scope resolve probes HKCU first and then falls back to HKLM, so an
+/// existing machine install is still discovered and its scope wins (see
+/// <see cref="InstallSession"/>); reading a hive the caller cannot write is safe.
+/// A <b>machine</b>-scope resolve probes HKLM and nothing else — see
+/// <see cref="ScopeProbeOrder"/> for why the mirrored fallback was a privilege
+/// escalation, not a convenience.
+/// </remarks>
 public static class InstalledStateResolver
 {
     // Mirrors ArpRegistration.UninstallKeyRoot (private there): the ARP subkey layout
@@ -24,9 +29,9 @@ public static class InstalledStateResolver
         @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
 
     /// <summary>
-    /// Resolve the installed state for <paramref name="appId"/>. <paramref name="tentativeScope"/>
-    /// only sets the hive probe order (so a same-scope install resolves to its own hive);
-    /// both hives are always searched, so a prior install in the other scope is still found.
+    /// Resolve the installed state for <paramref name="appId"/>.
+    /// <paramref name="tentativeScope"/> selects the hives probed and their order —
+    /// see <see cref="ScopeProbeOrder"/>.
     /// </summary>
     public static UpgradeState Resolve(string appId, InstallScope tentativeScope)
     {
@@ -35,11 +40,7 @@ public static class InstalledStateResolver
             return UpgradeState.None;
         }
 
-        var order = tentativeScope == InstallScope.Machine
-            ? new[] { InstallScope.Machine, InstallScope.User }
-            : new[] { InstallScope.User, InstallScope.Machine };
-
-        foreach (var scope in order)
+        foreach (var scope in ScopeProbeOrder(tentativeScope))
         {
             var state = TryReadFromHive(appId, scope);
             if (state is not null)
@@ -50,6 +51,34 @@ public static class InstalledStateResolver
 
         return UpgradeState.None;
     }
+
+    /// <summary>
+    /// The hives a resolve at <paramref name="tentativeScope"/> may read, in order.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// R2. This was symmetric: machine scope probed HKLM and then fell back to HKCU.
+    /// Everything read out of that key is acted on by an <em>already elevated</em>
+    /// process — in particular <c>UninstallString</c>, which
+    /// <see cref="ParseUninstallExe"/> turns into an exe path that
+    /// <see cref="InstallSession"/> spawns. HKCU is writable by the unprivileged user,
+    /// so that fallback let any standard user plant an ARP entry with a low
+    /// <c>DisplayVersion</c> (classified as an upgrade) and an <c>UninstallString</c>
+    /// aimed at their own binary, then wait for the next admin-approved run of the
+    /// publisher's legitimate installer to run it as administrator.
+    /// </para>
+    /// <para>
+    /// Machine scope therefore reads HKLM and nothing else. The user-scope fallback to
+    /// HKLM stays: a per-user install reading the machine hive is reading a hive it
+    /// cannot write, which is what makes a cross-scope upgrade discoverable without
+    /// trusting attacker-writable data. The direction of the asymmetry is the whole
+    /// fix — do not "restore the symmetry".
+    /// </para>
+    /// </remarks>
+    private static InstallScope[] ScopeProbeOrder(InstallScope tentativeScope) =>
+        tentativeScope == InstallScope.Machine
+            ? new[] { InstallScope.Machine }
+            : new[] { InstallScope.User, InstallScope.Machine };
 
     [SupportedOSPlatform("windows")]
     private static UpgradeState? TryReadFromHive(string appId, InstallScope scope)

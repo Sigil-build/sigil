@@ -67,8 +67,62 @@ internal sealed class TestRegistryKey : IDisposable
     }
 }
 
+/// <summary>
+/// A planted Add/Remove-Programs entry under
+/// <c>HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\&lt;appId&gt;</c> — the
+/// exact key register row R2's attacker writes, and the exact key
+/// <c>InstalledStateResolver</c> must not read on a machine-scope resolve.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>HKCU only, by construction.</b> There is no HKLM variant and there must never
+/// be one: writing the machine ARP hive needs elevation and would mutate the real
+/// machine's installed-programs list. The attack this models does not need HKLM —
+/// that it works from the user's own hive is the entire finding.
+/// </para>
+/// <para>
+/// The caller supplies a unique <c>appId</c> (a GUID-suffixed
+/// <c>sigil.test.*</c>), so the subkey can never collide with a real installed
+/// product, and <see cref="Dispose"/> deletes the subtree unconditionally.
+/// </para>
+/// </remarks>
+[SupportedOSPlatform("windows")]
+internal sealed class PlantedUninstallEntry : IDisposable
+{
+    private const string UninstallKeyRoot =
+        @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
+
+    /// <summary>Path of the planted key relative to <c>HKEY_CURRENT_USER</c>.</summary>
+    public string Path { get; }
+
+    internal PlantedUninstallEntry(string appId, string displayVersion, string uninstallString)
+    {
+        Path = UninstallKeyRoot + @"\" + appId;
+        using var key = Registry.CurrentUser.CreateSubKey(Path)
+            ?? throw new InvalidOperationException($"could not create planted ARP key {Path}");
+        key.SetValue("DisplayVersion", displayVersion);
+        key.SetValue("UninstallString", uninstallString);
+    }
+
+    public void Dispose()
+    {
+#pragma warning disable CA1031 // Best-effort fixture cleanup; ignore residual ACL/race issues.
+        try { Registry.CurrentUser.DeleteSubKeyTree(Path, throwOnMissingSubKey: false); }
+        catch { /* best-effort */ }
+#pragma warning restore CA1031
+    }
+}
+
 [SupportedOSPlatform("windows")]
 internal static class TestRegistry
 {
     public static TestRegistryKey CreateScratchKey() => new();
+
+    /// <summary>
+    /// Plant an ARP entry for <paramref name="appId"/> in the <b>user</b> hive.
+    /// See <see cref="PlantedUninstallEntry"/> for why this is HKCU-only.
+    /// </summary>
+    public static PlantedUninstallEntry PlantUserUninstallEntry(
+        string appId, string displayVersion, string uninstallString) =>
+        new(appId, displayVersion, uninstallString);
 }

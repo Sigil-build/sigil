@@ -220,6 +220,22 @@ public class SchemaValidationTests
             string.Join("; ", errors.Select(e => e.ToString())));
     }
 
+    [Fact]
+    public async Task PrerequisiteAllowUnsignedFixture_IsValidAgainstSchema()
+    {
+        // Register row R11: the per-prerequisite opt-out from the Authenticode gate in
+        // front of a downloaded prerequisite's launch. `additionalProperties: false` on
+        // the Prerequisite definition means an unschema'd property is a hard rejection,
+        // so this fixture is what proves the property is actually declared.
+        var schema = await LoadSchemaAsync();
+        var json = YamlToJson(await File.ReadAllTextAsync("Fixtures/valid/prerequisite-allow-unsigned.yaml"));
+        var errors = schema.Validate(json);
+
+        errors.Should().BeEmpty(
+            "the allow_unsigned prerequisite fixture must satisfy the schema; got: {0}",
+            string.Join("; ", errors.Select(e => e.ToString())));
+    }
+
     public static IEnumerable<object[]> InvalidFixturePaths() =>
         Directory.EnumerateFiles("Fixtures/invalid", "*.yaml").Select(p => new object[] { p });
 

@@ -119,6 +119,26 @@ public static class PrerequisiteRunner
             int exitCode;
             try
             {
+                // b2. R11: Authenticode, immediately before the launch and from inside the
+                //     window where the verified handle is already held, so the bytes being
+                //     judged are the bytes that will be executed. Only a DOWNLOADED
+                //     prerequisite is gated: a payload:// source came out of this very
+                //     executable's package, whose own signature already covers it, and
+                //     demanding a second signature on every bundled helper would be
+                //     ceremony. Fails closed unless the author declared allow_unsigned.
+                if (acquired.Downloaded)
+                {
+                    var refusal = DownloadedBinaryTrust.Refusal(
+                        acquired.ExePath!,
+                        $"prerequisite '{p.Name}'",
+                        p.AllowUnsigned,
+                        (msg, isErr) => Report(progress, ctx, msg, isErr));
+                    if (refusal is not null)
+                    {
+                        return PrerequisiteOutcome.Failed($"prerequisite '{p.Name}': {refusal}");
+                    }
+                }
+
                 // c. run it — WHILE the verified handle is still open, so nothing can
                 //    replace the bytes between the check and the launch.
                 var args = ResolveArgs(p.Args, ctx);
@@ -211,8 +231,13 @@ public static class PrerequisiteRunner
     /// bytes. The caller holds <see cref="Handle"/> across the launch and disposes both
     /// afterwards, handle first.
     /// </summary>
+    /// <param name="Downloaded">
+    /// True when the bytes came off the network rather than out of the package's own
+    /// payload. Only a download is Authenticode-gated (register row R11) — a
+    /// <c>payload://</c> source is already covered by the artifact's own signature.
+    /// </param>
     private readonly record struct AcquiredSource(
-        string? ExePath, SecureStaging? Staging, FileStream? Handle, string? Error)
+        string? ExePath, SecureStaging? Staging, FileStream? Handle, string? Error, bool Downloaded = false)
     {
         public static AcquiredSource Failed(string error) => new(null, null, null, error);
     }
@@ -309,7 +334,7 @@ public static class PrerequisiteRunner
             }
 
             acquired = true;
-            return new AcquiredSource(temp, staging, handle, null);
+            return new AcquiredSource(temp, staging, handle, null, Downloaded: true);
         }
         finally
         {

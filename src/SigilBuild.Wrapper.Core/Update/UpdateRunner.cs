@@ -227,6 +227,24 @@ internal sealed class UpdateRunner
 
         using (handle)
         {
+            // R11: Authenticode, immediately before the launch and from inside the window
+            // where the verified handle is already held. The channel manifest's signature
+            // authenticates the sha256, and the sha256 authenticates the bytes — but only
+            // against the manifest, and this process is about to run those bytes with the
+            // current scope's privileges. Armed only when THIS artifact declared signing:
+            // an installer that never claimed a signed provenance has no standing to
+            // demand one of its own successor, and would simply lose /Update entirely.
+            if (DownloadedBinaryTrust.RequiredForThisArtifact)
+            {
+                var refusal = DownloadedBinaryTrust.Refusal(
+                    dest, $"the downloaded {channel.Version} installer", allowUnsigned: false, _report);
+                if (refusal is not null)
+                {
+                    _report($"update: {refusal}", true);
+                    return InstallSession.UpdateManifestRejectedExitCode;
+                }
+            }
+
             var scopeFlag = request.Scope == InstallScope.Machine ? "/allusers" : "/currentuser";
             // T12.4: headless /Update (SilentChild true, T12.3 unchanged) launches the
             // child /silent; a headed, non-silent /Update launches it WITHOUT /silent so

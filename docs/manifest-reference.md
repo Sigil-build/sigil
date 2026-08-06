@@ -236,6 +236,7 @@ file_associations component: shorthand boolean or an object with extensions.
 | `exit_codes_ok` | array | - | - | Exit codes treated as success; defaults to [0]. An accepted code of 3010 additionally flags reboot-required. |
 | `scope_required` | string | - | - | Requires the install to run in this scope; a mismatch with the resolved scope is a diagnostic at session start. Omit to accept any scope. |
 | `timeout_seconds` | integer | - | - | Optional per-prerequisite run timeout, in seconds. |
+| `allow_unsigned` | boolean | - | `False` | Launch this prerequisite even when its Authenticode signature does not establish trust. A DOWNLOADED prerequisite installer is signature-checked immediately before it is run and refused if it is unsigned or its signature is invalid; unsigned redistributables are common and legitimate, so this opts out of that check. It NEVER waives a revoked or explicitly distrusted certificate, and the sha256 is enforced either way. Ignored for a payload:// source, which is not checked at all — its integrity comes from the package's own signature. |
 
 ## Definition: `HookPhase`
 

@@ -1,0 +1,33 @@
+# Register row R11: `allow_unsigned` on a prerequisite — the documented per-
+# prerequisite opt-out from the Authenticode gate that otherwise refuses to launch a
+# DOWNLOADED prerequisite installer whose signature does not establish trust.
+# This file only proves the JSON Schema shape accepts the property; the engine's
+# policy (and the fact that it never waives a REVOKED certificate) is covered by
+# SigilBuild.Wrapper.Tests.
+spec: v1.0
+
+app:
+  id: com.example.App
+  name: App
+  version: 0.1.0
+  publisher: P
+
+build:
+  source: ./out
+
+installer:
+  prerequisites:
+    # The gated default: no opt-out, so an unsigned download is refused.
+    - name: Acme Runtime
+      detect: registry_exists('HKLM\\SOFTWARE\\Acme\\Runtime')
+      source: https://cdn.example.com/acme-runtime.exe
+      sha256: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      args: ["/quiet", "/norestart"]
+    # A genuinely unsigned redistributable, waived on purpose. The sha256 is still
+    # required and still enforced.
+    - name: Legacy Redist
+      detect: file_exists('C:/Windows/System32/legacyrt.dll')
+      source: https://cdn.example.com/legacy-redist.exe
+      sha256: fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210
+      allow_unsigned: true
+      exit_codes_ok: [0, 3010]

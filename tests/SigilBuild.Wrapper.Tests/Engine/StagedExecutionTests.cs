@@ -100,7 +100,12 @@ public sealed class StagedExecutionTests
             Detect: $"file_exists('{marker.Replace('\\', '/')}')",
             Source: server.Url("/redist.exe"),
             Sha256: Sha256Hex(installerBytes),
-            Args: null, ExitCodesOk: null, ScopeRequired: null, TimeoutSeconds: null);
+            Args: null, ExitCodesOk: null, ScopeRequired: null, TimeoutSeconds: null,
+            // R11 landed the Authenticode gate in front of this launch. These bytes are
+            // synthetic and therefore unsigned, and this test is about the handle, not the
+            // signature — so it takes the documented opt-out rather than asserting a
+            // success the gate is now right to refuse.
+            AllowUnsigned: true);
 
         string? launchedPath = null;
         byte[]? launchedBytes = null;
@@ -156,7 +161,10 @@ public sealed class StagedExecutionTests
             Detect: $"file_exists('{marker.Replace('\\', '/')}')",
             Source: server.Url("/redist.exe"),
             Sha256: Sha256Hex(installerBytes),
-            Args: null, ExitCodesOk: null, ScopeRequired: null, TimeoutSeconds: null);
+            Args: null, ExitCodesOk: null, ScopeRequired: null, TimeoutSeconds: null,
+            // See above: R11's gate would otherwise refuse these unsigned synthetic bytes,
+            // and this test is about where the file is staged, not about its signature.
+            AllowUnsigned: true);
 
         string? launchedPath = null;
         PrerequisiteRunner.Launcher launcher = (exePath, _, _, _) =>

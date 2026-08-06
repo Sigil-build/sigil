@@ -478,16 +478,50 @@ public static class InstallerTrustLoader
     /// <paramref name="signatureValid"/>, otherwise <c>null</c> (no trust line).
     /// </summary>
     public static string? ResolveTrustLine(bool signDeclared, bool signatureValid, string? publisher)
-        => signDeclared && signatureValid
-            ? (string.IsNullOrWhiteSpace(publisher) ? "Signed" : $"Signed by {publisher}")
-            : null;
+        => ResolveTrustLine(
+            signDeclared,
+            signatureValid ? AuthenticodeStatus.Trusted : AuthenticodeStatus.Invalid,
+            publisher);
+
+    /// <summary>
+    /// The three-state trust line (register row R17). With revocation checking switched
+    /// on, "the certificate's revocation state could not be established" is a real and
+    /// common answer — an air-gapped machine, a blocked CRL distribution point — and it
+    /// must render as ITS OWN thing. Showing the plain line would say "still valid" on
+    /// no evidence; showing none would tell a user on a train that their genuine
+    /// installer looks forged, which trains them to ignore the line.
+    /// </summary>
+    /// <remarks>
+    /// <b>What the line means, precisely.</b> It attests that the artifact declared
+    /// signing at pack time and that its embedded signature is intact and chains to a
+    /// root <em>this machine</em> trusts. It is NOT a publisher-identity claim: the
+    /// per-user root store is writable without privilege, so a chain can be manufactured
+    /// locally. See the <see cref="AuthenticodeVerifier"/> remarks.
+    /// </remarks>
+    public static string? ResolveTrustLine(bool signDeclared, AuthenticodeStatus status, string? publisher)
+    {
+        if (!signDeclared)
+        {
+            return null;
+        }
+
+        var who = string.IsNullOrWhiteSpace(publisher) ? "Signed" : $"Signed by {publisher}";
+        return status switch
+        {
+            AuthenticodeStatus.Trusted => who,
+            AuthenticodeStatus.RevocationUnavailable => who + " — revocation status unavailable",
+            _ => null,
+        };
+    }
 
     /// <summary>
     /// Full self-check: reads <c>SignDeclared</c> + publisher from the running exe's
     /// embedded blob, verifies the exe's OWN Authenticode signature via
-    /// <see cref="AuthenticodeVerifier.VerifySelf"/>, and resolves the trust line.
-    /// Returns <c>null</c> for an un-stamped runtime, an unsigned artifact, or a
-    /// signature that fails to verify. The GUI host calls this once at startup.
+    /// <see cref="AuthenticodeVerifier.VerifySelfStatus"/>, and resolves the trust line.
+    /// Returns <c>null</c> for an un-stamped runtime, an unsigned artifact, a revoked
+    /// certificate, or a signature that fails to verify — and the qualified line when
+    /// the signature is good but its revocation state could not be reached. The GUI
+    /// host calls this once at startup.
     /// </summary>
     public static string? ResolveFromSelf()
     {
@@ -495,7 +529,7 @@ public static class InstallerTrustLoader
         var signDeclared = brand?.SignDeclared ?? false;
         // Short-circuit the P/Invoke when the artifact never declared signing —
         // no point verifying a signature that was never intended to exist.
-        var valid = signDeclared && AuthenticodeVerifier.VerifySelf();
-        return ResolveTrustLine(signDeclared, valid, brand?.Publisher);
+        var status = signDeclared ? AuthenticodeVerifier.VerifySelfStatus() : AuthenticodeStatus.NotEvaluated;
+        return ResolveTrustLine(signDeclared, status, brand?.Publisher);
     }
 }

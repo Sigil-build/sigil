@@ -566,6 +566,13 @@ internal sealed record SerializablePrerequisite
     public string? ScopeRequired { get; init; }
     public int? TimeoutSeconds { get; init; }
 
+    /// <summary>
+    /// Register row R11's per-prerequisite opt-out. Carried in the blob because the
+    /// decision is the manifest author's and is taken at install time, in the engine,
+    /// immediately before the launch.
+    /// </summary>
+    public bool AllowUnsigned { get; init; }
+
     public static InstallerPrerequisite ToPrerequisite(SerializablePrerequisite s)
     {
         ArgumentNullException.ThrowIfNull(s);
@@ -577,7 +584,8 @@ internal sealed record SerializablePrerequisite
             Args: s.Args,
             ExitCodesOk: s.ExitCodesOk,
             ScopeRequired: s.ScopeRequired,
-            TimeoutSeconds: s.TimeoutSeconds);
+            TimeoutSeconds: s.TimeoutSeconds,
+            AllowUnsigned: s.AllowUnsigned);
     }
 
     public static SerializablePrerequisite FromPrerequisite(InstallerPrerequisite p)
@@ -593,6 +601,7 @@ internal sealed record SerializablePrerequisite
             ExitCodesOk = p.ExitCodesOk is null ? null : System.Linq.Enumerable.ToArray(p.ExitCodesOk),
             ScopeRequired = p.ScopeRequired,
             TimeoutSeconds = p.TimeoutSeconds,
+            AllowUnsigned = p.AllowUnsigned,
         };
     }
 }

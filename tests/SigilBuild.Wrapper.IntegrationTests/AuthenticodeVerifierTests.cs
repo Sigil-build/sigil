@@ -30,8 +30,18 @@ public class AuthenticodeVerifierTests
             return; // soft-skip — see class remarks.
         }
 
-        AuthenticodeVerifier.VerifyFile(SignedSystemFile).Should().BeTrue(
-            "kernel32.dll is Authenticode/catalog-signed and must verify via WinVerifyTrust");
+        // Register row R17 switched revocation checking on (WTD_REVOKE_WHOLECHAIN), which
+        // means this file's verdict now depends on whether a CRL/OCSP responder is
+        // reachable. Asserting BeTrue would make this test pass on a networked host and
+        // fail on an air-gapped one for a reason that has nothing to do with the
+        // signature — so it asserts what is actually invariant: a genuinely signed
+        // Microsoft binary is never reported unsigned, invalid or revoked, whatever the
+        // host's connectivity.
+        var status = AuthenticodeVerifier.VerifyFileStatus(SignedSystemFile);
+
+        status.Should().BeOneOf(
+            new[] { AuthenticodeStatus.Trusted, AuthenticodeStatus.RevocationUnavailable },
+            "kernel32.dll is Authenticode/catalog-signed; only its revocation reachability may vary");
     }
 
     [Fact]
@@ -49,6 +59,12 @@ public class AuthenticodeVerifierTests
         try
         {
             AuthenticodeVerifier.VerifyFile(tmp).Should().BeFalse();
+
+            // R11's gate needs more than "not trusted": an absent signature is waivable
+            // per prerequisite, a revoked one never is, so the real API must separate them
+            // and not just report a bool. Connectivity cannot change this verdict — there
+            // is no certificate here to check anything about.
+            AuthenticodeVerifier.VerifyFileStatus(tmp).Should().Be(AuthenticodeStatus.NoSignature);
         }
         finally
         {

@@ -63,6 +63,27 @@ internal sealed class RunProgramStep : IStep
 
         using var verifiedHandle = verified;
 
+        // R11: the web-installer stub's payload, and anything else this run downloaded and
+        // is now about to execute. `verified` is non-null only for those, so a run_program
+        // of a payload binary or a system tool is untouched — the outer package's own
+        // signature already covers the first and the OS the second. Armed only when THIS
+        // artifact declared signing (see DownloadedBinaryTrust): an unsigned stub demanding
+        // a signature on what it fetches is ceremony, and would break unsigned authors
+        // outright with no manifest knob to reach for. The check runs while the verified
+        // handle is held, so the bytes being judged are the bytes that will be mapped.
+        if (verifiedHandle is not null && DownloadedBinaryTrust.RequiredForThisArtifact)
+        {
+            var refusal = DownloadedBinaryTrust.Refusal(
+                program,
+                $"'{program}', downloaded by this install",
+                allowUnsigned: false,
+                (msg, isErr) => ctx.ProgressSink?.Report(new StepProgress(0, 0, msg, isErr)));
+            if (refusal is not null)
+            {
+                return StepResult.Failed($"'{program}' was not started: {refusal}");
+            }
+        }
+
         var psi = new ProcessStartInfo
         {
             FileName = program,

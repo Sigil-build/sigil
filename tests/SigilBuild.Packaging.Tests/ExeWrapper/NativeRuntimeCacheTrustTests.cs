@@ -181,36 +181,95 @@ public sealed class NativeRuntimeCacheTrustTests
         _reported.Should().BeEmpty("reusing an intact cache is not an event");
     }
 
-    // ── the elevated branch: refuse, do not degrade ───────────────────────────
+    // ── the elevated branch: degrade the CACHE, refuse the EXTRACTION ─────────
 
+    /// <summary>
+    /// An elevated run that can establish <b>no</b> administrator-only directory refuses,
+    /// rather than extracting native DLLs somewhere a non-administrator can rewrite them
+    /// between the last hash and <c>LoadLibrary</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The refusal is provoked by something genuinely un-hardenable on any host.</b>
+    /// An earlier version of this test pointed at a scratch root that simply did not
+    /// exist yet — which <c>CreateHardened</c> then created, so on an <em>elevated</em>
+    /// runner the directory would be administrator-owned and the call would correctly
+    /// NOT refuse. That test could only pass in the world where production is broken.
+    /// Here the cache root's parent is a <b>file</b>, so neither the shared root nor the
+    /// per-run fallback beside it can be created, elevated or not.
+    /// </para>
+    /// </remarks>
     [Fact]
-    public void An_elevated_run_refuses_a_cache_root_that_is_not_administrator_only()
+    public void An_elevated_run_refuses_when_no_administrator_only_directory_can_be_established()
     {
         using var scratch = new Scratch();
         var (archive, _, _) = Archive(scratch.Path);
-        // A root under %TEMP%: created by this unelevated process, therefore owned and
-        // writable by it — precisely the shape %LocalAppData% has, and precisely what an
-        // elevated run must not extract native DLLs into.
-        var root = Path.Combine(scratch.Path, "runtime");
+
+        // A FILE where the cache root's parent directory would be: creating anything
+        // underneath it fails for every caller, at every privilege level.
+        var blocker = Path.Combine(scratch.Path, "blocker");
+        File.WriteAllText(blocker, "not a directory");
+        var root = Path.Combine(blocker, "sigil-runtime");
 
         var prepare = () => NativeRuntimeBootstrap.PrepareCacheDirectory(
             archive, root, requireAdminOnlyRoot: true, Report);
 
-        if (OperatingSystem.IsWindows())
-        {
-            prepare.Should().Throw<NativeRuntimeTrustException>(
-                    "an elevated run that cannot site its cache where only administrators can write must refuse, " +
-                    "not extract into a directory a non-administrator can rewrite between the check and the load")
-                .WithMessage("*administrator-only writable*");
-        }
-        else
-        {
-            prepare.Should().Throw<NativeRuntimeTrustException>(
-                "an administrator-only root is a Windows concept; off Windows the elevated request cannot be honoured");
-        }
+        prepare.Should().Throw<NativeRuntimeTrustException>(
+            "with nowhere administrator-only to extract to, refusing is the only safe answer — the " +
+            "alternative is loading native code an unprivileged process can replace");
 
         Directory.Exists(Path.Combine(root, ArchiveKey(archive))).Should().BeFalse(
-            "nothing is extracted into a root that failed the check");
+            "nothing is extracted when no trusted directory could be established");
+    }
+
+    /// <summary>
+    /// The negative control for the squat that <em>cannot</em> be repaired. The shared
+    /// cache root needs a stable name to work as a cache, so it stays pre-creatable — and
+    /// a squatter need not settle for making it merely permissive: a <b>file</b> at that
+    /// path makes <c>CreateHardened</c> throw outright. If that aborted the run, one
+    /// <c>New-Item</c> from any non-administrator would stop every elevated GUI install,
+    /// and <c>Program.cs</c> would take it as an unhandled crash before its own backstop
+    /// is even installed.
+    /// </summary>
+    /// <remarks>
+    /// What is asserted here is that a second, <b>per-run GUID</b> directory is attempted
+    /// beside the blocked one — visible in the reported line and in the final message —
+    /// rather than the run ending at the first failure. Whether that fallback then
+    /// <em>succeeds</em> depends on an elevated token this process does not have, so like
+    /// everything else in this lane the positive outcome is CI's to confirm. Before the
+    /// fix there was no second attempt at all.
+    /// </remarks>
+    [Fact]
+    public void An_unrepairable_shared_cache_root_falls_back_to_a_per_run_directory()
+    {
+        using var scratch = new Scratch();
+        var (archive, _, _) = Archive(scratch.Path);
+
+        // The squat: a FILE at the cache root's own path. Its PARENT is a perfectly good
+        // directory, so a sibling can still be created — which is the whole point.
+        var root = Path.Combine(scratch.Path, "sigil-runtime");
+        File.WriteAllText(root, "squatted by a non-administrator");
+
+        var prepare = () => NativeRuntimeBootstrap.PrepareCacheDirectory(
+            archive, root, requireAdminOnlyRoot: true, Report);
+
+        // Unelevated, the fallback cannot confirm either, so this still ends in a refusal —
+        // but the refusal must name BOTH paths, which is what proves the fallback happened.
+        prepare.Should().Throw<NativeRuntimeTrustException>()
+            .Which.Message.Should().MatchRegex(
+                @"sigil-runtime-[0-9a-f]{32}",
+                "the run must attempt a per-run GUID directory beside the blocked cache root, not stop at " +
+                "the first failure — otherwise a single pre-created file is a denial of service against " +
+                "every elevated install");
+
+        _reported.Should().Contain(
+            r => r.IsError
+                 && r.Message.Contains("could not be established as an administrator-only cache", StringComparison.Ordinal)
+                 && r.Message.Contains("for this run instead", StringComparison.Ordinal),
+            "losing the shared cache is an operator-visible event: it costs re-extraction every run");
+
+        Directory.EnumerateDirectories(scratch.Path, "sigil-runtime-*").Should().BeEmpty(
+            "a fallback directory that could not be confirmed administrator-only is not left behind");
     }
 
     /// <summary>

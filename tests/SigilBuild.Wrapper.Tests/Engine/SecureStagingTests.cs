@@ -341,9 +341,17 @@ public sealed class SecureStagingTests
     /// The internal <c>Create</c> overload takes <c>elevated</c> and <c>commonAppData</c>
     /// so the elevated branch is reachable from this unelevated test process — the only
     /// way to assert the refusal on a developer box or an unelevated runner, since the
-    /// real branch depends on a token this process does not have. Unelevated, the
-    /// directory this process creates is owned by this process, so the confirmation
-    /// fails: exactly the refusal case.
+    /// real branch depends on a token this process does not have.
+    /// </para>
+    /// <para>
+    /// <b>The refusal is provoked by something genuinely un-creatable on any host.</b> An
+    /// earlier version pointed at an ordinary empty scratch directory and relied on the
+    /// created child failing the administrator-only confirmation — true here, but false on
+    /// an <em>elevated</em> runner, where the child really would be administrator-owned and
+    /// staging must correctly proceed. That test could only pass in the world where
+    /// production is broken. This one denies
+    /// <see cref="FileSystemRights.CreateDirectories"/> to <c>Everyone</c> on the parent,
+    /// which stops the create for every caller at every privilege level.
     /// </para>
     /// <para>
     /// Pre-fix this path reported a degrade and handed back <c>%TEMP%</c>; the negative
@@ -351,32 +359,135 @@ public sealed class SecureStagingTests
     /// </para>
     /// </remarks>
     [WindowsFact("Windows ACL APIs")]
-    public void An_elevated_run_refuses_to_stage_when_the_directory_is_not_administrator_only()
+    public void An_elevated_run_refuses_to_stage_when_the_directory_cannot_be_created()
     {
         using var root = new TempDir();
-        var reported = new List<(string Message, bool IsError)>();
+        var locked = Path.Combine(root.Path, "locked");
+        DenyCreateDirectories(locked);
 
+        var reported = new List<(string Message, bool IsError)>();
         var create = () => SecureStaging.Create(
             "prereq",
             (m, e) => reported.Add((m, e)),
             fallbackRoot: null,
             elevated: true,
-            commonAppData: root.Path);
+            commonAppData: locked);
 
         create.Should()
             .Throw<StagingSecurityException>(
                 "an elevated process that stages a downloaded executable where an unprivileged process can " +
                 "also write it is handing that process an elevated launch — there is no weakened-but-useful " +
-                "version of that, so it refuses")
-            .WithMessage("*administrator-only writable*",
+                "version of that, so every way of failing to get an administrator-only directory refuses")
+            .WithMessage("*could not be created*",
                 "the thrown message must carry the cause, because a call site with no progress sink attached " +
                 "would otherwise lose it entirely");
 
         reported.Should().Contain(
             r => r.IsError && r.Message.Contains("REFUSED", StringComparison.Ordinal),
             "a refusal that says nothing is indistinguishable from an unrelated failure");
-        Directory.GetDirectories(root.Path).Should().BeEmpty(
-            "a directory that failed the confirmation is removed again — nothing was staged in it");
+        Directory.GetDirectories(locked).Should().BeEmpty("nothing was staged");
+    }
+
+    /// <summary>
+    /// The guard behind this lane's "no test writes to a real <c>%ProgramData%</c>"
+    /// claim, asserted through the <b>production</b> entry point — the same
+    /// <c>SecureStaging.Create(purpose, report, fallbackRoot)</c> that
+    /// <c>PrerequisiteRunner</c>, <c>UpdateRunner</c> and every <c>{staging_dir}</c>
+    /// resolution call.
+    /// </summary>
+    /// <remarks>
+    /// Unelevated this passes trivially. On an <b>elevated</b> runner — which CI is — it
+    /// fails the moment the assembly-wide floor in <c>TestAssemblySetup</c> is removed,
+    /// because staging would then correctly choose <c>%ProgramData%</c>. That is what
+    /// makes this a real guard rather than a restatement.
+    /// </remarks>
+    [Fact]
+    public void The_production_entry_point_never_stages_into_the_real_program_data_under_test()
+    {
+        var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+        using var root = new TempDir();
+
+        using var staging = SecureStaging.Create("prereq", (_, _) => { }, root.Path);
+
+        staging.Directory.Should().NotStartWith(
+            programData + Path.DirectorySeparatorChar,
+            "CI runs elevated, so without the assembly-wide floor every staging call in the suite would " +
+            "create a directory in the real machine-wide data root and launch binaries out of it");
+        staging.Directory.Should().StartWith(
+            root.Path, "the caller's own fallback root is still honoured — the floor only disables the " +
+            "elevated branch, it does not hijack where a test asked to stage");
+        staging.IsAdminOnly.Should().BeFalse("the elevated siting is exactly what the floor turns off");
+    }
+
+    /// <summary>
+    /// Staging must never delete anything it did not create. The specific composition that
+    /// made this a live defect: the native-runtime DLL cache lives beside staging under
+    /// <c>%ProgramData%</c> and its name starts with the same <c>sigil-</c> prefix, so a
+    /// revision that swept <c>sigil-*</c> siblings older than a day matched
+    /// <c>%ProgramData%\sigil-runtime</c> exactly — and could recursively delete the
+    /// directory the same elevated process was loading Skia and ANGLE from, mid-install.
+    /// </summary>
+    /// <remarks>
+    /// <b>This assertion is only sharp on an elevated runner.</b> The sweep it guards
+    /// against skipped candidates that failed <c>IsAdminOnlyWritable</c>, and an unelevated
+    /// process cannot create a directory that passes it — so unelevated this passes either
+    /// way, and it is CI, running elevated, that would actually have caught the deletion.
+    /// The fix itself is a removal: there is no sweep any more.
+    /// </remarks>
+    [WindowsFact("Windows ACL APIs")]
+    public void Staging_never_deletes_a_sibling_it_did_not_create()
+    {
+        using var root = new TempDir();
+
+        // The native-runtime cache, as it sits beside staging: same prefix, long-lived,
+        // holding a DLL the process may currently have mapped.
+        var runtimeCache = Path.Combine(root.Path, "sigil-runtime");
+        Directory.CreateDirectory(runtimeCache);
+        var loadedDll = Path.Combine(runtimeCache, "libSkiaSharp.dll");
+        File.WriteAllBytes(loadedDll, new byte[] { 1, 2, 3 });
+        Directory.SetCreationTimeUtc(runtimeCache, DateTime.UtcNow.AddDays(-30));
+
+        try
+        {
+            using var staging = SecureStaging.Create(
+                "stage", (_, _) => { }, fallbackRoot: null, elevated: true, commonAppData: root.Path);
+        }
+        catch (StagingSecurityException)
+        {
+            // Unelevated the confirmation cannot pass, so this is the expected outcome
+            // here. What matters either way is what survived the attempt.
+        }
+
+        Directory.Exists(runtimeCache).Should().BeTrue(
+            "resolving a staging directory must not remove a sibling — least of all the native-runtime " +
+            "cache the wizard loads Skia from");
+        File.ReadAllBytes(loadedDll).Should().Equal(
+            new byte[] { 1, 2, 3 }, "and certainly not the DLLs inside it");
+    }
+
+    /// <summary>
+    /// Create <paramref name="path"/> and deny <c>Everyone</c> the right to create
+    /// directories inside it, so a child cannot be created at any privilege level — Deny
+    /// beats Allow in the Windows access check, administrators included. Only that one
+    /// right is denied, so the directory itself stays deletable and <see cref="TempDir"/>
+    /// can still clean up.
+    /// </summary>
+    private static void DenyCreateDirectories(string path)
+    {
+        var security = new DirectorySecurity();
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        var everyone = new SecurityIdentifier(WellKnownSidType.WorldSid, null);
+        security.AddAccessRule(new FileSystemAccessRule(
+            everyone, FileSystemRights.FullControl, InheritanceFlags.None,
+            PropagationFlags.None, AccessControlType.Allow));
+        security.AddAccessRule(new FileSystemAccessRule(
+            everyone, FileSystemRights.CreateDirectories, InheritanceFlags.None,
+            PropagationFlags.None, AccessControlType.Deny));
+        security.CreateDirectory(path);
+
+        var probe = () => Directory.CreateDirectory(Path.Combine(path, "probe"));
+        probe.Should().Throw<UnauthorizedAccessException>(
+            "precondition: the parent must genuinely refuse child creation, or this test proves nothing");
     }
 
     /// <summary>

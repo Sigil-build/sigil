@@ -261,8 +261,11 @@ public static class PrerequisiteRunner
         SecureStaging staging;
         try
         {
-            // The staging report carries the "an elevated run degraded to a user-writable
-            // root" line, so it must reach the same progress sink as everything else here.
+            // An ELEVATED run that cannot obtain an administrator-only staging directory
+            // REFUSES: SecureStaging throws rather than degrading to a user-writable root,
+            // reporting the cause on this sink first — so it must reach the same progress
+            // channel as everything else here. The catch below turns the refusal into this
+            // method's ordinary typed failure.
             staging = SecureStaging.Create(
                 "prereq", (msg, isErr) => Report(progress, ctx, msg, isErr));
         }

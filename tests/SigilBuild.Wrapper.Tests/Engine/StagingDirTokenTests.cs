@@ -25,10 +25,17 @@ using Xunit;
 /// closed after hashing and never looked at again (so it could be <b>swapped</b>).
 /// </para>
 /// <para>
-/// These tests are unelevated, like the whole suite. What that means for
-/// <c>{staging_dir}</c> is that the directory is private-but-user-writable rather than
-/// administrator-only; the swap protection asserted here does not depend on that, which
-/// is the point of doing the re-verification from a held handle at all.
+/// <b>Every test here pins the staging siting to a scratch directory</b> via
+/// <c>SecureStaging.UseSitingForTesting</c>. Without that, resolving
+/// <c>{staging_dir}</c> goes through the production path, which on an <em>elevated</em>
+/// host — and CI is elevated — creates directories in the real <c>%ProgramData%</c> and
+/// executes binaries out of them. No test in this file touches a real
+/// <c>%ProgramData%</c> or <c>%TEMP%</c> path.
+/// </para>
+/// <para>
+/// The siting is pinned unelevated, so the directory is private-but-user-writable rather
+/// than administrator-only. The swap protection asserted here does not depend on that,
+/// which is the point of doing the re-verification from a held handle at all.
 /// </para>
 /// </remarks>
 public sealed class StagingDirTokenTests
@@ -44,6 +51,8 @@ public sealed class StagingDirTokenTests
     [Fact]
     public void Staging_dir_resolves_to_a_directory_that_exists_and_is_freshly_named()
     {
+        using var scratch = new TempDir();
+        using var siting = SecureStaging.UseSitingForTesting(scratch.Path);
         var ctx = NewContext();
         try
         {
@@ -53,9 +62,8 @@ public sealed class StagingDirTokenTests
             Directory.Exists(directory).Should().BeTrue(
                 "the token resolves by CREATING the private directory — an http_download into a path whose " +
                 "parent does not exist would only be papered over by the step's own mkdir");
-            Path.GetFileName(directory).Should().StartWith("sigil-stage-");
-            Path.GetFileName(directory).Length.Should().BeGreaterThan(
-                "sigil-stage-".Length + 16,
+            Path.GetFileName(directory).Should().MatchRegex(
+                "^sigil-stage-[0-9a-f]{32}$",
                 "the per-run component is a GUID: unguessable is the whole difference from {temp_dir}");
             Path.GetFileName(resolved).Should().Be("Acme-3.2.0-x64-Setup.exe");
         }
@@ -68,6 +76,8 @@ public sealed class StagingDirTokenTests
     [Fact]
     public void Staging_dir_is_stable_within_a_run_and_different_between_runs()
     {
+        using var scratch = new TempDir();
+        using var siting = SecureStaging.UseSitingForTesting(scratch.Path);
         var first = NewContext();
         var second = NewContext();
         try
@@ -90,21 +100,25 @@ public sealed class StagingDirTokenTests
     }
 
     [Fact]
-    public void Staging_dir_is_not_the_shared_temp_root_the_old_token_resolved_to()
+    public void Staging_dir_is_a_fresh_child_of_its_root_not_the_shared_root_itself()
     {
+        using var scratch = new TempDir();
+        using var siting = SecureStaging.UseSitingForTesting(scratch.Path);
         var ctx = NewContext();
         try
         {
-            var tempRoot = ctx.ResolvePath("{temp_dir}");
             var stagingDir = ctx.ResolvePath("{staging_dir}");
 
             stagingDir.Should().NotBe(
-                tempRoot,
-                "{temp_dir} put every copy of the stub's download at the same predictable path in a directory " +
-                "every process of this user can write");
+                scratch.Path,
+                "{temp_dir} put every copy of the stub's download at the same predictable path in a root " +
+                "every process of this user can write; the replacement must not do the same");
             Path.GetDirectoryName(stagingDir).Should().Be(
-                tempRoot, "unelevated there is nowhere better than %TEMP% to put it — the privacy comes from " +
-                "the fresh GUID directory and its protected DACL, not from the root");
+                scratch.Path,
+                "the privacy comes from the fresh GUID directory and its protected DACL, not from the root — " +
+                "so it is a DIRECT child of whichever root the siting chose");
+            ctx.ResolvePath("{temp_dir}").Should().NotBe(
+                stagingDir, "the two tokens must never resolve to the same place");
         }
         finally
         {
@@ -115,6 +129,8 @@ public sealed class StagingDirTokenTests
     [Fact]
     public void Release_removes_the_staging_directory()
     {
+        using var scratch = new TempDir();
+        using var siting = SecureStaging.UseSitingForTesting(scratch.Path);
         var ctx = NewContext();
         var directory = ctx.ResolvePath("{staging_dir}");
         File.WriteAllBytes(Path.Combine(directory, "Setup.exe"), new byte[] { 1, 2, 3 });

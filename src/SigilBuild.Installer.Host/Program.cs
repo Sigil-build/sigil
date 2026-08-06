@@ -157,7 +157,15 @@ public static partial class Program
                         }
                     });
             }
-            catch (NativeRuntimeTrustException ex)
+            // IOException / UnauthorizedAccessException are caught alongside the typed
+            // refusal on purpose. This call runs BEFORE the AppDomain.UnhandledException
+            // backstop installed below, so anything escaping here kills the wizard with no
+            // window, no log line and no exit code anyone can act on — and a non-admin can
+            // provoke exactly that by leaving something un-hardenable where the cache goes.
+            // The bootstrap falls back rather than throwing for that case; this is the belt
+            // to its braces, so a cache problem is always a diagnosed exit.
+            catch (Exception ex) when (
+                ex is NativeRuntimeTrustException or IOException or UnauthorizedAccessException)
             {
                 InstallerLog.Error("native runtime bootstrap refused to run", ex);
                 AttachParentConsole();

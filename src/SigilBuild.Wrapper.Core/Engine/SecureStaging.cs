@@ -104,13 +104,44 @@ using System.Security.Principal;
 internal sealed class SecureStaging : IDisposable
 {
     /// <summary>
-    /// How long an abandoned staging directory is left alone before a later elevated run
-    /// sweeps it. Generous on purpose: a concurrent install that is mid-download must
-    /// never have its directory swept out from under it, and no install runs for a day.
+    /// Test seam: forces the siting <see cref="Create(string, Action{string, bool}, string?)"/>
+    /// would otherwise read from the environment. <see cref="AsyncLocal{T}"/> rather than a
+    /// plain static so the override is scoped to the test that set it and flows into the
+    /// engine's async work — xUnit runs collections in parallel, and a global would leak
+    /// across them.
     /// </summary>
-    private static readonly TimeSpan OrphanAge = TimeSpan.FromHours(24);
+    /// <remarks>
+    /// This exists because the alternative is unacceptable: without it, any test that
+    /// resolves <c>{staging_dir}</c> writes into the real <c>%ProgramData%</c> whenever the
+    /// process happens to be elevated — which CI is. Same shape and same rationale as
+    /// <c>SigilHttpClient.UseForTesting</c>.
+    /// </remarks>
+    private static readonly AsyncLocal<Siting?> SitingOverride = new();
+
+    /// <summary>
+    /// Process-wide test floor: when set, the machine-wide (elevated) siting is never
+    /// taken, whatever the process's real token says. Set once per test assembly.
+    /// </summary>
+    /// <remarks>
+    /// A per-test opt-in is not enough on its own. Staging is reached transitively — the
+    /// prerequisite runner, the update runner and any <c>{staging_dir}</c> resolution all
+    /// funnel here — so a test that never mentions <c>SecureStaging</c> can still put a
+    /// directory in the real <c>%ProgramData%</c> and launch a binary out of it the moment
+    /// the runner happens to be elevated, which on CI it always is. Making the safe
+    /// answer the assembly-wide default means a future test cannot reintroduce that by
+    /// omission. Only the elevated <em>branch</em> is disabled; a caller's own fallback
+    /// root is untouched, so tests that assert where they staged still see their own root.
+    /// </remarks>
+    private static bool _neverElevatedForTesting;
 
     private bool _disposed;
+
+    /// <summary>
+    /// The environment facts that decide where a staging directory goes. <c>FallbackRoot</c>
+    /// is test-only and, when set, replaces the caller's own fallback argument so a test can
+    /// keep every byte it stages inside a scratch directory.
+    /// </summary>
+    internal readonly record struct Siting(bool Elevated, string CommonAppData, string? FallbackRoot);
 
     private SecureStaging(string directory, bool isAdminOnly)
     {
@@ -157,13 +188,63 @@ internal sealed class SecureStaging : IDisposable
     /// <see cref="Path.GetTempPath"/>.
     /// </param>
     public static SecureStaging Create(
-        string purpose, Action<string, bool> report, string? fallbackRoot = null) =>
-        Create(
+        string purpose, Action<string, bool> report, string? fallbackRoot = null)
+    {
+        if (SitingOverride.Value is { } siting)
+        {
+            return Create(
+                purpose, report, siting.FallbackRoot ?? fallbackRoot, siting.Elevated, siting.CommonAppData);
+        }
+
+        return Create(
             purpose,
             report,
             fallbackRoot,
-            elevated: OperatingSystem.IsWindows() && Elevation.IsProcessElevated(),
+            elevated: !_neverElevatedForTesting
+                      && OperatingSystem.IsWindows()
+                      && Elevation.IsProcessElevated(),
             commonAppData: Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData));
+    }
+
+    /// <summary>
+    /// Test seam (internal): for the rest of this process, never take the machine-wide
+    /// (elevated) siting — so nothing a test does, directly or transitively, can create a
+    /// directory in the real <c>%ProgramData%</c> or launch a binary out of one. Called
+    /// once from each test assembly's bootstrap. Not for production use.
+    /// </summary>
+    internal static void NeverStageElevatedForTesting() => _neverElevatedForTesting = true;
+
+    /// <summary>
+    /// Test seam (internal): make every <see cref="Create(string, Action{string, bool}, string?)"/>
+    /// on this async flow stage inside <paramref name="scratchRoot"/> instead of reading the
+    /// real environment, until the returned scope is disposed. Not for production use.
+    /// </summary>
+    /// <remarks>
+    /// This is a hard requirement, not a convenience. Without it a test that resolves
+    /// <c>{staging_dir}</c> through the production path writes into the real
+    /// <c>%ProgramData%</c> on any elevated host — and CI runs elevated — so it would
+    /// create directories there, execute binaries out of them, and leave them behind.
+    /// Every test that reaches staging wraps itself in this, including the ones that go
+    /// through <c>InstallSession</c>, which builds its own context and offers no seam.
+    /// <paramref name="elevated"/> defaults to <c>false</c> so a test cannot ask for the
+    /// administrator-only siting by accident.
+    /// </remarks>
+    internal static IDisposable UseSitingForTesting(string scratchRoot, bool elevated = false)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(scratchRoot);
+        var previous = SitingOverride.Value;
+        SitingOverride.Value = new Siting(elevated, scratchRoot, scratchRoot);
+        return new RestoreSiting(previous);
+    }
+
+    private sealed class RestoreSiting : IDisposable
+    {
+        private readonly Siting? _previous;
+
+        public RestoreSiting(Siting? previous) => _previous = previous;
+
+        public void Dispose() => SitingOverride.Value = _previous;
+    }
 
     /// <summary>
     /// The creation itself, with the two environment facts it depends on passed in so
@@ -189,36 +270,51 @@ internal sealed class SecureStaging : IDisposable
         // (CI)(WD,AD,WEA,WA) but not DC.
         var directory = Path.Combine(root, $"sigil-{Sanitize(purpose)}-{Guid.NewGuid():N}");
 
-        if (OperatingSystem.IsWindows())
-        {
-            if (wantAdminOnly)
-            {
-                SweepOrphans(root, report);
-            }
-
-            CreatePrivateDirectory(directory, wantAdminOnly);
-
-            // Confirmed on the directory that will actually hold the download, with the
-            // one frozen predicate — not inferred from the root. An elevated process
-            // that somehow produced a directory it does not exclusively own removes it
-            // and refuses, rather than staging an executable there.
-            if (wantAdminOnly && !StateDirectorySecurity.IsAdminOnlyWritable(directory))
-            {
-                TryRemove(directory);
-                Refuse(report, $"'{directory}' could not be made administrator-only writable");
-                throw new StagingSecurityException(
-                    $"'{directory}' could not be made administrator-only writable, so this elevated process " +
-                    "will not stage a downloaded executable there");
-            }
-        }
-        else
+        if (!OperatingSystem.IsWindows())
         {
             // Off Windows there are no ACLs to apply; the wrapper only ships on
             // Windows, but this assembly is built and unit-tested cross-platform.
             System.IO.Directory.CreateDirectory(directory);
+            return new SecureStaging(directory, wantAdminOnly);
         }
 
-        return new SecureStaging(directory, wantAdminOnly);
+        if (!wantAdminOnly)
+        {
+            CreatePrivateDirectory(directory, adminOnly: false);
+            return new SecureStaging(directory, false);
+        }
+
+        // Elevated from here down. Every way this can fail — the create throwing, or the
+        // created directory not confirming — ends in the SAME typed refusal, so no caller
+        // has to distinguish "could not" from "did not" and no raw IOException escapes as
+        // an unhandled crash.
+        try
+        {
+            CreatePrivateDirectory(directory, adminOnly: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Refuse(report, $"'{directory}' could not be created — {ex.GetType().Name}: {ex.Message}");
+            throw new StagingSecurityException(
+                $"'{directory}' could not be created, so this elevated process will not stage a downloaded " +
+                $"executable ({ex.GetType().Name}: {ex.Message})",
+                ex);
+        }
+
+        // Confirmed on the directory that will actually hold the download, with the one
+        // frozen predicate — not inferred from the root. An elevated process that somehow
+        // produced a directory it does not exclusively own removes it and refuses, rather
+        // than staging an executable there.
+        if (!StateDirectorySecurity.IsAdminOnlyWritable(directory))
+        {
+            TryRemove(directory);
+            Refuse(report, $"'{directory}' could not be made administrator-only writable");
+            throw new StagingSecurityException(
+                $"'{directory}' could not be made administrator-only writable, so this elevated process " +
+                "will not stage a downloaded executable there");
+        }
+
+        return new SecureStaging(directory, true);
     }
 
     /// <summary>
@@ -395,58 +491,23 @@ internal sealed class SecureStaging : IDisposable
         return (commonAppData, true);
     }
 
-    /// <summary>
-    /// Best-effort removal of staging directories abandoned by earlier runs — a crash, a
-    /// kill, or a staged file still held open at <see cref="Dispose"/> time all leave one
-    /// behind, and <c>%ProgramData%</c> has no OS sweeper the way <c>%TEMP%</c> does.
-    /// </summary>
-    /// <remarks>
-    /// Age-guarded at <see cref="OrphanAge"/>, which is what makes it safe: a
-    /// <em>concurrent</em> installer's staging directory is minutes old at most, so it is
-    /// never a candidate, and deleting one out from under a download in progress is
-    /// exactly the failure this whole type exists to prevent. Anything still locked
-    /// (loaded image, running child) fails to delete and is simply left for the next run,
-    /// so accumulation is bounded by "orphans younger than a day plus those still in
-    /// use" rather than growing without limit.
-    /// </remarks>
-    [SupportedOSPlatform("windows")]
-    private static void SweepOrphans(string root, Action<string, bool> report)
-    {
-#pragma warning disable CA1031 // A sweep is housekeeping: nothing it hits may fail an install.
-        try
-        {
-            var cutoff = DateTime.UtcNow - OrphanAge;
-            foreach (var candidate in System.IO.Directory.EnumerateDirectories(root, "sigil-*"))
-            {
-                try
-                {
-                    if (System.IO.Directory.GetCreationTimeUtc(candidate) > cutoff)
-                    {
-                        continue;
-                    }
-
-                    // Only ever remove something this component owns: an administrator-only
-                    // sigil-* directory. Anything else sharing the prefix is left alone.
-                    if (!StateDirectorySecurity.IsAdminOnlyWritable(candidate))
-                    {
-                        continue;
-                    }
-
-                    System.IO.Directory.Delete(candidate, recursive: true);
-                    report($"staging: removed the abandoned staging directory '{candidate}'", false);
-                }
-                catch
-                {
-                    // Locked or vanished — the next run tries again.
-                }
-            }
-        }
-        catch
-        {
-            // Cannot enumerate: nothing to do, and never a reason to fail an install.
-        }
-#pragma warning restore CA1031
-    }
+    // NOTE — there is deliberately NO orphan sweep here, and adding one back needs more
+    // care than it looks. A previous revision swept `sigil-*` siblings older than 24 h.
+    // Two independent defects came out of it:
+    //
+    //   * the glob also matched %ProgramData%\sigil-runtime, the native-runtime DLL cache
+    //     — so resolving {staging_dir} could recursively delete the very directory the
+    //     same process was loading Skia and ANGLE from, mid-install;
+    //   * both guards (creation time, ACL) were read THROUGH the candidate path, so a
+    //     junction planted by a user resolved to an admin-owned target and passed them,
+    //     and the age guard is attacker-settable anyway.
+    //
+    // What it bought was hygiene, not a security property: without it, abandoned staging
+    // directories accumulate in %ProgramData% after a crash or a kill. That is a
+    // housekeeping cost, and a far better trade than a delete loop next to a directory
+    // the process is executing from. If it ever comes back it must match the exact
+    // per-run shape (its own prefix plus a 32-hex GUID), never a bare `sigil-*`, must
+    // refuse to follow reparse points, and must be tested.
 
     /// <summary>Best-effort removal of a directory this call just created and rejected.</summary>
     private static void TryRemove(string directory)

@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using SigilBuild.Wrapper.Core.Localization;
+using SigilBuild.Wrapper.Engine;
 using Xunit;
 
 // P9 (Task 14): SessionLanguage (SigilBuild.Wrapper.Core.Localization) is
@@ -27,4 +28,20 @@ internal static class TestAssemblySetup
     [ModuleInitializer]
     [SuppressMessage("Usage", "CA2255", Justification = "Test-assembly bootstrap: establishes the SessionLanguage default once at load, mirroring the Release-mode fallback so Debug test runs behave the same.")]
     internal static void InitializeSessionLanguage() => SessionLanguage.Set(Lang.En);
+
+    /// <summary>
+    /// Never let this assembly take <c>SecureStaging</c>'s machine-wide (elevated)
+    /// siting, whatever token the test host happens to hold.
+    /// </summary>
+    /// <remarks>
+    /// CI runs <b>elevated</b>. Staging is reached transitively — the prerequisite runner,
+    /// the update runner, and every <c>{staging_dir}</c> resolution funnel into it — so
+    /// without this floor a test that never mentions <c>SecureStaging</c> would create
+    /// directories in the real <c>%ProgramData%</c> and launch binaries out of them.
+    /// Individual tests still pin their own scratch root where they assert on the path;
+    /// this makes the safe answer the default so a future test cannot lose it by omission.
+    /// </remarks>
+    [ModuleInitializer]
+    [SuppressMessage("Usage", "CA2255", Justification = "Test-assembly bootstrap: pins staging away from the real %ProgramData% before any test runs.")]
+    internal static void KeepStagingOutOfProgramData() => SecureStaging.NeverStageElevatedForTesting();
 }

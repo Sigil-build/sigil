@@ -168,9 +168,17 @@ public sealed class HttpDownloadIntegrationTests
         using var _ = TrustServer(server);
         using var tmp = new TempDir();
 
+        // Pin the staging siting to a scratch directory. Without this, {staging_dir}
+        // resolves through the production path, and on an ELEVATED host — which CI is —
+        // this test would create a directory in the real %ProgramData% and execute a copy
+        // of cmd.exe out of it.
+        using var scratch = new TempDir();
+        using var siting = SecureStaging.UseSitingForTesting(scratch.Path);
+
         var ctx = new StepContext(new Dictionary<string, object?>(StringComparer.Ordinal));
         var stagingDir = ctx.ResolvePath("{staging_dir}");
         var dest = Path.Combine(stagingDir, "Acme-3.2.0-x64-Setup.exe");
+        stagingDir.Should().StartWith(scratch.Path, "no test may stage into a real %ProgramData% path");
 
         // The attacker's copy carries the SAME file name, so copying it into the staging
         // directory overwrites exactly the file that is about to be launched.
@@ -217,8 +225,15 @@ public sealed class HttpDownloadIntegrationTests
         using var server = new TlsHttpServer((_, _) => (200, genuine, 0));
         using var _ = TrustServer(server);
 
+        // See the test above: the siting is pinned so this never stages into, or executes
+        // from, a real %ProgramData% path on an elevated runner.
+        using var scratch = new TempDir();
+        using var siting = SecureStaging.UseSitingForTesting(scratch.Path);
+
         var ctx = new StepContext(new Dictionary<string, object?>(StringComparer.Ordinal));
-        var dest = Path.Combine(ctx.ResolvePath("{staging_dir}"), "Acme-3.2.0-x64-Setup.exe");
+        var stagingDir = ctx.ResolvePath("{staging_dir}");
+        stagingDir.Should().StartWith(scratch.Path, "no test may stage into a real %ProgramData% path");
+        var dest = Path.Combine(stagingDir, "Acme-3.2.0-x64-Setup.exe");
 
         var result = await new InstallEngine().RunAsync(
             new InstallStep[]

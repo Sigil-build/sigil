@@ -188,11 +188,14 @@ public static partial class NativeRuntimeBootstrap
     /// never <c>%ProgramData%\Sigil</c>), so a pre-created one is <em>repaired</em> —
     /// <see cref="StateDirectorySecurity.CreateHardened"/> re-applies the protected DACL
     /// and hands ownership to <c>BUILTIN\Administrators</c>, which an elevated caller
-    /// can do — and the run continues. Nothing an unprivileged user can create makes
-    /// this refuse; only a genuinely broken or hostile environment does. The parent
-    /// <c>%ProgramData%</c> is deliberately <b>not</b> required to be administrator-only:
-    /// it grants <c>BUILTIN\Users</c> <c>(CI)(WD,AD)</c> but not <c>DC</c>, so a
-    /// non-administrator can add siblings and can never delete or replace ours.
+    /// can do — and the run continues. A squat that cannot even be repaired (a
+    /// <em>file</em> at that path, an owner-pinned deny ACE) costs the run its shared
+    /// cache and nothing else: <c>EstablishAdminOnlyRoot</c> falls back to a per-run GUID
+    /// directory beside it. Nothing an unprivileged user can create makes this refuse.
+    /// The parent <c>%ProgramData%</c> is deliberately <b>not</b> required to be
+    /// administrator-only: it grants <c>BUILTIN\Users</c> <c>(CI)(WD,AD)</c> but not
+    /// <c>DC</c>, so a non-administrator can add siblings and can never delete or replace
+    /// ours.
     /// </para>
     /// </remarks>
     public static string PrepareCacheDirectory(
@@ -202,13 +205,13 @@ public static partial class NativeRuntimeBootstrap
         ArgumentException.ThrowIfNullOrEmpty(cacheRoot);
 
         var root = Path.GetFullPath(cacheRoot);
-        var targetDir = Path.Combine(root, ArchiveKey(archiveBytes));
 
         if (requireAdminOnlyRoot)
         {
             if (OperatingSystem.IsWindows())
             {
-                EstablishAdminOnlyRoot(root);
+                // May hand back a DIFFERENT root than the one asked for — see the method.
+                root = EstablishAdminOnlyRoot(root, report);
             }
             else
             {
@@ -217,6 +220,8 @@ public static partial class NativeRuntimeBootstrap
                     $"so '{root}' cannot be established");
             }
         }
+
+        var targetDir = Path.Combine(root, ArchiveKey(archiveBytes));
 
         // The marker is a fast path and nothing more: it is consulted only alongside the
         // ACL check and a full content comparison, never instead of them.
@@ -270,39 +275,114 @@ public static partial class NativeRuntimeBootstrap
         || (OperatingSystem.IsWindows() && StateDirectorySecurity.IsAdminOnlyWritable(directory));
 
     /// <summary>
-    /// Establish <paramref name="cacheRoot"/> (<c>%ProgramData%\sigil-runtime</c>) as an
-    /// administrator-only directory, or throw.
+    /// Establish an administrator-only root to extract into, and return it: the shared
+    /// content-keyed <paramref name="cacheRoot"/> (<c>%ProgramData%\sigil-runtime</c>) when
+    /// it can be had, otherwise a fresh per-run GUID directory beside it.
     /// </summary>
     /// <remarks>
     /// <para>
     /// <c>cacheRoot</c> is <b>this component's own</b> directory, so a pre-existing
     /// permissive one is <em>repaired</em> rather than refused:
     /// <see cref="StateDirectorySecurity.CreateHardened"/> re-applies the protected DACL
-    /// and hands ownership to <c>BUILTIN\Administrators</c>. That is what keeps a
-    /// non-administrator from turning this refusal into a denial of service by simply
-    /// creating the directory first. It is also why the root deliberately does not live
-    /// under <c>%ProgramData%\Sigil</c>: that one belongs to the install-state store and
-    /// repairing it as a side effect of extracting native DLLs would be far too broad.
+    /// and hands ownership to <c>BUILTIN\Administrators</c>. That is why the root
+    /// deliberately does not live under <c>%ProgramData%\Sigil</c>, which belongs to the
+    /// install-state store and must not be repaired from here.
     /// </para>
     /// <para>
-    /// The <b>parent</b> is not checked, on purpose. <c>%ProgramData%</c> grants
-    /// <c>BUILTIN\Users</c> <c>(CI)(WD,AD,WEA,WA)</c> — create-child — but not
-    /// <c>DC</c> (delete-child), so a non-administrator can add siblings and can neither
-    /// delete nor replace a directory it does not own. Requiring the parent to be
-    /// administrator-only would fail for <c>%ProgramData%</c> itself and refuse every
-    /// legitimate elevated install.
+    /// <b>Why a shared cache failure must not be fatal.</b> The root's name has to be
+    /// stable for it to work as a cache, so it stays pre-creatable — and a squatter does
+    /// not have to make it merely permissive. Creating a <em>file</em> at that path, or a
+    /// directory with an owner-pinned deny ACE, makes <c>CreateHardened</c> throw. If that
+    /// aborted the run, one <c>New-Item</c> from any non-administrator would stop every
+    /// elevated GUI install. So the fallback is a per-run GUID directory: unguessable,
+    /// therefore un-squattable, and undeletable by a non-administrator once created —
+    /// <c>%ProgramData%</c> grants <c>BUILTIN\Users</c> <c>(CI)(WD,AD,WEA,WA)</c>,
+    /// create-child, but not <c>DC</c>. The attacker can cost the install its cache; it
+    /// cannot cost it the install. The security floor is untouched: the fallback is
+    /// created hardened and confirmed by the same predicate, and if <em>it</em> cannot be
+    /// established the run still refuses rather than extracting somewhere writable.
+    /// </para>
+    /// <para>
+    /// The <b>parent</b> is not checked, on purpose: <c>%ProgramData%</c> is never
+    /// administrator-only, so requiring it would refuse every legitimate elevated install.
     /// </para>
     /// </remarks>
     [SupportedOSPlatform("windows")]
-    private static void EstablishAdminOnlyRoot(string cacheRoot)
+    private static string EstablishAdminOnlyRoot(string cacheRoot, Action<string, bool>? report)
     {
-        StateDirectorySecurity.CreateHardened(cacheRoot);
-        if (!StateDirectorySecurity.IsAdminOnlyWritable(cacheRoot))
+        if (TryEstablish(cacheRoot, out var failure))
         {
-            throw new NativeRuntimeTrustException(
-                $"'{cacheRoot}' could not be made administrator-only writable; refusing to extract the " +
-                "native runtime there");
+            return cacheRoot;
         }
+
+        // Losing the shared cache means re-extracting ~18 MB on this run and leaving the
+        // directory behind, since its DLLs stay loaded for the process's lifetime. Both
+        // are costs worth paying to keep the install running.
+        var parent = Path.GetDirectoryName(cacheRoot);
+        var perRun = Path.Combine(
+            string.IsNullOrEmpty(parent) ? cacheRoot : parent,
+            $"sigil-runtime-{Guid.NewGuid():N}");
+
+        report?.Invoke(
+            $"native runtime: '{cacheRoot}' could not be established as an administrator-only cache " +
+            $"({failure}); extracting to the private directory '{perRun}' for this run instead",
+            true);
+
+        if (TryEstablish(perRun, out var fallbackFailure))
+        {
+            return perRun;
+        }
+
+        // Nothing was extracted into it, and its name is never reused, so leaving it would
+        // be pure litter.
+#pragma warning disable CA1031 // Cleanup of our own failed creation; the refusal below is what matters.
+        try
+        {
+            if (Directory.Exists(perRun))
+            {
+                Directory.Delete(perRun, recursive: true);
+            }
+        }
+        catch
+        {
+            // Untidy, never unsafe.
+        }
+#pragma warning restore CA1031
+
+        throw new NativeRuntimeTrustException(
+            $"neither '{cacheRoot}' ({failure}) nor '{perRun}' ({fallbackFailure}) could be made " +
+            "administrator-only writable; refusing to extract the native runtime into a directory a " +
+            "non-administrator could rewrite");
+    }
+
+    /// <summary>
+    /// Create <paramref name="directory"/> hardened and confirm it is administrator-only.
+    /// Any I/O or access failure is reported through <paramref name="failure"/> rather
+    /// than thrown, so the caller can fall back instead of aborting the install.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private static bool TryEstablish(string directory, out string failure)
+    {
+#pragma warning disable CA1031 // The caller's whole job is to survive this; the cause travels out in `failure`.
+        try
+        {
+            StateDirectorySecurity.CreateHardened(directory);
+        }
+        catch (Exception ex)
+        {
+            failure = $"{ex.GetType().Name}: {ex.Message}";
+            return false;
+        }
+#pragma warning restore CA1031
+
+        if (!StateDirectorySecurity.IsAdminOnlyWritable(directory))
+        {
+            failure = "it is not administrator-only writable";
+            return false;
+        }
+
+        failure = string.Empty;
+        return true;
     }
 
     /// <summary>

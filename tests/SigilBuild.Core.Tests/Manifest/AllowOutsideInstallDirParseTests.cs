@@ -34,6 +34,7 @@ public class AllowOutsideInstallDirParseTests
 
     [Theory]
     [InlineData("{ id: s, type: file_copy, from: a, to: b, allow_outside_install_dir: true }")]
+    [InlineData("{ id: s, type: directory_create, path: a, allow_outside_install_dir: true }")]
     [InlineData("{ id: s, type: file_delete, path: a, allow_outside_install_dir: true }")]
     [InlineData("{ id: s, type: directory_delete, path: a, allow_outside_install_dir: true }")]
     [InlineData("{ id: s, type: http_download, url: 'https://e.com/f', dest: d, sha256: 'aa', allow_outside_install_dir: true }")]
@@ -53,7 +54,8 @@ public class AllowOutsideInstallDirParseTests
 
     [Theory]
     [InlineData("{ id: s, type: registry_write, hive: HKCU, key: k, name: n, value: v, allow_outside_install_dir: true }")]
-    [InlineData("{ id: s, type: directory_create, path: a, allow_outside_install_dir: true }")]
+    [InlineData("{ id: s, type: env_set, name: N, value: v, allow_outside_install_dir: true }")]
+    [InlineData("{ id: s, type: run_program, program: p, allow_outside_install_dir: true }")]
     public void A_step_type_with_no_contained_destination_reports_it_as_unrecognized(string step)
     {
         // Silently ignoring it would let a manifest believe it had relaxed
@@ -61,6 +63,27 @@ public class AllowOutsideInstallDirParseTests
         var result = ManifestParser.Parse(Yaml(step), "s.yaml");
 
         result.Diagnostics.Should().Contain(d => d.Code == DiagnosticCodes.StepParameterMismatch);
+    }
+
+    [Theory]
+    [InlineData("{ id: s, type: registry_write, hive: HKCU, key: k, name: n, value: v, allow_outside_install_dir: true }")]
+    [InlineData("{ id: s, type: env_set, name: N, value: v, allow_outside_install_dir: true }")]
+    [InlineData("{ id: s, type: run_program, program: p, allow_outside_install_dir: true }")]
+    [InlineData("{ id: s, type: scheduled_task_create, name: T, program: p, trigger: logon, allow_outside_install_dir: true }")]
+    [InlineData("{ id: s, type: service_install, name: N, binary_path: p, allow_outside_install_dir: true }")]
+    [InlineData("{ id: s, type: com_register, path: p, allow_outside_install_dir: true }")]
+    [InlineData("{ id: s, type: firewall_rule, name: N, direction: in, action: allow, allow_outside_install_dir: true }")]
+    public void AllowOutsideInstallDirIsOnlyAcceptedWhereItApplies(string step)
+    {
+        // SIG0231 tells the author the unrecognized field is IGNORED. It must
+        // therefore actually BE ignored: applying it anyway would make the
+        // diagnostic lie, and would become a silent containment bypass the moment
+        // any of these step types grew a destination guard.
+        var result = ManifestParser.Parse(Yaml(step), "s.yaml");
+
+        result.Diagnostics.Should().Contain(d => d.Code == DiagnosticCodes.StepParameterMismatch);
+        result.Manifest!.InstallSteps!.Single().AllowOutsideInstallDir.Should().BeFalse(
+            "the diagnostic says the field is ignored, so it must not have been applied");
     }
 
     [Fact]
@@ -75,5 +98,6 @@ public class AllowOutsideInstallDirParseTests
             "s.yaml");
 
         result.Diagnostics.Should().Contain(d => d.Code == DiagnosticCodes.StepParameterMismatch);
+        result.Manifest!.InstallSteps!.Single().AllowOutsideInstallDir.Should().BeFalse();
     }
 }

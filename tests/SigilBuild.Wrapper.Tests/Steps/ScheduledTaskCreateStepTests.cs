@@ -103,9 +103,15 @@ public class ScheduledTaskCreateStepTests
         // the safer local assertion — the old shape issued a real
         // `schtasks /Create … /RU SYSTEM` that only failed because this sandbox is
         // unelevated, and would have created a live SYSTEM task on an elevated
-        // runner. Journal-before-mutation ordering is still asserted locally by
-        // FirewallRuleStepTests.Journal_records_DeleteFirewallRule_before_attempting_the_add,
-        // and end-to-end on the CI VM by ScheduledTaskCreateInstallTests.
+        // runner.
+        //
+        // What is asserted locally now is the invariant that replaced it: this
+        // step journals NOTHING on any path that does not reach schtasks.exe —
+        // here, in every case in PrivilegedStepContainmentTests, and in
+        // StepValueInjectionTests' quote refusal. Journal-BEFORE-exec ordering on
+        // the success path is verified end-to-end on the CI VM by
+        // ScheduledTaskCreateInstallTests, which is the only place it can be
+        // observed without creating a real SYSTEM task.
         if (!OperatingSystem.IsWindows())
         {
             return;

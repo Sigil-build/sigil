@@ -50,7 +50,12 @@ public sealed class WebInstallerStubCompletionTests
         Parameters: Array.Empty<ParameterDefinition>(),
         InstallSteps: new InstallStep[]
         {
-            new InstallStep.DirectoryCreate("mk", markerDir, When: null, OnFailure.Fail),
+            // R16: the marker directory is in an OS temp directory, never
+            // install_dir, so the out-of-tree write is declared with the
+            // production per-step opt-out. Under test here is the delegating
+            // stub's completion bookkeeping.
+            new InstallStep.DirectoryCreate("mk", markerDir, When: null, OnFailure.Fail)
+                { AllowOutsideInstallDir = true },
         },
         PreInstall: Array.Empty<InstallStep>(),
         PostInstall: Array.Empty<InstallStep>(),

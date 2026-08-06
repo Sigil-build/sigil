@@ -1,0 +1,105 @@
+# R16 (S2.4): schema fixture for the `allow_outside_install_dir` per-step
+# destination-containment opt-out. The property is declared on the step shape in
+# EVERY place that shape is duplicated in the schema — install_steps,
+# pre_install, post_install, uninstall, the `InstallStep`/`InstallStepList`
+# definitions — so this file exercises each of those positions rather than only
+# install_steps.
+#
+# Whether the value is HONOURED is a parser concern, not a schema one: only the
+# eight step types with a contained destination accept the key, and
+# SigilBuild.Core.Tests/Manifest/AllowOutsideInstallDirParseTests covers both the
+# acceptance and the SIG0231 rejection. This file only proves the JSON Schema
+# shape.
+spec: v1.0
+
+app:
+  id: com.example.App
+  name: App
+  version: 0.1.0
+  publisher: P
+
+build:
+  source: ./out
+
+pre_install:
+  - id: stage_machine_dir
+    type: directory_create
+    path: "C:\\ProgramData\\App"
+    allow_outside_install_dir: true
+
+install_steps:
+  # Every step type that accepts the opt-out.
+  - id: copy_shared
+    type: file_copy
+    from: "payload://shared/**"
+    to: "C:\\ProgramData\\App\\shared"
+    allow_outside_install_dir: true
+
+  - id: drop_stale_marker
+    type: file_delete
+    path: "C:\\ProgramData\\App\\stale.marker"
+    if_missing: skip
+    allow_outside_install_dir: true
+
+  - id: drop_stale_cache
+    type: directory_delete
+    path: "C:\\ProgramData\\App\\cache"
+    recursive: true
+    allow_outside_install_dir: true
+
+  - id: fetch_extra
+    type: http_download
+    url: "https://example.com/extra.bin"
+    dest: "C:\\ProgramData\\App\\extra.bin"
+    sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+    allow_outside_install_dir: true
+
+  - id: machine_ini
+    type: ini_write
+    path: "C:\\ProgramData\\App\\machine.ini"
+    section: service
+    key: endpoint
+    value: "https://api.example.com"
+    create_if_missing: true
+    allow_outside_install_dir: true
+
+  - id: machine_json
+    type: json_edit
+    path: "C:\\ProgramData\\App\\machine.json"
+    pointer: /service/endpoint
+    value: "https://api.example.com"
+    create_if_missing: true
+    allow_outside_install_dir: true
+
+  - id: machine_xml
+    type: xml_edit
+    path: "C:\\ProgramData\\App\\machine.xml"
+    xpath: /config/endpoint
+    value: "https://api.example.com"
+    create_if_missing: true
+    allow_outside_install_dir: true
+
+  # Omitting the key entirely is the default and must stay valid.
+  - id: copy_app
+    type: file_copy
+    from: "payload://app/**"
+    to: "{install_dir}"
+
+  # An explicit `false` must be valid too.
+  - id: contained_dir
+    type: directory_create
+    path: "{install_dir}/logs"
+    allow_outside_install_dir: false
+
+post_install:
+  - id: post_machine_marker
+    type: directory_create
+    path: "C:\\ProgramData\\App\\installed"
+    allow_outside_install_dir: true
+
+uninstall:
+  - id: remove_machine_dir
+    type: directory_delete
+    path: "C:\\ProgramData\\App"
+    recursive: true
+    allow_outside_install_dir: true

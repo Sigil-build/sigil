@@ -232,56 +232,46 @@ public sealed class StepDestinationContainmentTests
             "the containment refusal must come before the URL scheme check and before any request");
     }
 
-    // ── Unresolved tokens ─────────────────────────────────────────────────────
+    // ── directory_create ──────────────────────────────────────────────────────
 
     [Fact]
-    public async Task An_unresolved_var_token_in_a_path_fails_the_step_instead_of_creating_a_literal_directory()
+    public async Task Directory_create_refuses_a_path_outside_the_install_dir()
     {
-        // The bug: an unknown {var.x} was left literal, so a single typo in an
-        // installer.vars name silently created a folder called "{var.dest}" and
-        // the install reported success.
         using var installDir = new TempDir();
-        var literal = Path.Combine(installDir.Path, "{var.dest}");
+        using var elsewhere = new TempDir();
+        var target = Path.Combine(elsewhere.Path, "planted");
+        var journal = new RollbackJournal();
 
-        var result = await new FileCopyStep(
-                new InstallStep.FileCopy("cp", Path.Combine(installDir.Path, "*"),
-                    Path.Combine(installDir.Path, "{var.dest}"), Overwrite: true, null, OnFailure.Fail))
-            .RunAsync(Ctx(installDir.Path), new RollbackJournal(), CancellationToken.None);
+        var result = await new DirectoryCreateStep(
+                new InstallStep.DirectoryCreate("mk", target, null, OnFailure.Fail))
+            .RunAsync(Ctx(installDir.Path), journal, CancellationToken.None);
 
         result.Success.Should().BeFalse();
-        result.Error.Should().Contain("unresolved token '{var.dest}'");
-        Directory.Exists(literal).Should().BeFalse(
-            "a literal '{var.dest}' directory is exactly the regression this closes");
+        result.Error.Should().Contain("outside install_dir");
+        Directory.Exists(target).Should().BeFalse();
+        journal.Records.Should().BeEmpty("nothing was created, so nothing is queued for removal");
     }
 
     [Fact]
-    public async Task The_opt_out_does_not_excuse_an_unresolved_token()
+    public async Task Directory_create_accepts_the_documented_opt_out()
     {
         using var installDir = new TempDir();
+        using var elsewhere = new TempDir();
+        var target = Path.Combine(elsewhere.Path, "machine-data");
 
-        var result = await new FileCopyStep(
-                new InstallStep.FileCopy("cp", Path.Combine(installDir.Path, "*"),
-                    Path.Combine(installDir.Path, "{var.dest}"), Overwrite: true, null, OnFailure.Fail)
+        var result = await new DirectoryCreateStep(
+                new InstallStep.DirectoryCreate("mk", target, null, OnFailure.Fail)
                 { AllowOutsideInstallDir = true })
             .RunAsync(Ctx(installDir.Path), new RollbackJournal(), CancellationToken.None);
 
-        result.Success.Should().BeFalse();
-        result.Error.Should().Contain("unresolved token");
+        result.Success.Should().BeTrue(result.Error);
+        Directory.Exists(target).Should().BeTrue();
     }
 
-    [Fact]
-    public async Task An_unresolved_install_dir_token_fails_rather_than_landing_a_literal_folder()
-    {
-        // StepContext.Empty leaves {install_dir} literal. In production the token
-        // always resolves; if it ever did not, writing it verbatim would be the
-        // T13 regression all over again.
-        var result = await new IniWriteStep(
-                new InstallStep.IniWrite("i", "{install_dir}/app.ini", "app", "x", "9", true, null, OnFailure.Fail))
-            .RunAsync(StepContext.Empty, new RollbackJournal(), CancellationToken.None);
-
-        result.Success.Should().BeFalse();
-        result.Error.Should().Contain("unresolved token '{install_dir}'");
-    }
+    // NOTE: the unresolved-token cases that used to live here moved to
+    // UnresolvedPathTokenTests when the check moved from the per-step destination
+    // guards to StepContext.ResolvePath, so that it covers every path-valued step
+    // field rather than only the guarded destinations.
 
     private static StepContext Ctx(string installDir) =>
         new(new Dictionary<string, object?>(), installDir: installDir);

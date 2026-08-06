@@ -47,7 +47,10 @@ internal sealed class ComRegisterStep : IStep
         ArgumentNullException.ThrowIfNull(ctx);
         ArgumentNullException.ThrowIfNull(journal);
 
-        // Path may reference the extracted payload (payload://) or {install_dir}.
+        // Path must resolve INSIDE install_dir. A payload:// value rebases onto the
+        // extraction temp directory, which is user-writable and is deleted when the
+        // run ends, so the guard below refuses it — file_copy the DLL into
+        // install_dir first. See PrivilegedTargetGuard's remarks.
         var path = ctx.ResolvePath(_spec.Path);
         if (string.IsNullOrWhiteSpace(path))
         {

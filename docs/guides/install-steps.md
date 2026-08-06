@@ -189,6 +189,8 @@ In practice this means **these four steps need a machine-scope install into an a
 
 The examples below all use `${parameters.install_dir}\…`, which satisfies both conditions for a machine-scope install. A path hard-coded outside the install directory does not, and will fail the step.
 
+> **A `payload://` target is refused for these four steps.** `payload://` resolves to the temporary directory the embedded payload is extracted into (`%TEMP%\sigil-…`), which fails both conditions: it is writable by the user who launched the installer, and Sigil **deletes it when the run finishes** — so a service or scheduled task pointing into it would be left pointing at a path that no longer exists. Sequence a `file_copy` from `payload://` into `install_dir` first, then point the privileged step at the copied location. That is the ordering `service_install` already required for its own reasons.
+
 ## `service_install`
 
 Registers a Windows service via `sc.exe create`, optionally starts it. Records a `RemoveService` rollback so a failed install or `setup.exe /Uninstall` stops + deletes the service.
@@ -310,25 +312,27 @@ Every step accepts the same envelope:
 |`type`|yes|-|One of the step types above.|
 |`when`|-|-|Expression gating execution. See [Conditional installs](conditional-installs.md).|
 |`on_failure`|-|`fail`|`rollback` (undo journaled steps), `continue` (log + proceed), or `fail` (abort without rollback).|
-|`allow_outside_install_dir`|-|`false`|Opts this step out of destination containment (below). Accepted only by `file_copy`, `file_delete`, `directory_delete`, `http_download`, `ini_write`, `json_edit` and `xml_edit`; on any other step type it is an unrecognized field.|
+|`allow_outside_install_dir`|-|`false`|Opts this step out of destination containment (below). Accepted only by `file_copy`, `directory_create`, `file_delete`, `directory_delete`, `http_download`, `ini_write`, `json_edit` and `xml_edit`; on any other step type it is an unrecognized field and has no effect.|
 
 ## Every step destination is contained to `install_dir`
 
-The steps that write, download or delete — `file_copy` (`to`), `file_delete` (`path`), `directory_delete` (`path`), `http_download` (`dest`), `ini_write` / `json_edit` / `xml_edit` (`path`) — resolve their destination and then require it to be **inside `install_dir`**, with no directory junction anywhere on the way down.
+The steps that create, write, download or delete — `file_copy` (`to`), `directory_create` (`path`), `file_delete` (`path`), `directory_delete` (`path`), `http_download` (`dest`), `ini_write` / `json_edit` / `xml_edit` (`path`) — resolve their destination and then require it to be **inside `install_dir`**, with no directory junction anywhere on the way down.
 
 Two things this stops. A path that escapes the install directory (`..\..`, an absolute path elsewhere, a junction planted inside `install_dir`) is refused rather than followed; and because `File.WriteAllText` truncates an existing file **in place**, keeping its owner and its access control list, a config edit that landed on an attacker-created placeholder would leave that file attacker-writable after your elevated installer wrote to it.
 
-If a step genuinely needs to write outside the installed application — a machine-wide configuration file under `%ProgramData%` is the usual case — say so on that step:
+If a step genuinely needs to write outside the installed application — a machine-wide configuration file under ProgramData is the usual case — say so on that step:
 
 ```yaml
 - id: write-machine-config
   type: ini_write
   allow_outside_install_dir: true
-  path: "%ProgramData%\\MyApp\\machine.ini"
+  path: "C:\\ProgramData\\MyApp\\machine.ini"
   section: service
   key: endpoint
   value: "https://api.example.com"
 ```
+
+> **There is no `%VAR%` expansion in a step path.** `%ProgramData%\MyApp` is not a path — it is a relative directory whose first component is literally `%ProgramData%`, and it would be created as such next to the running installer. The only substitutions a step path gets are the `{…}` runtime tokens listed under [Paths and tokens](#an-unresolved-token-in-a-path-fails-the-step) and `${…}` parameter templates. If you want the path written once rather than hard-coded per environment, `${ProgramData}` is expanded by **`sigil pack`** from the packing machine's environment — which means the resolved literal is baked into the package, so use it knowingly.
 
 The opt-out is per step and deliberate: it is a declaration that this particular write is meant to leave the install tree, not a global switch. It does **not** relax the [privileged-target rules](#privileged-step-targets-are-anchored--read-this-before-the-next-four-steps) on `service_install`, `scheduled_task_create`, `com_register` or `firewall_rule` — those have no opt-out.
 
@@ -340,7 +344,11 @@ Rejected rather than escaped: an INI file has no escape for a newline inside a v
 
 ### An unresolved token in a path fails the step
 
-A `{token}` that is still present in a path after substitution — `{var.instal_dir}` for a typo'd `installer.vars` entry, say — **fails the step**. It is never written to disk. Previously an unknown brace token was left literal, so a single typo silently created a directory named `{var.instal_dir}` and the install "succeeded". `allow_outside_install_dir` does not suppress this: an unresolved token is a manifest mistake under any containment policy.
+A `{token}` that is still present in a path after substitution — `{var.instal_dir}` for a typo'd `installer.vars` entry, say — **fails the step**. It is never written to disk. Previously an unknown brace token was left literal, so a single typo silently created a directory named `{var.instal_dir}` and the install "succeeded".
+
+This applies to **every** path-valued field of every step, not just the destinations listed above: it is enforced where paths are resolved, so `run_program.program`, `shortcut_create.target`, `service_install.binary_path` and `scheduled_task_create.program` are covered too. `allow_outside_install_dir` does not suppress it — an unresolved token is a manifest mistake under any containment policy.
+
+The tokens a step path may use are `{install_dir}`, `{scope_root}`, `{app.name}`, `{app.id}` and `{var.<name>}` for each declared `installer.vars` entry, plus `${parameters.<name>}` templates. Anything else in braces that looks like an identifier is treated as a mistake.
 
 ## See also
 

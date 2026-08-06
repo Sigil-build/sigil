@@ -64,7 +64,10 @@ internal sealed class ScheduledTaskCreateStep : IStep
         ArgumentNullException.ThrowIfNull(journal);
 
         var name = ctx.Resolve(_spec.Name);
-        // Program may reference the extracted payload (payload://) or {install_dir}.
+        // Program must resolve INSIDE install_dir. A payload:// value rebases onto
+        // the extraction temp directory, which is user-writable and is deleted when
+        // the run ends, so the guard below refuses it — file_copy the binary into
+        // install_dir first. See PrivilegedTargetGuard's remarks.
         var program = ctx.ResolvePath(_spec.Program);
         var arguments = _spec.Arguments is null ? null : ctx.Resolve(_spec.Arguments);
 
@@ -90,11 +93,16 @@ internal sealed class ScheduledTaskCreateStep : IStep
             return StepResult.Failed(refusal);
         }
 
-        // Record the inverse BEFORE the create so an interrupted install still
-        // tears the task down on /Uninstall. Only the task name is journaled —
-        // no secrets, no resolved program path.
-        journal.Append(new RollbackRecord.DeleteScheduledTask(name));
-
+        // R31: build the argument list — which is where a double quote in `program`
+        // is rejected — BEFORE the journal entry. BuildCreateArgs is pure and
+        // starts no process, so ordering the validation first costs nothing and
+        // keeps every refusal path identical to the containment refusal above:
+        // nothing attempted, nothing journaled. Journaling first would let an
+        // `on_failure: continue` run with a quote typo queue a delete of a
+        // same-named, PRE-EXISTING SYSTEM task that this installer never created —
+        // a quote survives Path.GetFullPath and IsAdminOnlyWritable inspects the
+        // containing directory, so the refusal is genuinely reachable with an
+        // otherwise valid, contained path.
         List<string> args;
         try
         {
@@ -102,11 +110,14 @@ internal sealed class ScheduledTaskCreateStep : IStep
         }
         catch (ArgumentException ex)
         {
-            // R31: a quote in `program` is a manifest error, not a crash. The
-            // journal entry above is already written, and its undo (schtasks
-            // /Delete for a task that was never created) is tolerated best-effort.
             return StepResult.Failed($"scheduled_task_create '{name}': {ex.Message}");
         }
+
+        // Record the inverse BEFORE the create so an interrupted install still
+        // tears the task down on /Uninstall. Only the task name is journaled —
+        // no secrets, no resolved program path. Everything above this line either
+        // returns without touching anything or is side-effect-free.
+        journal.Append(new RollbackRecord.DeleteScheduledTask(name));
 
         var result = await RunSchtasksAsync(args, ct).ConfigureAwait(false);
         if (result.ExitCode != 0)

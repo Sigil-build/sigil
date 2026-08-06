@@ -17,10 +17,13 @@ using Xunit;
 /// field it was written in.
 /// </summary>
 /// <remarks>
-/// No test here creates a scheduled task: every case refuses inside
-/// <see cref="ScheduledTaskCreateStep.BuildCreateArgs"/>, a pure function that
-/// never starts a process, or inside <c>ini_write</c>'s transform, which never
-/// reaches the file.
+/// No test here creates a scheduled task, and none writes an INI file: every case
+/// refuses inside <see cref="ScheduledTaskCreateStep.BuildCreateArgs"/>, a pure
+/// function that starts no process, or inside <c>ini_write</c>'s transform, which
+/// runs before the file is written. The two step-level cases additionally assert
+/// that nothing was journaled and that the target file is byte-unchanged; the
+/// pure-seam cases have no journal to assert on, which is precisely why they
+/// cannot touch anything.
 /// </remarks>
 [System.Runtime.Versioning.SupportedOSPlatform("windows")]
 public sealed class StepValueInjectionTests
@@ -75,9 +78,20 @@ public sealed class StepValueInjectionTests
     }
 
     [Fact]
-    public async Task The_step_reports_a_refused_program_as_a_step_failure()
+    public async Task The_step_reports_a_refused_program_as_a_step_failure_and_journals_nothing()
     {
-        // The throw must not escape RunAsync as an unhandled exception.
+        // Two properties, and the second is the one that bit us. The throw must
+        // not escape RunAsync as an unhandled exception; and the validation must
+        // run BEFORE the journal entry.
+        //
+        // This arrangement is the reachable one: a double quote survives
+        // Path.GetFullPath, and IsAdminOnlyWritable inspects the CONTAINING
+        // directory — so an otherwise perfectly contained, admin-only path with a
+        // quote typo clears both privileged-target checks and lands here. With the
+        // journal appended first, an `on_failure: continue` run would have queued a
+        // DeleteScheduledTask for 'SigilTestTask_DoesNotPersist' — a name this
+        // installer never created, quite possibly a PRE-EXISTING SYSTEM task — to
+        // be executed on rollback or uninstall.
         var spec = new InstallStep.ScheduledTaskCreate(
             "t", "SigilTestTask_DoesNotPersist", @"C:\Windows\System32\a"" && calc.exe && """,
             Arguments: null, Trigger: "logon", RunLevel: "limited",
@@ -86,12 +100,15 @@ public sealed class StepValueInjectionTests
             new System.Collections.Generic.Dictionary<string, object?>(),
             scope: InstallScope.Machine,
             installDir: Environment.SystemDirectory);
+        var journal = new RollbackJournal();
 
-        var result = await new ScheduledTaskCreateStep(spec)
-            .RunAsync(ctx, new RollbackJournal(), CancellationToken.None);
+        var result = await new ScheduledTaskCreateStep(spec).RunAsync(ctx, journal, CancellationToken.None);
 
         result.Success.Should().BeFalse();
         result.Error.Should().Contain("quote");
+        journal.Records.Should().BeEmpty(
+            "the quote is rejected before the journal entry, so no delete is queued for a " +
+            "same-named task this installer never created");
     }
 
     // ── R32: ini_write line injection ─────────────────────────────────────────

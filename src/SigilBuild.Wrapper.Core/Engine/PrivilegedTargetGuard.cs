@@ -49,6 +49,38 @@ using System.Runtime.Versioning;
 /// never returns null and <see cref="StepContext.From"/> always calls it — so
 /// this branch is reachable only from a hand-built context (the step unit tests).
 /// </para>
+/// <para>
+/// <b><c>payload://</c> targets are refused, and that is a decision rather than a
+/// side effect.</b> Register row R9 proposes "resolve privileged step targets only
+/// from <c>payload://</c> or a contained <c>{install_dir}</c>", i.e. it treats the
+/// extracted payload as a safe source. It is not one, for two independent reasons:
+/// </para>
+/// <list type="number">
+///   <item><description>
+///     <see cref="PayloadExtraction"/> extracts to
+///     <c>%TEMP%\sigil-&lt;appid&gt;-&lt;random&gt;</c>. Under an elevated install that
+///     is the invoking user's own temp directory, which that user can write — so a
+///     payload-rooted service binary or COM DLL is replaceable between extraction
+///     and use. That is R3's attack with a different directory, and
+///     <see cref="StateDirectorySecurity.IsAdminOnlyWritable"/> correctly answers
+///     false for it.
+///   </description></item>
+///   <item><description>
+///     <see cref="InstallSession"/> owns that directory's lifetime and deletes it
+///     when the run ends. A scheduled task, service or COM registration pointing
+///     into it would be left pointing at a path that no longer exists — so a
+///     payload-rooted privileged target is broken on its own terms even with the
+///     security question set aside.
+///   </description></item>
+/// </list>
+/// <para>
+/// The supported shape is the one the guide already prescribes for
+/// <c>service_install</c>: <c>file_copy</c> the binary into <c>install_dir</c>
+/// first, then point the privileged step at <c>{install_dir}\…</c>. A
+/// <c>payload://</c> target is reported by the containment arm below, whose
+/// message names <c>install_dir</c>; <c>docs/guides/install-steps.md</c> states
+/// the rule and the workaround.
+/// </para>
 /// </remarks>
 [SupportedOSPlatform("windows")]
 internal static class PrivilegedTargetGuard

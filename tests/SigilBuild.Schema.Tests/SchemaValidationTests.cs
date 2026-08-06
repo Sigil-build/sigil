@@ -155,6 +155,42 @@ public class SchemaValidationTests
     }
 
     [Fact]
+    public async Task AllowOutsideInstallDirFixture_IsValidAgainstSchema()
+    {
+        // R16 (S2.4): the `allow_outside_install_dir` opt-out is declared on the
+        // step shape, which the schema duplicates across install_steps /
+        // pre_install / post_install / uninstall and the InstallStep /
+        // InstallStepList definitions. The fixture uses the key in each of those
+        // positions, on every step type that accepts it, plus the omitted and the
+        // explicit-false cases — so a declaration missed in one copy fails here
+        // rather than at pack time in a publisher's manifest.
+        var schema = await LoadSchemaAsync();
+        var json = YamlToJson(await File.ReadAllTextAsync("Fixtures/valid/allow-outside-install-dir.yaml"));
+        var errors = schema.Validate(json);
+
+        errors.Should().BeEmpty(
+            "the allow_outside_install_dir fixture must satisfy the schema; got: {0}",
+            string.Join("; ", errors.Select(e => e.ToString())));
+    }
+
+    [Fact]
+    public async Task AllowOutsideInstallDir_RejectsANonBooleanValue()
+    {
+        // The property is typed, so a plausible-looking string is caught. The step
+        // shape carries `additionalProperties: true`, which means an UNDECLARED
+        // key would be accepted silently — declaring it is exactly what buys this.
+        var schema = await LoadSchemaAsync();
+        var yaml = await File.ReadAllTextAsync("Fixtures/valid/allow-outside-install-dir.yaml");
+        var json = YamlToJson(yaml.Replace(
+            "allow_outside_install_dir: true",
+            "allow_outside_install_dir: \"yes-please\"",
+            System.StringComparison.Ordinal));
+
+        schema.Validate(json).Should().NotBeEmpty(
+            "allow_outside_install_dir is declared as a boolean, so a string must be rejected");
+    }
+
+    [Fact]
     public async Task ComRegisterFixture_IsValidAgainstSchema()
     {
         // T11.2 (P11): com_register must be accepted by the step-type enum in

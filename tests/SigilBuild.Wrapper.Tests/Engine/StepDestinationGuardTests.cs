@@ -1,7 +1,6 @@
 namespace SigilBuild.Wrapper.Tests.Engine;
 
 using System;
-using System.Collections.Generic;
 using System.IO;
 using FluentAssertions;
 using SigilBuild.Core.Manifest;
@@ -11,72 +10,14 @@ using SigilBuild.Wrapper.Tests.Helpers;
 using Xunit;
 
 /// <summary>
-/// The pure seam behind register row R16 — destination containment and the
-/// unresolved-token failure.
+/// The pure seam behind register row R16's containment half. R16's other half —
+/// an unresolved <c>{token}</c> in a path — lives in
+/// <see cref="StepContext.ResolvePath"/> so that it covers every path-valued step
+/// field rather than only the guarded destinations; it is covered by
+/// <c>UnresolvedPathTokenTests</c>.
 /// </summary>
 public sealed class StepDestinationGuardTests
 {
-    // ── The token scan ────────────────────────────────────────────────────────
-
-    [Theory]
-    [InlineData(@"C:\App\{var.dest}\x", "var.dest")]
-    [InlineData("{install_dir}/app.ini", "install_dir")]
-    [InlineData("{scope_root}/x", "scope_root")]
-    [InlineData("{temp_dir}/x", "temp_dir")]
-    [InlineData("{staging_dir}/pkg.exe", "staging_dir")]
-    [InlineData("{app.name}", "app.name")]
-    [InlineData(@"C:\a\{_private}\b", "_private")]
-    public void A_surviving_brace_token_is_reported(string value, string expected)
-        => StepDestinationGuard.FirstUnresolvedToken(value).Should().Be(expected);
-
-    [Theory]
-    [InlineData(@"C:\Program Files\App\app.ini")]
-    [InlineData("")]
-    [InlineData(null)]
-    // A braced GUID is a real directory name (driver store, COM component
-    // folders) and must not be mistaken for a token: its hyphens exclude it.
-    [InlineData(@"C:\App\{3f2504e0-4f89-11d3-9a0c-0305e82c3301}\x")]
-    // A name starting with a digit is not an identifier.
-    [InlineData(@"C:\App\{1234}\x")]
-    // Braces around something that is plainly prose, not a token.
-    [InlineData(@"C:\App\{not a token}\x")]
-    // Unterminated: nothing to name, so nothing to refuse.
-    [InlineData(@"C:\App\{install_dir")]
-    // Empty braces.
-    [InlineData(@"C:\App\{}\x")]
-    public void Anything_that_is_not_an_identifier_in_braces_is_left_alone(string? value)
-        => StepDestinationGuard.FirstUnresolvedToken(value).Should().BeNull();
-
-    /// <summary>
-    /// The cross-lane property: the scan runs over the ALREADY-RESOLVED string,
-    /// so every token the engine knows has been substituted away before it is
-    /// reached. That is what makes it safe against a token another lane adds —
-    /// there is no allow-list here to fall out of date, and the guard never
-    /// resolves anything itself (resolving <c>{staging_dir}</c> creates a
-    /// directory and can throw, so a validator that resolved in order to
-    /// validate would have side effects).
-    /// </summary>
-    [Theory]
-    [InlineData("{install_dir}")]
-    [InlineData("{scope_root}")]
-    [InlineData("{app.name}")]
-    [InlineData("{app.id}")]
-    [InlineData("{temp_dir}")]
-    public void No_token_the_context_knows_survives_into_the_guard(string token)
-    {
-        var blob = Blob();
-        var ctx = StepContext.From(blob, CommandLineParser.Parse(new[] { "/silent" }, blob.Parameters));
-
-        var resolved = ctx.ResolvePath(token + "/payload.bin");
-
-        resolved.Should().NotContain("{");
-        StepDestinationGuard.FirstUnresolvedToken(resolved).Should().BeNull(
-            "a token the context substitutes can never reach the guard, so a token added by " +
-            "another lane is accepted with no change here");
-    }
-
-    // ── Containment and the opt-out ───────────────────────────────────────────
-
     [Fact]
     public void A_destination_inside_the_install_dir_is_accepted()
     {
@@ -98,7 +39,7 @@ public sealed class StepDestinationGuardTests
     }
 
     [Fact]
-    public void The_opt_out_suppresses_containment_but_never_the_token_failure()
+    public void The_opt_out_suppresses_containment()
     {
         using var installDir = new TempDir();
         using var elsewhere = new TempDir();
@@ -106,10 +47,6 @@ public sealed class StepDestinationGuardTests
         StepDestinationGuard.Check(
                 installDir.Path, "ini_write", "path", Path.Combine(elsewhere.Path, "a.ini"), true)
             .Should().BeNull();
-
-        StepDestinationGuard.Check(
-                installDir.Path, "ini_write", "path", Path.Combine(elsewhere.Path, "{var.x}", "a.ini"), true)
-            .Should().Contain("unresolved token");
     }
 
     [Fact]

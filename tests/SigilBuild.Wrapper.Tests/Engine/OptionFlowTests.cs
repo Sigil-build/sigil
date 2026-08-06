@@ -223,7 +223,11 @@ public sealed class OptionFlowTests
 
         var steps = new InstallStep[]
         {
-            new InstallStep.DirectoryCreate("g", gatedDir, When: "option.desktop_shortcut", OnFailure.Fail),
+            // R16: gatedDir is in an OS temp directory, never install_dir, so the
+            // out-of-tree write is declared with the production per-step opt-out.
+            // Under test here is option gating, not containment.
+            new InstallStep.DirectoryCreate("g", gatedDir, When: "option.desktop_shortcut", OnFailure.Fail)
+                { AllowOutsideInstallDir = true },
         };
 
         // desktop_shortcut = false (unchecked) → the step's `when` is false → skipped.

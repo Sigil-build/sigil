@@ -1128,11 +1128,32 @@ public static class ManifestParser
     // analyzer (CA1861) doesn't fault us for allocating them on every step parse.
     // R16: `allow_outside_install_dir` is accepted only by the step types whose
     // destination is contained — the ones that actually write somewhere. On any
-    // other type it stays an unrecognized field, so a manifest that expects it to
-    // relax e.g. a scheduled_task_create target is told so rather than silently
-    // ignored.
+    // other type it stays an unrecognized field (SIG0231) AND is not applied, so a
+    // manifest that expects it to relax e.g. a scheduled_task_create target is
+    // told so rather than silently ignored — or, worse, silently honoured.
+    // `ContainedDestinationStepTypes` below must list exactly the types whose
+    // field array contains the key; `AllowOutsideInstallDirIsOnlyAcceptedWhereItApplies`
+    // pins the two against each other.
+    private static readonly string[] ContainedDestinationStepTypes =
+    {
+        "file_copy", "directory_create", "file_delete", "directory_delete",
+        "http_download", "ini_write", "json_edit", "xml_edit",
+    };
+
+    private static bool IsContainedDestinationStep(string stepType)
+    {
+        foreach (var t in ContainedDestinationStepTypes)
+        {
+            if (string.Equals(t, stepType, System.StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static readonly string[] FileCopyFields = { "id", "type", "when", "on_failure", "allow_outside_install_dir", "from", "to", "overwrite" };
-    private static readonly string[] DirectoryCreateFields = { "id", "type", "when", "on_failure", "path" };
+    private static readonly string[] DirectoryCreateFields = { "id", "type", "when", "on_failure", "allow_outside_install_dir", "path" };
     private static readonly string[] FileDeleteFields = { "id", "type", "when", "on_failure", "allow_outside_install_dir", "path", "if_missing" };
     private static readonly string[] DirectoryDeleteFields = { "id", "type", "when", "on_failure", "allow_outside_install_dir", "path", "recursive" };
     private static readonly string[] RegistryWriteFields = { "id", "type", "when", "on_failure", "hive", "key", "name", "type_value", "value_type", "value", "view" };
@@ -1222,11 +1243,16 @@ public static class ManifestParser
 
         // R16: the destination-containment opt-out is a common envelope field,
         // parsed here alongside `when` / `on_failure` rather than in each of the
-        // seven Build* methods that would otherwise have to repeat it. Steps that
-        // do not write anywhere never read it, and their known-field lists do not
-        // accept the key, so setting it on e.g. registry_write is still reported
-        // as an unrecognized field.
-        if (step is not null && GetBool(node, "allow_outside_install_dir", defaultValue: false))
+        // eight Build* methods that would otherwise have to repeat it.
+        //
+        // Gated on the step type actually accepting the key. Applying it to every
+        // type would make SIG0231 lie: that diagnostic tells the author the
+        // unrecognized field is IGNORED, while the value would in fact have been
+        // applied — a silent containment bypass on any step type that has, or
+        // later gains, a destination guard.
+        if (step is not null
+            && IsContainedDestinationStep(typeStr!)
+            && GetBool(node, "allow_outside_install_dir", defaultValue: false))
         {
             step = step with { AllowOutsideInstallDir = true };
         }

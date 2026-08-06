@@ -65,7 +65,10 @@ internal sealed class FirewallRuleStep : IStep
         ArgumentNullException.ThrowIfNull(journal);
 
         var name = ctx.Resolve(_spec.Name);
-        // Program may reference the extracted payload (payload://) or {install_dir}.
+        // Program, when set, must resolve INSIDE install_dir. A payload:// value
+        // rebases onto the extraction temp directory, which is user-writable and is
+        // deleted when the run ends, so the guard below refuses it — file_copy the
+        // executable into install_dir first. See PrivilegedTargetGuard's remarks.
         var program = _spec.Program is null ? null : ctx.ResolvePath(_spec.Program);
 
         if (string.IsNullOrWhiteSpace(name))

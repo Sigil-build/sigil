@@ -244,6 +244,97 @@ public sealed class PrivilegedStepContainmentTests
         journal.Records.Should().BeEmpty();
     }
 
+    // ── payload:// is refused, deliberately ───────────────────────────────────
+
+    [WindowsFact("Windows ACL APIs")]
+    public async Task A_payload_rooted_task_program_is_refused()
+    {
+        // Register row R9 proposes payload:// as a SAFE source for a privileged
+        // target. It is not. PayloadExtraction extracts to
+        // %TEMP%\sigil-<appid>-<random>, which under an elevated install is the
+        // invoking user's own temp directory — user-writable, therefore
+        // replaceable between extraction and use — and InstallSession DELETES it
+        // when the run ends, which would leave a SYSTEM task pointing at a path
+        // that no longer exists. This pins that the refusal is a decision rather
+        // than an accident; the supported shape is file_copy into install_dir
+        // first.
+        using var payload = new TempDir();
+        using var installDir = new TempDir();
+        File.WriteAllText(Path.Combine(payload.Path, "heartbeat.exe"), "not really an exe");
+
+        var ctx = new StepContext(
+            new System.Collections.Generic.Dictionary<string, object?>(),
+            payloadRoot: payload.Path,
+            scope: InstallScope.Machine,
+            installDir: installDir.Path,
+            appId: "com.example.myapp");
+        var journal = new RollbackJournal();
+
+        var result = await new ScheduledTaskCreateStep(TaskSpec("payload://heartbeat.exe"))
+            .RunAsync(ctx, journal, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Contain("install_dir");
+        result.Error.Should().Contain(payload.Path,
+            "the message must show the rebased temp path so the author can see what was refused");
+        journal.Records.Should().BeEmpty();
+    }
+
+    [WindowsFact("Windows ACL APIs")]
+    public async Task A_payload_rooted_service_binary_is_rebased_and_then_refused()
+    {
+        // service_install.binary_path used ctx.Resolve, so 'payload://svc.exe'
+        // stayed a LITERAL string: the guard saw scheme text rather than a path,
+        // and the author was told the target was outside install_dir without ever
+        // learning where it had actually landed. It is a path field and resolves
+        // like one now — the message names the rebased temp location, which is
+        // what makes the refusal actionable ("file_copy it into install_dir
+        // first") rather than mystifying.
+        using var payload = new TempDir();
+        using var installDir = new TempDir();
+        var binary = Path.Combine(payload.Path, "svc.exe");
+        File.WriteAllText(binary, "not really an exe");
+
+        var ctx = new StepContext(
+            new System.Collections.Generic.Dictionary<string, object?>(),
+            payloadRoot: payload.Path,
+            scope: InstallScope.Machine,
+            installDir: installDir.Path,
+            appId: "com.example.myapp");
+        var journal = new RollbackJournal();
+
+        var result = await new ServiceInstallStep(
+                new InstallStep.ServiceInstall(
+                    "svc", "SigilTestService_DoesNotPersist", "payload://svc.exe", "Sigil Test",
+                    Description: null, StartType: "demand", ServiceAccount: "LocalSystem",
+                    StartAfterInstall: false, When: null, OnFailure: OnFailure.Continue))
+            .RunAsync(ctx, journal, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Contain(binary,
+            "binary_path is a path field: the refusal must name the rebased payload location, " +
+            "not the literal 'payload://' text");
+        result.Error.Should().NotContain("payload://",
+            "the scheme must have been resolved away before the guard saw it");
+        journal.Records.Should().BeEmpty("sc.exe create must never be reached");
+    }
+
+    [WindowsFact("Windows ACL APIs")]
+    public void The_payload_root_can_never_satisfy_the_guard()
+    {
+        // Stated as a property rather than inferred from one arrangement: the
+        // extraction root lives under %TEMP%, which is not admin-only writable.
+        // So even a run that anchored install_dir ON the payload root would still
+        // be refused, by the ACL condition rather than by containment.
+        using var payload = new TempDir();
+
+        StateDirectorySecurity.IsAdminOnlyWritable(Path.Combine(payload.Path, "x.exe"))
+            .Should().BeFalse("the payload extraction root is the invoking user's temp directory");
+
+        PrivilegedTargetGuard.Check("com_register", "path", payload.Path, Path.Combine(payload.Path, "x.dll"))
+            .Should().Contain("writable by a non-administrator");
+    }
+
     // ── Both entry paths: /D= (silent) and wizard-collected (headed) ───────────
 
     [WindowsFact("Windows scope roots")]

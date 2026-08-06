@@ -54,7 +54,11 @@ public sealed class SecretHygieneTests
         // A step whose resolved path embeds the secret — so the rollback journal's
         // RemoveDirectory record would carry it verbatim if not redacted.
         var dir = tmp.Path + "/app-${parameters.license_key}";
-        var blob = BlobWith(new InstallStep.DirectoryCreate("mk", dir, When: null, OnFailure.Fail));
+        // R16: an OS temp directory is never install_dir, so the out-of-tree write
+        // is declared with the production per-step opt-out. Under test here is
+        // secret redaction in the journal and the log.
+        var blob = BlobWith(new InstallStep.DirectoryCreate("mk", dir, When: null, OnFailure.Fail)
+        { AllowOutsideInstallDir = true });
         var parsed = CommandLineParser.Parse(new[] { $"/Plicense_key={Secret}" }, blob.Parameters);
         var ctx = StepContext.From(blob, parsed);
 
@@ -100,7 +104,13 @@ public sealed class SecretHygieneTests
         var blob = new WrapperBlob(
             AppId: "com.acme.Studio",
             Parameters: new[] { LicenseKey() },
-            InstallSteps: new InstallStep[] { new InstallStep.DirectoryCreate("mk", dir, When: null, OnFailure.Fail) },
+            // R16: an OS temp directory is never install_dir — see the note above.
+            // Note the {var.tainted} token must still RESOLVE, opt-out or not.
+            InstallSteps: new InstallStep[]
+            {
+                new InstallStep.DirectoryCreate("mk", dir, When: null, OnFailure.Fail)
+                    { AllowOutsideInstallDir = true },
+            },
             PreInstall: Array.Empty<InstallStep>(),
             PostInstall: Array.Empty<InstallStep>(),
             UpdateSteps: Array.Empty<InstallStep>(),

@@ -1003,18 +1003,20 @@ public sealed class InstallSession
                 $"cannot upgrade: the previous version's uninstaller was not found at '{exe}'. No changes were made.");
         }
 
-        // R2: `exe` came out of an ARP UninstallString — registry data — and this
-        // process is already elevated. File.Exists is not a trust decision. Refuse
-        // loudly rather than continue silently: silently continuing is exactly the
-        // behaviour that made this exploitable.
-        if (!IsPriorUninstallerTrusted(exe))
+        // R2: `exe` came out of an ARP UninstallString — registry data — and the spawn
+        // below inherits this process's token. File.Exists is not a trust decision.
+        // Refuse loudly rather than continue silently: silently continuing is exactly
+        // the behaviour that made this exploitable.
+        //
+        // Gated on "privilege is actually at stake" — see PriorUninstallerNeedsTrust.
+        if (PriorUninstallerNeedsTrust(_scope) && !IsPriorUninstallerTrusted(exe))
         {
             return new InstallOutcome(
                 false,
                 $"cannot upgrade: the previous version's uninstaller at '{exe}' is not verified — " +
-                "it is neither Authenticode-signed nor located in a directory only administrators " +
-                "can write, so running it from this elevated process would let an unprivileged " +
-                "user choose what runs as administrator. No changes were made.");
+                "it is neither Authenticode-signed nor a file only administrators can write, so " +
+                "running it from this elevated process would let an unprivileged user choose what " +
+                "runs as administrator. No changes were made.");
         }
 
         // Remove the prior version in ITS OWN scope (where it physically lives), which
@@ -1066,28 +1068,85 @@ public sealed class InstallSession
     }
 
     /// <summary>
-    /// R2: may this already-elevated process spawn <paramref name="exe"/>, a path that
-    /// came from an Add/Remove-Programs <c>UninstallString</c>? True only when the file
-    /// is Authenticode-valid <em>or</em> lives in a directory only administrators can
-    /// write.
+    /// R2: is a trust check on the prior uninstaller required for this run at all?
+    /// True when <paramref name="scope"/> is machine — which either is or is about to
+    /// become an elevated process — or when this process is already elevated.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Either condition alone is a sufficient proof that an unprivileged user did not
-    /// choose the bytes that are about to run at high integrity: a valid Authenticode
-    /// signature means the file is intact and chains to a trusted publisher wherever it
-    /// sits, and an admin-only-writable directory means nobody unprivileged could have
-    /// put a file there or replaced one. Requiring <em>both</em> would refuse the
-    /// ordinary unsigned-uninstaller-in-<c>%ProgramFiles%</c> case and every legitimate
-    /// upgrade of a per-user install whose publisher does not sign
-    /// <c>uninstall.exe</c>; requiring neither is the bug.
+    /// This gate exists to stop an <em>unprivileged</em> user choosing what runs
+    /// <em>privileged</em>. When the run is unelevated and per-user, that boundary does
+    /// not exist: the uninstaller runs with exactly the token of the user who owns the
+    /// directory it sits in, so verifying it buys nothing an attacker could not already
+    /// do directly. Applying it unconditionally cost real functionality instead — an
+    /// unsigned per-user install, whose <c>uninstall.exe</c> lives in
+    /// <c>%LocalAppData%\Programs\&lt;App&gt;</c>, could satisfy neither half of
+    /// <see cref="IsPriorUninstallerTrusted"/> and so could never be upgraded at all.
+    /// Register row R2 words the condition as "when the effective scope is machine (or
+    /// the process is elevated)"; this is that wording.
     /// </para>
     /// <para>
-    /// The directory half is deliberately
-    /// <see cref="StateDirectorySecurity.IsAdminOnlyWritable"/> — the frozen, shared
-    /// predicate (owner ∈ {LocalSystem, Administrators, TrustedInstaller} AND no
-    /// non-admin holds a write-class right on the containing directory itself). Do not
-    /// grow a second ACL check here.
+    /// The elevation half is what makes it safe to keep the check narrow: a per-user
+    /// install launched with Run as administrator, or from an elevated shell, or by
+    /// Intune as SYSTEM, IS a privilege boundary and IS gated. Widening the condition
+    /// is safe; narrowing it is not.
+    /// </para>
+    /// </remarks>
+    internal static bool PriorUninstallerNeedsTrust(InstallScope scope) =>
+        scope == InstallScope.Machine || Elevation.IsProcessElevated();
+
+    /// <summary>
+    /// R2: may this run spawn <paramref name="exe"/>, a path that came from an
+    /// Add/Remove-Programs <c>UninstallString</c>? True only when the file is
+    /// Authenticode-valid <em>or</em> is a file that only administrators can write.
+    /// Consulted only when <see cref="PriorUninstallerNeedsTrust"/> says privilege is
+    /// at stake.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Either condition alone is meant to establish that an unprivileged user did not
+    /// choose the bytes about to run at high integrity. Requiring <em>both</em> would
+    /// refuse the ordinary unsigned-uninstaller-in-<c>%ProgramFiles%</c> case, which is
+    /// the common shape; requiring neither is the bug.
+    /// </para>
+    /// <para>
+    /// <b>What the Authenticode half does and does not establish.</b>
+    /// <see cref="AuthenticodeVerifier.VerifyFile"/> asks <c>WinVerifyTrust</c> whether
+    /// the file is intact and chains to a root this machine trusts. It is <b>not</b>
+    /// publisher pinning: it does not compare the subject to this installer's own
+    /// publisher, and the trusted-root set includes
+    /// <c>HKCU\SOFTWARE\Microsoft\SystemCertificates\Root</c>, which an unprivileged
+    /// user can add to. A user who plants a self-signed root and signs their own binary
+    /// with it therefore passes this half. It also runs with
+    /// <c>WTD_REVOKE_NONE</c> (register row R17), so a revoked certificate still
+    /// verifies. Pinning the subject and enabling chain policy is lane S3's Authenticode
+    /// work (R11 / R17) — deliberately not duplicated here. Until it lands, the file
+    /// half below is the load-bearing check for a hostile local user, and the hard-coded
+    /// <see cref="System.Diagnostics.ProcessStartInfo.ArgumentList"/> at the call site
+    /// (no attacker-controlled arguments are ever forwarded) is what keeps the residual
+    /// exposure to "runs a binary the attacker could already run as themselves".
+    /// </para>
+    /// <para>
+    /// <b>The file half checks the file, not just its folder.</b>
+    /// <see cref="StateDirectorySecurity.IsAdminOnlyWritable"/> inspects the CONTAINING
+    /// DIRECTORY, so a file carrying its own <c>Users:(M)</c> ACE inside an admin-only
+    /// directory would pass it — an installer that ships a world-writable
+    /// <c>uninstall.exe</c> into <c>%ProgramFiles%</c> is exactly that, and the attacker
+    /// then rewrites the file in place without ever needing the directory. Both are
+    /// therefore required: <see cref="StateDirectorySecurity.IsTrustedFile"/> for the
+    /// file's own owner and DACL, and <c>IsAdminOnlyWritable</c> for the directory,
+    /// because directory write alone lets an attacker delete and replace the file
+    /// wholesale. This is the same both-objects rule
+    /// <see cref="UninstallStateStore"/> applies to <c>uninstall.json</c> (R1); the two
+    /// shared predicates are consumed, never reimplemented.
+    /// </para>
+    /// <para>
+    /// <b>Remote paths are refused outright.</b> Both halves are answered by the far end
+    /// of a network hop: an SMB server reports the ACL, and <c>BUILTIN\Administrators</c>
+    /// is a machine-independent SID, so a server the attacker controls can claim any
+    /// owner and any DACL it likes. There is no legitimate case for an elevated
+    /// installer launching a prior uninstaller off a share, so this refuses UNC paths
+    /// and mapped network drives rather than trying to evaluate them.
     /// </para>
     /// <para>
     /// A TOCTOU window remains between this check and
@@ -1095,7 +1154,7 @@ public sealed class InstallSession
     /// closing it needs the file opened with a deny-write share and launched from that
     /// handle, which is register row R12's fix and is not in scope here. This check
     /// still removes the entire trivially-reachable attack — an attacker who can win
-    /// that race can already write the directory.
+    /// that race can already write the file or its directory.
     /// </para>
     /// <para>
     /// <c>internal</c> is the test seam (<c>InternalsVisibleTo</c>): it lets the
@@ -1105,7 +1164,7 @@ public sealed class InstallSession
     /// </remarks>
     internal static bool IsPriorUninstallerTrusted(string exe)
     {
-        if (string.IsNullOrEmpty(exe))
+        if (string.IsNullOrEmpty(exe) || IsRemotePath(exe))
         {
             return false;
         }
@@ -1118,7 +1177,56 @@ public sealed class InstallSession
         // Off Windows there is no Authenticode and no ACL to inspect, so this fails
         // closed. The upgrade teardown path spawns a Windows uninstall.exe and is
         // Windows-only in practice.
-        return OperatingSystem.IsWindows() && StateDirectorySecurity.IsAdminOnlyWritable(exe);
+        return OperatingSystem.IsWindows()
+            && StateDirectorySecurity.IsTrustedFile(exe)
+            && StateDirectorySecurity.IsAdminOnlyWritable(exe);
+    }
+
+    /// <summary>
+    /// True when <paramref name="path"/> resolves off this machine — a UNC path
+    /// (<c>\\server\share</c>, including the <c>\\?\UNC\</c> and <c>\\.\</c> device
+    /// forms) or a drive letter mapped to a network share. Fails CLOSED: a path that
+    /// cannot be classified is treated as remote.
+    /// </summary>
+    private static bool IsRemotePath(string path)
+    {
+#pragma warning disable CA1031 // Unclassifiable path → treated as remote → refused.
+        try
+        {
+            var probe = Path.GetFullPath(path);
+
+            // The extended-length UNC form is still a UNC path.
+            if (probe.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            // Strip \\?\ so that \\?\C:\... classifies exactly as C:\... does.
+            if (probe.StartsWith(@"\\?\", StringComparison.Ordinal))
+            {
+                probe = probe.Substring(4);
+            }
+
+            // \\server\share and the \\.\ device namespace.
+            if (probe.StartsWith(@"\\", StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            var root = Path.GetPathRoot(probe);
+            if (string.IsNullOrEmpty(root))
+            {
+                return true;
+            }
+
+            // A mapped drive (Z: → \\server\share) is a UNC path wearing a letter.
+            return new DriveInfo(root).DriveType == DriveType.Network;
+        }
+        catch
+        {
+            return true;
+        }
+#pragma warning restore CA1031
     }
 
     /// <summary>

@@ -14,12 +14,12 @@ using SigilBuild.Core.Manifest;
 /// off Windows or when no entry is found.
 /// </summary>
 /// <remarks>
-/// A <b>user</b>-scope resolve probes HKCU first and then falls back to HKLM, so an
-/// existing machine install is still discovered and its scope wins (see
+/// An <b>unelevated user</b>-scope resolve probes HKCU first and then falls back to
+/// HKLM, so an existing machine install is still discovered and its scope wins (see
 /// <see cref="InstallSession"/>); reading a hive the caller cannot write is safe.
-/// A <b>machine</b>-scope resolve probes HKLM and nothing else — see
-/// <see cref="ScopeProbeOrder"/> for why the mirrored fallback was a privilege
-/// escalation, not a convenience.
+/// A <b>machine</b>-scope resolve, or <b>any</b> resolve in an elevated process,
+/// probes HKLM and nothing else — see <see cref="ScopeProbeOrder"/> for why the
+/// mirrored fallback was a privilege escalation, not a convenience.
 /// </remarks>
 public static class InstalledStateResolver
 {
@@ -40,7 +40,7 @@ public static class InstalledStateResolver
             return UpgradeState.None;
         }
 
-        foreach (var scope in ScopeProbeOrder(tentativeScope))
+        foreach (var scope in ScopeProbeOrder(tentativeScope, Elevation.IsProcessElevated()))
         {
             var state = TryReadFromHive(appId, scope);
             if (state is not null)
@@ -54,6 +54,8 @@ public static class InstalledStateResolver
 
     /// <summary>
     /// The hives a resolve at <paramref name="tentativeScope"/> may read, in order.
+    /// Pure — <paramref name="elevated"/> is passed in rather than probed — so both
+    /// branches are testable from a single unelevated test run.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -68,15 +70,24 @@ public static class InstalledStateResolver
     /// publisher's legitimate installer to run it as administrator.
     /// </para>
     /// <para>
-    /// Machine scope therefore reads HKLM and nothing else. The user-scope fallback to
-    /// HKLM stays: a per-user install reading the machine hive is reading a hive it
-    /// cannot write, which is what makes a cross-scope upgrade discoverable without
-    /// trusting attacker-writable data. The direction of the asymmetry is the whole
-    /// fix — do not "restore the symmetry".
+    /// The condition is <b>machine scope OR an elevated process</b>, which is how
+    /// register row R2 words it, and the second half is not redundant: a
+    /// <em>user</em>-scope run can be elevated — launched with Run as administrator,
+    /// started from an already-elevated shell, or deployed by Intune / SCCM running as
+    /// SYSTEM. Keying on scope alone left every one of those probing HKCU and reaching
+    /// the same elevated spawn, with the trust gate in
+    /// <see cref="InstallSession.IsPriorUninstallerTrusted"/> as the sole remaining
+    /// defence. Two independent gates were the design; one is not.
+    /// </para>
+    /// <para>
+    /// The unelevated user-scope fallback to HKLM stays: a per-user install reading the
+    /// machine hive is reading a hive it cannot write, which is what makes a cross-scope
+    /// upgrade discoverable without trusting attacker-writable data. The direction of
+    /// the asymmetry is the whole fix — do not "restore the symmetry".
     /// </para>
     /// </remarks>
-    private static InstallScope[] ScopeProbeOrder(InstallScope tentativeScope) =>
-        tentativeScope == InstallScope.Machine
+    internal static InstallScope[] ScopeProbeOrder(InstallScope tentativeScope, bool elevated) =>
+        tentativeScope == InstallScope.Machine || elevated
             ? new[] { InstallScope.Machine }
             : new[] { InstallScope.User, InstallScope.Machine };
 

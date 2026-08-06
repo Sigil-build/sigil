@@ -5,6 +5,7 @@ using System.IO;
 using System.Runtime.Versioning;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Microsoft.Win32;
 using SigilBuild.Core.Manifest;
 using SigilBuild.Wrapper.Cli;
 using SigilBuild.Wrapper.Engine;
@@ -68,12 +69,14 @@ public sealed class PriorUninstallerTrustTests
     }
 
     /// <summary>
-    /// The non-vacuity control for the test above. Without this, deleting the
-    /// registry read entirely — or a fixture that silently failed to plant the key —
-    /// would leave that test green.
+    /// The non-vacuity control for the test above: deleting the registry read
+    /// entirely — or a fixture that silently failed to plant the key — must not leave
+    /// it green. The fixture is verified through the raw registry API, which does not
+    /// depend on the process token, and only then is the resolver's answer asserted
+    /// against the contract for the token this run actually has.
     /// </summary>
     [WindowsFact("Windows registry")]
-    public void The_same_HKCU_entry_is_still_found_by_a_user_scope_resolve()
+    public void The_same_HKCU_entry_is_readable_and_is_resolved_per_the_elevation_contract()
     {
         var appId = "sigil.test." + Guid.NewGuid().ToString("N");
         using var planted = TestRegistry.PlantUserUninstallEntry(
@@ -81,28 +84,64 @@ public sealed class PriorUninstallerTrustTests
             displayVersion: "0.0.1",
             uninstallString: @"""C:\Users\Public\evil.exe"" /S /Uninstall");
 
+        // The fixture really did plant a readable ARP entry — asserted independently
+        // of the resolver and of the process token.
+        using (var raw = Registry.CurrentUser.OpenSubKey(planted.Path))
+        {
+            raw.Should().NotBeNull();
+            raw!.GetValue("DisplayVersion").Should().Be("0.0.1");
+        }
+
         var user = InstalledStateResolver.Resolve(appId, InstallScope.User);
 
-        user.Found.Should().BeTrue("the fixture really did plant a readable ARP entry");
-        user.InstalledVersion.Should().Be("0.0.1");
-        user.PriorUninstallExe.Should().Be(@"C:\Users\Public\evil.exe");
-        user.FoundScope.Should().Be(InstallScope.User);
+        if (Elevation.IsProcessElevated())
+        {
+            // R2's second half: an ELEVATED user-scope run is a privilege boundary
+            // too, so it must not read HKCU either.
+            user.Found.Should().BeFalse(
+                "an elevated process must not resolve an ARP entry out of the user hive, " +
+                "whatever scope it was asked for");
+        }
+        else
+        {
+            user.Found.Should().BeTrue(
+                "an unelevated per-user run legitimately reads its own hive — refusing " +
+                "that would break every per-user upgrade");
+            user.InstalledVersion.Should().Be("0.0.1");
+            user.PriorUninstallExe.Should().Be(@"C:\Users\Public\evil.exe");
+            user.FoundScope.Should().Be(InstallScope.User);
+        }
     }
 
     /// <summary>
-    /// The user-scope → HKLM fallback is deliberately kept: reading a hive the caller
-    /// cannot write is safe, and it is what makes a machine install discoverable from
-    /// a per-user run. Asserted against the resolver's own probe order rather than by
-    /// planting an HKLM key, which would need elevation and would mutate the real
-    /// machine's installed-programs list.
+    /// The probe order itself, in both elevation branches, against the pure seam.
+    /// </summary>
+    [WindowsTheory("Windows registry")]
+    [InlineData(InstallScope.Machine, false)]
+    [InlineData(InstallScope.Machine, true)]
+    [InlineData(InstallScope.User, true)]
+    public void Hkcu_is_never_probed_when_privilege_is_at_stake(InstallScope scope, bool elevated)
+    {
+        InstalledStateResolver.ScopeProbeOrder(scope, elevated)
+            .Should().Equal(InstallScope.Machine);
+    }
+
+    /// <summary>
+    /// The user → HKLM fallback, which is deliberately kept and had no coverage at
+    /// all. Asserted against the pure seam rather than by planting an HKLM key: that
+    /// would need elevation and would mutate the real machine's installed-programs
+    /// list. Passing <c>elevated</c> as a parameter is what lets the branch this
+    /// unelevated session cannot otherwise reach be tested at the same time.
     /// </summary>
     [WindowsFact("Windows registry")]
-    public void User_scope_resolve_of_an_unknown_app_is_simply_absent()
+    public void An_unelevated_user_scope_probe_reads_HKCU_first_and_then_falls_back_to_HKLM()
     {
-        var appId = "sigil.test." + Guid.NewGuid().ToString("N");
-
-        InstalledStateResolver.Resolve(appId, InstallScope.User).Found.Should().BeFalse();
-        InstalledStateResolver.Resolve(appId, InstallScope.Machine).Found.Should().BeFalse();
+        InstalledStateResolver.ScopeProbeOrder(InstallScope.User, elevated: false)
+            .Should().Equal(
+                new[] { InstallScope.User, InstallScope.Machine },
+                "a per-user install must still discover a prior MACHINE install so the " +
+                "existing scope can win — reading a hive the caller cannot write is safe, " +
+                "and dropping this fallback would silently break cross-scope upgrades");
     }
 
     // ---- Defect 2: the spawn ------------------------------------------------
@@ -125,36 +164,86 @@ public sealed class PriorUninstallerTrustTests
     {
         // Arrange
         using var temp = new TempDir();
-        var fakeUninstaller = Path.Combine(temp.Path, "evil.exe");
-        File.WriteAllBytes(fakeUninstaller, new byte[] { 0x4D, 0x5A });   // "MZ"
+        var fakeUninstaller = StubExe(temp, "evil.exe");
 
-        var blob = Blob("2.0.0");
-        var state = new UpgradeState(
-            Found: true,
-            InstalledVersion: "1.0.0",
-            PriorInstallDir: temp.Path,
-            PriorUninstallExe: fakeUninstaller,
-            FoundScope: InstallScope.User);
-        var session = InstallSession.ForTesting(
-            blob, CommandLineParser.Parse(new[] { "/silent" }, blob.Parameters), state);
-        session.UpgradeAction.Should().Be(
-            UpgradeAction.Upgrade, "the teardown under test only runs for an upgrade");
-
-        // Act — empty payload, so the run reaches the prior-version teardown and
-        // aborts there, before the journal is ever opened.
-        var outcome = await session.RunInstallCoreAsync(Array.Empty<byte>(), progress: null);
+        // Machine scope: the run either is elevated or is about to relaunch itself
+        // elevated, so the gate applies whatever token this test process holds.
+        var outcome = await RunUpgradeAsync(InstallScope.Machine, temp.Path, fakeUninstaller);
 
         // Assert
-        outcome.Success.Should().BeFalse();
         outcome.Error.Should().Contain(
             "is not verified",
             "the elevated process must refuse a registry-supplied uninstaller that is " +
-            "neither signed nor admin-path-resident — reaching Process.Start at all is " +
+            "neither signed nor admin-writable-only — reaching Process.Start at all is " +
             "the vulnerability");
         outcome.Error.Should().NotContain(
             "failed to run",
             "that wording means the spawn was attempted and the fake image happened to " +
             "be rejected by Windows, which is luck rather than a gate");
+    }
+
+    /// <summary>
+    /// The positive case, first-class rather than an afterthought: an <b>unelevated
+    /// per-user</b> upgrade whose <c>uninstall.exe</c> is unsigned and sits in the
+    /// user's own profile — the ordinary shape of an unsigned per-user install — must
+    /// NOT be gated.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// There is no privilege boundary in that run: the uninstaller executes with
+    /// exactly the token of the user who owns the directory it sits in, so the check
+    /// buys nothing an attacker could not do directly, while applying it made every
+    /// such app permanently un-upgradable.
+    /// </para>
+    /// <para>
+    /// "Not gated" is observed as the run REACHING <c>Process.Start</c> — the stub is
+    /// not a valid Win32 image, so Windows rejects it and the engine reports "failed to
+    /// run". That is the exact wording the test above forbids, which is what makes the
+    /// pair jointly falsifiable: one asserts the gate fires, the other asserts it does
+    /// not, and no single constant satisfies both.
+    /// </para>
+    /// </remarks>
+    [WindowsFact("Windows-only elevation path")]
+    public async Task An_unelevated_per_user_upgrade_of_an_unsigned_uninstaller_is_not_gated()
+    {
+        using var temp = new TempDir();
+        var uninstaller = StubExe(temp, "uninstall.exe");
+
+        var outcome = await RunUpgradeAsync(InstallScope.User, temp.Path, uninstaller);
+
+        if (Elevation.IsProcessElevated())
+        {
+            outcome.Error.Should().Contain(
+                "is not verified",
+                "an ELEVATED per-user run IS a privilege boundary and stays gated");
+        }
+        else
+        {
+            outcome.Error.Should().Contain(
+                "failed to run",
+                "the run must have reached Process.Start — an unsigned per-user " +
+                "uninstaller in the user's own profile is the ordinary shape of an " +
+                "unsigned per-user install, and gating it makes that app permanently " +
+                "un-upgradable for no security benefit whatsoever");
+            outcome.Error.Should().NotContain("is not verified");
+        }
+    }
+
+    /// <summary>
+    /// The gate condition itself. Machine scope is gated whatever this process's token
+    /// is; user scope is gated exactly when the process is elevated. Pure, so neither
+    /// branch depends on the token the suite happens to run under.
+    /// </summary>
+    [WindowsFact("Windows-only elevation path")]
+    public void The_trust_gate_applies_to_machine_scope_and_to_any_elevated_run()
+    {
+        InstallSession.PriorUninstallerNeedsTrust(InstallScope.Machine).Should().BeTrue(
+            "a machine-scope run either is elevated or is about to relaunch itself elevated");
+
+        InstallSession.PriorUninstallerNeedsTrust(InstallScope.User).Should().Be(
+            Elevation.IsProcessElevated(),
+            "user scope is gated exactly when the process is elevated — Run as " +
+            "administrator, an elevated shell, or Intune running as SYSTEM");
     }
 
     /// <summary>
@@ -164,36 +253,190 @@ public sealed class PriorUninstallerTrustTests
     /// without running anything.
     /// </summary>
     [WindowsFact("Windows ACL APIs")]
-    public void Prior_uninstaller_trust_accepts_an_admin_only_directory_and_refuses_a_user_one()
+    public void Prior_uninstaller_trust_accepts_an_admin_only_file_and_refuses_a_user_one()
     {
         using var temp = new TempDir();
-        var userWritable = Path.Combine(temp.Path, "uninstall.exe");
-        File.WriteAllBytes(userWritable, new byte[] { 0x4D, 0x5A });
+        var userWritable = StubExe(temp, "uninstall.exe");
 
         // %TEMP% is the user's own directory and the stub carries no signature, so
-        // both halves of the predicate say no.
+        // every half of the predicate says no.
         InstallSession.IsPriorUninstallerTrusted(userWritable).Should().BeFalse();
 
-        // System32 is TrustedInstaller-owned with no non-admin writer, so the
-        // admin-only-directory half says yes. cmd.exe is only ever a path here — it
-        // is never started.
-        var systemExe = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe");
-        File.Exists(systemExe).Should().BeTrue("the positive control needs a real system exe");
-        InstallSession.IsPriorUninstallerTrusted(systemExe).Should().BeTrue(
+        // System32\cmd.exe is TrustedInstaller-owned with no non-admin writer, on the
+        // file AND its directory. It is only ever a path here — never started.
+        File.Exists(SystemCmd).Should().BeTrue("the positive control needs a real system exe");
+        InstallSession.IsPriorUninstallerTrusted(SystemCmd).Should().BeTrue(
             "a legitimate uninstaller lives under %ProgramFiles% / %SystemRoot%, and " +
             "refusing those would refuse every real machine-scope upgrade");
 
         InstallSession.IsPriorUninstallerTrusted(string.Empty).Should().BeFalse();
     }
 
-    private static WrapperBlob Blob(string version) => new(
+    /// <summary>
+    /// The file's OWN security descriptor is checked, not merely its folder's.
+    /// <see cref="StateDirectorySecurity.IsAdminOnlyWritable"/> inspects the CONTAINING
+    /// DIRECTORY, so an installer that ships a world-writable <c>uninstall.exe</c> into
+    /// an admin-only directory passes a directory-only check while the attacker
+    /// rewrites the file in place, never needing the directory at all.
+    /// </summary>
+    /// <remarks>
+    /// Asserted the only way an unelevated session can: <c>System32\cmd.exe</c> is a
+    /// real file in a real admin-only directory for which both predicates are true
+    /// today, so pinning them beside a user-owned file for which the file predicate is
+    /// false proves the file check is wired in and is not a constant in either
+    /// direction. Nothing is written to <c>System32</c> — both calls are read-only ACL
+    /// reads.
+    /// </remarks>
+    [WindowsFact("Windows ACL APIs")]
+    public void The_uninstallers_own_acl_is_checked_not_just_its_directory()
+    {
+        using var temp = new TempDir();
+        var userOwned = StubExe(temp, "uninstall.exe");
+
+        StateDirectorySecurity.IsTrustedFile(SystemCmd).Should().BeTrue(
+            "the file half must be satisfiable by a real system binary, or the gate is " +
+            "a constant-false that refuses every legitimate upgrade");
+        StateDirectorySecurity.IsAdminOnlyWritable(SystemCmd).Should().BeTrue();
+
+        StateDirectorySecurity.IsTrustedFile(userOwned).Should().BeFalse(
+            "a file the unprivileged user owns can be rewritten in place at any moment, " +
+            "whatever its directory says");
+        InstallSession.IsPriorUninstallerTrusted(userOwned).Should().BeFalse();
+    }
+
+    /// <summary>
+    /// The discriminating case for the file check, and the one an unelevated session
+    /// can actually construct: a path whose CONTAINING DIRECTORY is admin-only but
+    /// whose FILE fails the file predicate. A directory-only gate answers <c>true</c>
+    /// here; a gate that inspects the object itself answers <c>false</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The absent file is the stand-in. The case that matters in production is an
+    /// <em>existing</em> <c>uninstall.exe</c> inside an admin-only directory carrying
+    /// its own <c>Users:(M)</c> ACE — an installer that ships a world-writable binary
+    /// into <c>%ProgramFiles%</c>. That fixture cannot be built without elevation (a
+    /// directory this session can write to is by definition not admin-only), so it is
+    /// listed in the report as an elevated check for gate G1. Both cases are refused by
+    /// the same <c>IsTrustedFile</c> conjunct, and this one pins that conjunct is
+    /// present and load-bearing.
+    /// </para>
+    /// <para>
+    /// The engine checks <see cref="File.Exists(string)"/> before it reaches the gate,
+    /// so this exact path is unreachable through <c>RunPriorUninstallAsync</c>; the
+    /// predicate is therefore exercised directly, which is what the seam is for.
+    /// </para>
+    /// </remarks>
+    [WindowsFact("Windows ACL APIs")]
+    public void A_directory_only_check_would_accept_what_the_file_check_refuses()
+    {
+        var absentInSystem32 = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.System),
+            "sigil-test-" + Guid.NewGuid().ToString("N") + ".exe");
+
+        File.Exists(absentInSystem32).Should().BeFalse(
+            "the fixture must not exist — and nothing here creates it; System32 is only " +
+            "ever read from in this file");
+
+        StateDirectorySecurity.IsAdminOnlyWritable(absentInSystem32).Should().BeTrue(
+            "IsAdminOnlyWritable answers for the CONTAINING DIRECTORY, which is System32");
+        StateDirectorySecurity.IsTrustedFile(absentInSystem32).Should().BeFalse();
+
+        InstallSession.IsPriorUninstallerTrusted(absentInSystem32).Should().BeFalse(
+            "the gate must answer for the file it is about to spawn, not merely for the " +
+            "folder that file sits in");
+    }
+
+    /// <summary>
+    /// A remote path is refused outright. Both halves of the predicate are answered by
+    /// the far end of a network hop — an SMB server reports the ACL, and
+    /// <c>BUILTIN\Administrators</c> is a machine-independent SID, so a server the
+    /// attacker controls can claim any owner and any DACL it likes. There is no
+    /// legitimate case for an elevated installer launching a prior uninstaller off a
+    /// share.
+    /// </summary>
+    /// <remarks>
+    /// The hosts below are never contacted: classification is by path shape and the
+    /// refusal happens before any ACL or signature read. No network access.
+    /// </remarks>
+    [WindowsTheory("Windows-only elevation path")]
+    [InlineData(@"\\attacker\share\uninstall.exe")]
+    [InlineData(@"\\127.0.0.1\C$\Windows\System32\cmd.exe")]
+    [InlineData(@"\\?\UNC\attacker\share\uninstall.exe")]
+    public void A_remote_uninstaller_path_is_refused(string path)
+    {
+        InstallSession.IsPriorUninstallerTrusted(path).Should().BeFalse(
+            "an SMB server the attacker controls reports whatever owner and DACL it " +
+            "likes, and BUILTIN\\Administrators is a machine-independent SID");
+    }
+
+    /// <summary>
+    /// Non-vacuity for the test above: the extended-length prefix on a LOCAL path must
+    /// not be mistaken for a remote one, or the remote refusal would just be a
+    /// constant that also breaks long local paths.
+    /// </summary>
+    [WindowsFact("Windows ACL APIs")]
+    public void The_extended_length_prefix_on_a_local_path_is_not_treated_as_remote()
+    {
+        InstallSession.IsPriorUninstallerTrusted(@"\\?\" + SystemCmd).Should().BeTrue();
+    }
+
+    /// <summary><c>System32\cmd.exe</c> — used as a path only; never started.</summary>
+    private static string SystemCmd => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe");
+
+    /// <summary>A two-byte "MZ" stub: a real file, never a runnable image.</summary>
+    private static string StubExe(TempDir temp, string name)
+    {
+        var path = Path.Combine(temp.Path, name);
+        File.WriteAllBytes(path, new byte[] { 0x4D, 0x5A });
+        return path;
+    }
+
+    /// <summary>
+    /// Drive the real <see cref="InstallSession.RunInstallCoreAsync"/> upgrade teardown
+    /// with an injected installed state and an empty payload, so the run reaches the
+    /// prior-version teardown and aborts there — before the journal is ever opened and
+    /// before anything is written to disk.
+    /// </summary>
+    /// <remarks>
+    /// This is what the existing <c>UpgradeSessionTests</c> do not do: they all inject
+    /// a non-existent <c>PriorUninstallExe</c>, so every one of them exits at the
+    /// earlier <c>File.Exists</c> branch and none has ever reached the gate. That is
+    /// why an unconditional gate broke unsigned per-user upgrades undetected.
+    /// </remarks>
+    private static async Task<InstallOutcome> RunUpgradeAsync(
+        InstallScope scope, string priorInstallDir, string priorUninstallExe)
+    {
+        var blob = Blob("2.0.0", scope);
+        var session = InstallSession.ForTesting(
+            blob,
+            CommandLineParser.Parse(new[] { "/silent" }, blob.Parameters),
+            new UpgradeState(
+                Found: true,
+                InstalledVersion: "1.0.0",
+                PriorInstallDir: priorInstallDir,
+                PriorUninstallExe: priorUninstallExe,
+                FoundScope: scope));
+
+        session.UpgradeAction.Should().Be(
+            UpgradeAction.Upgrade, "the teardown under test only runs for an upgrade");
+        session.ResolvedScope.Should().Be(scope);
+
+        var outcome = await session.RunInstallCoreAsync(Array.Empty<byte>(), progress: null);
+        outcome.Success.Should().BeFalse(
+            "the stub is not a runnable image, so the run aborts either at the gate or " +
+            "at Process.Start — the WHICH is what each caller asserts");
+        return outcome;
+    }
+
+    private static WrapperBlob Blob(string version, InstallScope scope) => new(
         AppId: "sigil.test.prior-uninstaller",
         Parameters: Array.Empty<ParameterDefinition>(),
         InstallSteps: Array.Empty<InstallStep>(),
         PreInstall: Array.Empty<InstallStep>(),
         PostInstall: Array.Empty<InstallStep>(),
         UpdateSteps: Array.Empty<InstallStep>(),
-        Scope: InstallScope.User,
+        Scope: scope,
         Version: version);
 }

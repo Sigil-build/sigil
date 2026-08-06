@@ -170,13 +170,24 @@ public sealed class StepValueInjectionTests
             "i", path, "app", "x", "9\n[admin]\nenabled=true",
             CreateIfMissing: false, null, OnFailure.Fail);
 
+        var journal = new RollbackJournal();
         var result = await new IniWriteStep(spec).RunAsync(
             new StepContext(new System.Collections.Generic.Dictionary<string, object?>(), installDir: installDir.Path),
-            new RollbackJournal(),
+            journal,
             CancellationToken.None);
 
         result.Success.Should().BeFalse();
         File.ReadAllText(path).Should().Be("[app]\r\nx=1\r\n", "the file must not have been rewritten");
         File.ReadAllText(path).Should().NotContain("[admin]");
+
+        // The one refusal in this lane that legitimately DOES journal:
+        // ConfigFileEditor snapshots the prior file before handing off to the
+        // transform, and the transform is where R32 rejects. The record is a
+        // RESTORE of a file inside this test's own temp directory —
+        // non-destructive by type — and is pinned here so that "refused implies
+        // empty journal" is never assumed in the one place it does not hold.
+        journal.Records.Should().ContainSingle()
+            .Which.Should().BeOfType<RollbackRecord.RestoreConfigFile>()
+            .Which.OriginalPath.Should().Be(path);
     }
 }

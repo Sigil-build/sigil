@@ -126,6 +126,7 @@ public sealed class UnresolvedPathTokenTests
 
         result.Success.Should().BeFalse();
         result.Error.Should().Contain("unresolved token '{var.typo}'");
+        result.Journal.Records.Should().BeEmpty();
         Directory.Exists(literal).Should().BeFalse(
             "a literal '{var.typo}' directory is exactly the regression this closes");
     }
@@ -143,6 +144,7 @@ public sealed class UnresolvedPathTokenTests
 
         result.Success.Should().BeFalse();
         result.Error.Should().Contain("unresolved token '{var.typo}'");
+        result.Journal.Records.Should().BeEmpty();
     }
 
     [Fact]
@@ -158,6 +160,7 @@ public sealed class UnresolvedPathTokenTests
 
         result.Success.Should().BeFalse();
         result.Error.Should().Contain("unresolved token");
+        result.Journal.Records.Should().BeEmpty();
     }
 
     /// <summary>
@@ -195,6 +198,12 @@ public sealed class UnresolvedPathTokenTests
 /// <remarks>
 /// None of these creates anything: each returns on the resolver's refusal, before
 /// <c>schtasks.exe</c> / <c>sc.exe</c> is started and before any shortcut COM call.
+/// Every one asserts the rollback journal is EMPTY, which is the load-bearing
+/// assertion rather than a nicety — these tests run with <c>OnFailure.Fail</c>, so
+/// the engine replays the journal on the way out. A journaled
+/// <c>DeleteShortcut</c> would therefore be EXECUTED, deleting a same-named
+/// pre-existing <c>.lnk</c> from the real Desktop or Start Menu of whatever
+/// machine ran the suite.
 /// </remarks>
 [System.Runtime.Versioning.SupportedOSPlatform("windows")]
 public sealed class UnresolvedPathTokenWindowsTests
@@ -211,6 +220,105 @@ public sealed class UnresolvedPathTokenWindowsTests
 
         result.Success.Should().BeFalse();
         result.Error.Should().Contain("unresolved token '{var.typo}'");
+        result.Journal.Records.Should().BeEmpty(
+            "the refusal happens before the journal entry — a DeleteShortcut queued here would " +
+            "be replayed by the engine and would delete a real Desktop shortcut named 'App.lnk'");
+    }
+
+    [WindowsFact("Windows shell APIs")]
+    public async Task Shortcut_create_refuses_an_unresolved_token_in_its_location()
+    {
+        // R16 verbatim, in the one path field that reached NO substitution at all,
+        // so a check on substituted output could never have caught it:
+        // `location` fed Directory.CreateDirectory raw. The literal directory is
+        // asserted absent relative to the current directory, which is where an
+        // unrooted path would have landed.
+        var literal = Path.Combine(Directory.GetCurrentDirectory(), "{install_dir}");
+        Directory.Exists(literal).Should().BeFalse("precondition: no leftover from an earlier run");
+
+        var result = await RunThroughEngineAsync(
+            new InstallStep.ShortcutCreate(
+                "sc", @"C:\App\app.exe", @"{var.typo}\Tools", "App",
+                Args: null, WorkingDir: null, Icon: null, Description: null, null, OnFailure.Fail));
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Contain("unresolved token '{var.typo}'");
+        result.Journal.Records.Should().BeEmpty();
+        Directory.Exists(Path.Combine(Directory.GetCurrentDirectory(), "{var.typo}"))
+            .Should().BeFalse("the location directory must not have been created");
+    }
+
+    [WindowsFact("Windows shell APIs")]
+    public async Task Shortcut_create_substitutes_its_location_rather_than_taking_it_literally()
+    {
+        // The shipped example manifest uses `location: "${parameters.install_dir}\StartMenu"`.
+        // Before the fix nothing substituted `location`, so following the
+        // documentation produced a directory named after the template text.
+        using var installDir = new TempDir();
+        var expected = Path.Combine(installDir.Path, "StartMenu");
+        var literal = Path.Combine(Directory.GetCurrentDirectory(), "{install_dir}");
+
+        try
+        {
+            var result = await new InstallEngine().RunAsync(
+                new InstallStep[]
+                {
+                    new InstallStep.ShortcutCreate(
+                        "sc", Path.Combine(installDir.Path, "app.exe"), @"{install_dir}\StartMenu", "App",
+                        Args: null, WorkingDir: null, Icon: null, Description: null, null, OnFailure.Fail),
+                },
+                new StepContext(new Dictionary<string, object?>(), installDir: installDir.Path),
+                CancellationToken.None);
+
+            result.Success.Should().BeTrue(result.Error);
+            Directory.Exists(expected).Should().BeTrue("{install_dir} must have expanded");
+            File.Exists(Path.Combine(expected, "App.lnk")).Should().BeTrue();
+            Directory.Exists(literal).Should().BeFalse(
+                "a literal '{install_dir}' directory is exactly the regression this closes");
+
+            // This is the ONE test in the lane that legitimately journals a
+            // DESTRUCTIVE record (DeleteShortcut unlinks a .lnk unconditionally).
+            // Pin that its target is the shortcut this test just created, inside a
+            // temp directory — so even if the engine replayed the journal it could
+            // not touch a real Desktop or Start Menu entry.
+            result.Journal.Records.Should().ContainSingle()
+                .Which.Should().BeOfType<RollbackRecord.DeleteShortcut>()
+                .Which.Path.Should().Be(Path.Combine(expected, "App.lnk"));
+        }
+        finally
+        {
+            // Only reachable if the fix regressed; leaving it would poison the
+            // next run rather than failing this one.
+            if (Directory.Exists(literal))
+            {
+                Directory.Delete(literal, recursive: true);
+            }
+        }
+    }
+
+    [WindowsFact("Windows shell APIs")]
+    public async Task Shortcut_create_refuses_an_unresolved_token_in_its_name()
+    {
+        // `name` is a display string, so it goes through Resolve rather than
+        // ResolvePath — but it is concatenated into the .lnk filename, so the
+        // COMPOSED path is checked. Found by enumerating fields rather than by
+        // reasoning about which ones "are paths".
+        using var installDir = new TempDir();
+
+        var result = await new InstallEngine().RunAsync(
+            new InstallStep[]
+            {
+                new InstallStep.ShortcutCreate(
+                    "sc", Path.Combine(installDir.Path, "app.exe"), installDir.Path, "{var.typo}",
+                    Args: null, WorkingDir: null, Icon: null, Description: null, null, OnFailure.Fail),
+            },
+            new StepContext(new Dictionary<string, object?>(), installDir: installDir.Path),
+            CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Contain("unresolved token '{var.typo}'");
+        result.Journal.Records.Should().BeEmpty();
+        File.Exists(Path.Combine(installDir.Path, "{var.typo}.lnk")).Should().BeFalse();
     }
 
     [WindowsFact("Windows service APIs")]

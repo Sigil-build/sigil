@@ -33,11 +33,11 @@ public sealed class StepDestinationContainmentTests
         using var elsewhere = new TempDir();
         var target = Path.Combine(elsewhere.Path, "machine.ini");
 
-        var result = await new IniWriteStep(
-                new InstallStep.IniWrite("i", target, "app", "x", "9", CreateIfMissing: true, null, OnFailure.Fail))
-            .RunAsync(Ctx(installDir.Path), new RollbackJournal(), CancellationToken.None);
+        var result = await StepRun.RefusalAsync(
+            new IniWriteStep(
+                new InstallStep.IniWrite("i", target, "app", "x", "9", CreateIfMissing: true, null, OnFailure.Fail)),
+            Ctx(installDir.Path));
 
-        result.Success.Should().BeFalse();
         result.Error.Should().Contain("outside install_dir");
         File.Exists(target).Should().BeFalse("the refusal happens before anything is written");
     }
@@ -54,11 +54,11 @@ public sealed class StepDestinationContainmentTests
 
         try
         {
-            var result = await new JsonEditStep(
-                    new InstallStep.JsonEdit("j", target, "/a", "2", CreateIfMissing: true, null, OnFailure.Fail))
-                .RunAsync(Ctx(installDir.Path), new RollbackJournal(), CancellationToken.None);
+            var result = await StepRun.RefusalAsync(
+                new JsonEditStep(
+                    new InstallStep.JsonEdit("j", target, "/a", "2", CreateIfMissing: true, null, OnFailure.Fail)),
+                Ctx(installDir.Path));
 
-            result.Success.Should().BeFalse();
             result.Error.Should().Contain("outside install_dir");
             File.Exists(full).Should().BeFalse();
         }
@@ -90,11 +90,11 @@ public sealed class StepDestinationContainmentTests
         {
             var target = Path.Combine(link, "app.config");
 
-            var result = await new XmlEditStep(
-                    new InstallStep.XmlEdit("x", target, "/root/a", null, "new", CreateIfMissing: true, null, OnFailure.Fail))
-                .RunAsync(Ctx(installDir.Path), new RollbackJournal(), CancellationToken.None);
+            var result = await StepRun.RefusalAsync(
+                new XmlEditStep(
+                    new InstallStep.XmlEdit("x", target, "/root/a", null, "new", CreateIfMissing: true, null, OnFailure.Fail)),
+                Ctx(installDir.Path));
 
-            result.Success.Should().BeFalse();
             result.Error.Should().Contain("junction");
             File.Exists(Path.Combine(elsewhere.Path, "app.config"))
                 .Should().BeFalse("the write must not have followed the junction");
@@ -111,12 +111,16 @@ public sealed class StepDestinationContainmentTests
         using var installDir = new TempDir();
         var target = Path.Combine(installDir.Path, "conf", "app.ini");
 
-        var result = await new IniWriteStep(
-                new InstallStep.IniWrite("i", target, "app", "x", "9", CreateIfMissing: true, null, OnFailure.Fail))
-            .RunAsync(Ctx(installDir.Path), new RollbackJournal(), CancellationToken.None);
+        var (result, journal) = await StepRun.Async(
+            new IniWriteStep(
+                new InstallStep.IniWrite("i", target, "app", "x", "9", CreateIfMissing: true, null, OnFailure.Fail)),
+            Ctx(installDir.Path));
 
         result.Success.Should().BeTrue(result.Error);
         File.ReadAllText(target).Should().Contain("x=9");
+        journal.Records.Should().ContainSingle()
+            .Which.Should().BeOfType<RollbackRecord.RestoreConfigFile>(
+                "an accepted edit journals a RESTORE, which is non-destructive by construction");
     }
 
     [Fact]
@@ -128,13 +132,16 @@ public sealed class StepDestinationContainmentTests
         using var elsewhere = new TempDir();
         var target = Path.Combine(elsewhere.Path, "machine.ini");
 
-        var result = await new IniWriteStep(
+        var (result, journal) = await StepRun.Async(
+            new IniWriteStep(
                 new InstallStep.IniWrite("i", target, "app", "x", "9", CreateIfMissing: true, null, OnFailure.Fail)
-                { AllowOutsideInstallDir = true })
-            .RunAsync(Ctx(installDir.Path), new RollbackJournal(), CancellationToken.None);
+                { AllowOutsideInstallDir = true }),
+            Ctx(installDir.Path));
 
         result.Success.Should().BeTrue(result.Error);
         File.ReadAllText(target).Should().Contain("x=9");
+        journal.Records.Should().ContainSingle()
+            .Which.Should().BeOfType<RollbackRecord.RestoreConfigFile>();
     }
 
     // ── file_copy ─────────────────────────────────────────────────────────────
@@ -148,11 +155,11 @@ public sealed class StepDestinationContainmentTests
         File.WriteAllText(Path.Combine(source.Path, "a.txt"), "A");
         var to = Path.Combine(elsewhere.Path, "landing");
 
-        var result = await new FileCopyStep(
-                new InstallStep.FileCopy("cp", Path.Combine(source.Path, "*"), to, Overwrite: true, null, OnFailure.Fail))
-            .RunAsync(Ctx(installDir.Path), new RollbackJournal(), CancellationToken.None);
+        var result = await StepRun.RefusalAsync(
+            new FileCopyStep(
+                new InstallStep.FileCopy("cp", Path.Combine(source.Path, "*"), to, Overwrite: true, null, OnFailure.Fail)),
+            Ctx(installDir.Path));
 
-        result.Success.Should().BeFalse();
         result.Error.Should().Contain("outside install_dir");
         Directory.Exists(to).Should().BeFalse(
             "the guard runs before Directory.CreateDirectory, so not even the destination tree is made");
@@ -169,11 +176,15 @@ public sealed class StepDestinationContainmentTests
         var ctx = new StepContext(
             new Dictionary<string, object?>(), payloadRoot: payload.Path, installDir: installDir.Path);
 
+        var journal = new RollbackJournal();
         var act = async () => await new FileCopyStep(
                 new InstallStep.FileCopy("cp", "payload://a.txt", "payload://../escaped", Overwrite: true, null, OnFailure.Fail))
-            .RunAsync(ctx, new RollbackJournal(), CancellationToken.None);
+            .RunAsync(ctx, journal, CancellationToken.None);
 
         await act.Should().ThrowAsync<FormatException>().WithMessage("*escapes the payload root*");
+        journal.Records.Should().BeEmpty(
+            "the resolver throws before the step reaches any journaling — asserted here too so " +
+            "the lane-wide invariant holds for the throwing path as well as the refusing one");
     }
 
     // ── file_delete / directory_delete ────────────────────────────────────────
@@ -186,11 +197,10 @@ public sealed class StepDestinationContainmentTests
         var victim = Path.Combine(elsewhere.Path, "important.txt");
         File.WriteAllText(victim, "keep me");
 
-        var result = await new FileDeleteStep(
-                new InstallStep.FileDelete("del", victim, IfMissing: "fail", null, OnFailure.Fail))
-            .RunAsync(Ctx(installDir.Path), new RollbackJournal(), CancellationToken.None);
+        var result = await StepRun.RefusalAsync(
+            new FileDeleteStep(new InstallStep.FileDelete("del", victim, IfMissing: "fail", null, OnFailure.Fail)),
+            Ctx(installDir.Path));
 
-        result.Success.Should().BeFalse();
         result.Error.Should().Contain("outside install_dir");
         File.Exists(victim).Should().BeTrue("the file must not have been deleted");
     }
@@ -202,11 +212,11 @@ public sealed class StepDestinationContainmentTests
         using var elsewhere = new TempDir();
         File.WriteAllText(Path.Combine(elsewhere.Path, "important.txt"), "keep me");
 
-        var result = await new DirectoryDeleteStep(
-                new InstallStep.DirectoryDelete("dd", elsewhere.Path, Recursive: true, null, OnFailure.Fail))
-            .RunAsync(Ctx(installDir.Path), new RollbackJournal(), CancellationToken.None);
+        var result = await StepRun.RefusalAsync(
+            new DirectoryDeleteStep(
+                new InstallStep.DirectoryDelete("dd", elsewhere.Path, Recursive: true, null, OnFailure.Fail)),
+            Ctx(installDir.Path));
 
-        result.Success.Should().BeFalse();
         result.Error.Should().Contain("outside install_dir");
         Directory.Exists(elsewhere.Path).Should().BeTrue("the subtree must not have been deleted");
     }
@@ -220,13 +230,13 @@ public sealed class StepDestinationContainmentTests
         using var elsewhere = new TempDir();
         var dest = Path.Combine(elsewhere.Path, "payload.bin");
 
-        var result = await new HttpDownloadStep(
+        var result = await StepRun.RefusalAsync(
+            new HttpDownloadStep(
                 new InstallStep.HttpDownload(
                     "dl", "https://example.invalid/f", dest, new string('a', 64),
-                    TimeoutSeconds: 1, Retries: 0, null, OnFailure.Fail))
-            .RunAsync(Ctx(installDir.Path), new RollbackJournal(), CancellationToken.None);
+                    TimeoutSeconds: 1, Retries: 0, null, OnFailure.Fail)),
+            Ctx(installDir.Path));
 
-        result.Success.Should().BeFalse();
         result.Error.Should().Contain("outside install_dir");
         result.Error.Should().NotContain("https",
             "the containment refusal must come before the URL scheme check and before any request");
@@ -240,16 +250,35 @@ public sealed class StepDestinationContainmentTests
         using var installDir = new TempDir();
         using var elsewhere = new TempDir();
         var target = Path.Combine(elsewhere.Path, "planted");
+
+        var result = await StepRun.RefusalAsync(
+            new DirectoryCreateStep(new InstallStep.DirectoryCreate("mk", target, null, OnFailure.Fail)),
+            Ctx(installDir.Path));
+
+        result.Error.Should().Contain("outside install_dir");
+        Directory.Exists(target).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Directory_create_accepts_a_path_inside_the_install_dir()
+    {
+        // The accept direction. All eleven pre-existing fixtures that needed
+        // directory_create's containment relaxed did so with the opt-out, which
+        // left the guard with no accept-side coverage of its own — a guard that
+        // refused EVERYTHING would still have passed the whole suite.
+        using var installDir = new TempDir();
+        var target = Path.Combine(installDir.Path, "logs", "diagnostics");
         var journal = new RollbackJournal();
 
         var result = await new DirectoryCreateStep(
                 new InstallStep.DirectoryCreate("mk", target, null, OnFailure.Fail))
             .RunAsync(Ctx(installDir.Path), journal, CancellationToken.None);
 
-        result.Success.Should().BeFalse();
-        result.Error.Should().Contain("outside install_dir");
-        Directory.Exists(target).Should().BeFalse();
-        journal.Records.Should().BeEmpty("nothing was created, so nothing is queued for removal");
+        result.Success.Should().BeTrue(result.Error);
+        Directory.Exists(target).Should().BeTrue();
+        journal.Records.Should().ContainSingle()
+            .Which.Should().BeOfType<RollbackRecord.RemoveDirectory>(
+                "a directory this step created must still be journaled for rollback");
     }
 
     [Fact]
@@ -259,13 +288,16 @@ public sealed class StepDestinationContainmentTests
         using var elsewhere = new TempDir();
         var target = Path.Combine(elsewhere.Path, "machine-data");
 
-        var result = await new DirectoryCreateStep(
+        var (result, journal) = await StepRun.Async(
+            new DirectoryCreateStep(
                 new InstallStep.DirectoryCreate("mk", target, null, OnFailure.Fail)
-                { AllowOutsideInstallDir = true })
-            .RunAsync(Ctx(installDir.Path), new RollbackJournal(), CancellationToken.None);
+                { AllowOutsideInstallDir = true }),
+            Ctx(installDir.Path));
 
         result.Success.Should().BeTrue(result.Error);
         Directory.Exists(target).Should().BeTrue();
+        journal.Records.Should().ContainSingle()
+            .Which.Should().BeOfType<RollbackRecord.RemoveDirectory>();
     }
 
     // NOTE: the unresolved-token cases that used to live here moved to

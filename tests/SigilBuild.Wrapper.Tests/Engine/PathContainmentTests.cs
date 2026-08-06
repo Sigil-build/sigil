@@ -33,6 +33,51 @@ public sealed class PathContainmentTests
     public void IsUnder_contains_only_real_descendants(string root, string candidate, bool expected)
         => PathContainment.IsUnder(root, candidate).Should().Be(expected);
 
+    /// <summary>
+    /// Win32 device-namespace spellings (<c>\\.\</c>, <c>\\?\</c>) reach the same
+    /// file as the plain DOS path and pass an ACL read, so they are an alias a
+    /// containment check has to have an answer for. Raised by lane S1, which hit
+    /// the same aliasing in its trust predicate.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The answer is <b>refuse</b>, and it falls out of canonicalisation rather
+    /// than from a special case: <see cref="Path.GetFullPath(string)"/> collapses
+    /// <c>..</c> but <b>preserves</b> the <c>\\.\</c> / <c>\\?\</c> prefix, so a
+    /// device-spelled candidate can never share a prefix with a plainly-spelled
+    /// root and <see cref="PathContainment.IsUnder"/> answers false. Fail-closed in
+    /// both directions — a device-spelled root does not admit a plain candidate
+    /// either.
+    /// </para>
+    /// <para>
+    /// These rows exist because that is <em>load-bearing behaviour that looks like
+    /// an oversight</em>. "Normalising" the prefix away in
+    /// <c>PathContainment.Canonicalize</c> — a plausible tidy-up — would silently
+    /// turn every one of these refusals into an admission, and for the
+    /// privileged-step guard that means a SYSTEM-level target admitted under an
+    /// alias. The price is that a device-path spelling of an otherwise legitimate
+    /// location is rejected; no real installer writes one.
+    /// </para>
+    /// </remarks>
+    [WindowsTheory("Windows path semantics")]
+    // Device-spelled candidate against a plainly-spelled root.
+    [InlineData(@"C:\Program Files\App", @"\\.\C:\Program Files\App\evil.exe")]
+    [InlineData(@"C:\Program Files\App", @"\\?\C:\Program Files\App\evil.exe")]
+    // …with a traversal folded in, which GetFullPath DOES collapse — proving the
+    // refusal comes from the prefix, not from the '..'.
+    [InlineData(@"C:\Program Files\App", @"\\.\C:\Program Files\App\..\..\Windows\System32\cmd.exe")]
+    [InlineData(@"C:\Program Files\App", @"\\?\C:\Program Files\App\..\..\Windows\System32\cmd.exe")]
+    // The reverse: a device-spelled root must not admit a plain candidate.
+    [InlineData(@"\\.\C:\Program Files\App", @"C:\Program Files\App\evil.exe")]
+    [InlineData(@"\\?\C:\Program Files\App", @"C:\Program Files\App\evil.exe")]
+    public void IsUnder_refuses_a_device_namespace_alias(string root, string candidate)
+    {
+        PathContainment.IsUnder(root, candidate).Should().BeFalse(
+            "a device-namespace spelling must not be admitted against a differently-spelled " +
+            "root — see the remarks on this method");
+        PathContainment.IsUnderWithoutTraversal(root, candidate).Should().BeFalse();
+    }
+
     [WindowsFact("Windows directory junctions")]
     public void IsUnderWithoutTraversal_rejects_a_directory_junction_in_the_chain()
     {

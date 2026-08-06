@@ -72,11 +72,17 @@ public class ComRegisterStepTests
         // The rollback record is appended BEFORE the native call, so even when
         // the register itself fails (here: the DLL can't load) the journal
         // already knows how to undo. Path only — no secrets.
-        var dll = @"C:\does\not\exist\nope.dll";
+        //
+        // R3/R9: com_register now anchors its path to install_dir and requires an
+        // admin-only-writable directory, so the arrangement uses System32 — a real
+        // admin-only directory — with a file that does not exist in it. The DLL is
+        // still never loaded and nothing is ever registered.
+        var dll = Path.Combine(Environment.SystemDirectory, "sigil-does-not-exist-nope.dll");
         var spec = new InstallStep.ComRegister("reg", dll, When: null, OnFailure: OnFailure.Continue);
         var journal = new RollbackJournal();
 
-        var result = await new ComRegisterStep(spec).RunAsync(StepContext.Empty, journal, default);
+        var result = await new ComRegisterStep(spec)
+            .RunAsync(SystemDirContext(), journal, default);
 
         result.Success.Should().BeFalse();
         result.Error.Should().Contain("LoadLibraryEx");
@@ -97,11 +103,23 @@ public class ComRegisterStepTests
         var spec = new InstallStep.ComRegister("reg", kernel32, When: null, OnFailure: OnFailure.Continue);
         var journal = new RollbackJournal();
 
-        var result = await new ComRegisterStep(spec).RunAsync(StepContext.Empty, journal, default);
+        var result = await new ComRegisterStep(spec).RunAsync(SystemDirContext(), journal, default);
 
         result.Success.Should().BeFalse();
         result.Error.Should().Contain("self-registering COM DLL");
         journal.Records.Should().ContainSingle()
             .Which.Should().BeOfType<RollbackRecord.UnregisterCom>();
     }
+
+    /// <summary>
+    /// A context anchored on <c>%WINDIR%\System32</c> — an existing, real
+    /// admin-only-writable directory — so the R3/R9 privileged-target guard
+    /// admits the arrangement and the step reaches the outcome under test.
+    /// Refusal cases live in <c>PrivilegedStepContainmentTests</c>.
+    /// </summary>
+    private static StepContext SystemDirContext() =>
+        new(new System.Collections.Generic.Dictionary<string, object?>(),
+            scope: InstallScope.Machine,
+            installDir: Environment.SystemDirectory,
+            appId: "com.example.myapp");
 }

@@ -77,6 +77,19 @@ internal sealed class ScheduledTaskCreateStep : IStep
             return StepResult.Failed("scheduled_task_create: program is empty after substitution");
         }
 
+        // R3/R9: /RU SYSTEM is hardcoded below, so the task's executable must be
+        // anchored inside install_dir AND sit somewhere no unprivileged user can
+        // rewrite it. Refused BEFORE the journal entry: nothing was created, so
+        // there is nothing to undo — and journaling a DeleteScheduledTask here
+        // would make an on_failure: continue run tear down a same-named task this
+        // installer never owned.
+        var refusal = PrivilegedTargetGuard.Check(
+            "scheduled_task_create", "program", ctx.InstallDir, program);
+        if (refusal is not null)
+        {
+            return StepResult.Failed(refusal);
+        }
+
         // Record the inverse BEFORE the create so an interrupted install still
         // tears the task down on /Uninstall. Only the task name is journaled —
         // no secrets, no resolved program path.

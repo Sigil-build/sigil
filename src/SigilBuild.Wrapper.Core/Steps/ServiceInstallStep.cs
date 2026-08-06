@@ -59,6 +59,19 @@ internal sealed class ServiceInstallStep : IStep
         {
             return StepResult.Failed("service_install: binary_path is empty after substitution");
         }
+        // R3/R9: the service binary is launched by the SCM, so it must be anchored
+        // inside install_dir AND live somewhere no unprivileged user can rewrite
+        // it. Checked BEFORE File.Exists so an out-of-tree path is reported as the
+        // refusal it is rather than as a missing file, and before the journal
+        // entry so a refused step never queues a RemoveService for a service this
+        // installer did not create.
+        var refusal = PrivilegedTargetGuard.Check(
+            "service_install", "binary_path", ctx.InstallDir, binaryPath);
+        if (refusal is not null)
+        {
+            return StepResult.Failed(refusal);
+        }
+
         if (!File.Exists(binaryPath))
         {
             return StepResult.Failed(

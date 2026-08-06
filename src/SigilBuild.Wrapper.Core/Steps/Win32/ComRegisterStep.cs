@@ -54,6 +54,18 @@ internal sealed class ComRegisterStep : IStep
             return Task.FromResult(StepResult.Failed("com_register: path is empty after substitution"));
         }
 
+        // R3/R9: this DLL is loaded into the ELEVATED installer process and its
+        // DllRegisterServer export is invoked, so a user-writable path here is
+        // straight code execution as administrator. Anchored inside install_dir
+        // and required to sit in an admin-only-writable directory, before the
+        // journal entry — a refused step must not queue an UnregisterCom for a
+        // registration it never made.
+        var refusal = PrivilegedTargetGuard.Check("com_register", "path", ctx.InstallDir, path);
+        if (refusal is not null)
+        {
+            return Task.FromResult(StepResult.Failed(refusal));
+        }
+
         // Journal the inverse (DllUnregisterServer) BEFORE registering so an
         // interrupted install and /Uninstall both unwind the COM registration.
         // Path only — no secrets.

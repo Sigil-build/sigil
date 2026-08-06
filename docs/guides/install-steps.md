@@ -172,9 +172,28 @@ Records NO journal entry: an external process is not invertible. If `run_program
   timeout_seconds: 600
 ```
 
+## Privileged step targets are anchored — read this before the next four steps
+
+`service_install`, `scheduled_task_create`, `com_register` and `firewall_rule` hand a path from your manifest to something running with SYSTEM-level authority: the SCM launches a service binary, `schtasks` is always invoked with `/RU SYSTEM`, `com_register` loads the DLL **into the elevated installer process** and calls its `DllRegisterServer`, and `firewall_rule`'s `program=` grants that executable the exemption you asked for.
+
+> **Two conditions, both enforced at install time.** The resolved target must
+>
+> 1. **resolve inside `install_dir`** — after `${…}` / `{…}` substitution and canonicalization, with **no directory junction anywhere on the way down** (junctions need no privilege on Windows, so a link planted inside the install directory is the realistic redirection primitive); and
+> 2. **sit in a directory only administrators can write** — owned by `NT AUTHORITY\SYSTEM`, `BUILTIN\Administrators` or `NT SERVICE\TrustedInstaller`, with no write-class right granted to anyone else.
+>
+> A step whose target fails either condition **fails with a message naming the condition it failed**. Nothing is created and nothing is journaled.
+
+The second condition is the one that matters. A path can be perfectly contained inside `install_dir` and still be replaceable by any unprivileged user — which is exactly the attack: a legitimately signed installer, a UAC prompt an administrator approves, and a SYSTEM-level task or service left pointing at a binary anyone can overwrite.
+
+In practice this means **these four steps need a machine-scope install into an admin-only location**. `%ProgramFiles%` and `%ProgramFiles(x86)%` qualify. A per-user install root under `%LocalAppData%` does not — it is writable by the user who owns it — and neither does `%ProgramData%`, which grants `BUILTIN\Users` create rights by inheritance. `install_dir` is separately constrained to the scope root, so `Setup.exe /allusers /D=C:\Users\Public\evil` is refused before any step runs.
+
+The examples below all use `${parameters.install_dir}\…`, which satisfies both conditions for a machine-scope install. A path hard-coded outside the install directory does not, and will fail the step.
+
 ## `service_install`
 
 Registers a Windows service via `sc.exe create`, optionally starts it. Records a `RemoveService` rollback so a failed install or `setup.exe /Uninstall` stops + deletes the service.
+
+> **`binary_path` is a privileged target.** It must resolve inside `install_dir` and sit in a directory no non-administrator can write — see [the anchoring rules above](#privileged-step-targets-are-anchored--read-this-before-the-next-four-steps). Otherwise the step fails and no service is created.
 
 |Field|Notes|
 |---|---|
@@ -204,6 +223,8 @@ Creates a Windows Scheduled Task via `schtasks.exe /Create`, always running the 
 
 > **Machine-scope only.** This step touches machine-global state, so the manifest must set `installer.scope: machine`. Under `user` or `auto` scope, packing fails with **SIG0310** (`installer.scope: machine` required for this step).
 
+> **`program` is a privileged target.** The task always runs as `SYSTEM` (`/RU SYSTEM`), so `program` must resolve inside `install_dir` and sit in a directory no non-administrator can write — see [the anchoring rules above](#privileged-step-targets-are-anchored--read-this-before-the-next-four-steps). Otherwise the step fails and no task is created.
+
 |Field|Type|Required|Default|Notes|
 |---|---|---|---|---|
 |`name`|string|yes|-|Task name (`schtasks`'s `/TN`).|
@@ -231,6 +252,8 @@ Self-registers a COM DLL by loading it and invoking its exported `HRESULT DllReg
 
 > **Machine-scope only.** `DllRegisterServer` writes machine-global registration (`HKLM\Software\Classes` / `HKCR\CLSID`), so the manifest must set `installer.scope: machine`. Under `user` or `auto` scope, packing fails with **SIG0310**.
 
+> **`path` is a privileged target — and the sharpest of the four.** The DLL is loaded into the *elevated installer process* and one of its exports is called, so a user-writable path here is arbitrary code execution as administrator. It must resolve inside `install_dir` and sit in a directory no non-administrator can write — see [the anchoring rules above](#privileged-step-targets-are-anchored--read-this-before-the-next-four-steps). Otherwise the step fails and the DLL is never loaded.
+
 |Field|Type|Required|Default|Notes|
 |---|---|---|---|---|
 |`path`|string|yes|-|Path to the COM DLL to register.|
@@ -248,6 +271,8 @@ Journals an `UnregisterCom` record (DLL path only) **before** the register, so a
 Creates a Windows Defender Firewall rule via `netsh advfirewall firewall add rule`.
 
 > **Machine-scope only.** There is no per-user firewall policy store — firewall rules are always machine-global — so the manifest must set `installer.scope: machine`. Under `user` or `auto` scope, packing fails with **SIG0310**.
+
+> **`program` is a privileged target.** When set, it must resolve inside `install_dir` and sit in a directory no non-administrator can write — see [the anchoring rules above](#privileged-step-targets-are-anchored--read-this-before-the-next-four-steps). Otherwise the step fails and no rule is added. A rule with no `program` has no target to anchor and is unaffected.
 
 |Field|Type|Required|Default|Notes|
 |---|---|---|---|---|

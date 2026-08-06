@@ -73,6 +73,21 @@ internal sealed class FirewallRuleStep : IStep
             return StepResult.Failed("firewall_rule: name is empty after substitution");
         }
 
+        // R3/R9: `program=` scopes the rule to one executable, so a path an
+        // unprivileged user can replace hands that user the firewall exemption the
+        // publisher granted their own binary. Only checked when a program was
+        // declared — a program-less rule has no target to anchor. Before the
+        // journal entry, so a refused step never queues a DeleteFirewallRule for a
+        // rule this installer did not add.
+        if (program is not null)
+        {
+            var refusal = PrivilegedTargetGuard.Check("firewall_rule", "program", ctx.InstallDir, program);
+            if (refusal is not null)
+            {
+                return StepResult.Failed(refusal);
+            }
+        }
+
         // Record the inverse BEFORE any mutation (including the idempotency
         // pre-delete below) so an interrupted install still tears the rule
         // down on /Uninstall. Only the rule name is journaled — no secrets,

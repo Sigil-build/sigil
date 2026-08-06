@@ -230,20 +230,32 @@ public sealed class PriorUninstallerTrustTests
     }
 
     /// <summary>
-    /// The gate condition itself. Machine scope is gated whatever this process's token
-    /// is; user scope is gated exactly when the process is elevated. Pure, so neither
-    /// branch depends on the token the suite happens to run under.
+    /// The gate condition itself, as a full truth table of literals.
     /// </summary>
-    [WindowsFact("Windows-only elevation path")]
-    public void The_trust_gate_applies_to_machine_scope_and_to_any_elevated_run()
+    /// <remarks>
+    /// <para>
+    /// Every expectation here is a <b>constant</b>. The earlier version wrote
+    /// <c>.Should().Be(Elevation.IsProcessElevated())</c> — recomputing, in the
+    /// expectation, the very thing the predicate read. That asserts only "the gate
+    /// agrees with the token", which an <em>unconditional</em> gate also satisfies on
+    /// an elevated host: the Critical could have been reverted and CI would have stayed
+    /// green. Elevation is a parameter now precisely so the expectation can be a
+    /// literal.
+    /// </para>
+    /// <para>
+    /// The fourth row — <c>(User, unelevated) =&gt; false</c> — is the Critical's own
+    /// branch, and it is pinned on every host, including an elevated runner.
+    /// </para>
+    /// </remarks>
+    [WindowsTheory("Windows-only elevation path")]
+    [InlineData(InstallScope.Machine, false, true)]
+    [InlineData(InstallScope.Machine, true, true)]
+    [InlineData(InstallScope.User, true, true)]
+    [InlineData(InstallScope.User, false, false)]
+    public void The_trust_gate_applies_to_machine_scope_and_to_any_elevated_run(
+        InstallScope scope, bool elevated, bool expected)
     {
-        InstallSession.PriorUninstallerNeedsTrust(InstallScope.Machine).Should().BeTrue(
-            "a machine-scope run either is elevated or is about to relaunch itself elevated");
-
-        InstallSession.PriorUninstallerNeedsTrust(InstallScope.User).Should().Be(
-            Elevation.IsProcessElevated(),
-            "user scope is gated exactly when the process is elevated — Run as " +
-            "administrator, an elevated shell, or Intune running as SYSTEM");
+        InstallSession.PriorUninstallerNeedsTrust(scope, elevated).Should().Be(expected);
     }
 
     /// <summary>
@@ -356,29 +368,59 @@ public sealed class PriorUninstallerTrustTests
     /// share.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// <b>Asserted on the VERDICT, not on the bool</b>, and that is what makes it
+    /// falsifiable. Every remote fixture below is also un-ACL-readable from an
+    /// unprivileged process, so <c>IsPriorUninstallerTrusted</c> returns <c>false</c>
+    /// for all of them whether or not the remote check exists — a bool assertion here
+    /// passes with the refusal deleted. <c>Remote</c> versus <c>Untrusted</c> is the
+    /// distinction only the refusal can produce, so deleting it turns these red.
+    /// </para>
+    /// <para>
     /// The hosts below are never contacted: classification is by path shape and the
-    /// refusal happens before any ACL or signature read. No network access.
+    /// refusal short-circuits before any ACL or signature read. No network access.
+    /// </para>
     /// </remarks>
     [WindowsTheory("Windows-only elevation path")]
     [InlineData(@"\\attacker\share\uninstall.exe")]
     [InlineData(@"\\127.0.0.1\C$\Windows\System32\cmd.exe")]
     [InlineData(@"\\?\UNC\attacker\share\uninstall.exe")]
+    [InlineData(@"\\.\C:\Windows\System32\cmd.exe")]
     public void A_remote_uninstaller_path_is_refused(string path)
     {
-        InstallSession.IsPriorUninstallerTrusted(path).Should().BeFalse(
+        InstallSession.ClassifyPriorUninstaller(path).Should().Be(
+            InstallSession.PriorUninstallerVerdict.Remote,
             "an SMB server the attacker controls reports whatever owner and DACL it " +
-            "likes, and BUILTIN\\Administrators is a machine-independent SID");
+            "likes, and BUILTIN\\Administrators is a machine-independent SID — so this " +
+            "must be refused on path SHAPE, before anything is read from it");
+
+        InstallSession.IsPriorUninstallerTrusted(path).Should().BeFalse();
     }
 
     /// <summary>
-    /// Non-vacuity for the test above: the extended-length prefix on a LOCAL path must
-    /// not be mistaken for a remote one, or the remote refusal would just be a
-    /// constant that also breaks long local paths.
+    /// Non-vacuity for the test above, in both directions: a LOCAL path must not be
+    /// classified <c>Remote</c> (or the refusal is a constant that breaks every
+    /// legitimate upgrade), and a local path that fails on trust grounds must be
+    /// reported as <c>Untrusted</c> rather than <c>Remote</c> (or the two verdicts are
+    /// interchangeable and the test above proves nothing).
     /// </summary>
     [WindowsFact("Windows ACL APIs")]
-    public void The_extended_length_prefix_on_a_local_path_is_not_treated_as_remote()
+    public void A_local_path_is_never_classified_remote_whatever_its_form()
     {
-        InstallSession.IsPriorUninstallerTrusted(@"\\?\" + SystemCmd).Should().BeTrue();
+        using var temp = new TempDir();
+
+        InstallSession.ClassifyPriorUninstaller(SystemCmd)
+            .Should().Be(InstallSession.PriorUninstallerVerdict.Trusted);
+
+        InstallSession.ClassifyPriorUninstaller(@"\\?\" + SystemCmd)
+            .Should().Be(
+                InstallSession.PriorUninstallerVerdict.Trusted,
+                "the extended-length prefix on a local path is not a network hop");
+
+        InstallSession.ClassifyPriorUninstaller(StubExe(temp, "uninstall.exe"))
+            .Should().Be(
+                InstallSession.PriorUninstallerVerdict.Untrusted,
+                "a user-owned local file is refused on TRUST grounds, not as remote");
     }
 
     /// <summary><c>System32\cmd.exe</c> — used as a path only; never started.</summary>

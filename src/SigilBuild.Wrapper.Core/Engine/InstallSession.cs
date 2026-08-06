@@ -1009,14 +1009,21 @@ public sealed class InstallSession
         // the behaviour that made this exploitable.
         //
         // Gated on "privilege is actually at stake" — see PriorUninstallerNeedsTrust.
-        if (PriorUninstallerNeedsTrust(_scope) && !IsPriorUninstallerTrusted(exe))
+        if (PriorUninstallerNeedsTrust(_scope, Elevation.IsProcessElevated()))
         {
-            return new InstallOutcome(
-                false,
-                $"cannot upgrade: the previous version's uninstaller at '{exe}' is not verified — " +
-                "it is neither Authenticode-signed nor a file only administrators can write, so " +
-                "running it from this elevated process would let an unprivileged user choose what " +
-                "runs as administrator. No changes were made.");
+            var verdict = ClassifyPriorUninstaller(exe);
+            if (verdict != PriorUninstallerVerdict.Trusted)
+            {
+                var why = verdict == PriorUninstallerVerdict.Remote
+                    ? "it is on a network location, whose owner and permissions are reported by " +
+                      "the remote server rather than by this machine"
+                    : "it is neither Authenticode-signed nor a file only administrators can write";
+                return new InstallOutcome(
+                    false,
+                    $"cannot upgrade: the previous version's uninstaller at '{exe}' is not verified — " +
+                    $"{why}, so running it from this elevated process would let an unprivileged user " +
+                    "choose what runs as administrator. No changes were made.");
+            }
         }
 
         // Remove the prior version in ITS OWN scope (where it physically lives), which
@@ -1092,8 +1099,21 @@ public sealed class InstallSession
     /// is safe; narrowing it is not.
     /// </para>
     /// </remarks>
-    internal static bool PriorUninstallerNeedsTrust(InstallScope scope) =>
-        scope == InstallScope.Machine || Elevation.IsProcessElevated();
+    /// <remarks>
+    /// <para>
+    /// <paramref name="elevated"/> is a PARAMETER, not an internal
+    /// <see cref="Elevation.IsProcessElevated"/> call, and that is load-bearing rather
+    /// than stylistic. When the predicate read the token itself, the only test that
+    /// could be written had to recompute <c>IsProcessElevated()</c> in its own
+    /// expectation — which made it assert "the gate agrees with the token", a
+    /// statement an <em>unconditional</em> gate also satisfies on an elevated host. The
+    /// test could not fail, and the whole point of this method could have been reverted
+    /// green through CI. Taking elevation as an argument lets both branches be pinned
+    /// as literals on any host, elevated or not.
+    /// </para>
+    /// </remarks>
+    internal static bool PriorUninstallerNeedsTrust(InstallScope scope, bool elevated) =>
+        scope == InstallScope.Machine || elevated;
 
     /// <summary>
     /// R2: may this run spawn <paramref name="exe"/>, a path that came from an
@@ -1141,12 +1161,18 @@ public sealed class InstallSession
     /// shared predicates are consumed, never reimplemented.
     /// </para>
     /// <para>
-    /// <b>Remote paths are refused outright.</b> Both halves are answered by the far end
-    /// of a network hop: an SMB server reports the ACL, and <c>BUILTIN\Administrators</c>
-    /// is a machine-independent SID, so a server the attacker controls can claim any
-    /// owner and any DACL it likes. There is no legitimate case for an elevated
-    /// installer launching a prior uninstaller off a share, so this refuses UNC paths
-    /// and mapped network drives rather than trying to evaluate them.
+    /// <b>Remote paths are refused outright, and this is load-bearing rather than
+    /// defence in depth.</b> Both halves are answered by the far end of a network hop:
+    /// an SMB server reports the ACL, and <c>BUILTIN\Administrators</c> is a
+    /// machine-independent SID, so a server the attacker controls can claim any owner
+    /// and any DACL it likes. Measured with the check removed, on an unelevated box:
+    /// <c>\\127.0.0.1\C$\Windows\System32\cmd.exe</c> and
+    /// <c>\\.\C:\Windows\System32\cmd.exe</c> both classified <b>Trusted</b> — the
+    /// device-namespace form is a straight local alias that reaches the same file, and
+    /// the loopback admin share resolved and passed the ACL read. Without this check
+    /// those paths would be spawned. There is no legitimate case for an elevated
+    /// installer launching a prior uninstaller off a share or through a device alias,
+    /// so both are refused on shape before anything is read from them.
     /// </para>
     /// <para>
     /// A TOCTOU window remains between this check and
@@ -1162,16 +1188,54 @@ public sealed class InstallSession
     /// started. It is not part of the public engine surface.
     /// </para>
     /// </remarks>
-    internal static bool IsPriorUninstallerTrusted(string exe)
+    internal static bool IsPriorUninstallerTrusted(string exe) =>
+        ClassifyPriorUninstaller(exe) == PriorUninstallerVerdict.Trusted;
+
+    /// <summary>
+    /// Why <see cref="IsPriorUninstallerTrusted"/> answered as it did.
+    /// </summary>
+    /// <remarks>
+    /// The reason is carried, not collapsed to a bool, for two reasons. It gives the
+    /// operator a message that names the actual problem — "on a network location" and
+    /// "not signed and not admin-only" call for different responses. And it makes the
+    /// remote refusal <b>falsifiable</b>: with a bool return, deleting the
+    /// <see cref="IsRemotePath"/> check changes nothing observable for any fixture an
+    /// unelevated test can build, because a UNC path an unprivileged process cannot
+    /// read the ACL of answers "untrusted" either way. Distinguishing the two verdicts
+    /// is what lets a test fail when the check is removed.
+    /// </remarks>
+    internal enum PriorUninstallerVerdict
     {
-        if (string.IsNullOrEmpty(exe) || IsRemotePath(exe))
+        /// <summary>Safe to spawn from an elevated process.</summary>
+        Trusted,
+
+        /// <summary>Refused on path shape alone: UNC, device namespace, or a mapped network drive.</summary>
+        Remote,
+
+        /// <summary>Present and local, but neither signed nor admin-writable-only.</summary>
+        Untrusted,
+    }
+
+    /// <summary>
+    /// <see cref="IsPriorUninstallerTrusted"/> with the reason preserved. The remote
+    /// check runs FIRST and short-circuits, so a network path is refused on shape
+    /// alone — before any ACL or signature read that a hostile server would answer.
+    /// </summary>
+    internal static PriorUninstallerVerdict ClassifyPriorUninstaller(string exe)
+    {
+        if (string.IsNullOrEmpty(exe))
         {
-            return false;
+            return PriorUninstallerVerdict.Untrusted;
+        }
+
+        if (IsRemotePath(exe))
+        {
+            return PriorUninstallerVerdict.Remote;
         }
 
         if (AuthenticodeVerifier.VerifyFile(exe))
         {
-            return true;
+            return PriorUninstallerVerdict.Trusted;
         }
 
         // Off Windows there is no Authenticode and no ACL to inspect, so this fails
@@ -1179,7 +1243,9 @@ public sealed class InstallSession
         // Windows-only in practice.
         return OperatingSystem.IsWindows()
             && StateDirectorySecurity.IsTrustedFile(exe)
-            && StateDirectorySecurity.IsAdminOnlyWritable(exe);
+            && StateDirectorySecurity.IsAdminOnlyWritable(exe)
+                ? PriorUninstallerVerdict.Trusted
+                : PriorUninstallerVerdict.Untrusted;
     }
 
     /// <summary>

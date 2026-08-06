@@ -78,10 +78,13 @@ public class ReplayAnchoringTests
         var outcome = await journal.UndoAsync(
             ReplayAnchorage.ForInstallDir(installDir.Path), progress: null, ct: CancellationToken.None);
 
-        // Assert
-        outcome.RefusedRecords.Should().ContainSingle()
-            .Which.Should().Contain("evil.dll",
-                "a DLL outside install_dir must never be loaded by the elevated process");
+        // Assert — the structured shape lane S5 consumes for R15, not just the prose.
+        var refusal = outcome.RefusedRecords.Should().ContainSingle().Subject;
+        refusal.RecordType.Should().Be("unregister_com");
+        refusal.Target.Should().Be(evil);
+        refusal.Code.Should().Be(ReplayRefusalCode.ComDllOutsideInstallDir);
+        refusal.Message.Should().Contain("evil.dll",
+            "a DLL outside install_dir must never be loaded by the elevated process");
     }
 
     [WindowsFact("Windows path semantics")]
@@ -97,8 +100,8 @@ public class ReplayAnchoringTests
         var verdict = Anchor(installDir.Path).Check(record);
 
         // Assert
-        verdict.RefusalReason.Should().NotBeNull();
-        verdict.RefusalReason!.Should().Contain("evil.dll");
+        verdict.RefusalMessage.Should().NotBeNull();
+        verdict.RefusalMessage!.Should().Contain("evil.dll");
     }
 
     [WindowsFact("Windows path semantics")]
@@ -113,7 +116,7 @@ public class ReplayAnchoringTests
         var verdict = Anchor(installDir.Path).Check(new RollbackRecord.UnregisterCom(recorded));
 
         // Assert
-        verdict.RefusalReason.Should().BeNull();
+        verdict.RefusalMessage.Should().BeNull();
         verdict.Record.Should().BeOfType<RollbackRecord.UnregisterCom>()
             .Which.DllPath.Should().Be(Path.Combine(installDir.Path, "component.dll"),
                 "the DLL path must be re-derived from install_dir, not trusted as persisted");
@@ -138,8 +141,8 @@ public class ReplayAnchoringTests
             new RollbackRecord.RestoreFile(victim, ExistedBefore: false, BackupPath: null));
 
         // Assert
-        verdict.RefusalReason.Should().NotBeNull();
-        verdict.RefusalReason!.Should().Contain("hosts",
+        verdict.RefusalMessage.Should().NotBeNull();
+        verdict.RefusalMessage!.Should().Contain("hosts",
             "an elevated replay must not be able to delete a file it never installed");
     }
 
@@ -164,8 +167,8 @@ public class ReplayAnchoringTests
         var verdict = Anchor(installDir.Path).Check(PathRecord(type, outside));
 
         // Assert
-        verdict.RefusalReason.Should().NotBeNull();
-        verdict.RefusalReason!.Should().StartWith(type + " refused:").And.Contain("outside.dat");
+        verdict.RefusalMessage.Should().NotBeNull();
+        verdict.RefusalMessage!.Should().StartWith(type + " refused:").And.Contain("outside.dat");
     }
 
     [WindowsTheory("Windows path semantics")]
@@ -188,7 +191,7 @@ public class ReplayAnchoringTests
         var verdict = Anchor(installDir.Path).Check(PathRecord(type, inside));
 
         // Assert
-        verdict.RefusalReason.Should().BeNull(
+        verdict.RefusalMessage.Should().BeNull(
             "a record targeting the install directory is exactly what a legitimate " +
             "uninstall replays");
     }
@@ -290,8 +293,8 @@ public class ReplayAnchoringTests
         var verdict = Anchor(installDir.Path).Check(record);
 
         // Assert
-        verdict.RefusalReason.Should().NotBeNull();
-        verdict.RefusalReason!.Should().Contain(key);
+        verdict.RefusalMessage.Should().NotBeNull();
+        verdict.RefusalMessage!.Should().Contain(key);
     }
 
     [WindowsTheory("Windows registry semantics")]
@@ -314,7 +317,7 @@ public class ReplayAnchoringTests
         var verdict = Anchor(installDir.Path).Check(record);
 
         // Assert
-        verdict.RefusalReason.Should().BeNull();
+        verdict.RefusalMessage.Should().BeNull();
     }
 
     [WindowsFact("Windows registry semantics")]
@@ -340,7 +343,7 @@ public class ReplayAnchoringTests
         var verdict = Anchor(installDir.Path).Check(record);
 
         // Assert
-        verdict.RefusalReason.Should().BeNull(
+        verdict.RefusalMessage.Should().BeNull(
             "denying the shape outright would break every installer that registers a " +
             "file type — the value must be checked, not the key alone");
     }
@@ -368,7 +371,7 @@ public class ReplayAnchoringTests
         var verdict = Anchor(installDir).Check(record);
 
         // Assert
-        verdict.RefusalReason.Should().BeNull(
+        verdict.RefusalMessage.Should().BeNull(
             "a machine install reversing its own association to its own binary in an " +
             "admin-only directory is the ordinary case and must replay");
     }
@@ -402,8 +405,8 @@ public class ReplayAnchoringTests
         var verdict = Anchor(installDir.Path).Check(record);
 
         // Assert
-        verdict.RefusalReason.Should().NotBeNull();
-        verdict.RefusalReason!.Should().Contain("evil.exe").And.Contain("administrators",
+        verdict.RefusalMessage.Should().NotBeNull();
+        verdict.RefusalMessage!.Should().Contain("evil.exe").And.Contain("administrators",
             "being inside the anchor is not enough for a machine-wide execution mapping; " +
             "the target must also be one no non-administrator can rewrite");
     }
@@ -440,7 +443,7 @@ public class ReplayAnchoringTests
         var verdict = Anchor(installDir.Path).Check(record);
 
         // Assert
-        verdict.RefusalReason.Should().BeNull(
+        verdict.RefusalMessage.Should().BeNull(
             "the shape must be matched by structural position, not by the word: a plain " +
             "application key carries no execution semantics and must replay");
     }
@@ -466,8 +469,8 @@ public class ReplayAnchoringTests
         var verdict = Anchor(installDir.Path).Check(record);
 
         // Assert
-        verdict.RefusalReason.Should().NotBeNull();
-        verdict.RefusalReason!.Should().Contain("evil.exe").And.Contain("execution mapping");
+        verdict.RefusalMessage.Should().NotBeNull();
+        verdict.RefusalMessage!.Should().Contain("evil.exe").And.Contain("execution mapping");
     }
 
     [WindowsFact("Windows registry semantics")]
@@ -485,9 +488,9 @@ public class ReplayAnchoringTests
             "HKLM", @"Software\Acme\App", "default", snapshots, false));
 
         // Assert
-        refused.RefusalReason.Should().NotBeNull();
-        refused.RefusalReason!.Should().Contain("Services");
-        allowed.RefusalReason.Should().BeNull();
+        refused.RefusalMessage.Should().NotBeNull();
+        refused.RefusalMessage!.Should().Contain("Services");
+        allowed.RefusalMessage.Should().BeNull();
     }
 
     // ---------------------------------------------------------------------------
@@ -506,8 +509,8 @@ public class ReplayAnchoringTests
         var verdict = Anchor(installDir.Path).Check(record);
 
         // Assert
-        verdict.RefusalReason.Should().NotBeNull();
-        verdict.RefusalReason!.Should().Contain(@"C:\Users\Public\evil",
+        verdict.RefusalMessage.Should().NotBeNull();
+        verdict.RefusalMessage!.Should().Contain(@"C:\Users\Public\evil",
             "a restore may only remove what the install added; it may never introduce a " +
             "path the variable does not already contain");
     }
@@ -530,8 +533,8 @@ public class ReplayAnchoringTests
         var verdict = Anchor(installDir.Path).Check(record);
 
         // Assert
-        verdict.RefusalReason.Should().NotBeNull();
-        verdict.RefusalReason!.Should().Contain(installDir.Path,
+        verdict.RefusalMessage.Should().NotBeNull();
+        verdict.RefusalMessage!.Should().Contain(installDir.Path,
             "a machine-PATH entry that a non-administrator can write is R1's hijack, " +
             "whether or not it happens to be the install directory");
     }
@@ -557,7 +560,7 @@ public class ReplayAnchoringTests
         var verdict = Anchor(installDir.Path).Check(record);
 
         // Assert
-        verdict.RefusalReason.Should().BeNull(
+        verdict.RefusalMessage.Should().BeNull(
             "refusing this would strand a stale install_dir entry in the machine PATH " +
             "after every legitimate machine-scope uninstall");
     }
@@ -587,8 +590,8 @@ public class ReplayAnchoringTests
         var verdict = Anchor(installDir.Path).Check(record);
 
         // Assert
-        verdict.RefusalReason.Should().NotBeNull();
-        verdict.RefusalReason!.Should().Contain($"deleting {scope}-scope 'Path'",
+        verdict.RefusalMessage.Should().NotBeNull();
+        verdict.RefusalMessage!.Should().Contain($"deleting {scope}-scope 'Path'",
             "PATH's entries were not created by this install, and losing it breaks the " +
             "machine — a destructive primitive in its own right");
     }
@@ -608,8 +611,8 @@ public class ReplayAnchoringTests
         var verdict = Anchor(installDir.Path).Check(record);
 
         // Assert
-        verdict.RefusalReason.Should().NotBeNull();
-        verdict.RefusalReason!.Should().Contain("could not be read",
+        verdict.RefusalMessage.Should().NotBeNull();
+        verdict.RefusalMessage!.Should().Contain("could not be read",
             "with nothing to run the ownership test against, the only safe answer for a " +
             "variable the system depends on is to refuse");
     }
@@ -632,7 +635,7 @@ public class ReplayAnchoringTests
         var verdict = Anchor(installDir.Path).Check(record);
 
         // Assert
-        verdict.RefusalReason.Should().BeNull();
+        verdict.RefusalMessage.Should().BeNull();
     }
 
     [WindowsFact("Windows registry semantics")]
@@ -649,8 +652,8 @@ public class ReplayAnchoringTests
         var verdict = Anchor(installDir.Path).Check(record);
 
         // Assert
-        verdict.RefusalReason.Should().NotBeNull();
-        verdict.RefusalReason!.Should().Contain(@"C:\Users\Public\evil");
+        verdict.RefusalMessage.Should().NotBeNull();
+        verdict.RefusalMessage!.Should().Contain(@"C:\Users\Public\evil");
     }
 
     [WindowsFact("Windows registry semantics")]
@@ -667,7 +670,7 @@ public class ReplayAnchoringTests
         var verdict = Anchor(installDir.Path).Check(record);
 
         // Assert
-        verdict.RefusalReason.Should().BeNull();
+        verdict.RefusalMessage.Should().BeNull();
     }
 
     // ---------------------------------------------------------------------------
@@ -688,8 +691,8 @@ public class ReplayAnchoringTests
         var verdict = Anchor(installDir.Path).Check(new RollbackRecord.RemoveService(serviceName));
 
         // Assert
-        verdict.RefusalReason.Should().NotBeNull();
-        verdict.RefusalReason!.Should().Contain(serviceName).And.Contain(imagePath,
+        verdict.RefusalMessage.Should().NotBeNull();
+        verdict.RefusalMessage!.Should().Contain(serviceName).And.Contain(imagePath,
             "the refusal must name the binary that proves the service is not ours");
     }
 
@@ -706,7 +709,7 @@ public class ReplayAnchoringTests
         var verdict = Anchor(installDir.Path).Check(record);
 
         // Assert
-        verdict.RefusalReason.Should().BeNull();
+        verdict.RefusalMessage.Should().BeNull();
     }
 
     [WindowsTheory("Path parsing only")]
@@ -811,6 +814,75 @@ public class ReplayAnchoringTests
         // Assert
         outcome.RefusedRecords.Should().BeEmpty();
         File.Exists(outside).Should().BeFalse();
+    }
+
+    // ---------------------------------------------------------------------------
+    // The RefusedRecords contract (lane S5 consumes this in Stage 2 for R15).
+    // ---------------------------------------------------------------------------
+
+    [WindowsFact("Windows path + registry semantics")]
+    public void Every_refusal_carries_a_record_type_a_target_and_a_code_not_just_prose()
+    {
+        // Arrange — one refusal of each kind, so a consumer never has to parse Message
+        // to learn what happened. Predicate only; nothing is replayed.
+        using var installDir = new TempDir();
+        using var elsewhere = new TempDir();
+        var anchor = Anchor(installDir.Path);
+        var outsidePath = Path.Combine(elsewhere.Path, "outside.dat");
+        var (serviceName, _) = FindStockService();
+
+        // Act
+        var path = anchor.Check(new RollbackRecord.RestoreFile(outsidePath, false, null));
+        var registry = anchor.Check(new RollbackRecord.RestoreRegistryValue(
+            "HKLM", @"SYSTEM\CurrentControlSet\Services\Spooler", "ImagePath", "default",
+            "REG_SZ", @"C:\Users\Public\evil.exe", false));
+        var mapping = anchor.Check(new RollbackRecord.RestoreRegistryValue(
+            "HKLM", @"Software\Classes\exefile\shell\open\command", "", "default",
+            "REG_SZ", Path.Combine(elsewhere.Path, "evil.exe"), false));
+        var env = anchor.Check(new RollbackRecord.RestoreEnv(
+            "machine", "Path", @"C:\Users\Public\evil;" + ReadMachineEnv("Path"), false));
+        var service = anchor.Check(new RollbackRecord.RemoveService(serviceName));
+        var com = anchor.Check(new RollbackRecord.UnregisterCom(
+            Path.Combine(elsewhere.Path, "evil.dll")));
+
+        // Assert
+        path.Refusal.Should().NotBeNull();
+        path.Refusal!.RecordType.Should().Be("restore_file");
+        path.Refusal.Target.Should().Be(outsidePath);
+        path.Refusal.Code.Should().Be(ReplayRefusalCode.PathOutsideInstallRoots);
+
+        registry.Refusal.Should().NotBeNull();
+        registry.Refusal!.RecordType.Should().Be("restore_registry_value");
+        registry.Refusal.Target.Should().Be(@"HKLM\SYSTEM\CurrentControlSet\Services\Spooler");
+        registry.Refusal.Code.Should().Be(ReplayRefusalCode.RegistryOutsideApplicationSpace);
+
+        mapping.Refusal.Should().NotBeNull();
+        mapping.Refusal!.Target.Should().Be(@"HKLM\Software\Classes\exefile\shell\open\command");
+        mapping.Refusal.Code.Should().Be(ReplayRefusalCode.ExecutionMappingNotOwned);
+
+        env.Refusal.Should().NotBeNull();
+        env.Refusal!.RecordType.Should().Be("restore_env");
+        env.Refusal.Target.Should().Be("env:machine:Path");
+        env.Refusal.Code.Should().Be(ReplayRefusalCode.EnvironmentIntroducesForeignEntry);
+
+        service.Refusal.Should().NotBeNull();
+        service.Refusal!.RecordType.Should().Be("remove_service");
+        service.Refusal.Target.Should().Be(serviceName);
+        service.Refusal.Code.Should().Be(ReplayRefusalCode.ServiceNotOwned);
+
+        com.Refusal.Should().NotBeNull();
+        com.Refusal!.RecordType.Should().Be("unregister_com");
+        com.Refusal.Code.Should().Be(ReplayRefusalCode.ComDllOutsideInstallDir);
+
+        // …and every one still carries the operator-facing line the /LOG file needs.
+        foreach (var refusal in new[]
+                 {
+                     path.Refusal, registry.Refusal, mapping.Refusal,
+                     env.Refusal, service.Refusal, com.Refusal,
+                 })
+        {
+            refusal.Message.Should().NotBeNullOrWhiteSpace();
+        }
     }
 
     [Fact]

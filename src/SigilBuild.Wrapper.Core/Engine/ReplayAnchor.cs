@@ -180,9 +180,25 @@ internal sealed class ReplayAnchor
     /// <summary>
     /// The verdict for one record: the record to actually replay (possibly re-derived
     /// from the install directory, as <c>unregister_com</c> is) and a non-<c>null</c>
-    /// <see cref="Verdict.RefusalReason"/> when it must be skipped instead.
+    /// <see cref="Refusal"/> when it must be skipped instead.
     /// </summary>
-    public readonly record struct Verdict(RollbackRecord Record, string? RefusalReason);
+    public readonly record struct Verdict(RollbackRecord Record, RefusedRecord? Refusal)
+    {
+        /// <summary>The operator-facing line, or <c>null</c> when the record is allowed.</summary>
+        public string? RefusalMessage => Refusal?.Message;
+    }
+
+    /// <summary>Allow <paramref name="record"/> to replay unchanged.</summary>
+    private static Verdict Allow(RollbackRecord record) => new(record, null);
+
+    /// <summary>Skip <paramref name="record"/>, capturing the structured reason (R15).</summary>
+    private static Verdict Refuse(
+        RollbackRecord record,
+        string recordType,
+        string target,
+        ReplayRefusalCode code,
+        string message) =>
+        new(record, new RefusedRecord(recordType, target, code, message));
 
     /// <summary>Allow, re-derive, or refuse <paramref name="record"/>.</summary>
     public Verdict Check(RollbackRecord record)
@@ -248,7 +264,7 @@ internal sealed class ReplayAnchor
             // and they are not part of register row R1's evidence table. Left
             // unanchored deliberately, and reported rather than quietly widened.
             default:
-                return new Verdict(record, null);
+                return Allow(record);
         }
     }
 
@@ -256,8 +272,13 @@ internal sealed class ReplayAnchor
 
     private Verdict PathVerdict(RollbackRecord record, string type, string path) =>
         IsAllowedPath(path)
-            ? new Verdict(record, null)
-            : new Verdict(record, $"{type} refused: '{path}' {OutsideText()}");
+            ? Allow(record)
+            : Refuse(
+                record,
+                type,
+                path,
+                ReplayRefusalCode.PathOutsideInstallRoots,
+                $"{type} refused: '{path}' {OutsideText()}");
 
     /// <summary>
     /// True when <paramref name="path"/> resolves inside one of the anchored
@@ -307,12 +328,17 @@ internal sealed class ReplayAnchor
         string key,
         IReadOnlyList<object?> writtenValues)
     {
+        var target = $"{hive}\\{key}";
+
         var effective = EffectiveRegistryPath(hive, key);
         if (effective is null || !IsAllowedRegistryKey(effective))
         {
-            return new Verdict(
+            return Refuse(
                 record,
-                $"{type} refused: '{hive}\\{key}' is outside the application-configuration " +
+                type,
+                target,
+                ReplayRefusalCode.RegistryOutsideApplicationSpace,
+                $"{type} refused: '{target}' is outside the application-configuration " +
                 "subtree an installer may reverse (HKLM/HKCU Software\\…, excluding the " +
                 "auto-run, policy and COM-activation surfaces)");
         }
@@ -326,7 +352,7 @@ internal sealed class ReplayAnchor
         // list of names.
         if (!IsExecutionShapedKey(effective))
         {
-            return new Verdict(record, null);
+            return Allow(record);
         }
 
         // An execution mapping in a MACHINE hive is the same primitive as an entry on the
@@ -349,24 +375,30 @@ internal sealed class ReplayAnchor
 
             if (value is not string command)
             {
-                return new Verdict(
+                return Refuse(
                     record,
-                    $"{type} refused: '{hive}\\{key}' is an execution mapping and the value " +
+                    type,
+                    target,
+                    ReplayRefusalCode.ExecutionMappingUncheckable,
+                    $"{type} refused: '{target}' is an execution mapping and the value " +
                     "being restored is not a command line that can be checked");
             }
 
             if (!ProgramIsOwnedByThisInstall(command, isMachineHive))
             {
-                return new Verdict(
+                return Refuse(
                     record,
-                    $"{type} refused: '{hive}\\{key}' is an execution mapping and '{command}' " +
+                    type,
+                    target,
+                    ReplayRefusalCode.ExecutionMappingNotOwned,
+                    $"{type} refused: '{target}' is an execution mapping and '{command}' " +
                     $"{(isMachineHive ? "is not a program inside the install directory " +
                         $"'{_installDir}' that only administrators can write" : OutsideText())}" +
                     " — restoring it would hand Windows a program this install does not own");
             }
         }
 
-        return new Verdict(record, null);
+        return Allow(record);
     }
 
     /// <summary>
@@ -627,14 +659,18 @@ internal sealed class ReplayAnchor
     private Verdict EnvVerdict(RollbackRecord record, RollbackRecord.RestoreEnv r)
     {
         var isMachine = r.Scope.Equals("machine", StringComparison.OrdinalIgnoreCase);
+        var target = $"env:{r.Scope}:{r.Name}";
 
         if (!OperatingSystem.IsWindows())
         {
             // The current value cannot be consulted, and RestoreEnv.UndoAsync is a
             // no-op off Windows anyway. Fail closed rather than record an allowance
             // that has never been checked.
-            return new Verdict(
+            return Refuse(
                 record,
+                "restore_env",
+                target,
+                ReplayRefusalCode.EnvironmentUnverifiable,
                 $"restore_env refused: '{r.Name}' cannot be verified off Windows");
         }
 
@@ -666,7 +702,7 @@ internal sealed class ReplayAnchor
             // refusing anything.
             if (!IsSystemCriticalVariable(r.Name))
             {
-                return new Verdict(record, null);
+                return Allow(record);
             }
 
             var live = SplitEntries(expanded);
@@ -679,8 +715,11 @@ internal sealed class ReplayAnchor
                 // ambient profile: deleting something that is not there is a no-op, so
                 // refusing costs nothing, and it means the verdict for a system-critical
                 // variable is the same on a fresh profile as on a configured one.
-                return new Verdict(
+                return Refuse(
                     record,
+                    "restore_env",
+                    target,
+                    ReplayRefusalCode.EnvironmentUnverifiable,
                     $"restore_env refused: deleting {r.Scope}-scope '{r.Name}' — its current " +
                     "value could not be read, and a variable the system depends on is never " +
                     "removed on an unverified claim");
@@ -692,18 +731,21 @@ internal sealed class ReplayAnchor
                 {
                     continue;
                 }
-                return new Verdict(
+                return Refuse(
                     record,
+                    "restore_env",
+                    target,
+                    ReplayRefusalCode.EnvironmentDeleteNotOwned,
                     $"restore_env refused: deleting {r.Scope}-scope '{r.Name}' would discard " +
                     $"'{entry}', which this install does not own");
             }
-            return new Verdict(record, null);
+            return Allow(record);
         }
 
         if (r.PriorValue is null)
         {
             // Nothing is written and nothing is deleted.
-            return new Verdict(record, null);
+            return Allow(record);
         }
 
         var currentEntries = SplitEntries(expanded);
@@ -719,13 +761,16 @@ internal sealed class ReplayAnchor
             {
                 continue;
             }
-            return new Verdict(
+            return Refuse(
                 record,
+                "restore_env",
+                target,
+                ReplayRefusalCode.EnvironmentIntroducesForeignEntry,
                 $"restore_env refused: {r.Scope}-scope '{r.Name}' would introduce '{entry}', " +
                 "which is neither already present in the variable nor a directory this " +
                 "install owns — a restore may only remove what the install added");
         }
-        return new Verdict(record, null);
+        return Allow(record);
     }
 
     /// <summary>
@@ -838,8 +883,11 @@ internal sealed class ReplayAnchor
     {
         if (!OperatingSystem.IsWindows())
         {
-            return new Verdict(
+            return Refuse(
                 record,
+                "remove_service",
+                r.ServiceName,
+                ReplayRefusalCode.ServiceUnverifiable,
                 $"remove_service refused: '{r.ServiceName}' cannot be verified off Windows");
         }
 
@@ -848,16 +896,19 @@ internal sealed class ReplayAnchor
         {
             // No such service (or its key is unreadable and therefore not ours to
             // delete): sc delete would be a no-op.
-            return new Verdict(record, null);
+            return Allow(record);
         }
 
         if (ImagePathIsInside(imagePath, _installDir))
         {
-            return new Verdict(record, null);
+            return Allow(record);
         }
 
-        return new Verdict(
+        return Refuse(
             record,
+            "remove_service",
+            r.ServiceName,
+            ReplayRefusalCode.ServiceNotOwned,
             $"remove_service refused: service '{r.ServiceName}' runs '{imagePath}', " +
             $"which {OutsideText()} — this install did not create it");
     }
@@ -969,13 +1020,16 @@ internal sealed class ReplayAnchor
         var rederived = ReDeriveInsideInstallDir(r.DllPath);
         if (rederived is null)
         {
-            return new Verdict(
+            return Refuse(
                 record,
+                "unregister_com",
+                r.DllPath,
+                ReplayRefusalCode.ComDllOutsideInstallDir,
                 $"unregister_com refused: '{r.DllPath}' {OutsideText()} — a DLL outside " +
                 "the install directory must never be loaded by the elevated process");
         }
 
-        return new Verdict(r with { DllPath = rederived }, null);
+        return Allow(r with { DllPath = rederived });
     }
 
     /// <summary>

@@ -201,6 +201,35 @@ public sealed class UninstallEngine
         return fallback;
     }
 
+    /// <summary>
+    /// The sanity floor for a recovered install directory: reject the values that would
+    /// make the anchor meaningless — a volume root, or one of the well-known system
+    /// directories themselves.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>This check is equality-only, and that is deliberate. Do not "tighten" it
+    /// to require <see cref="StateDirectorySecurity.IsAdminOnlyWritable"/> for machine
+    /// scope.</strong> It looks like an obvious improvement and it is not: lane S2
+    /// contains new machine-scope installs to the <c>%ProgramFiles%</c> roots but
+    /// deliberately GRANDFATHERS a recovered prior install directory, honouring it even
+    /// outside that root, because an install predating containment would otherwise be
+    /// neither upgradable nor removable. Requiring admin-only-writable here would refuse
+    /// the uninstall of exactly that grandfathered population — machine installs sitting
+    /// legitimately outside the root today — and recreate "silently unremovable" for the
+    /// very users S2's ruling exists to protect.
+    /// </para>
+    /// <para>
+    /// The residual is accepted knowingly. A recorded directory that is user-writable but
+    /// not one of the rejected values still passes, so an attacker who controls it can
+    /// have file records replayed inside it — but that is a directory they already
+    /// control, so it is not an escalation. The consequences that WOULD be escalations
+    /// are closed elsewhere: a machine-wide execution mapping and a machine <c>PATH</c>
+    /// entry both additionally require the target to be admin-only-writable
+    /// (<c>ReplayAnchor.OwnedByThisInstall</c>), so neither can point into such a
+    /// directory however the anchor was chosen.
+    /// </para>
+    /// </remarks>
     private static bool IsPlausibleInstallDirectory(string candidate)
     {
 #pragma warning disable CA1031 // Fail closed: an unparseable value is never an acceptable anchor.

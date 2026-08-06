@@ -30,6 +30,25 @@ using SigilBuild.Wrapper.Json;
 internal static class UninstallStateStore
 {
     /// <summary>
+    /// R19: <c>uninstall.json</c> is attacker-supplied bytes until it has been read
+    /// and validated, and the read materializes the whole file. Cap it <em>before</em>
+    /// the read, not after. A real journal is one short record per mutation an
+    /// installer made — a few hundred records of a few dozen bytes each — so 4 MB is
+    /// three orders of magnitude of headroom and still an instant read. Anything
+    /// larger is not a Sigil journal.
+    /// </summary>
+    private const long MaxStateFileBytes = 4L * 1024 * 1024;
+
+    /// <summary>
+    /// R19: the size cap alone does not bound the work, because the records are tiny
+    /// — 4 MB of <c>[null,null,…]</c> is on the order of a million of them. A real
+    /// install journals one record per file, registry value, shortcut and PATH edit,
+    /// so 50,000 is far beyond any plausible installer while still bounding
+    /// rehydration and the replay that follows it.
+    /// </summary>
+    private const int MaxStateRecords = 50_000;
+
+    /// <summary>
     /// Per-app state directory: <c>&lt;StateRoot&gt;\Sigil\&lt;AppId&gt;</c>
     /// (<c>%ProgramData%</c> for machine scope, <c>%LocalAppData%</c> for user).
     /// </summary>
@@ -220,9 +239,11 @@ internal static class UninstallStateStore
     /// <see cref="LoadedState.Scope"/> is the scope of the DIRECTORY the file was found
     /// in — never the <c>scope</c> field inside the file — and drives ARP-hive /
     /// state-dir selection. Returns <c>null</c> when no
-    /// state file exists in that scope or the JSON is unreadable; the caller
+    /// state file exists in that scope; the caller
     /// (<c>UninstallEngine</c>) translates that into the documented "no uninstall
-    /// state found" error. Machine-scope state is refused outright (R1) unless BOTH
+    /// state found" error. A file that exists but is oversized, malformed, over the
+    /// record ceiling or un-rehydratable is a <em>refusal</em>, not an absence (R19).
+    /// Machine-scope state is refused outright (R1) unless BOTH
     /// its directory (<see cref="StateDirectorySecurity.IsTrusted"/>) and the
     /// <c>uninstall.json</c> file itself
     /// (<see cref="StateDirectorySecurity.IsTrustedFile"/>) pass the provenance check,
@@ -242,9 +263,11 @@ internal static class UninstallStateStore
     /// <summary>
     /// <see cref="TryLoad"/> with the refusal distinguished from the absence: a
     /// non-<c>null</c> <see cref="LoadAttempt.RefusalReason"/> means state WAS present
-    /// and was rejected on R1 provenance grounds. Reporting that as "no uninstall
-    /// state found" would tell the operator the opposite of what happened and would
-    /// mask an attack, so <c>UninstallEngine</c> consumes this shape.
+    /// and was rejected — on R1 provenance grounds, or on R19 readability grounds
+    /// (size ceiling, malformed JSON, record ceiling, un-rehydratable record).
+    /// Reporting either as "no uninstall state found" would tell the operator the
+    /// opposite of what happened and would mask an attack, so
+    /// <c>UninstallEngine</c> consumes this shape.
     /// </summary>
     public static LoadAttempt Load(
         string appId,
@@ -302,30 +325,66 @@ internal static class UninstallStateStore
             }
         }
 
-        var json = File.ReadAllText(path);
+        // R19: read, deserialize AND rehydrate under ONE try. Rehydration used to sit
+        // outside it, and it throws on an unknown discriminator, a null array element
+        // or a missing required field (SerializableRollbackRecord.ToRollbackRecord) —
+        // none of which the deserialize-only catch covered, and which nothing above
+        // (UninstallEngine.RunAsync, InstallSession) caught either. A one-line planted
+        // file therefore killed every install AND every uninstall of that AppId with
+        // an unhandled exception: a persistent, per-app denial of service that any
+        // user who can write the state directory could arm. Failing closed here is
+        // right; failing fatally is not.
         SerializableRollbackJournal? s;
+        RollbackJournal journal;
         try
         {
+            // Bounded BEFORE the read, so an oversized file is never materialized.
+            var length = new FileInfo(path).Length;
+            if (length > MaxStateFileBytes)
+            {
+                return Unreadable(
+                    path,
+                    $"the state file is {length} bytes, over the {MaxStateFileBytes}-byte ceiling",
+                    progress);
+            }
+
             s = JsonSerializer.Deserialize(
-                json,
+                File.ReadAllText(path),
                 WrapperBlobJsonContext.Default.SerializableRollbackJournal);
+
+            if (s is null)
+            {
+                return Unreadable(path, "the state file deserialized to nothing", progress);
+            }
+
+            // A literal `"records": null` binds null over the property initializer.
+            var records = s.Records;
+            if (records is null)
+            {
+                return Unreadable(path, "the state file carries no records array", progress);
+            }
+
+            if (records.Length > MaxStateRecords)
+            {
+                return Unreadable(
+                    path,
+                    $"the state file declares {records.Length} records, over the " +
+                    $"{MaxStateRecords}-record ceiling",
+                    progress);
+            }
+
+            journal = new RollbackJournal();
+            foreach (var rec in records)
+            {
+                journal.Append(rec.ToRollbackRecord());
+            }
         }
-#pragma warning disable CA1031 // Corrupt state file → absence → caller surfaces a clear error.
-        catch
+#pragma warning disable CA1031 // The point of R19: ANY failure here is "state unreadable", never an escape.
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return new LoadAttempt(null, null);
+            return Unreadable(path, $"the state file could not be read ({ex.Message})", progress);
         }
 #pragma warning restore CA1031
-        if (s is null)
-        {
-            return new LoadAttempt(null, null);
-        }
-
-        var journal = new RollbackJournal();
-        foreach (var rec in s.Records)
-        {
-            journal.Append(rec.ToRollbackRecord());
-        }
 
         // The scope is the DIRECTORY's scope, deliberately — never s.Scope.
         //
@@ -338,6 +397,25 @@ internal static class UninstallStateStore
         // compatibility with state written before this fix — reading it back must never
         // be reintroduced.
         return new LoadAttempt(new LoadedState(journal, dirScope, s.InstallDir), null);
+    }
+
+    /// <summary>
+    /// R19: state that is PRESENT but cannot be read as a journal — oversized,
+    /// malformed, over the record ceiling, or carrying a record that will not
+    /// rehydrate. Reported as a <em>refusal</em> on the same channel as the R1
+    /// provenance refusal, deliberately: both mean "there is a file here and it was
+    /// not replayed", and collapsing that into the absence channel would print "no
+    /// uninstall state found" for a file the operator can see on disk — the same
+    /// misreport R1 closed, and the same cover for an attacker.
+    /// </summary>
+    private static LoadAttempt Unreadable(
+        string path, string detail, IProgress<StepProgress>? progress)
+    {
+        var reason =
+            $"refusing state at '{path}': {detail}. Nothing was replayed. Remove the file " +
+            "as an administrator and reinstall, or investigate who wrote it";
+        progress?.Report(new StepProgress(0, 0, reason, IsError: true));
+        return new LoadAttempt(null, reason);
     }
 
     /// <summary>

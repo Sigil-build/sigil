@@ -95,7 +95,19 @@ internal sealed class ScheduledTaskCreateStep : IStep
         // no secrets, no resolved program path.
         journal.Append(new RollbackRecord.DeleteScheduledTask(name));
 
-        var args = BuildCreateArgs(name, program, arguments, _spec.Trigger, _spec.RunLevel);
+        List<string> args;
+        try
+        {
+            args = BuildCreateArgs(name, program, arguments, _spec.Trigger, _spec.RunLevel);
+        }
+        catch (ArgumentException ex)
+        {
+            // R31: a quote in `program` is a manifest error, not a crash. The
+            // journal entry above is already written, and its undo (schtasks
+            // /Delete for a task that was never created) is tolerated best-effort.
+            return StepResult.Failed($"scheduled_task_create '{name}': {ex.Message}");
+        }
+
         var result = await RunSchtasksAsync(args, ct).ConfigureAwait(false);
         if (result.ExitCode != 0)
         {
@@ -115,9 +127,29 @@ internal sealed class ScheduledTaskCreateStep : IStep
     /// create+query+delete leg (which needs <c>/RU SYSTEM</c> elevation) is
     /// verified on the CI VM (see AGENTS.md §2).
     /// </summary>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="program"/> contains a double quote (register row R31).
+    /// </exception>
     internal static List<string> BuildCreateArgs(
         string name, string program, string? arguments, string trigger, string runLevel)
     {
+        // R31: the /TR value is the one concatenated command fragment in the
+        // privileged-step set, and `program` is manifest-substitutable. An
+        // embedded " re-tokenizes the task's own command line, so which token
+        // Task Scheduler treats as the executable is no longer the one the
+        // publisher wrote. Rejected rather than escaped: `program` is authored at
+        // pack time, so a hard failure puts the mistake in front of the publisher
+        // instead of silently rewriting it. (`arguments` is deliberately NOT
+        // checked — quotes there are ordinary and necessary, e.g. a spaced path
+        // in a flag value, and it cannot displace the executable token.)
+        if (program.Contains('"', StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                $"scheduled_task_create: 'program' must not contain a double quote — it would " +
+                $"re-tokenize the task's own /TR command line (got '{program}')",
+                nameof(program));
+        }
+
         // schtasks parses /TR's value as its own command line, so the program
         // part is quoted even though the whole value is one ArgumentList entry.
         var trValue = string.IsNullOrEmpty(arguments)

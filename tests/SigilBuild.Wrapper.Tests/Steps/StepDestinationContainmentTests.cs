@@ -46,18 +46,34 @@ public sealed class StepDestinationContainmentTests
     public async Task Json_edit_refuses_a_traversal_escape()
     {
         using var installDir = new TempDir();
-        var target = Path.Combine(installDir.Path, "..", "escaped.json");
+        // The escape target is unique per run: it lands in the shared OS temp
+        // directory, so a fixed name would let one run's leftovers make the next
+        // run's "must not exist" assertion lie in either direction.
+        var target = Path.Combine(installDir.Path, "..", $"sigil-escaped-{Guid.NewGuid():N}.json");
+        var full = Path.GetFullPath(target);
 
-        var result = await new JsonEditStep(
-                new InstallStep.JsonEdit("j", target, "/a", "2", CreateIfMissing: true, null, OnFailure.Fail))
-            .RunAsync(Ctx(installDir.Path), new RollbackJournal(), CancellationToken.None);
+        try
+        {
+            var result = await new JsonEditStep(
+                    new InstallStep.JsonEdit("j", target, "/a", "2", CreateIfMissing: true, null, OnFailure.Fail))
+                .RunAsync(Ctx(installDir.Path), new RollbackJournal(), CancellationToken.None);
 
-        result.Success.Should().BeFalse();
-        result.Error.Should().Contain("outside install_dir");
-        File.Exists(Path.GetFullPath(target)).Should().BeFalse();
+            result.Success.Should().BeFalse();
+            result.Error.Should().Contain("outside install_dir");
+            File.Exists(full).Should().BeFalse();
+        }
+        finally
+        {
+            // Only reached if the guard regressed; leaving the file would then
+            // poison the next run rather than failing this one.
+            if (File.Exists(full))
+            {
+                File.Delete(full);
+            }
+        }
     }
 
-    [Fact]
+    [WindowsFact("NTFS directory junctions")]
     public async Task Xml_edit_refuses_a_destination_reached_through_a_junction()
     {
         // The junction is INSIDE install_dir, so every textual prefix check says

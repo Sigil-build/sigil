@@ -1,0 +1,165 @@
+namespace SigilBuild.Wrapper.Tests.Steps;
+
+using System;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+using FluentAssertions;
+using SigilBuild.Core.Manifest;
+using SigilBuild.Wrapper.Engine;
+using SigilBuild.Wrapper.Steps;
+using SigilBuild.Wrapper.Tests.Helpers;
+using Xunit;
+
+/// <summary>
+/// Register rows R31 and R32 — the two places where a manifest-substitutable
+/// value was concatenated into a syntax that gives it more authority than the
+/// field it was written in.
+/// </summary>
+/// <remarks>
+/// No test here creates a scheduled task: every case refuses inside
+/// <see cref="ScheduledTaskCreateStep.BuildCreateArgs"/>, a pure function that
+/// never starts a process, or inside <c>ini_write</c>'s transform, which never
+/// reaches the file.
+/// </remarks>
+[System.Runtime.Versioning.SupportedOSPlatform("windows")]
+public sealed class StepValueInjectionTests
+{
+    // ── R31: schtasks /TR ─────────────────────────────────────────────────────
+
+    [Fact]
+    public void Task_program_containing_a_quote_is_refused()
+    {
+        // /TR's value is parsed by schtasks as its own mini command line, so an
+        // embedded quote moves where the executable token ends.
+        var act = () => ScheduledTaskCreateStep.BuildCreateArgs(
+            name: "T", program: @"C:\a\b"" && calc.exe && """, arguments: null,
+            trigger: "daily", runLevel: "limited");
+
+        act.Should().Throw<ArgumentException>().WithMessage("*quote*");
+    }
+
+    [Fact]
+    public void Task_program_with_a_single_leading_quote_is_refused_too()
+    {
+        var act = () => ScheduledTaskCreateStep.BuildCreateArgs(
+            name: "T", program: @"""C:\a\b.exe", arguments: null,
+            trigger: "logon", runLevel: "limited");
+
+        act.Should().Throw<ArgumentException>().WithMessage("*quote*");
+    }
+
+    [Fact]
+    public void An_ordinary_spaced_program_path_is_still_accepted()
+    {
+        // The quoting that makes a spaced path work is added by BuildCreateArgs
+        // itself; refusing author-supplied quotes must not break that.
+        var args = ScheduledTaskCreateStep.BuildCreateArgs(
+            "T", @"C:\Program Files\Acme\updater.exe", arguments: null,
+            trigger: "logon", runLevel: "limited");
+
+        args[4].Should().Be("\"C:\\Program Files\\Acme\\updater.exe\"");
+    }
+
+    [Fact]
+    public void Arguments_may_still_contain_quotes()
+    {
+        // Deliberately unrestricted: a quoted flag value is ordinary, and
+        // `arguments` is appended after the executable token so it cannot
+        // displace it.
+        var args = ScheduledTaskCreateStep.BuildCreateArgs(
+            "T", @"C:\App\app.exe", arguments: @"--path ""C:\Program Files\x""",
+            trigger: "logon", runLevel: "limited");
+
+        args[4].Should().Be(@"""C:\App\app.exe"" --path ""C:\Program Files\x""");
+    }
+
+    [Fact]
+    public async Task The_step_reports_a_refused_program_as_a_step_failure()
+    {
+        // The throw must not escape RunAsync as an unhandled exception.
+        var spec = new InstallStep.ScheduledTaskCreate(
+            "t", "SigilTestTask_DoesNotPersist", @"C:\Windows\System32\a"" && calc.exe && """,
+            Arguments: null, Trigger: "logon", RunLevel: "limited",
+            When: null, OnFailure: OnFailure.Continue);
+        var ctx = new StepContext(
+            new System.Collections.Generic.Dictionary<string, object?>(),
+            scope: InstallScope.Machine,
+            installDir: Environment.SystemDirectory);
+
+        var result = await new ScheduledTaskCreateStep(spec)
+            .RunAsync(ctx, new RollbackJournal(), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Contain("quote");
+    }
+
+    // ── R32: ini_write line injection ─────────────────────────────────────────
+
+    [Fact]
+    public void Ini_value_containing_a_newline_cannot_inject_a_section()
+    {
+        var act = () => IniEditor.Set("[app]\nx=1\n", "app", "x", "9\n[admin]\nenabled=true");
+
+        act.Should().Throw<ArgumentException>();
+    }
+
+    [Theory]
+    [InlineData("9\r[admin]\r")]
+    [InlineData("9\r\n[admin]\r\nenabled=true")]
+    public void A_carriage_return_in_a_value_is_refused_as_well_as_a_line_feed(string value)
+    {
+        var act = () => IniEditor.Set("[app]\r\nx=1\r\n", "app", "x", value);
+
+        act.Should().Throw<ArgumentException>().WithMessage("*line feed*");
+    }
+
+    [Theory]
+    [InlineData("[admin]", "x", "1")]
+    [InlineData("app", "[admin]", "1")]
+    [InlineData("app", "x", "[admin]")]
+    public void A_leading_bracket_is_refused_in_section_key_and_value(string section, string key, string value)
+    {
+        var act = () => IniEditor.Set("[app]\r\nx=1\r\n", section, key, value);
+
+        act.Should().Throw<ArgumentException>().WithMessage("*[*");
+    }
+
+    [Theory]
+    [InlineData("app\ninjected", "x", "1")]
+    [InlineData("app", "x\ninjected=1", "1")]
+    public void A_newline_is_refused_in_the_section_and_the_key_too(string section, string key, string value)
+    {
+        var act = () => IniEditor.Set("[app]\r\nx=1\r\n", section, key, value);
+
+        act.Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
+    public void An_ordinary_edit_is_untouched()
+    {
+        IniEditor.Set("[app]\r\nx=1\r\n", "app", "x", "9")
+            .Should().Be("[app]\r\nx=9\r\n");
+    }
+
+    [Fact]
+    public async Task The_step_reports_a_refused_value_as_a_step_failure_and_leaves_the_file_alone()
+    {
+        using var installDir = new TempDir();
+        var path = Path.Combine(installDir.Path, "a.ini");
+        File.WriteAllText(path, "[app]\r\nx=1\r\n");
+
+        var spec = new InstallStep.IniWrite(
+            "i", path, "app", "x", "9\n[admin]\nenabled=true",
+            CreateIfMissing: false, null, OnFailure.Fail);
+
+        var result = await new IniWriteStep(spec).RunAsync(
+            new StepContext(new System.Collections.Generic.Dictionary<string, object?>(), installDir: installDir.Path),
+            new RollbackJournal(),
+            CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        File.ReadAllText(path).Should().Be("[app]\r\nx=1\r\n", "the file must not have been rewritten");
+        File.ReadAllText(path).Should().NotContain("[admin]");
+    }
+}

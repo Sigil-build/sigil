@@ -222,7 +222,7 @@ Registers a Windows service via `sc.exe create`, optionally starts it. Records a
 Creates a Windows Scheduled Task via `schtasks.exe /Create`, always running the task as `SYSTEM` (`/RU SYSTEM`).
 
 > **Machine-scope only.** This step touches machine-global state, so the manifest must set `installer.scope: machine`. Under `user` or `auto` scope, packing fails with **SIG0310** (`installer.scope: machine` required for this step).
-
+>
 > **`program` is a privileged target.** The task always runs as `SYSTEM` (`/RU SYSTEM`), so `program` must resolve inside `install_dir` and sit in a directory no non-administrator can write — see [the anchoring rules above](#privileged-step-targets-are-anchored--read-this-before-the-next-four-steps). Otherwise the step fails and no task is created.
 
 |Field|Type|Required|Default|Notes|
@@ -232,6 +232,8 @@ Creates a Windows Scheduled Task via `schtasks.exe /Create`, always running the 
 |`arguments`|string|-|-|Arguments appended to `program` in the task's command line.|
 |`trigger`|enum|yes|-|`logon`, `daily`, or `onstart`.|
 |`run_level`|enum|-|`limited`|`limited` or `highest` (`/RL`).|
+
+> **`program` must not contain a double quote.** `schtasks` parses the `/TR` value as its own miniature command line, so an embedded `"` moves where the executable token ends — the task would run something other than what the manifest says. A quote in `program` fails the step. This is only about author-supplied quotes: the quoting a spaced path needs is added for you, and `arguments` is unrestricted (quoted flag values there are ordinary and cannot displace the executable).
 
 For `trigger: daily`, the step always passes a fixed `/ST 00:00` start time rather than the packing machine's wall-clock time — this keeps the produced task deterministic across repeated pack runs of the same manifest. `logon` and `onstart` triggers need no start time. The create is run with `/F` (force overwrite), so a repeat install/repair is idempotent.
 
@@ -251,7 +253,7 @@ Journals a `DeleteScheduledTask` record (task name only) **before** the create, 
 Self-registers a COM DLL by loading it and invoking its exported `HRESULT DllRegisterServer(void)`.
 
 > **Machine-scope only.** `DllRegisterServer` writes machine-global registration (`HKLM\Software\Classes` / `HKCR\CLSID`), so the manifest must set `installer.scope: machine`. Under `user` or `auto` scope, packing fails with **SIG0310**.
-
+>
 > **`path` is a privileged target — and the sharpest of the four.** The DLL is loaded into the *elevated installer process* and one of its exports is called, so a user-writable path here is arbitrary code execution as administrator. It must resolve inside `install_dir` and sit in a directory no non-administrator can write — see [the anchoring rules above](#privileged-step-targets-are-anchored--read-this-before-the-next-four-steps). Otherwise the step fails and the DLL is never loaded.
 
 |Field|Type|Required|Default|Notes|
@@ -271,7 +273,7 @@ Journals an `UnregisterCom` record (DLL path only) **before** the register, so a
 Creates a Windows Defender Firewall rule via `netsh advfirewall firewall add rule`.
 
 > **Machine-scope only.** There is no per-user firewall policy store — firewall rules are always machine-global — so the manifest must set `installer.scope: machine`. Under `user` or `auto` scope, packing fails with **SIG0310**.
-
+>
 > **`program` is a privileged target.** When set, it must resolve inside `install_dir` and sit in a directory no non-administrator can write — see [the anchoring rules above](#privileged-step-targets-are-anchored--read-this-before-the-next-four-steps). Otherwise the step fails and no rule is added. A rule with no `program` has no target to anchor and is unaffected.
 
 |Field|Type|Required|Default|Notes|
@@ -329,6 +331,12 @@ If a step genuinely needs to write outside the installed application — a machi
 ```
 
 The opt-out is per step and deliberate: it is a declaration that this particular write is meant to leave the install tree, not a global switch. It does **not** relax the [privileged-target rules](#privileged-step-targets-are-anchored--read-this-before-the-next-four-steps) on `service_install`, `scheduled_task_create`, `com_register` or `firewall_rule` — those have no opt-out.
+
+### `ini_write` values cannot inject INI lines
+
+`section`, `key` and `value` are substituted and then concatenated into a single `key=value` line, so a value of `9\n[admin]\nenabled=true` used to write entries into an entirely different section — which matters as soon as the value comes from a wizard field or a `registry_read` var rather than a literal. All three fields now **reject a carriage return, a line feed, or a leading `[`** (how a section header begins), and the step fails with the file untouched.
+
+Rejected rather than escaped: an INI file has no escape for a newline inside a value, so escaping would silently mangle what you wrote. All three are pack-time-authored, so failing puts the problem in front of the publisher. The leading-`[` rule is deliberately conservative — a `[` in a *value* cannot itself create a section — so write `value: " [1,2,3]"` or quote it differently if you need one.
 
 ### An unresolved token in a path fails the step
 

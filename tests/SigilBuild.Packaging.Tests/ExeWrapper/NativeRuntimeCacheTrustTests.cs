@@ -232,44 +232,89 @@ public sealed class NativeRuntimeCacheTrustTests
     /// is even installed.
     /// </summary>
     /// <remarks>
-    /// What is asserted here is that a second, <b>per-run GUID</b> directory is attempted
-    /// beside the blocked one — visible in the reported line and in the final message —
-    /// rather than the run ending at the first failure. Whether that fallback then
-    /// <em>succeeds</em> depends on an elevated token this process does not have, so like
-    /// everything else in this lane the positive outcome is CI's to confirm. Before the
-    /// fix there was no second attempt at all.
+    /// <para>
+    /// <b>Elevated host — the outcome this fix exists to produce:</b> the fallback
+    /// <em>succeeds</em>. A per-run GUID directory is created hardened beside the blocked
+    /// root, confirmed administrator-only, and the archive is extracted into it. No
+    /// exception; the install carries on, having lost only its shared cache.
+    /// </para>
+    /// <para>
+    /// <b>Unelevated host:</b> the fallback cannot pass the confirmation either, so the run
+    /// still refuses — but the refusal must name a per-run GUID path, which is what proves
+    /// a second attempt was made rather than the run ending at the first failure. Before
+    /// the fix there was no second attempt at all, and the first failure escaped as a raw
+    /// <see cref="IOException"/>.
+    /// </para>
+    /// <para>
+    /// Both branches assert the fallback was attempted; neither is vacuous, and exactly one
+    /// runs on any given host. Asserting only the refusal would be a test that can pass
+    /// solely in the world where the fix does not work.
+    /// </para>
     /// </remarks>
     [Fact]
     public void An_unrepairable_shared_cache_root_falls_back_to_a_per_run_directory()
     {
         using var scratch = new Scratch();
-        var (archive, _, _) = Archive(scratch.Path);
+        var (archive, skia, _) = Archive(scratch.Path);
 
-        // The squat: a FILE at the cache root's own path. Its PARENT is a perfectly good
-        // directory, so a sibling can still be created — which is the whole point.
+        // The squat: a FILE at the cache root's own path, which CreateHardened cannot
+        // repair. Its PARENT is a perfectly good directory, so a sibling can still be
+        // created — which is the whole point.
         var root = Path.Combine(scratch.Path, "sigil-runtime");
         File.WriteAllText(root, "squatted by a non-administrator");
 
-        var prepare = () => NativeRuntimeBootstrap.PrepareCacheDirectory(
-            archive, root, requireAdminOnlyRoot: true, Report);
+        string? prepared = null;
+        NativeRuntimeTrustException? refusal = null;
+        try
+        {
+            prepared = NativeRuntimeBootstrap.PrepareCacheDirectory(
+                archive, root, requireAdminOnlyRoot: true, Report);
+        }
+        catch (NativeRuntimeTrustException ex)
+        {
+            refusal = ex;
+        }
 
-        // Unelevated, the fallback cannot confirm either, so this still ends in a refusal —
-        // but the refusal must name BOTH paths, which is what proves the fallback happened.
-        prepare.Should().Throw<NativeRuntimeTrustException>()
-            .Which.Message.Should().MatchRegex(
-                @"sigil-runtime-[0-9a-f]{32}",
-                "the run must attempt a per-run GUID directory beside the blocked cache root, not stop at " +
-                "the first failure — otherwise a single pre-created file is a denial of service against " +
-                "every elevated install");
-
+        // Common to both hosts: the fallback was ATTEMPTED and announced. That is the
+        // denial-of-service closure — a single pre-created file must not end the run.
         _reported.Should().Contain(
             r => r.IsError
                  && r.Message.Contains("could not be established as an administrator-only cache", StringComparison.Ordinal)
                  && r.Message.Contains("for this run instead", StringComparison.Ordinal),
             "losing the shared cache is an operator-visible event: it costs re-extraction every run");
 
-        Directory.EnumerateDirectories(scratch.Path, "sigil-runtime-*").Should().BeEmpty(
-            "a fallback directory that could not be confirmed administrator-only is not left behind");
+        if (prepared is not null)
+        {
+            // ELEVATED HOST: the fallback works, which is the entire point of the fix.
+            refusal.Should().BeNull();
+            var fallbackRoot = Path.GetDirectoryName(prepared)!;
+            Path.GetFileName(fallbackRoot).Should().MatchRegex(
+                "^sigil-runtime-[0-9a-f]{32}$",
+                "an unrepairable shared cache root costs the run its cache, never the install — extraction " +
+                "moves to an unguessable per-run directory beside it");
+            Path.GetDirectoryName(fallbackRoot).Should().Be(
+                scratch.Path, "the fallback is a sibling of the blocked root, still a direct child of the " +
+                "machine-wide root");
+            File.ReadAllBytes(Path.Combine(prepared, SkiaName)).Should().Equal(
+                skia, "the archive really is extracted into the fallback — the run proceeds");
+            File.Exists(Path.Combine(prepared, MarkerName)).Should().BeTrue(
+                "and the extraction was verified, so the completion marker was written");
+            File.ReadAllText(root).Should().Be(
+                "squatted by a non-administrator", "the squatted path is left exactly as found");
+        }
+        else
+        {
+            // UNELEVATED HOST: nothing this process creates can pass the confirmation, so
+            // the run refuses — but the message must name the per-run path it tried.
+            Elevation.IsProcessElevated().Should().BeFalse(
+                "an ELEVATED run reaching here would mean the fallback does not work, which is the whole " +
+                "denial of service this fix removes");
+            refusal!.Message.Should().MatchRegex(
+                @"sigil-runtime-[0-9a-f]{32}",
+                "the refusal must name the per-run directory it attempted, not stop at the first failure");
+            Directory.EnumerateDirectories(scratch.Path, "sigil-runtime-*").Should().BeEmpty(
+                "a fallback directory that could not be confirmed administrator-only is not left behind");
+        }
     }
 
     /// <summary>

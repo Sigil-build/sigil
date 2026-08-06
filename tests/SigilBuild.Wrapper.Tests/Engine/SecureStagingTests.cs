@@ -164,8 +164,23 @@ public sealed class SecureStagingTests
         }
     }
 
+    /// <summary>
+    /// <c>IsAdminOnly</c> is never anything but the frozen predicate's own answer about
+    /// the directory that was created — this type implements no second ACL check.
+    /// </summary>
+    /// <remarks>
+    /// <b>This asserts the unelevated contract unconditionally, on every host.</b> It goes
+    /// through the <em>public</em> entry point, and the assembly-wide test floor forces the
+    /// unelevated siting there, so branching on <c>Elevation.IsProcessElevated()</c> would
+    /// now be wrong: on an elevated runner the token says "elevated" while the siting is
+    /// deliberately not. An earlier revision did branch that way and passed on CI only
+    /// because the suite was still staging into the real <c>%ProgramData%</c> — the bug.
+    /// The elevated contract moved to
+    /// <see cref="The_elevated_siting_agrees_with_the_frozen_predicate_or_refuses"/>, which
+    /// asks for that siting explicitly.
+    /// </remarks>
     [WindowsFact("Windows ACL APIs")]
-    public void Staging_is_admin_only_exactly_when_the_process_is_elevated()
+    public void Staging_through_the_public_entry_point_agrees_with_the_frozen_predicate()
     {
         using var root = new TempDir();
         using var staging = Staging("prereq", root.Path);
@@ -181,27 +196,71 @@ public sealed class SecureStagingTests
             Environment.GetFolderPath(Environment.SpecialFolder.System))
             .Should().BeTrue("the predicate must still answer true for a genuinely admin-only directory");
 
-        if (Elevation.IsProcessElevated())
+        staging.IsAdminOnly.Should().BeFalse(
+            "the test floor pins the unelevated siting, and a process staging in a root it owns cannot " +
+            "produce a directory only administrators can write");
+        staging.Directory.Should().StartWith(
+            root.Path, "the unelevated siting stages in the caller's own root");
+        _reported.Should().BeEmpty(
+            "staging in the caller's root unelevated is the only option there is, not a downgrade — " +
+            "reporting it would train an operator to ignore the line that does matter");
+    }
+
+    /// <summary>
+    /// The elevated contract, asked for explicitly through the internal overload so it does
+    /// not depend on the host's token matching a siting the test floor has pinned.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Elevated host:</b> the hardened directory really is administrator-only, the frozen
+    /// predicate agrees, and it is a direct child of the root it was given. That is the
+    /// premise the whole lane rests on — if <c>CreateHardened</c>'s output did not satisfy
+    /// <c>IsAdminOnlyWritable</c>, every elevated install would refuse — so this test is how
+    /// CI states it rather than assuming it.
+    /// </para>
+    /// <para>
+    /// <b>Unelevated host:</b> the confirmation cannot pass, so the refusal is the contract;
+    /// nothing is left behind. The <c>catch</c> re-asserts that the process really is
+    /// unelevated, so an <em>elevated</em> runner that wrongly refuses fails here instead of
+    /// being quietly absorbed.
+    /// </para>
+    /// <para>Neither branch is vacuous, and exactly one runs on any given host.</para>
+    /// </remarks>
+    [WindowsFact("Windows ACL APIs")]
+    public void The_elevated_siting_agrees_with_the_frozen_predicate_or_refuses()
+    {
+        using var root = new TempDir();
+        var reported = new List<(string Message, bool IsError)>();
+
+        try
         {
-            // ELEVATED: the directory is created hardened as a direct child of
-            // %ProgramData% and confirmed, so it must be admin-only writable. NOT
-            // exercised on the developer box that produced this file (unelevated);
-            // CI/an elevated run is the arbiter.
+            using var staging = SecureStaging.Create(
+                "prereq", (m, e) => reported.Add((m, e)), fallbackRoot: null,
+                elevated: true, commonAppData: root.Path);
+
+            // ELEVATED HOST.
             staging.IsAdminOnly.Should().BeTrue(
-                "an elevated run stages in %ProgramData%\\sigil-<purpose>-<guid>, created hardened");
+                "creation and confirmation both succeeded, so the directory is administrator-only by " +
+                "construction");
+            StateDirectorySecurity.IsAdminOnlyWritable(staging.Directory).Should().BeTrue(
+                "IsAdminOnly is the frozen predicate's answer, not a second opinion");
+            Path.GetDirectoryName(staging.Directory).Should().Be(
+                root.Path, "the per-run directory is a DIRECT child of the machine-wide root");
+            Path.GetFileName(staging.Directory).Should().MatchRegex("^sigil-prereq-[0-9a-f]{32}$");
+            reported.Should().BeEmpty("a successful elevated staging has nothing to report");
         }
-        else
+        catch (StagingSecurityException ex)
         {
-            // UNELEVATED: an admin-only directory is unreachable by construction — this
-            // process could not create something it cannot itself modify. The honest
-            // answer is false, not a pretended true; OpenVerified is what carries the
-            // guarantee in this branch.
-            staging.IsAdminOnly.Should().BeFalse(
-                "an unelevated process cannot create a directory only administrators can write");
-            staging.Directory.Should().StartWith(root.Path, "unelevated staging falls back to the caller's root");
-            _reported.Should().BeEmpty(
-                "staging in the caller's root unelevated is the only option there is, not a downgrade — " +
-                "reporting it would train an operator to ignore the line that does matter");
+            // UNELEVATED HOST.
+            Elevation.IsProcessElevated().Should().BeFalse(
+                "only a process that cannot own an administrator-only directory may fail this " +
+                "confirmation — an ELEVATED run reaching here would mean CreateHardened's output does " +
+                "not satisfy IsAdminOnlyWritable, which would make every real elevated install refuse");
+            ex.Message.Should().Contain("administrator-only writable");
+            reported.Should().Contain(
+                r => r.IsError && r.Message.Contains("REFUSED", StringComparison.Ordinal));
+            Directory.GetDirectories(root.Path).Should().BeEmpty(
+                "a directory that failed the confirmation is removed again — nothing was staged in it");
         }
     }
 

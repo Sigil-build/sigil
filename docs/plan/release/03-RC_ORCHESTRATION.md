@@ -1,6 +1,15 @@
 # Release-candidate track — orchestration
 
-> ## Status: Stage 0 COMPLETE (2026-07-28) · Stage 1 ready to open
+> ## Status: Stage 1 COMPLETE (2026-08-11) · Stages 2 and 3 ready to open
+>
+> **Stage 1's four lanes are merged and gate G1 is closed** at RC head `f300b39`
+> — see the G1 block below for the five attacks and their refusal lines, and
+> `00-GAP_REGISTER.md` for the 17 rows closed and the 14 filed. Headline numbers:
+> **1538 tests · 1517 passed · 21 skipped · 0 failed**, project-wide coverage
+> **78.04%**. The skip count rose from 1 to 21 on purpose — that is the suite
+> starting to tell the truth, not a regression.
+>
+> ### Stage 0 (2026-07-28)
 >
 > **Stage 0 (lane F0) merged as [PR #16](https://github.com/Sigil-build/sigil/pull/16)
 > → `c82f5eb`.** Gate **G0 passed**, including its proof-of-failure ceremony:
@@ -195,7 +204,7 @@ the RC merges.
 | Stage | Document | Lanes | Runs | Gate |
 |---|---|---|---|---|
 | 0 | [`04-STAGE-0-foundation.md`](04-STAGE-0-foundation.md) | F0 | **solo** | G0 |
-| 1 | [`05-STAGE-1-security-core.md`](05-STAGE-1-security-core.md) | S1, S2, S3, T1 | 4 parallel | G1 |
+| 1 | [`05-STAGE-1-security-core.md`](05-STAGE-1-security-core.md) | S1, S2, S3, T1 | 4 parallel | **G1 ✅** |
 | 2 | [`06-STAGE-2-security-depth.md`](06-STAGE-2-security-depth.md) | S4, S5, S6 | 3 parallel | G2 |
 | 3 | [`07-STAGE-3-release-surface.md`](07-STAGE-3-release-surface.md) | REL, SUP, DOC | 3 parallel, **overlaps Stage 2** | G2 |
 | 4 | [`08-STAGE-4-verification.md`](08-STAGE-4-verification.md) | V1 | solo | G3, G4 |
@@ -303,15 +312,35 @@ but is deliberately **not** the test project: that project installs a process-wi
 `NeverStageElevatedForTesting` floor via `[ModuleInitializer]`, and running these
 attacks under it would exercise a path production never takes.
 
-- [ ] Plant `C:\ProgramData\Sigil\<AppId>\uninstall.json` with a `restore_file`
+- [x] Plant `C:\ProgramData\Sigil\<AppId>\uninstall.json` with a `restore_file`
       record targeting `C:\Windows\System32\`. Run an elevated machine-scope
-      install **and** an elevated uninstall. Both refuse. *(R1)*
-- [ ] Plant the same file in `%LocalAppData%\Sigil\<AppId>\`. A machine-scope
-      operation must not read it at all. *(R1)*
-- [ ] Plant `HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\<AppId>`
+      install **and** an elevated uninstall. Both refuse. *(R1)* — **PASSED.** The
+      plant succeeds as the standard user and the file is owned by them; the
+      elevated uninstall answers *"uninstall state for 'SigilG1ProbePD' was found
+      but REFUSED, not replayed: … the state directory **and the state file**
+      failed the provenance check … Nothing was uninstalled."* Both objects are
+      named, which is the point — a hardened directory alone would not have caught
+      a pre-created file, because `File.WriteAllText` truncates in place and leaves
+      the attacker's owner on it. The refusal is **not** reported as an absence,
+      and the planted file is still on disk afterwards: nothing acted on it.
+- [x] Plant the same file in `%LocalAppData%\Sigil\<AppId>\`. A machine-scope
+      operation must not read it at all. *(R1)* — **PASSED.** With the machine
+      directory empty for that app id, the elevated machine uninstall reports
+      *"no uninstall state found … (expected at
+      `C:\ProgramData\Sigil\…\uninstall.json`)"* — naming the machine path, never
+      the profile one — and the user-profile plant is untouched.
+- [x] Plant `HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\<AppId>`
       with `DisplayVersion=0.0.1` and `UninstallString` pointing at a scratch
       exe. Run an elevated machine-scope install of that AppId. The scratch exe
-      must **not** run. *(R2)*
+      must **not** run. *(R2)* — **PASSED, and both gates were checked
+      independently.** Gate 1: `ScopeProbeOrder(User, elevated:true) = [Machine]`,
+      so `Resolve` returns `Found=False` and never sees the entry — while the
+      **same key is demonstrably readable from that same elevated process's hive**,
+      so the negative is not vacuous. Gate 2: handed the path directly,
+      `ClassifyPriorUninstaller` returns `Untrusted` and
+      `PriorUninstallerNeedsTrust(User, elevated:true)` is `true`, so the spawn is
+      refused even if the first gate were bypassed. Two independent gates was the
+      design; both are armed.
 - [x] `Setup.exe /allusers /D=C:\Users\Public\evil` is rejected. *(R3)* — **PASSED
       2026-08-11.** Refusal line: *"The install directory 'C:\Users\Public\evil' is
       outside the machine scope root 'C:\Program Files', 'C:\Program Files (x86)'
@@ -320,11 +349,21 @@ attacks under it would exercise a path production never takes.
       wizard-collected path is refused identically, and the positive control
       (`/D=C:\Program Files\SigilG1Probe`) still resolves, so the check is not
       vacuous.
-- [ ] Pre-create the elevated native-runtime cache with a bogus `libSkiaSharp.dll`
+- [x] Pre-create the elevated native-runtime cache with a bogus `libSkiaSharp.dll`
       and a valid `.sigil-runtime-complete` marker. The elevated wizard must not
       load it. *(R4)* — **the path in this line was stale**: the R4 fix moved the
       elevated root to `%ProgramData%\sigil-runtime\<sha>\`, not
-      `%LocalAppData%\Sigil\runtime\<sha>\`. Attack the new one.
+      `%LocalAppData%\Sigil\runtime\<sha>\`. Attacked at the new path.
+      **PASSED.** The standard user pre-creates the derivable content-keyed
+      directory, plants a hostile `libSkiaSharp.dll`, a `version.dll` the archive
+      does not contain at all, and a valid marker. The elevated bootstrap
+      *repairs rather than refuses* — *"repaired the access control list …",
+      "took ownership … for BUILTIN\Administrators"* — then *"the cache directory
+      … does not match the embedded archive — discarding it and extracting
+      again"*. Afterwards the DLL holds the genuine bytes, the planted
+      `version.dll` is gone, and the directory is administrator-only. **The
+      repair-don't-refuse design is what stops this being a denial of service**:
+      one `mkdir` by any user would otherwise block every elevated install.
 
 Plus one probe the plan did not ask for, added because **S3's entire elevated path
 rests on it**: does a directory `CreateHardened` produces actually satisfy
@@ -333,9 +372,19 @@ install refuses. It fails only on a box with `NoDefaultAdminOwner=1`, where
 `%ProgramFiles%`'s inherit-only `CREATOR OWNER:(F)` materialises as a concrete
 user ACE. Run through the **real** predicate, not a PowerShell replica of it.
 
-- [ ] Elevated ACL probe: `IsAdminOnlyWritable(dir)` and `IsTrustedFile(file)` on
+- [x] Elevated ACL probe: `IsAdminOnlyWritable(dir)` and `IsTrustedFile(file)` on
       a fresh `%ProgramFiles%` directory, on a `CreateHardened` one, and — as the
       non-vacuity control — on `%ProgramData%` itself, which must be **rejected**.
+      **PASSED on this machine.** A directory an elevated process creates under
+      `%ProgramFiles%`, and a file it writes there, are both owned by
+      `BUILTIN\Administrators` and satisfy the predicate; `CreateHardened`'s output
+      satisfies `IsAdminOnlyWritable` **and** `IsTrusted`; and `%ProgramData%`
+      itself is correctly **rejected**, so the predicate is discriminating rather
+      than always-true. **This is one machine's answer, not a proof.** A box with
+      `NoDefaultAdminOwner=1` makes the elevating admin the owner instead, at which
+      point `%ProgramFiles%`'s inherit-only `CREATOR OWNER:(F)` materialises as a
+      concrete user ACE and both halves fail. Re-run the probe on any machine where
+      elevated installs start refusing, before debugging anything else.
 
 Then:
 
@@ -355,6 +404,26 @@ Then:
       `StagedExecutionTests` at `31ae3a3`; R3's 6-of-8 and R31/R32's 12-of-15 at
       the S2 parent, in each case with the passing remainder being the positive
       controls.
+
+**G1 CLOSED 2026-08-11** at RC head `f300b39`. All five attacks and the ACL probe
+refused as designed — 16 harness checks, 0 failures.
+
+Three things this gate does **not** prove, recorded so nobody reads more into it:
+
+1. **No real `Setup.exe` was attacked.** The victim half drove the engine entry
+   points directly, because this box cannot AOT-publish. The end-to-end
+   pack → `Setup.exe` → attack path remains CI/VM territory (**G3**).
+2. **The ACL result is one machine's.** See the probe entry above.
+3. **The attacks confirm the fixes hold; they do not confirm the fixes are
+   complete.** R16's clause 3 is unimplemented and R22's guards are unproven —
+   both stated in `00-GAP_REGISTER.md`, and neither is something these five
+   attacks would have caught.
+
+**Residue.** The probe leaves `C:\ProgramData\sigil-runtime` owned by
+Administrators with a protected DACL — production behaviour, but it means the
+standard-user cleanup cannot remove it. That the unprivileged delete *fails* is
+itself confirmation the hardening works, and it is register row **R50** in
+miniature.
 
 ### G2 — after Stages 2 and 3
 
@@ -423,7 +492,7 @@ Merge order: **S4 → S5 → S6 → REL → SUP → DOC**.
 | S1  | `rc/s1-trusted-state` | ☑ | [#20](https://github.com/Sigil-build/sigil/pull/20) | ☑ `5b65712` | G1 |
 | S2  | `rc/s2-path-containment` | ☑ | [#21](https://github.com/Sigil-build/sigil/pull/21) | ☑ `4505b24` | G1 |
 | S3  | `rc/s3-staged-execution` | ☑ | [#22](https://github.com/Sigil-build/sigil/pull/22) | ☑ `72d6437` | G1 |
-| T1  | `rc/t1-test-truth` | ☑ | [#23](https://github.com/Sigil-build/sigil/pull/23) | ☑ `86c2799` | G1 |
+| T1  | `rc/t1-test-truth` | ☑ | [#23](https://github.com/Sigil-build/sigil/pull/23) | ☑ `86c2799` | **G1 ✅** |
 | S4  | `rc/s4-network-update` | ☐ | ☐ | ☐ | G2 |
 | S5  | `rc/s5-residual-engine` | ☐ | ☐ | ☐ | G2 |
 | S6  | `rc/s6-step-hardening` | ☐ | ☐ | ☐ | G2 |

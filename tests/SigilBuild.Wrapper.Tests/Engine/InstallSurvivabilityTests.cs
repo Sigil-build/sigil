@@ -57,7 +57,7 @@ public sealed class InstallSurvivabilityTests
         File.Exists(dest).Should().BeTrue();
 
         // The copy is NOT this test host's image, so undo deletes it outright.
-        await journal.UndoAsync(CancellationToken.None);
+        await journal.UndoAsync(ReplayAnchorage.InProcess);
 
         File.Exists(dest).Should().BeFalse("undoing the RemoveUninstaller record deletes the copy");
     }
@@ -171,12 +171,14 @@ public sealed class InstallSurvivabilityTests
             };
             var installResult = await new InstallEngine().RunAsync(steps, StepContext.Empty);
             installResult.Success.Should().BeTrue();
-            UninstallStateStore.Save(appId, installResult.Journal, InstallScope.User);
+            UninstallStateStore.Save(
+                appId, installResult.Journal, InstallScope.User,
+                secretValues: null, progress: null, installDir: dst.Path);
 
             var lines = new System.Collections.Generic.List<string>();
             var progress = new SyncProgress(p => { if (p.Message is not null) lines.Add(p.Message); });
 
-            var result = await new UninstallEngine().RunAsync(appId, InstallScope.User, progress);
+            var result = await new UninstallEngine().RunAsync(appId, dst.Path, InstallScope.User, progress);
             result.Success.Should().BeTrue();
 
             // The reversal log carries a delete line for the copied file.

@@ -661,6 +661,95 @@ public class StateProvenanceTests
     }
 
     /// <summary>
+    /// R1, clause (b): <c>TryLoad</c> searched the preferred scope's directory and then
+    /// the OPPOSITE scope's. A machine-scope (elevated, <c>/allusers</c>) uninstall
+    /// therefore read <c>%LocalAppData%</c> — a directory the unprivileged user owns
+    /// outright — whenever <c>%ProgramData%</c> held no state, which is the normal case
+    /// on a machine that has never had a machine-scope install.
+    /// </summary>
+    [WindowsFact("Windows-only state layout")]
+    public void Machine_scope_load_ignores_state_planted_in_the_user_scope()
+    {
+        // Arrange — write user-scope state, the location an unprivileged user fully
+        // controls. No machine-scope file exists, which is exactly when the old
+        // fallback fired.
+        var appId = "sigil.test." + Guid.NewGuid().ToString("N");
+        var journal = new RollbackJournal();
+        journal.Append(new RollbackRecord.RemoveDirectory(@"C:\Windows\System32\evil"));
+        UninstallStateStore.Save(appId, journal, InstallScope.User);
+
+        try
+        {
+            File.Exists(UninstallStateStore.PathFor(appId, InstallScope.User)).Should().BeTrue(
+                "the fixture must really exist in user scope, or the refusal below is vacuous");
+            File.Exists(UninstallStateStore.PathFor(appId, InstallScope.Machine)).Should().BeFalse(
+                "no machine-scope state may exist, or this asserts the wrong thing");
+
+            // Act — an elevated /allusers uninstall asks for machine scope.
+            var loaded = UninstallStateStore.TryLoad(appId, InstallScope.Machine);
+
+            // Assert — the user-scope file must be invisible to it. Before this fix
+            // TryLoad fell through to the opposite scope and then took the
+            // authoritative scope from a field inside the attacker's own file.
+            loaded.Should().BeNull(
+                "a machine-scope operation must never read %LocalAppData%");
+
+            // …and it is an ABSENCE, not a provenance refusal: nothing was found to
+            // refuse. A caller distinguishing the two must still see "no prior install".
+            UninstallStateStore.Load(appId, InstallScope.Machine).RefusalReason
+                .Should().BeNull();
+        }
+        finally
+        {
+            UninstallStateStore.Delete(appId, InstallScope.User);
+        }
+    }
+
+    /// <summary>
+    /// The other half of R1 clause (b): the authoritative scope came from a
+    /// <c>scope</c> field <em>inside</em> the file. A user-scope file claiming
+    /// <c>machine</c> made an unprivileged uninstall drive the HKLM ARP hive and the
+    /// <c>%ProgramData%</c> state directory. The scope must come from the directory
+    /// the file was found in.
+    /// </summary>
+    [WindowsFact("Windows-only state layout")]
+    public void Loaded_scope_comes_from_the_directory_not_from_the_file()
+    {
+        var appId = "sigil.test." + Guid.NewGuid().ToString("N");
+        var userPath = UninstallStateStore.PathFor(appId, InstallScope.User);
+
+        try
+        {
+            // Arrange — a real user-scope payload, then flip the in-file scope claim to
+            // "machine". Produced by the real store so the wire shape is not guessed.
+            var journal = new RollbackJournal();
+            journal.Append(new RollbackRecord.RemoveDirectory(@"C:\Windows\System32\evil"));
+            UninstallStateStore.Save(appId, journal, InstallScope.User);
+
+            var payload = File.ReadAllText(userPath);
+            payload.Should().Contain("\"scope\":\"User\"",
+                "the fixture flips this exact token; a wire-format change must break here " +
+                "loudly rather than silently disarm the test");
+            File.WriteAllText(userPath, payload.Replace(
+                "\"scope\":\"User\"", "\"scope\":\"Machine\"", StringComparison.Ordinal));
+
+            // Act
+            var loaded = UninstallStateStore.TryLoad(appId, InstallScope.User);
+
+            // Assert
+            loaded.Should().NotBeNull("the file is still well-formed and in the user directory");
+            loaded!.Scope.Should().Be(InstallScope.User,
+                "the scope that drives the ARP hive and the state directory must be the " +
+                "scope of the DIRECTORY the file was found in — a field inside an " +
+                "attacker-writable file is not an authority on privilege");
+        }
+        finally
+        {
+            UninstallStateStore.Delete(appId, InstallScope.User);
+        }
+    }
+
+    /// <summary>
     /// Re-grant write access so <see cref="TempDir"/> can actually delete a hardened
     /// directory. <see cref="StateDirectorySecurity.CreateHardened"/> leaves
     /// <c>BUILTIN\Users</c> with ReadAndExecute only, so an unelevated caller cannot

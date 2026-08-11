@@ -694,19 +694,28 @@ public sealed class InstallSession
     /// shortcuts, or ARP rows. Always <c>false</c> off Windows and for the un-stamped
     /// <see cref="WrapperBlob.Empty"/> runtime.
     /// </summary>
-    public bool ExistingInstallDetected
+    /// <remarks>
+    /// Memoized. The answer requires a full load — file read, size check, deserialize,
+    /// rehydrate — and reports an R1 provenance refusal on the log sink as a side effect,
+    /// so evaluating it per access made the wizard and the core run each re-read the state
+    /// and emit the refusal line twice. The scope and app id are fixed for the lifetime of
+    /// a session, so the answer cannot change under us within one.
+    /// </remarks>
+    public bool ExistingInstallDetected =>
+        _existingInstallDetected ??= ComputeExistingInstallDetected();
+
+    private bool? _existingInstallDetected;
+
+    private bool ComputeExistingInstallDetected()
     {
-        get
+        if (ReferenceEquals(_blob, WrapperBlob.Empty) || !OperatingSystem.IsWindows())
         {
-            if (ReferenceEquals(_blob, WrapperBlob.Empty) || !OperatingSystem.IsWindows())
-            {
-                return false;
-            }
-            // R1: pass the log sink. Without it a refused machine-scope load would
-            // make this property answer false with no trace anywhere — literally
-            // "no prior install", which is the reading the brief forbids.
-            return UninstallStateStore.TryLoad(_blob.AppId, _scope, StateProgress) is not null;
+            return false;
         }
+        // R1: pass the log sink. Without it a refused machine-scope load would
+        // make this property answer false with no trace anywhere — literally
+        // "no prior install", which is the reading the brief forbids.
+        return UninstallStateStore.TryLoad(_blob.AppId, _scope, StateProgress) is not null;
     }
 
     /// <summary>
@@ -960,7 +969,7 @@ public sealed class InstallSession
             }
             else
             {
-                await PerformReinstallCleanupAsync(ct).ConfigureAwait(false);
+                await PerformReinstallCleanupAsync(ctx.InstallDir, ct).ConfigureAwait(false);
             }
 
             // P2: pre_install hooks run OUTSIDE and BEFORE the journal opens. A hook
@@ -1031,8 +1040,11 @@ public sealed class InstallSession
                     _log?.WriteLine($"result: failed — {ctx.Redact(err)}");
                     Report(effectiveProgress, ctx, $"error: {err}", isError: true);
                     // Best-effort by construction: UndoAsync swallows individual record
-                    // failures, so only cancellation can escape it.
-                    await result.Journal.UndoAsync(ct, effectiveProgress).ConfigureAwait(false);
+                    // failures, so only cancellation can escape it. InProcess (R1): this
+                    // is the journal this run just built, not one read back from disk.
+                    await result.Journal
+                        .UndoAsync(ReplayAnchorage.InProcess, effectiveProgress, ct)
+                        .ConfigureAwait(false);
                     return new InstallOutcome(false, err);
                 }
 #pragma warning restore CA1031
@@ -1074,7 +1086,7 @@ public sealed class InstallSession
     /// the outcome is intentionally ignored. No-op for the un-stamped runtime and
     /// off Windows.
     /// </summary>
-    private async Task PerformReinstallCleanupAsync(CancellationToken ct)
+    private async Task PerformReinstallCleanupAsync(string? resolvedInstallDir, CancellationToken ct)
     {
         if (!ExistingInstallDetected)
         {
@@ -1084,8 +1096,17 @@ public sealed class InstallSession
         // the reinstall's own progress stream begins with the fresh install below —
         // but the log-only sink is still passed so an R1 refusal (which would make
         // this cleanup silently do nothing) is recorded in the /LOG file.
+        //
+        // This is only the FALLBACK anchor (R1 clause (c)): the prior install recorded
+        // where it actually landed, and UninstallEngine prefers that. This value —
+        // the destination THIS run resolved — is used only for state written before
+        // the recorded field existed.
+        var fallback = string.IsNullOrWhiteSpace(resolvedInstallDir)
+            ? Path.Combine(ScopeLayout.For(_scope).InstallRoot, _blob.AppId)
+            : resolvedInstallDir;
+
         await new UninstallEngine()
-            .RunAsync(_blob.AppId, _scope, progress: StateProgress, ct)
+            .RunAsync(_blob.AppId, fallback, _scope, StateProgress, ct)
             .ConfigureAwait(false);
     }
 
@@ -1114,6 +1135,29 @@ public sealed class InstallSession
             return new InstallOutcome(
                 false,
                 $"cannot upgrade: the previous version's uninstaller was not found at '{exe}'. No changes were made.");
+        }
+
+        // R2: `exe` came out of an ARP UninstallString — registry data — and the spawn
+        // below inherits this process's token. File.Exists is not a trust decision.
+        // Refuse loudly rather than continue silently: silently continuing is exactly
+        // the behaviour that made this exploitable.
+        //
+        // Gated on "privilege is actually at stake" — see PriorUninstallerNeedsTrust.
+        if (PriorUninstallerNeedsTrust(_scope, Elevation.IsProcessElevated()))
+        {
+            var verdict = ClassifyPriorUninstaller(exe);
+            if (verdict != PriorUninstallerVerdict.Trusted)
+            {
+                var why = verdict == PriorUninstallerVerdict.Remote
+                    ? "it is on a network location, whose owner and permissions are reported by " +
+                      "the remote server rather than by this machine"
+                    : "it is neither Authenticode-signed nor a file only administrators can write";
+                return new InstallOutcome(
+                    false,
+                    $"cannot upgrade: the previous version's uninstaller at '{exe}' is not verified — " +
+                    $"{why}, so running it from this elevated process would let an unprivileged user " +
+                    "choose what runs as administrator. No changes were made.");
+            }
         }
 
         // Remove the prior version in ITS OWN scope (where it physically lives), which
@@ -1162,6 +1206,225 @@ public sealed class InstallSession
         }
 
         return new InstallOutcome(true, null);
+    }
+
+    /// <summary>
+    /// R2: is a trust check on the prior uninstaller required for this run at all?
+    /// True when <paramref name="scope"/> is machine — which either is or is about to
+    /// become an elevated process — or when this process is already elevated.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This gate exists to stop an <em>unprivileged</em> user choosing what runs
+    /// <em>privileged</em>. When the run is unelevated and per-user, that boundary does
+    /// not exist: the uninstaller runs with exactly the token of the user who owns the
+    /// directory it sits in, so verifying it buys nothing an attacker could not already
+    /// do directly. Applying it unconditionally cost real functionality instead — an
+    /// unsigned per-user install, whose <c>uninstall.exe</c> lives in
+    /// <c>%LocalAppData%\Programs\&lt;App&gt;</c>, could satisfy neither half of
+    /// <see cref="IsPriorUninstallerTrusted"/> and so could never be upgraded at all.
+    /// Register row R2 words the condition as "when the effective scope is machine (or
+    /// the process is elevated)"; this is that wording.
+    /// </para>
+    /// <para>
+    /// The elevation half is what makes it safe to keep the check narrow: a per-user
+    /// install launched with Run as administrator, or from an elevated shell, or by
+    /// Intune as SYSTEM, IS a privilege boundary and IS gated. Widening the condition
+    /// is safe; narrowing it is not.
+    /// </para>
+    /// <para>
+    /// <paramref name="elevated"/> is a PARAMETER, not an internal
+    /// <see cref="Elevation.IsProcessElevated"/> call, and that is load-bearing rather
+    /// than stylistic. When the predicate read the token itself, the only test that
+    /// could be written had to recompute <c>IsProcessElevated()</c> in its own
+    /// expectation — which made it assert "the gate agrees with the token", a
+    /// statement an <em>unconditional</em> gate also satisfies on an elevated host. The
+    /// test could not fail, and the whole point of this method could have been reverted
+    /// green through CI. Taking elevation as an argument lets both branches be pinned
+    /// as literals on any host, elevated or not.
+    /// </para>
+    /// </remarks>
+    internal static bool PriorUninstallerNeedsTrust(InstallScope scope, bool elevated) =>
+        scope == InstallScope.Machine || elevated;
+
+    /// <summary>
+    /// R2: may this run spawn <paramref name="exe"/>, a path that came from an
+    /// Add/Remove-Programs <c>UninstallString</c>? True only when the file is
+    /// Authenticode-valid <em>or</em> is a file that only administrators can write.
+    /// Consulted only when <see cref="PriorUninstallerNeedsTrust"/> says privilege is
+    /// at stake.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Either condition alone is meant to establish that an unprivileged user did not
+    /// choose the bytes about to run at high integrity. Requiring <em>both</em> would
+    /// refuse the ordinary unsigned-uninstaller-in-<c>%ProgramFiles%</c> case, which is
+    /// the common shape; requiring neither is the bug.
+    /// </para>
+    /// <para>
+    /// <b>What the Authenticode half does and does not establish.</b>
+    /// <see cref="AuthenticodeVerifier.VerifyFile"/> asks <c>WinVerifyTrust</c> whether
+    /// the file is intact and chains to a root this machine trusts. It is <b>not</b>
+    /// publisher pinning: it does not compare the subject to this installer's own
+    /// publisher, and the trusted-root set includes
+    /// <c>HKCU\SOFTWARE\Microsoft\SystemCertificates\Root</c>, which an unprivileged
+    /// user can add to. A user who plants a self-signed root and signs their own binary
+    /// with it therefore passes this half. It also runs with
+    /// <c>WTD_REVOKE_NONE</c> (register row R17), so a revoked certificate still
+    /// verifies. Pinning the subject and enabling chain policy is lane S3's Authenticode
+    /// work (R11 / R17) — deliberately not duplicated here. Until it lands, the file
+    /// half below is the load-bearing check for a hostile local user, and the hard-coded
+    /// <see cref="System.Diagnostics.ProcessStartInfo.ArgumentList"/> at the call site
+    /// (no attacker-controlled arguments are ever forwarded) is what keeps the residual
+    /// exposure to "runs a binary the attacker could already run as themselves".
+    /// </para>
+    /// <para>
+    /// <b>The file half checks the file, not just its folder.</b>
+    /// <see cref="StateDirectorySecurity.IsAdminOnlyWritable"/> inspects the CONTAINING
+    /// DIRECTORY, so a file carrying its own <c>Users:(M)</c> ACE inside an admin-only
+    /// directory would pass it — an installer that ships a world-writable
+    /// <c>uninstall.exe</c> into <c>%ProgramFiles%</c> is exactly that, and the attacker
+    /// then rewrites the file in place without ever needing the directory. Both are
+    /// therefore required: <see cref="StateDirectorySecurity.IsTrustedFile"/> for the
+    /// file's own owner and DACL, and <c>IsAdminOnlyWritable</c> for the directory,
+    /// because directory write alone lets an attacker delete and replace the file
+    /// wholesale. This is the same both-objects rule
+    /// <see cref="UninstallStateStore"/> applies to <c>uninstall.json</c> (R1); the two
+    /// shared predicates are consumed, never reimplemented.
+    /// </para>
+    /// <para>
+    /// <b>Remote paths are refused outright, and this is load-bearing rather than
+    /// defence in depth.</b> Both halves are answered by the far end of a network hop:
+    /// an SMB server reports the ACL, and <c>BUILTIN\Administrators</c> is a
+    /// machine-independent SID, so a server the attacker controls can claim any owner
+    /// and any DACL it likes. Measured with the check removed, on an unelevated box:
+    /// <c>\\127.0.0.1\C$\Windows\System32\cmd.exe</c> and
+    /// <c>\\.\C:\Windows\System32\cmd.exe</c> both classified <b>Trusted</b> — the
+    /// device-namespace form is a straight local alias that reaches the same file, and
+    /// the loopback admin share resolved and passed the ACL read. Without this check
+    /// those paths would be spawned. There is no legitimate case for an elevated
+    /// installer launching a prior uninstaller off a share or through a device alias,
+    /// so both are refused on shape before anything is read from them.
+    /// </para>
+    /// <para>
+    /// A TOCTOU window remains between this check and
+    /// <see cref="System.Diagnostics.Process.Start(System.Diagnostics.ProcessStartInfo)"/>:
+    /// closing it needs the file opened with a deny-write share and launched from that
+    /// handle, which is register row R12's fix and is not in scope here. This check
+    /// still removes the entire trivially-reachable attack — an attacker who can win
+    /// that race can already write the file or its directory.
+    /// </para>
+    /// <para>
+    /// <c>internal</c> is the test seam (<c>InternalsVisibleTo</c>): it lets the
+    /// refusal <em>and</em> the acceptance be asserted without a process ever being
+    /// started. It is not part of the public engine surface.
+    /// </para>
+    /// </remarks>
+    internal static bool IsPriorUninstallerTrusted(string exe) =>
+        ClassifyPriorUninstaller(exe) == PriorUninstallerVerdict.Trusted;
+
+    /// <summary>
+    /// Why <see cref="IsPriorUninstallerTrusted"/> answered as it did.
+    /// </summary>
+    /// <remarks>
+    /// The reason is carried, not collapsed to a bool, for two reasons. It gives the
+    /// operator a message that names the actual problem — "on a network location" and
+    /// "not signed and not admin-only" call for different responses. And it makes the
+    /// remote refusal <b>falsifiable</b>: with a bool return, deleting the
+    /// <see cref="IsRemotePath"/> check changes nothing observable for any fixture an
+    /// unelevated test can build, because a UNC path an unprivileged process cannot
+    /// read the ACL of answers "untrusted" either way. Distinguishing the two verdicts
+    /// is what lets a test fail when the check is removed.
+    /// </remarks>
+    internal enum PriorUninstallerVerdict
+    {
+        /// <summary>Safe to spawn from an elevated process.</summary>
+        Trusted,
+
+        /// <summary>Refused on path shape alone: UNC, device namespace, or a mapped network drive.</summary>
+        Remote,
+
+        /// <summary>Present and local, but neither signed nor admin-writable-only.</summary>
+        Untrusted,
+    }
+
+    /// <summary>
+    /// <see cref="IsPriorUninstallerTrusted"/> with the reason preserved. The remote
+    /// check runs FIRST and short-circuits, so a network path is refused on shape
+    /// alone — before any ACL or signature read that a hostile server would answer.
+    /// </summary>
+    internal static PriorUninstallerVerdict ClassifyPriorUninstaller(string exe)
+    {
+        if (string.IsNullOrEmpty(exe))
+        {
+            return PriorUninstallerVerdict.Untrusted;
+        }
+
+        if (IsRemotePath(exe))
+        {
+            return PriorUninstallerVerdict.Remote;
+        }
+
+        if (AuthenticodeVerifier.VerifyFile(exe))
+        {
+            return PriorUninstallerVerdict.Trusted;
+        }
+
+        // Off Windows there is no Authenticode and no ACL to inspect, so this fails
+        // closed. The upgrade teardown path spawns a Windows uninstall.exe and is
+        // Windows-only in practice.
+        return OperatingSystem.IsWindows()
+            && StateDirectorySecurity.IsTrustedFile(exe)
+            && StateDirectorySecurity.IsAdminOnlyWritable(exe)
+                ? PriorUninstallerVerdict.Trusted
+                : PriorUninstallerVerdict.Untrusted;
+    }
+
+    /// <summary>
+    /// True when <paramref name="path"/> resolves off this machine — a UNC path
+    /// (<c>\\server\share</c>, including the <c>\\?\UNC\</c> and <c>\\.\</c> device
+    /// forms) or a drive letter mapped to a network share. Fails CLOSED: a path that
+    /// cannot be classified is treated as remote.
+    /// </summary>
+    private static bool IsRemotePath(string path)
+    {
+#pragma warning disable CA1031 // Unclassifiable path → treated as remote → refused.
+        try
+        {
+            var probe = Path.GetFullPath(path);
+
+            // The extended-length UNC form is still a UNC path.
+            if (probe.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            // Strip \\?\ so that \\?\C:\... classifies exactly as C:\... does.
+            if (probe.StartsWith(@"\\?\", StringComparison.Ordinal))
+            {
+                probe = probe.Substring(4);
+            }
+
+            // \\server\share and the \\.\ device namespace.
+            if (probe.StartsWith(@"\\", StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            var root = Path.GetPathRoot(probe);
+            if (string.IsNullOrEmpty(root))
+            {
+                return true;
+            }
+
+            // A mapped drive (Z: → \\server\share) is a UNC path wearing a letter.
+            return new DriveInfo(root).DriveType == DriveType.Network;
+        }
+        catch
+        {
+            return true;
+        }
+#pragma warning restore CA1031
     }
 
     /// <summary>
@@ -1227,7 +1490,12 @@ public sealed class InstallSession
         // record is part of the persisted, replay-on-uninstall journal.
         // StateProgress carries the R1 hardening trail (a repaired state-directory
         // DACL) into the /LOG file; without a sink the repair would be invisible.
-        UninstallStateStore.Save(_blob.AppId, journal, _scope, secretValues, StateProgress);
+        // uninstallDir is recorded in the state so the uninstall anchors its replay to
+        // where the files ACTUALLY landed (R1 clause (c)). Recomputing a default at
+        // uninstall time would refuse every file record of a /D= or wizard-chosen
+        // install and leave the app unremovable.
+        UninstallStateStore.Save(
+            _blob.AppId, journal, _scope, secretValues, StateProgress, uninstallDir);
         // T10: register the REAL manifest.App.* fields + packed size threaded through
         // the blob, not the former AppId / "1.0.0" / "Unknown" / 0 placeholders. The
         // fallbacks only fire for a (theoretical) blob that omitted them — a real
@@ -1366,8 +1634,10 @@ public sealed class InstallSession
             return 1;
         }
 
+        // R1 clause (c): ctx.InstallDir is resolved from the signed blob / manifest /
+        // command line and anchors the replay of the persisted journal.
         var result = await new UninstallEngine()
-            .RunAsync(_blob.AppId, _scope, progress, ct)
+            .RunAsync(_blob.AppId, UninstallAnchorFallback(ctx), _scope, progress, ct)
             .ConfigureAwait(false);
         if (!result.Success)
         {
@@ -1416,6 +1686,32 @@ public sealed class InstallSession
     internal StepContext BuildUninstallContextForTesting() => BuildUninstallContext();
 
     /// <summary>
+    /// The LAST-RESORT anchor for a persisted-journal replay (R1 clause (c)): the
+    /// destination this run resolved from the manifest and command line.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="UninstallEngine"/> prefers, in order, the directory recorded in the
+    /// state file and then the ARP <c>InstallLocation</c>; this value is reached only
+    /// when neither exists. It is a DEFAULT destination — <see cref="BuildUninstallContext"/>
+    /// resolves <c>InstallDir</c> with no collected value and no prior dir, and the ARP
+    /// <c>UninstallString</c> carries no <c>/D=</c> — so it is right for an install that
+    /// took the default and wrong for one that did not. That is why it is last.
+    /// </para>
+    /// <para>
+    /// Deliberately NOT the directory of the running image. <c>setup.exe /Uninstall</c>
+    /// is a documented flow (<c>docs/guides/uninstaller.md</c>) and the user typically
+    /// runs that exe from their downloads folder; anchoring there would refuse every
+    /// file record of every pre-fix install and leave the app unremovable — the exact
+    /// failure mode this clause exists to prevent.
+    /// </para>
+    /// </remarks>
+    private string UninstallAnchorFallback(StepContext ctx) =>
+        string.IsNullOrWhiteSpace(ctx.InstallDir)
+            ? Path.Combine(ScopeLayout.For(_scope).InstallRoot, _blob.AppId)
+            : ctx.InstallDir;
+
+    /// <summary>
     /// GUI entry point for the interactive uninstall flow (T15): drive
     /// <see cref="UninstallEngine"/> for this session's app, forwarding
     /// <paramref name="progress"/> so the wizard's uninstall progress screen can
@@ -1456,8 +1752,9 @@ public sealed class InstallSession
             return new InstallOutcome(false, msg);
         }
 
+        // R1 clause (c): anchored to the install dir resolved from the signed blob.
         var result = await new UninstallEngine()
-            .RunAsync(_blob.AppId, _scope, effectiveProgress, ct)
+            .RunAsync(_blob.AppId, UninstallAnchorFallback(ctx), _scope, effectiveProgress, ct)
             .ConfigureAwait(false);
 
         if (result.Success)

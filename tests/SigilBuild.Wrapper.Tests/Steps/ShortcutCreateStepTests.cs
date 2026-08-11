@@ -58,7 +58,7 @@ public class ShortcutCreateStepTests
             "the file must start with the Shell Link Header magic 4C 00 00 00");
 
         // Rollback deletes the .lnk
-        await journal.UndoAsync(default);
+        await journal.UndoAsync(ReplayAnchorage.InProcess);
         File.Exists(lnk).Should().BeFalse();
     }
 
@@ -122,12 +122,12 @@ public class ShortcutCreateStepTests
         var lnk = Path.Combine(sandbox.Path, "Twice.lnk");
         File.Exists(lnk).Should().BeTrue();
 
-        await journal.UndoAsync(default);
+        await journal.UndoAsync(ReplayAnchorage.InProcess);
         File.Exists(lnk).Should().BeFalse();
 
         // Second undo must not throw — DeleteShortcut is best-effort and
         // the journal swallows individual failures on top of that.
-        await journal.UndoAsync(default);
+        await journal.UndoAsync(ReplayAnchorage.InProcess);
     }
 
     [Fact]

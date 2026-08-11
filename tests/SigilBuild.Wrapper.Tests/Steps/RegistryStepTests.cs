@@ -46,7 +46,7 @@ public class RegistryStepTests
         result.Success.Should().BeTrue();
         k.GetValue("V").Should().Be("after");
 
-        await journal.UndoAsync(default);
+        await journal.UndoAsync(ReplayAnchorage.InProcess);
 
         k.GetValue("V").Should().Be("before", "rollback must restore the prior value");
     }
@@ -79,7 +79,7 @@ public class RegistryStepTests
         await step.RunAsync(StepContext.Empty, journal, default);
         k.GetValue("V").Should().Be("new");
 
-        await journal.UndoAsync(default);
+        await journal.UndoAsync(ReplayAnchorage.InProcess);
 
         k.HasValue("V").Should().BeFalse("rollback must remove the value the step created");
     }
@@ -180,7 +180,7 @@ public class RegistryStepTests
         result.Success.Should().BeTrue();
         k.HasValue("V").Should().BeFalse();
 
-        await journal.UndoAsync(default);
+        await journal.UndoAsync(ReplayAnchorage.InProcess);
 
         k.GetValue("V").Should().Be("foo");
     }
@@ -210,7 +210,7 @@ public class RegistryStepTests
         var result = await step.RunAsync(StepContext.Empty, journal, default);
 
         result.Success.Should().BeTrue();
-        await journal.UndoAsync(default);
+        await journal.UndoAsync(ReplayAnchorage.InProcess);
         k.HasValue("MissingValue").Should().BeFalse();
     }
 
@@ -243,7 +243,7 @@ public class RegistryStepTests
         result.Success.Should().BeTrue();
         k.Exists().Should().BeFalse("key should be gone after delete_key");
 
-        await journal.UndoAsync(default);
+        await journal.UndoAsync(ReplayAnchorage.InProcess);
 
         k.Exists().Should().BeTrue("rollback must re-create the key");
         k.GetValue("A").Should().Be("alpha");

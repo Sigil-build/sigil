@@ -92,10 +92,26 @@ public sealed class RollbackJournal
 #pragma warning restore CA1031
     }
 
-    public async System.Threading.Tasks.Task UndoAsync(
-        System.Threading.CancellationToken ct,
-        System.IProgress<StepProgress>? progress = null)
+    /// <summary>
+    /// Replay every record in reverse (LIFO), best-effort: an individual failure is
+    /// swallowed so one bad record cannot strand the rest of an uninstall.
+    /// </summary>
+    /// <param name="anchorage">
+    /// Whether the records must be anchored before replay, and to what (R1).
+    /// <strong>No default, on purpose</strong>: a caller replaying persisted state
+    /// cannot lose anchoring by omitting an argument — only by writing
+    /// <see cref="ReplayAnchorage.InProcess"/> and being wrong about it. A record whose
+    /// target escapes the anchor is skipped, logged, and returned in
+    /// <see cref="UndoOutcome.RefusedRecords"/>.
+    /// </param>
+    public async System.Threading.Tasks.Task<UndoOutcome> UndoAsync(
+        ReplayAnchorage anchorage,
+        System.IProgress<StepProgress>? progress = null,
+        System.Threading.CancellationToken ct = default)
     {
+        var anchor = ReplayAnchor.For(anchorage);
+        var refused = new System.Collections.Generic.List<RefusedRecord>();
+
         // Walk in reverse. Undo failures should not cascade — log and continue.
         var total = _records.Count;
         var completed = 0;
@@ -103,6 +119,26 @@ public sealed class RollbackJournal
         {
             ct.ThrowIfCancellationRequested();
             var record = _records[i];
+
+            if (anchor is not null)
+            {
+                var verdict = anchor.Check(record);
+                if (verdict.Refusal is not null)
+                {
+                    // Logged and skipped, never silent and never fatal: silence would
+                    // mask an attack, and aborting would let one planted record block a
+                    // legitimate uninstall.
+                    refused.Add(verdict.Refusal);
+                    completed++;
+                    progress?.Report(new StepProgress(
+                        completed, total, $"refused: {verdict.Refusal.Message}", IsError: true));
+                    continue;
+                }
+                // The verdict may hand back a re-derived record (unregister_com's DLL
+                // path is rebuilt from install_dir rather than trusted).
+                record = verdict.Record;
+            }
+
             try
             {
                 await record.UndoAsync(ct).ConfigureAwait(false);
@@ -116,6 +152,8 @@ public sealed class RollbackJournal
             completed++;
             progress?.Report(new StepProgress(completed, total, DescribeUndo(record), IsError: false));
         }
+
+        return new UndoOutcome(refused);
     }
 
     /// <summary>
@@ -144,6 +182,127 @@ public sealed class RollbackJournal
         _ => "revert",
     };
 }
+
+/// <summary>
+/// Why replay anchoring refused a record (R1). A stable code, so a consumer can group,
+/// count and route refusals without parsing prose.
+/// </summary>
+/// <remarks>
+/// Part of the cross-lane contract described on <see cref="RefusedRecord"/>. Add members
+/// rather than renumbering or repurposing existing ones.
+/// </remarks>
+public enum ReplayRefusalCode
+{
+    /// <summary>A path-bearing record targeted something outside the anchored roots.</summary>
+    PathOutsideInstallRoots = 1,
+
+    /// <summary>
+    /// A registry record targeted a hive, or a subtree, that an installer's rollback may
+    /// not reverse at all — outside <c>Software\</c>, or an auto-run / policy /
+    /// COM-activation surface.
+    /// </summary>
+    RegistryOutsideApplicationSpace = 2,
+
+    /// <summary>
+    /// The destination was in range but the content the record would restore comes from a
+    /// backup or stash outside the anchored roots — the register's "arbitrary file / tree
+    /// write from an attacker-chosen stash".
+    /// </summary>
+    ContentSourceOutsideInstallRoots = 11,
+
+    /// <summary>
+    /// A variable the system depends on (<c>PATH</c>, <c>ComSpec</c>, …) may only have
+    /// entries removed; the record would have replaced its contents wholesale.
+    /// </summary>
+    EnvironmentSystemVariableNotReplaceable = 12,
+
+    /// <summary>
+    /// The key is an execution mapping (a shell verb, a class registration, a driver map)
+    /// and the program it would be restored to is not one this install owns.
+    /// </summary>
+    ExecutionMappingNotOwned = 3,
+
+    /// <summary>
+    /// The key is an execution mapping and the value is not a command line that could be
+    /// checked at all.
+    /// </summary>
+    ExecutionMappingUncheckable = 4,
+
+    /// <summary>
+    /// An environment restore would introduce an entry that is neither already present in
+    /// the variable nor a directory this install owns.
+    /// </summary>
+    EnvironmentIntroducesForeignEntry = 5,
+
+    /// <summary>
+    /// Deleting a variable the system depends on, whose current contents this install did
+    /// not create.
+    /// </summary>
+    EnvironmentDeleteNotOwned = 6,
+
+    /// <summary>
+    /// An environment record could not be verified — the current value was unreadable, or
+    /// the host is not Windows.
+    /// </summary>
+    EnvironmentUnverifiable = 7,
+
+    /// <summary>The named service runs a binary this install did not place.</summary>
+    ServiceNotOwned = 8,
+
+    /// <summary>A service record could not be verified on this host.</summary>
+    ServiceUnverifiable = 9,
+
+    /// <summary>
+    /// A <c>unregister_com</c> record named a DLL that does not resolve inside the install
+    /// directory — <c>LoadLibrary</c> plus an export call on an attacker-chosen module.
+    /// </summary>
+    ComDllOutsideInstallDir = 10,
+}
+
+/// <summary>
+/// One record that replay anchoring skipped (R1): what it was, what it would have
+/// touched, why, and the line that went to the log.
+/// </summary>
+/// <remarks>
+/// <strong>Cross-lane contract.</strong> Lane S5 consumes
+/// <see cref="UndoOutcome.RefusedRecords"/> in Stage 2 for register row R15, so this is
+/// deliberately structured rather than prose: a consumer must never have to parse
+/// <see cref="Message"/> to decide what happened. Treat the shape and the name
+/// <c>RefusedRecords</c> as pinned; <see cref="Message"/> is the only part free to change
+/// wording.
+/// </remarks>
+/// <param name="RecordType">
+/// The journal record's wire discriminator — <c>restore_file</c>, <c>restore_env</c>,
+/// <c>unregister_com</c>, … — matching <c>SerializableRollbackRecord.Type</c>.
+/// </param>
+/// <param name="Target">
+/// The coordinate the record would have acted on, rendered in the natural form for its
+/// kind: a filesystem path; <c>HIVE\Key</c> for a registry record; <c>env:scope:NAME</c>
+/// for an environment variable; the service name; the DLL path.
+/// </param>
+/// <param name="Code">The stable reason, for grouping and routing.</param>
+/// <param name="Message">
+/// The human-readable line reported on the progress sink and written to the <c>/LOG</c>
+/// file. For operators, not for parsing.
+/// </param>
+public sealed record RefusedRecord(
+    string RecordType,
+    string Target,
+    ReplayRefusalCode Code,
+    string Message);
+
+/// <summary>
+/// The result of a <see cref="RollbackJournal.UndoAsync"/> replay.
+/// </summary>
+/// <param name="RefusedRecords">
+/// One entry per record that replay anchoring skipped (R1). Empty on an unanchored replay
+/// and on a clean anchored one. A non-empty list after a legitimate uninstall means either
+/// a planted journal or an anchoring bug, and either way it must reach the operator rather
+/// than being swallowed. Consumed by lane S5 in Stage 2 for R15 — see
+/// <see cref="RefusedRecord"/>.
+/// </param>
+public sealed record UndoOutcome(
+    System.Collections.Generic.IReadOnlyList<RefusedRecord> RefusedRecords);
 
 public abstract record RollbackRecord
 {

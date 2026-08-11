@@ -94,15 +94,34 @@ jobs:
           # below is the actual enforced gate and is strictly higher than this.
           THRESHOLD = 0.65
 
-          # T1.3/R21 per-assembly floors: set at the CURRENT MEASURED value from
-          # Stage 0 rounded DOWN -- a ratchet, not the aspirational CLAUDE.md/
-          # AGENTS.md targets (Core >=80%, Signing/SDK >=85%). Project-wide union
-          # measured 74.74% at Stage 0.
-          PROJECT_WIDE_FLOOR = 0.74
+          # T1.3/R21 per-assembly floors: set at the CURRENT MEASURED value
+          # rounded DOWN -- a ratchet, not the aspirational CLAUDE.md/AGENTS.md
+          # targets (Core >=80%, Signing/SDK >=85%).
+          #
+          # RE-PINNED at Stage 1 (T1, after S1+S2+S3 merged). The Stage 0 numbers
+          # were measured before three security lanes landed ~440 tests and a
+          # large amount of production code; Wrapper.Core had 0.05pp of headroom
+          # left. Measured on the integrated tree, previous floor in parentheses:
+          #   SigilBuild.Core            69.51%  -> 0.69  (was 0.63)
+          #   SigilBuild.Packaging       72.26%  -> 0.72  (was 0.72, unchanged)
+          #   SigilBuild.Signing         68.79%  -> 0.68  (was 0.68, unchanged)
+          #   SigilBuild.Wrapper.Core    79.17%  -> 0.79  (was 0.77)
+          #   project-wide union         77.05%  -> 0.77  (was 0.74)
+          # That run had no staged win-x64 installer-host runtime (the measuring
+          # machine cannot AOT-publish), so nine RuntimeStaged/Kiosk-gated
+          # SigilBuild.Packaging tests that CI does run were skipped. Union
+          # coverage is monotonic in tests executed, so each number above is a
+          # LOWER bound for CI and these floors cannot fail an otherwise-green run.
+          #
+          # SigilBuild.Installer.BrandGenerator (100.00%, 18 lines) and
+          # SigilBuild.Localization.Generator (97.42%) do report but are left
+          # unfloored on purpose: an 18-line assembly pinned at 100% is a cliff,
+          # not a ratchet.
+          PROJECT_WIDE_FLOOR = 0.77
           ASSEMBLY_FLOORS = {
-              'SigilBuild.Core': 0.63,
+              'SigilBuild.Core': 0.69,
               'SigilBuild.Signing': 0.68,
-              'SigilBuild.Wrapper.Core': 0.77,
+              'SigilBuild.Wrapper.Core': 0.79,
               'SigilBuild.Packaging': 0.72,
           }
 

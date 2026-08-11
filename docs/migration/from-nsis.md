@@ -41,7 +41,7 @@
 - **Sections:** NSIS `Section` blocks group commands and contribute to component selection. Sigil's `parameters: { type: enum }` + `when:` clauses replace this.
 - **`OnInit` / `.onInstSuccess`:** map to `pre_install:` / `post_install:` blocks.
 - **Plugin model:** NSIS's plugin DLLs (`SimpleSC`, `AccessControl`, `nsisFirewall`, `InetC`/`NSISdl`, `System::Call`) are absent from Sigil's surface. The functionality they provide is split between dedicated MUST/SHOULD step types (`service_install`, `acl_grant`, `firewall_rule`), the `run_program` escape hatch, and explicit declines.
-- **Modern UI macros:** `MUI_*` macros are realised by the wizard host. The `MUI_PAGE_DIRECTORY` page is auto-generated when the manifest declares an `install_dir` parameter (with a disk-space readout); `MUI_PAGE_INSTFILES` is the wizard's locked Installing screen. See "Wizard page mapping" below.
+- **Modern UI macros:** `MUI_*` macros are realised by the wizard host. The `MUI_PAGE_DIRECTORY` page (with a disk-space readout) is **always rendered**, second after Welcome — it is not conditioned on declaring any parameter; `MUI_PAGE_INSTFILES` is the wizard's locked Installing screen. See "Wizard page mapping" below.
 - **Case-insensitivity:** NSIS commands are case-insensitive (`File`, `file`, `FILE` all work). Sigil step names are case-**sensitive** lowercase. Migrate canonical-cased.
 
 ## Wizard page mapping
@@ -51,8 +51,8 @@
 | NSIS Modern UI directive | Sigil equivalent | Notes |
 |---|---|---|
 | `!insertmacro MUI_PAGE_WELCOME` | always rendered (Welcome step) | brand slots customise the logo / app name / version |
-| `!insertmacro MUI_PAGE_LICENSE` | always rendered (License step) | manifest will accept a `installer.license_path` field; today the wizard ships a placeholder |
-| `!insertmacro MUI_PAGE_DIRECTORY` | auto-inserted when `parameters.install_dir` is declared | dedicated screen with TextBox + Browse… + drive selector + free-space readout |
+| `!insertmacro MUI_PAGE_LICENSE` | rendered only when the manifest has a license | manifest will accept a `installer.license_path` field; today the wizard ships a placeholder. `InstallerViewModel.cs:1046-1049` gates this screen on `_hasLicense` — unlike `MUI_PAGE_DIRECTORY` below, it is conditional |
+| `!insertmacro MUI_PAGE_DIRECTORY` | **always rendered**, second after Welcome — **not** conditioned on declaring any parameter | dedicated screen with TextBox + Browse… + drive selector + free-space readout. There is no `parameters.install_dir` concept: `InstallerViewModel.RebuildFlow` adds this screen unconditionally (`InstallerViewModel.cs:1041-1045`). See the warning in [Parameters](../guides/parameters.md#cli-overrides-at-install-time). |
 | `!insertmacro MUI_PAGE_COMPONENTS` | (no direct equivalent) | model components as `parameters.<feature>.type: bool` with `screen:` grouping; the wizard renders one CheckBox per bool |
 | `!insertmacro MUI_PAGE_CUSTOMFUNCTION_*` (themed pages) | `parameters.<name>.screen: "Page Title"` | one wizard page per unique `screen` value, in declaration order |
 | `!insertmacro MUI_PAGE_INSTFILES` | always rendered (Installing step) | locked layout |
@@ -75,11 +75,11 @@
 | NSIS construct | Sigil equivalent | Notes |
 |---|---|---|
 | `Section "Uninstall"` | top-level `uninstall:` step list | renamed from `pre_uninstall:` per D-016; the legacy key is no longer accepted |
-| `WriteUninstaller "$INSTDIR\Uninstall.exe"` | (automatic) | the packager generates a ~4 MB stamped wrapper copy, embeds it as the `SIGIL_UNINSTALLER_V1` resource, and the wrapper drops it to `install_dir\uninstaller.exe` on install success |
+| `WriteUninstaller "$INSTDIR\Uninstall.exe"` | (automatic) | the packager generates a ~4 MB stamped wrapper copy, embeds it as the `SIGIL_UNINSTALLER_V1` resource, and the wrapper drops it to `install_dir\uninstall.exe` on install success |
 | `WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\$AppId" "UninstallString" "..."` | (automatic) | the wrapper writes both `UninstallString` and `QuietUninstallString` to point at the deployed exe |
-| `Delete $INSTDIR\file.dat` inside the uninstall section | (use the install journal) | the wrapper's rollback journal already replays a reverse-install when `uninstaller.exe` runs; declare `uninstall:` only for tear-down that the journal can't infer (e.g. stopping a service, deleting an AppData cache) |
+| `Delete $INSTDIR\file.dat` inside the uninstall section | (use the install journal) | the wrapper's rollback journal already replays a reverse-install when `uninstall.exe` runs; declare `uninstall:` only for tear-down that the journal can't infer (e.g. stopping a service, deleting an AppData cache) |
 | `RMDir /r $INSTDIR` at the end of the uninstall section | (automatic) | the journal replay removes everything the installer wrote, then the install dir itself |
-| Custom uninstaller icon via `!define MUI_UNICON` | (single icon for installer + uninstaller) | the `installer.icon` manifest field stamps the icon on `setup.exe`, the bundled wizard exe, and the produced `uninstaller.exe` |
+| Custom uninstaller icon via `!define MUI_UNICON` | (single icon for installer + uninstaller) | the `installer.icon` manifest field stamps the icon on `setup.exe`, the bundled wizard exe, and the produced `uninstall.exe` |
 
 ## Examples
 

@@ -1243,6 +1243,39 @@ invites a name squat — the classic supply-chain attack on a new project.
 update or delete the doc. **S**
 
 ### R42 — Supply chain: preview/beta dependencies, no vulnerability scanning
+
+> **STATUS — PARTIALLY CLOSED in Stage 3** (lane SUP, `rc/sup-supply-chain`).
+> Done: `.github/dependabot.yml` (nuget + github-actions, weekly);
+> `dotnet list package --vulnerable --include-transitive` as a **separate**
+> failing CI job (`vulnerability-scan` in `ci.yml`, not folded into `build`,
+> so an external advisory landing mid-track goes red on its own check rather
+> than on the coverage-gated build — see the job's comment for the reasoning);
+> a real local run of the scan (recorded below — **zero** vulnerable packages,
+> including for the four UNVERIFIED names this row called out); SkiaSharp
+> moved off the preview build entirely (`3.119.4-preview.1.1` ->
+> **`3.119.4`** stable), which required bumping Avalonia `12.0.2` ->
+> **`12.0.5`** (Avalonia.Skia's own `.nuspec` pins SkiaSharp to an exact
+> version per release; 12.0.2 still requires the preview, 12.0.5+ requires
+> the stable release — verified against nuget.org, not assumed). Full suite
+> green after the bump (1538/1538, 27 skipped, matching the pre-bump
+> baseline exactly).
+>
+> **Not done, on purpose:** `System.CommandLine` stays at
+> `2.0.0-beta4.22272.1`. 2.0.0 GA has since shipped (now at 2.0.11 on
+> nuget.org, with a 3.0 preview line already underway) — the beta is not
+> just stale, it's obsolete. But the 2.0 API changed from the beta series,
+> five files under `src/SigilBuild.Cli/Commands/` and `Program.cs` (~450
+> lines) plus ~48 references across `SigilBuild.Cli.Tests` would need
+> rewriting, and this is a security/supply-chain lane, not a CLI-surface
+> lane. Budgeted as a small, self-contained follow-up task (estimate: a few
+> hours — narrow surface, no cross-project fan-out) for a future PR, not
+> attempted here.
+>
+> Also not done: SBOM generation, because it targets `release.yml`, which
+> lane REL creates and which does not exist yet in SUP's worktree (branch
+> cut before REL merges). The exact step and its placement are written down
+> at `docs/plan/release/sup-sbom-handoff.md` for REL to fold in.
+
 Every package in `Directory.Packages.props` is pinned to an exact version — no
 wildcards, no floating ranges — with central management and transitive pinning
 on. That part is good. (Reproducibility is R23a.)

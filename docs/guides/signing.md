@@ -62,7 +62,7 @@ Auth uses the standard Azure SDK environment-variable conventions. In GitHub Act
 |Artefact|Signed?|How|
 |---|---|---|
 |`setup.exe` (EXE wrapper)|yes|Authenticode via the configured provider.|
-|`uninstaller.exe` (embedded inside `setup.exe`)|yes|Same provider, signed before being embedded.|
+|`uninstall.exe` (embedded inside `setup.exe`)|yes|Same provider, signed before being embedded.|
 |MSIX bundles|yes|Package signature via the provider.|
 |ZIP artefacts|no|No widely-understood embedded signature for ZIP; archives are unsigned in the MVP.|
 

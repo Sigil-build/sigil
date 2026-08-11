@@ -216,11 +216,53 @@ internal static class DownloadedBinaryTrust
     {
         ArgumentNullException.ThrowIfNull(report);
 
-        var (refusal, line, isError) = Decide(AuthenticodeVerifier.VerifyFileStatus(path), what, allowUnsigned);
+        var (refusal, line, isError) = Decide(StatusOf(path), what, allowUnsigned);
         if (line is not null)
         {
             report(line, isError);
         }
         return refusal;
+    }
+
+    /// <summary>
+    /// Test seam: substitutes the verdict, and — the point of it — gives a test a
+    /// callback that runs at EXACTLY the moment the trust check happens.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// All three gates verify <b>by path</b>. That is sound only because a
+    /// <see cref="System.IO.FileShare.Read"/> handle on that path is concurrently held —
+    /// opened by <c>SecureStaging.OpenVerified</c> / <c>OpenVerifiedForLaunch</c> BEFORE
+    /// the check and kept open across <c>Process.Start</c>. Verifying a path nobody holds
+    /// is the identical TOCTOU that register rows R5, R11 and R12 exist to close: the
+    /// bytes examined would not provably be the bytes executed.
+    /// </para>
+    /// <para>
+    /// That ordering was an invariant no test could see. Hoisting the trust check above
+    /// the open, or widening the share mode to <c>ReadWrite</c>, would have reopened the
+    /// window with the whole suite still green. This seam is what lets a test stand
+    /// inside the check and assert the handle is there.
+    /// </para>
+    /// </remarks>
+    internal static IDisposable UseStatusForTesting(Func<string, AuthenticodeStatus> probe)
+    {
+        ArgumentNullException.ThrowIfNull(probe);
+        var previous = StatusProbe.Value;
+        StatusProbe.Value = probe;
+        return new RestoreProbe(previous);
+    }
+
+    private static readonly AsyncLocal<Func<string, AuthenticodeStatus>?> StatusProbe = new();
+
+    private static AuthenticodeStatus StatusOf(string path) =>
+        StatusProbe.Value is { } probe ? probe(path) : AuthenticodeVerifier.VerifyFileStatus(path);
+
+    private sealed class RestoreProbe : IDisposable
+    {
+        private readonly Func<string, AuthenticodeStatus>? _previous;
+
+        public RestoreProbe(Func<string, AuthenticodeStatus>? previous) => _previous = previous;
+
+        public void Dispose() => StatusProbe.Value = _previous;
     }
 }

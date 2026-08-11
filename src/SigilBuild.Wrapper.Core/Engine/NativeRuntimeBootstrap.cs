@@ -236,7 +236,10 @@ public static partial class NativeRuntimeBootstrap
 
         if (requireAdminOnlyRoot && OperatingSystem.IsWindows())
         {
-            StateDirectorySecurity.CreateHardened(targetDir);
+            // The ownership-repair diagnostic goes to the same sink as everything else
+            // here: taking ownership of an existing machine-scope directory must not be
+            // a silent event.
+            StateDirectorySecurity.CreateHardened(targetDir, ReportSink.For(report));
         }
 
         ExtractArchive(archiveBytes, targetDir);
@@ -310,7 +313,7 @@ public static partial class NativeRuntimeBootstrap
     [SupportedOSPlatform("windows")]
     private static string EstablishAdminOnlyRoot(string cacheRoot, Action<string, bool>? report)
     {
-        if (TryEstablish(cacheRoot, out var failure))
+        if (TryEstablish(cacheRoot, report, out var failure))
         {
             return cacheRoot;
         }
@@ -328,7 +331,7 @@ public static partial class NativeRuntimeBootstrap
             $"({failure}); extracting to the private directory '{perRun}' for this run instead",
             true);
 
-        if (TryEstablish(perRun, out var fallbackFailure))
+        if (TryEstablish(perRun, report, out var fallbackFailure))
         {
             return perRun;
         }
@@ -361,12 +364,12 @@ public static partial class NativeRuntimeBootstrap
     /// than thrown, so the caller can fall back instead of aborting the install.
     /// </summary>
     [SupportedOSPlatform("windows")]
-    private static bool TryEstablish(string directory, out string failure)
+    private static bool TryEstablish(string directory, Action<string, bool>? report, out string failure)
     {
 #pragma warning disable CA1031 // The caller's whole job is to survive this; the cause travels out in `failure`.
         try
         {
-            StateDirectorySecurity.CreateHardened(directory);
+            StateDirectorySecurity.CreateHardened(directory, ReportSink.For(report));
         }
         catch (Exception ex)
         {

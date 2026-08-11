@@ -52,50 +52,65 @@ internal static class HookRunner
         // takes a journal; run_program (the common hook) records nothing anyway.
         var discard = new RollbackJournal();
 
-        foreach (var spec in hooks)
+        try
         {
-            ct.ThrowIfCancellationRequested();
-            if (spec.When is not null && !ctx.Evaluate(spec.When))
+            foreach (var spec in hooks)
             {
-                continue;
-            }
+                ct.ThrowIfCancellationRequested();
+                if (spec.When is not null && !ctx.Evaluate(spec.When))
+                {
+                    continue;
+                }
 
-            StepResult result;
-            try
-            {
-                var step = StepFactory.Create(spec);
-                result = await step.RunAsync(ctx, discard, ct).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
+                StepResult result;
+                try
+                {
+                    var step = StepFactory.Create(spec);
+                    result = await step.RunAsync(ctx, discard, ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
 #pragma warning disable CA1031 // Hook boundary: surface any step exception as a typed failure.
-            catch (Exception ex)
-            {
-                result = new StepResult(false, ex.Message);
-            }
+                catch (Exception ex)
+                {
+                    result = new StepResult(false, ex.Message);
+                }
 #pragma warning restore CA1031
 
-            if (result.Success)
-            {
-                Report(progress, ctx, $"hook {phaseLabel}: {Describe(spec)}", isError: false);
-                continue;
+                if (result.Success)
+                {
+                    Report(progress, ctx, $"hook {phaseLabel}: {Describe(spec)}", isError: false);
+                    continue;
+                }
+
+                var msg = $"hook {phaseLabel}: step '{spec.Id}' failed: {result.Error}";
+                if (spec.OnFailure == OnFailure.Continue)
+                {
+                    Report(progress, ctx, msg + " (continue)", isError: true);
+                    continue;
+                }
+
+                // fail / rollback → abort the phase (no journal to unwind).
+                Report(progress, ctx, msg, isError: true);
+                return HookOutcome.Failed(spec.Id, result.Error);
             }
 
-            var msg = $"hook {phaseLabel}: step '{spec.Id}' failed: {result.Error}";
-            if (spec.OnFailure == OnFailure.Continue)
-            {
-                Report(progress, ctx, msg + " (continue)", isError: true);
-                continue;
-            }
-
-            // fail / rollback → abort the phase (no journal to unwind).
-            Report(progress, ctx, msg, isError: true);
-            return HookOutcome.Failed(spec.Id, result.Error);
+            return HookOutcome.Ok();
         }
-
-        return HookOutcome.Ok();
+        finally
+        {
+            // A post_install / post_uninstall hook phase runs on the SAME StepContext
+            // after InstallEngine's own finally has already released this run's
+            // {staging_dir}. A hook resolving the token there used to create a second
+            // SecureStaging that nobody owned and nothing ever disposed — a hardened
+            // directory leaked per install, in %ProgramData% on an elevated run. This
+            // gives that directory the same phase-bounded lifetime the install body's has.
+            // A no-op for a phase that resolved no token, and a no-op for a pre_install
+            // phase, which runs BEFORE the engine and whose staging the engine still owns.
+            ctx.ReleasePostRunStaging();
+        }
     }
 
     private static void Report(IProgress<StepProgress>? progress, StepContext ctx, string message, bool isError)

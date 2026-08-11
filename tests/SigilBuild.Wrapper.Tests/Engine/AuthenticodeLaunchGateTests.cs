@@ -45,10 +45,41 @@ using Xunit;
 /// the real <c>%ProgramData%</c> on an elevated runner — CI is elevated.
 /// </para>
 /// <para>
-/// <b>Host damage.</b> Nothing is written outside a <see cref="TempDir"/>, no
-/// certificate is added to any store, no real <c>%ProgramData%</c> path is touched, and
-/// no launcher here starts a process — the seam records the call instead.
+/// <b>Host damage — derived, per capability.</b> An earlier draft of this block claimed
+/// "nothing is written outside a <see cref="TempDir"/>", and that was <b>false</b>: the
+/// download test drives the real <c>PrerequisiteRunner</c>, which calls
+/// <c>SecureStaging.Create("prereq", …)</c> with no fallback root, so unelevated it stages
+/// under the process <c>%TEMP%</c> root — not a directory this test owns. The accurate
+/// derivation:
 /// </para>
+/// <list type="number">
+///   <item><description>
+///   <b>Filesystem.</b> The scratch marker and the bundled payload live in a
+///   <see cref="TempDir"/>. The downloaded prerequisite lands in a per-run, GUID-named
+///   <c>SecureStaging</c> directory under <c>%TEMP%</c>, which the runner disposes in its
+///   own <c>finally</c> whether the launch is refused or not. Nothing is written to any
+///   fixed path, and nothing outside those two roots.
+///   </description></item>
+///   <item><description>
+///   <b><c>%ProgramData%</c>.</b> Not touched — but only because the assembly-wide
+///   <c>SecureStaging.NeverStageElevatedForTesting</c> floor makes the elevated siting
+///   unreachable. Without that floor this test WOULD write there on the elevated CI
+///   runner. The guarantee is the floor's, not this file's, and naming whose it is
+///   is the difference between a derivation and an assertion.
+///   </description></item>
+///   <item><description>
+///   <b>Processes.</b> None started. Both tests inject a <c>PrerequisiteRunner.Launcher</c>
+///   seam that sets a bool.
+///   </description></item>
+///   <item><description>
+///   <b>Certificate stores.</b> The TLS origin's certificate is an ephemeral in-memory
+///   PKCS#12 handed to <c>SslStream</c> and disposed; it never reaches <c>X509Store</c>.
+///   </description></item>
+///   <item><description>
+///   <b>Machine state and network.</b> No registry, service, environment or ACL change.
+///   Loopback only, on an ephemeral port, with the listener stopped by <c>using</c>.
+///   </description></item>
+/// </list>
 /// </remarks>
 [SupportedOSPlatform("windows")]
 public sealed class AuthenticodeLaunchGateTests

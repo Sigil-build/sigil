@@ -177,9 +177,14 @@ internal sealed class SecureStaging : IDisposable
     /// <para>
     /// <b>Required, and deliberately not defaulted.</b> An optional reporting parameter
     /// reintroduces that exact failure by omission — a future call site that simply does
-    /// not pass one loses the degrade line with no compile error to catch it. Making it
+    /// not pass one loses the refusal line with no compile error to catch it. Making it
     /// required means the omission cannot be made by accident; passing a sink that
     /// discards has to be a decision someone writes down.
+    /// </para>
+    /// <para>
+    /// It says "refusal", not "degrade": this type stopped degrading when register row
+    /// R5's residual was closed. There is no downgraded elevated run left to announce —
+    /// there is a refusal, and that is the line that must reach a human.
     /// </para>
     /// </param>
     /// <param name="fallbackRoot">
@@ -280,7 +285,7 @@ internal sealed class SecureStaging : IDisposable
 
         if (!wantAdminOnly)
         {
-            CreatePrivateDirectory(directory, adminOnly: false);
+            CreatePrivateDirectory(directory, adminOnly: false, report);
             return new SecureStaging(directory, false);
         }
 
@@ -290,7 +295,7 @@ internal sealed class SecureStaging : IDisposable
         // an unhandled crash.
         try
         {
-            CreatePrivateDirectory(directory, adminOnly: true);
+            CreatePrivateDirectory(directory, adminOnly: true, report);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -546,14 +551,17 @@ internal sealed class SecureStaging : IDisposable
     /// nothing of the parent's permissions survives.
     /// </summary>
     [SupportedOSPlatform("windows")]
-    private static void CreatePrivateDirectory(string directory, bool adminOnly)
+    private static void CreatePrivateDirectory(string directory, bool adminOnly, Action<string, bool> report)
     {
         if (adminOnly)
         {
             // Elevated: SYSTEM + Administrators full control, Users read-execute. The
             // elevated caller is itself a member of BUILTIN\Administrators, so it needs
             // no ACE of its own — adding one would make the directory non-admin-only.
-            StateDirectorySecurity.CreateHardened(directory);
+            // Passing the sink, not discarding it: CreateHardened announces here when it
+            // TAKES OWNERSHIP of a pre-existing directory, and an ownership change on a
+            // machine-scope path is not something an install may perform silently.
+            StateDirectorySecurity.CreateHardened(directory, ReportSink.For(report));
             return;
         }
 

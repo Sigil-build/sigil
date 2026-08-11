@@ -200,8 +200,22 @@ public sealed class StagingDirTokenTests
             "and hash-verified has a digest to re-check against");
     }
 
+    /// <summary>
+    /// A digest confirmed during one engine run says nothing about the same path
+    /// afterwards — so the record must not survive the release. But <b>refusing</b> is not
+    /// the same as <b>forgetting</b>, and this test used to assert the latter.
+    /// </summary>
+    /// <remarks>
+    /// Returning <c>null</c> made a later launch of that path indistinguishable from a
+    /// <c>run_program</c> of a payload binary: no re-hash, no held handle, no Authenticode
+    /// verdict, and nothing said. <c>InstallSession</c> runs the <c>post_install</c> hook
+    /// phase on this very context after <c>InstallEngine</c>'s <c>finally</c> has released,
+    /// so that was a reachable, shipped bypass of everything registers R5, R11 and R12
+    /// added — found by the branch review. The record is now retired into a refuse-set
+    /// instead, and this test asserts the refusal it should have asserted from the start.
+    /// </remarks>
     [Fact]
-    public void Release_forgets_the_verified_downloads_of_the_run_that_ended()
+    public void Release_refuses_rather_than_forgets_the_verified_downloads_of_the_run_that_ended()
     {
         using var root = new TempDir();
         var ctx = NewContext();
@@ -212,7 +226,11 @@ public sealed class StagingDirTokenTests
 
         ctx.ReleaseStaging();
 
-        ctx.OpenVerifiedForLaunch(path).Should().BeNull(
-            "a digest confirmed during one engine run says nothing about the same path in a later one");
+        var refuse = () => ctx.OpenVerifiedForLaunch(path);
+
+        refuse.Should().Throw<StagedFileVerificationException>(
+                "the digest is gone, so the guarantee is gone — and a launch that has lost its guarantee " +
+                "must fail loudly, not quietly look like a launch that never needed one")
+            .WithMessage("*was downloaded by this install*");
     }
 }

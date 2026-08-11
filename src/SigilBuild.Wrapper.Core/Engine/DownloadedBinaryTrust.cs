@@ -79,6 +79,18 @@ internal static class DownloadedBinaryTrust
     /// </remarks>
     internal static bool RequiredForThisArtifact => RequirementOverride.Value ?? SelfDeclaresSigning;
 
+    /// <summary>
+    /// Said out loud whenever <see cref="RequiredForThisArtifact"/> is false at a launch
+    /// site that would otherwise have gated. The inference above is defensible; making it
+    /// SILENTLY is not. An author reads "downloaded binaries are Authenticode-checked",
+    /// packs without a <c>sign</c> block — the default for anyone not yet code-signing —
+    /// and two thirds of that sentence is false for their artifact, with no manifest knob,
+    /// no diagnostic and no log line to tell them. This is the log line.
+    /// </summary>
+    internal const string DisarmedNotice =
+        "signature: this artifact declared no `sign` block — downloaded binaries are NOT " +
+        "Authenticode-checked before they are launched; the sha256 is the only gate";
+
     private static bool SelfDeclaresSigning
     {
         get
@@ -167,6 +179,32 @@ internal static class DownloadedBinaryTrust
                 "or chaining to no trusted root); refusing to run it",
                 null, false),
         };
+
+    /// <summary>
+    /// The entry point for the two launch sites whose gate is conditioned on
+    /// <see cref="RequiredForThisArtifact"/> — the update package and a web-stub payload.
+    /// Gates when the artifact declared signing; otherwise reports
+    /// <see cref="DisarmedNotice"/> and allows.
+    /// </summary>
+    /// <remarks>
+    /// Both branches go through here so that "the gate did not run" is a single, named,
+    /// reported event rather than a condition each call site writes for itself — the shape
+    /// that let it be silent in the first place. There is no <c>allowUnsigned</c>
+    /// parameter: neither of these sites has a per-item manifest knob, and the
+    /// artifact-level answer is the one being consulted.
+    /// </remarks>
+    internal static string? RefusalForArtifactDownload(string path, string what, Action<string, bool> report)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+
+        if (!RequiredForThisArtifact)
+        {
+            report(DisarmedNotice, true);
+            return null;
+        }
+
+        return Refusal(path, what, allowUnsigned: false, report);
+    }
 
     /// <summary>
     /// Evaluate <paramref name="path"/> immediately before it is launched, report the

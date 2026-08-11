@@ -130,8 +130,33 @@ public static partial class AuthenticodeVerifier
     private const int CERT_E_REVOKED = unchecked((int)0x800B010C);
     private const int CERT_E_REVOCATION_FAILURE = unchecked((int)0x800B010E);
     private const int TRUST_E_EXPLICIT_DISTRUST = unchecked((int)0x800B0111);
+
+    // The CRYPT_E_ revocation band, 0x80092010..0x80092014, in full. It is enumerated
+    // exhaustively and in order on purpose: an omission here does not fail loudly, it
+    // silently drops a code into the Invalid bucket, and for an infrastructure code that
+    // means REFUSING a correctly signed binary on a host whose only fault is that it
+    // cannot resolve a distribution point. That is anchoring which breaks real installs.
+    //
+    //   0x80092010 CRYPT_E_REVOKED                   the certificate is revoked — a
+    //                                                verdict, and distinct from
+    //                                                CERT_E_REVOKED above; both mean the
+    //                                                same thing and both are refusals
+    //   0x80092011 CRYPT_E_NO_REVOCATION_DLL         no DLL/exported function found to
+    //                                                verify subject usage — infrastructure
+    //   0x80092012 CRYPT_E_NO_REVOCATION_CHECK       the check could not be made
+    //   0x80092013 CRYPT_E_REVOCATION_OFFLINE        the responder was unreachable
+    //   0x80092014 CRYPT_E_NOT_IN_REVOCATION_DATABASE the responder answered "I do not
+    //                                                know this certificate" — an inability
+    //                                                to establish status, not a finding
+    //                                                against the certificate
+    //
+    // Four of the five are "could not establish", one is "revoked". Only the last is a
+    // judgement about the key.
+    private const int CRYPT_E_REVOKED = unchecked((int)0x80092010);
+    private const int CRYPT_E_NO_REVOCATION_DLL = unchecked((int)0x80092011);
     private const int CRYPT_E_NO_REVOCATION_CHECK = unchecked((int)0x80092012);
     private const int CRYPT_E_REVOCATION_OFFLINE = unchecked((int)0x80092013);
+    private const int CRYPT_E_NOT_IN_REVOCATION_DATABASE = unchecked((int)0x80092014);
 
     // {00AAC56B-CD44-11d0-8CC2-00C04FC295EE} — WINTRUST_ACTION_GENERIC_VERIFY_V2.
     private static readonly Guid WINTRUST_ACTION_GENERIC_VERIFY_V2 =
@@ -198,11 +223,28 @@ public static partial class AuthenticodeVerifier
     {
         ERROR_SUCCESS => AuthenticodeStatus.Trusted,
 
-        // Someone with authority has said this key is bad.
-        CERT_E_REVOKED or TRUST_E_EXPLICIT_DISTRUST => AuthenticodeStatus.Revoked,
+        // Someone with authority has said this key is bad. CRYPT_E_REVOKED is the same
+        // finding as CERT_E_REVOKED reported from the CryptoAPI side rather than the
+        // chain-policy side; treating it as anything softer would let a genuinely revoked
+        // certificate through on nothing but which layer happened to notice.
+        CERT_E_REVOKED or CRYPT_E_REVOKED or TRUST_E_EXPLICIT_DISTRUST => AuthenticodeStatus.Revoked,
 
-        // The chain checked out but its revocation state could not be established.
-        CRYPT_E_REVOCATION_OFFLINE or CRYPT_E_NO_REVOCATION_CHECK or CERT_E_REVOCATION_FAILURE
+        // The chain checked out but its revocation state could not be established. Every
+        // one of these is a statement about the CHECK, not about the certificate:
+        //  - OFFLINE / NO_REVOCATION_CHECK / CERT_E_REVOCATION_FAILURE: no answer obtained;
+        //  - NO_REVOCATION_DLL: this host has no provider able to resolve the certificate's
+        //    distribution-point scheme — a host configuration fact, and the code that most
+        //    invites being mistaken for a trust failure because it names no responder;
+        //  - NOT_IN_REVOCATION_DATABASE: the responder answered, and its answer was "I do
+        //    not know this certificate", which is an absence of information rather than a
+        //    finding against it.
+        // Classifying any of them Invalid would refuse a correctly signed binary because
+        // of the host's plumbing.
+        CRYPT_E_REVOCATION_OFFLINE
+            or CRYPT_E_NO_REVOCATION_CHECK
+            or CRYPT_E_NO_REVOCATION_DLL
+            or CRYPT_E_NOT_IN_REVOCATION_DATABASE
+            or CERT_E_REVOCATION_FAILURE
             => AuthenticodeStatus.RevocationUnavailable,
 
         // No signature to speak of. TRUST_E_SUBJECT_FORM_UNKNOWN / TRUST_E_PROVIDER_UNKNOWN

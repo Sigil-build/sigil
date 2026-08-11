@@ -70,13 +70,15 @@ internal sealed class RunProgramStep : IStep
         // artifact declared signing (see DownloadedBinaryTrust): an unsigned stub demanding
         // a signature on what it fetches is ceremony, and would break unsigned authors
         // outright with no manifest knob to reach for. The check runs while the verified
-        // handle is held, so the bytes being judged are the bytes that will be mapped.
-        if (verifiedHandle is not null && DownloadedBinaryTrust.RequiredForThisArtifact)
+        // handle is held, so the bytes being judged are the bytes that will be mapped. When
+        // the gate is NOT armed, RefusalForArtifactDownload reports that on the progress
+        // channel instead of passing quietly — a check that silently did not happen reads,
+        // in a log, exactly like a check that passed.
+        if (verifiedHandle is not null)
         {
-            var refusal = DownloadedBinaryTrust.Refusal(
+            var refusal = DownloadedBinaryTrust.RefusalForArtifactDownload(
                 program,
                 $"'{program}', downloaded by this install",
-                allowUnsigned: false,
                 (msg, isErr) => ctx.ProgressSink?.Report(new StepProgress(0, 0, msg, isErr)));
             if (refusal is not null)
             {

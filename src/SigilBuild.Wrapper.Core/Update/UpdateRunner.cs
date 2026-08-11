@@ -234,15 +234,15 @@ internal sealed class UpdateRunner
             // current scope's privileges. Armed only when THIS artifact declared signing:
             // an installer that never claimed a signed provenance has no standing to
             // demand one of its own successor, and would simply lose /Update entirely.
-            if (DownloadedBinaryTrust.RequiredForThisArtifact)
+            // When it is NOT armed, RefusalForArtifactDownload says so on this same report
+            // channel rather than passing quietly — an absent check nobody is told about is
+            // indistinguishable, in a log, from a check that passed.
+            var trustRefusal = DownloadedBinaryTrust.RefusalForArtifactDownload(
+                dest, $"the downloaded {channel.Version} installer", _report);
+            if (trustRefusal is not null)
             {
-                var refusal = DownloadedBinaryTrust.Refusal(
-                    dest, $"the downloaded {channel.Version} installer", allowUnsigned: false, _report);
-                if (refusal is not null)
-                {
-                    _report($"update: {refusal}", true);
-                    return InstallSession.UpdateManifestRejectedExitCode;
-                }
+                _report($"update: {trustRefusal}", true);
+                return InstallSession.UpdateManifestRejectedExitCode;
             }
 
             var scopeFlag = request.Scope == InstallScope.Machine ? "/allusers" : "/currentuser";

@@ -60,8 +60,11 @@ public sealed class DownloadedBinaryTrustTests
     [InlineData(0, AuthenticodeStatus.Trusted)]
     [InlineData(unchecked((int)0x800B010C), AuthenticodeStatus.Revoked)]              // CERT_E_REVOKED
     [InlineData(unchecked((int)0x800B0111), AuthenticodeStatus.Revoked)]              // TRUST_E_EXPLICIT_DISTRUST
+    [InlineData(unchecked((int)0x80092010), AuthenticodeStatus.Revoked)]              // CRYPT_E_REVOKED
     [InlineData(unchecked((int)0x80092013), AuthenticodeStatus.RevocationUnavailable)] // CRYPT_E_REVOCATION_OFFLINE
     [InlineData(unchecked((int)0x80092012), AuthenticodeStatus.RevocationUnavailable)] // CRYPT_E_NO_REVOCATION_CHECK
+    [InlineData(unchecked((int)0x80092011), AuthenticodeStatus.RevocationUnavailable)] // CRYPT_E_NO_REVOCATION_DLL
+    [InlineData(unchecked((int)0x80092014), AuthenticodeStatus.RevocationUnavailable)] // CRYPT_E_NOT_IN_REVOCATION_DATABASE
     [InlineData(unchecked((int)0x800B010E), AuthenticodeStatus.RevocationUnavailable)] // CERT_E_REVOCATION_FAILURE
     [InlineData(unchecked((int)0x800B0100), AuthenticodeStatus.NoSignature)]          // TRUST_E_NOSIGNATURE
     [InlineData(unchecked((int)0x800B0003), AuthenticodeStatus.NoSignature)]          // TRUST_E_SUBJECT_FORM_UNKNOWN
@@ -91,6 +94,50 @@ public sealed class DownloadedBinaryTrustTests
             "an unreachable revocation responder must not be reported as trust, nor as forgery — " +
             "the first makes an offline box read a revoked publisher as good, the second tells every " +
             "offline user their genuine installer looks forged");
+    }
+
+    /// <summary>
+    /// The whole <c>CRYPT_E_</c> revocation band, <c>0x80092010..0x80092014</c>, asserted
+    /// exhaustively rather than code by code.
+    /// </summary>
+    /// <remarks>
+    /// Fix round 1 caught <c>CRYPT_E_NO_REVOCATION_DLL</c> (0x80092011) sitting in the
+    /// <see cref="AuthenticodeStatus.Invalid"/> bucket, where it would have REFUSED a
+    /// correctly signed prerequisite on any host unable to resolve a distribution-point
+    /// scheme — anchoring which breaks real installs, arrived at through a mapping table.
+    /// An omission in a table does not fail loudly, so the defence is to walk the
+    /// contiguous range and require every member to be classified deliberately: exactly
+    /// one revocation verdict, four infrastructure answers, nothing left in the default
+    /// bucket.
+    /// </remarks>
+    [Fact]
+    public void Every_code_in_the_CRYPT_E_revocation_band_is_classified_deliberately()
+    {
+        var band = new Dictionary<int, AuthenticodeStatus>
+        {
+            [unchecked((int)0x80092010)] = AuthenticodeStatus.Revoked,                // CRYPT_E_REVOKED
+            [unchecked((int)0x80092011)] = AuthenticodeStatus.RevocationUnavailable,  // NO_REVOCATION_DLL
+            [unchecked((int)0x80092012)] = AuthenticodeStatus.RevocationUnavailable,  // NO_REVOCATION_CHECK
+            [unchecked((int)0x80092013)] = AuthenticodeStatus.RevocationUnavailable,  // REVOCATION_OFFLINE
+            [unchecked((int)0x80092014)] = AuthenticodeStatus.RevocationUnavailable,  // NOT_IN_REVOCATION_DATABASE
+        };
+
+        foreach (var (hresult, expected) in band)
+        {
+            AuthenticodeVerifier.Classify(hresult).Should().Be(
+                expected,
+                "0x{0:X8} is in the CRYPT_E_ revocation band and must not fall through to the " +
+                "Invalid bucket — an infrastructure answer classified as a trust failure refuses a " +
+                "correctly signed binary because of the host's plumbing",
+                hresult);
+        }
+
+        band.Values.Should().Contain(
+            AuthenticodeStatus.Revoked,
+            "exactly one member of this band is a verdict about the certificate; if none were, the " +
+            "test would pass by mapping the whole band to 'unavailable' and losing a real revocation");
+        band.Values.Should().NotContain(
+            AuthenticodeStatus.Invalid, "nothing in this band is a statement about the signature itself");
     }
 
     // ── 2. R17: the trust line the wizard renders ─────────────────────────────
@@ -276,11 +323,18 @@ public sealed class DownloadedBinaryTrustTests
             var ctx = new StepContext(new Dictionary<string, object?>(StringComparer.Ordinal));
             ctx.RecordVerifiedDownload(program, sha);
 
-            var result = await new InstallEngine().RunAsync(new InstallStep[] { step }, ctx);
+            var progress = new SyncProgress();
+            var result = await new InstallEngine().RunAsync(
+                Array.Empty<InstallStep>(), new InstallStep[] { step }, Array.Empty<InstallStep>(),
+                ctx, progress);
 
             result.Success.Should().BeFalse();
             result.Error.Should().Contain("refusing to run",
                 "a signed installer must not execute an unsigned binary it pulled off the network");
+            progress.Lines.Should().NotContain(
+                l => l.Contains("declared no `sign` block", StringComparison.Ordinal),
+                "the disarm notice belongs to the disarmed branch only — emitting it here would train " +
+                "readers to ignore it");
         }
 
         // Disarmed — the positive control. Same file, same step: the gate is no longer
@@ -291,11 +345,57 @@ public sealed class DownloadedBinaryTrustTests
             var ctx = new StepContext(new Dictionary<string, object?>(StringComparer.Ordinal));
             ctx.RecordVerifiedDownload(program, sha);
 
-            var result = await new InstallEngine().RunAsync(new InstallStep[] { step }, ctx);
+            var progress = new SyncProgress();
+            var result = await new InstallEngine().RunAsync(
+                Array.Empty<InstallStep>(), new InstallStep[] { step }, Array.Empty<InstallStep>(),
+                ctx, progress);
 
             result.Error.Should().NotContain("refusing to run",
                 "with the requirement off, the Authenticode gate must not be what stops this");
             result.Error.Should().Contain("failed to start");
+
+            // Fix round 1: the disarm must be VISIBLE. An author who packs without a
+            // `sign` block reads the docs, concludes downloaded binaries are checked, and
+            // is wrong — and before this line there was nothing anywhere to tell them.
+            string.Join("\n", progress.Lines).Should().Contain(
+                "declared no `sign` block",
+                "a check that silently did not happen reads, in a log, exactly like a check that passed");
+            string.Join("\n", progress.Lines).Should().Contain("the sha256 is the only gate");
+        }
+    }
+
+    /// <summary>
+    /// The same disarm notice on the other conditioned launch site. Both are asserted,
+    /// because the two call sites are independent and a notice on one says nothing about
+    /// the other — which is precisely how the condition came to be silent on both.
+    /// </summary>
+    [Fact]
+    public async Task The_update_path_announces_that_its_signature_gate_is_disarmed()
+    {
+        using var tmp = new TempDir();
+        var packageBytes = Encoding.UTF8.GetBytes("an-unsigned-setup-payload");
+        var (manifest, signature, key) = SignedManifest("2.0.0", Sha256Hex(packageBytes));
+        var launcher = new RecordingLauncher();
+        var log = new List<string>();
+
+        using (DownloadedBinaryTrust.RequireForTesting(false))
+        {
+            var runner = new UpdateRunner(
+                Fetcher(manifest, signature), new WritingDownloader(packageBytes), launcher,
+                () => Installed("1.0.0"), (m, isError) => log.Add((isError ? "! " : "  ") + m));
+
+            var code = await runner.RunAsync(Request(key, tmp.Path), CancellationToken.None);
+
+            code.Should().Be(0, "the update still proceeds — this is a notice, not a refusal");
+            launcher.Called.Should().BeTrue();
+            log.Should().Contain(
+                l => l.Contains("declared no `sign` block", StringComparison.Ordinal),
+                "an absent check that nobody is told about is the failure mode that reads as success");
+            log.Should().Contain(
+                l => l.StartsWith("! ", StringComparison.Ordinal)
+                     && l.Contains("declared no `sign` block", StringComparison.Ordinal),
+                "and it must carry the error flag, or the wizard and the silent log both render it as " +
+                "ordinary progress chatter");
         }
     }
 
@@ -411,6 +511,23 @@ public sealed class DownloadedBinaryTrustTests
         {
             File.WriteAllBytes(destination, _bytes);
             return Task.FromResult(UpdatePackageDownloadResult.Ok());
+        }
+    }
+
+    /// <summary>
+    /// Synchronous progress sink — <see cref="Progress{T}"/> posts asynchronously and
+    /// would make these assertions race the engine.
+    /// </summary>
+    private sealed class SyncProgress : IProgress<StepProgress>
+    {
+        public List<string> Lines { get; } = new();
+
+        public void Report(StepProgress value)
+        {
+            if (value?.Message is { } message)
+            {
+                Lines.Add(message);
+            }
         }
     }
 

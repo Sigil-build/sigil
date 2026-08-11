@@ -69,18 +69,13 @@ public class UninstallEngineTests
         finally
         {
             // Best-effort cleanup if the test threw mid-flight.
+            //
+            // R57: this used to also DeleteSubKeyTree an HKLM\…\Uninstall key. Harmless
+            // while no test creates that key — but CI runs elevated, so on an app-id
+            // collision it was the one line in the suite that would do something real to
+            // the host. This test installs to user scope and writes no HKLM row.
 #pragma warning disable CA1031 // Test cleanup must never mask the original assertion failure.
             try { UninstallStateStore.Delete(appId, InstallScope.User); } catch { /* best-effort */ }
-            try
-            {
-                Microsoft.Win32.Registry.LocalMachine.DeleteSubKeyTree(
-                    @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\" + appId,
-                    throwOnMissingSubKey: false);
-            }
-            catch
-            {
-                // best-effort
-            }
 #pragma warning restore CA1031
         }
     }

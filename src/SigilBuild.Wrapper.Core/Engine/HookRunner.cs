@@ -48,6 +48,21 @@ internal static class HookRunner
             return HookOutcome.Ok();
         }
 
+        // R56: give this phase the run's progress channel. ctx.ProgressSink used to be
+        // set by InstallEngine and nothing else, so every intra-step line a hook raised
+        // was reported to nothing — including the two that are security refusals: the
+        // DownloadedBinaryTrust disarm notice (RunProgramStep) and SecureStaging's
+        // "this elevated run could not establish an administrator-only staging root".
+        // A refusal that is not logged is, from the operator's side, indistinguishable
+        // from a silent success — the exact failure mode R1 and R19 were fixed to
+        // remove, surviving in the one phase nobody checked (pre_install, post_install,
+        // and both uninstall hook phases all run through here).
+        //
+        // Set, not saved-and-restored: InstallEngine sets the identical sink on the same
+        // context moments later, and the uninstall hook phases have nothing after them.
+        // Leaving it set cannot lose a line; clearing it could.
+        ctx.ProgressSink = progress;
+
         // Never replayed — hooks get no rollback (P2). Present only because IStep
         // takes a journal; run_program (the common hook) records nothing anyway.
         var discard = new RollbackJournal();

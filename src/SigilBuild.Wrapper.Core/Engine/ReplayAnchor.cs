@@ -133,13 +133,18 @@ internal sealed class ReplayAnchor
     private const string ServicesKey = @"System\CurrentControlSet\Services";
 
     /// <summary>
-    /// Sub-paths that are excised from an otherwise-allowed filesystem root. The Start
-    /// Menu is allowed because <c>shortcut_create</c> writes there and its reversal must
-    /// replay — but the Start Menu's own subtree contains <c>Programs\Startup</c>, a
-    /// per-logon execution surface. Sigil never places a shortcut there
-    /// (<c>ShortcutCreateStep.ResolveLocation</c> resolves only <c>start_menu</c> and
-    /// <c>desktop</c> to the folder itself), so excising it costs no legitimate replay.
+    /// Sub-paths that no record may WRITE into, even though their containing root is
+    /// allowed. The Start Menu is allowed because <c>shortcut_create</c> writes there and
+    /// its reversal must replay — but the Start Menu's own subtree contains
+    /// <c>Programs\Startup</c>, a per-logon execution surface that a planted
+    /// <c>restore_deleted_file</c> would otherwise be able to populate.
     /// </summary>
+    /// <remarks>
+    /// Write-only: see <see cref="IsAllowedPath"/>. Deleting from these paths stays
+    /// allowed, because <c>shortcut_create</c> accepts an explicit location and a
+    /// publisher may legitimately place a startup shortcut there — whose removal at
+    /// uninstall must replay.
+    /// </remarks>
     private static readonly string[] ExcludedRootSubPaths =
     {
         @"Programs\Startup",
@@ -149,6 +154,37 @@ internal sealed class ReplayAnchor
     private readonly string _installDir;
     private readonly string[] _fileRoots;
     private readonly string[] _excludedRoots;
+
+    /// <summary>
+    /// Environment values as they were BEFORE this replay began, keyed by
+    /// <c>machine|user</c> + <c>expanded|literal</c> + name, filled on first read and
+    /// never refreshed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>This cache is a security mechanism, not a performance optimisation. Do not
+    /// replace it with a live read.</strong>
+    /// </para>
+    /// <para>
+    /// <see cref="EnvVerdict"/>'s whole-value ("<c>action: set</c>") model asks whether
+    /// this install had taken a variable over, and answers it from the variable's current
+    /// content. Read live, that question is answerable by the replay itself: the loop in
+    /// <see cref="RollbackJournal.UndoAsync"/> applies records one at a time, so a first
+    /// record may legitimately write an install-owned value into a variable and a second
+    /// record then finds exactly the precondition the set model looks for. The pair
+    /// composes into "set any non-critical machine variable to anything" — a code
+    /// injection vector for variables such as <c>COR_PROFILER_PATH</c> — while each record
+    /// is individually plausible and neither is sufficient alone.
+    /// </para>
+    /// <para>
+    /// Anchoring the premise to the pre-replay snapshot removes the composition: no record
+    /// can manufacture the precondition for a later one, because the answer is fixed
+    /// before the first record runs. Legitimate append/prepend sequences are unaffected —
+    /// their prior values are subsets of the pre-replay value by construction.
+    /// </para>
+    /// </remarks>
+    private readonly Dictionary<string, string?> _envSnapshot =
+        new(StringComparer.OrdinalIgnoreCase);
 
     private ReplayAnchor(string installDir, string[] fileRoots, string[] excludedRoots)
     {
@@ -253,26 +289,59 @@ internal sealed class ReplayAnchor
             // register's own wording for these rows is "arbitrary file / tree write FROM
             // AN ATTACKER-CHOSEN STASH". A contained destination fed from an uncontained
             // source is still an attacker-content write.
+            //
+            // `writesContent` also decides whether the excised sub-roots apply: a record
+            // that only DELETES may reach them (removing a Startup shortcut this install
+            // created is the legitimate uninstall), a record that WRITES may not.
             case RollbackRecord.RestoreFile r:
-                return PathVerdict(record, "restore_file", r.Path, r.BackupPath);
+                return PathVerdict(
+                    record,
+                    "restore_file",
+                    r.Path,
+                    // With no usable backup this record deletes Path rather than writing it.
+                    writesContent: r is { ExistedBefore: true, BackupPath: not null },
+                    contentSource: r.BackupPath,
+                    withSource: static (rec, s) => ((RollbackRecord.RestoreFile)rec) with { BackupPath = s });
 
             case RollbackRecord.RemoveDirectory r:
-                return PathVerdict(record, "remove_directory", r.Path);
+                return PathVerdict(record, "remove_directory", r.Path, writesContent: false);
 
             case RollbackRecord.DeleteShortcut r:
-                return PathVerdict(record, "delete_shortcut", r.Path);
+                return PathVerdict(record, "delete_shortcut", r.Path, writesContent: false);
 
             case RollbackRecord.RemoveUninstaller r:
-                return PathVerdict(record, "remove_uninstaller", r.Path);
+                return PathVerdict(record, "remove_uninstaller", r.Path, writesContent: false);
 
             case RollbackRecord.RestoreDeletedFile r:
-                return PathVerdict(record, "restore_deleted_file", r.OriginalPath, r.StashPath);
+                return PathVerdict(
+                    record,
+                    "restore_deleted_file",
+                    r.OriginalPath,
+                    writesContent: true,
+                    contentSource: r.StashPath,
+                    withSource: static (rec, s) =>
+                        ((RollbackRecord.RestoreDeletedFile)rec) with { StashPath = s! });
 
             case RollbackRecord.RestoreDeletedDirectory r:
-                return PathVerdict(record, "restore_deleted_directory", r.OriginalPath, r.StashPath);
+                return PathVerdict(
+                    record,
+                    "restore_deleted_directory",
+                    r.OriginalPath,
+                    writesContent: true,
+                    contentSource: r.StashPath,
+                    withSource: static (rec, s) =>
+                        ((RollbackRecord.RestoreDeletedDirectory)rec) with { StashPath = s! });
 
             case RollbackRecord.RestoreConfigFile r:
-                return PathVerdict(record, "restore_config_file", r.OriginalPath, r.StashPath);
+                return PathVerdict(
+                    record,
+                    "restore_config_file",
+                    r.OriginalPath,
+                    // A null stash means "the edit created this file"; the undo deletes it.
+                    writesContent: r.StashPath is not null,
+                    contentSource: r.StashPath,
+                    withSource: static (rec, s) =>
+                        ((RollbackRecord.RestoreConfigFile)rec) with { StashPath = s });
 
             case RollbackRecord.RestoreRegistryValue r:
                 // PreviouslyAbsent → the undo deletes the value it wrote; nothing of the
@@ -327,31 +396,58 @@ internal sealed class ReplayAnchor
     /// there is nothing to constrain.
     /// </para>
     /// <para>
-    /// Requiring the source to be anchored costs no legitimate replay. A
-    /// <c>restore_file</c> backup is written as <c>&lt;destination&gt;.sigil-bak</c>
-    /// (<c>FileCopyStep</c>), so it is inside the anchor exactly when its destination is.
-    /// The <c>%TEMP%\sigil-fd-*</c> / <c>-dd-*</c> / <c>-cfg-*</c> stashes belong to the
-    /// mid-install rollback only: <c>RollbackJournal.DiscardTransientStashes</c> reclaims
-    /// them the moment the install commits, and the journal is persisted after that — so
-    /// a stash named by a record that reached an ANCHORED replay is either already gone
-    /// (the undo is a no-op) or was planted. Mid-install rollback runs
-    /// <see cref="ReplayAnchorage.InProcess"/> and is unaffected.
+    /// A source outside the anchored roots is only REFUSED when it currently EXISTS.
+    /// <c>file_delete</c>, <c>directory_delete</c> and the config editors stash the prior
+    /// content under <c>%TEMP%\sigil-fd-*</c> / <c>-dd-*</c> / <c>-cfg-*</c>, and
+    /// <c>RollbackJournal.DiscardTransientStashes</c> reclaims those the moment the
+    /// install commits — but the RECORD, stash path and all, is persisted. Refusing on the
+    /// path alone therefore refused every persisted <c>file_delete</c>,
+    /// <c>directory_delete</c>, <c>ini_write</c>, <c>json_edit</c> and <c>xml_edit</c>
+    /// record on a perfectly healthy uninstall, and emitted the very log line the
+    /// documentation tells publishers to investigate.
+    /// </para>
+    /// <para>
+    /// When the source is absent the record's own undo is already a no-op, so instead of
+    /// refusing, the source is REWRITTEN to a path that cannot exist. That keeps the log
+    /// quiet for the ordinary case and closes the check-then-copy race in the same move: a
+    /// source that appears between this check and the copy is no longer the one the record
+    /// will read. A source that exists AND is out of range is still refused and logged —
+    /// that is the planted case.
+    /// </para>
+    /// <para>
+    /// A <c>restore_file</c> backup is written as <c>&lt;destination&gt;.sigil-bak</c>
+    /// (<c>FileCopyStep</c>), so it is anchored exactly when its destination is and never
+    /// reaches either branch. Mid-install rollback runs
+    /// <see cref="ReplayAnchorage.InProcess"/> and is unaffected throughout.
     /// </para>
     /// </remarks>
     private Verdict PathVerdict(
-        RollbackRecord record, string type, string path, string? contentSource = null)
+        RollbackRecord record,
+        string type,
+        string path,
+        bool writesContent = false,
+        string? contentSource = null,
+        Func<RollbackRecord, string?, RollbackRecord>? withSource = null)
     {
-        if (!IsAllowedPath(path))
+        if (!IsAllowedPath(path, writesContent))
         {
             return Refuse(
                 record,
                 type,
                 path,
                 ReplayRefusalCode.PathOutsideInstallRoots,
-                $"{type} refused: '{path}' {OutsideText()}");
+                $"{type} refused: '{path}' {OutsideText()}" +
+                (writesContent && IsExcised(path)
+                    ? " — a record may remove what this install placed there, but never write to it"
+                    : string.Empty));
         }
 
-        if (contentSource is not null && !IsAllowedPath(contentSource))
+        if (contentSource is null || IsAllowedPath(contentSource, forWrite: false))
+        {
+            return Allow(record);
+        }
+
+        if (SourceExists(contentSource))
         {
             return Refuse(
                 record,
@@ -364,7 +460,29 @@ internal sealed class ReplayAnchor
                 "attacker-content write");
         }
 
-        return Allow(record);
+        // Absent: the undo is a no-op already. Neuter the path rather than refuse, so an
+        // ordinary uninstall logs nothing and nothing that appears later can be read.
+        return withSource is null
+            ? Allow(record)
+            : Allow(withSource(record, NeuteredSourcePath()));
+    }
+
+    /// <summary>A path inside the anchor that is guaranteed not to exist.</summary>
+    private string NeuteredSourcePath() =>
+        Path.Combine(_installDir, "sigil-neutered-source-" + Guid.NewGuid().ToString("N"));
+
+    private static bool SourceExists(string source)
+    {
+#pragma warning disable CA1031 // Fail closed: if existence cannot be determined, treat it as present.
+        try
+        {
+            return File.Exists(source) || Directory.Exists(source);
+        }
+        catch
+        {
+            return true;
+        }
+#pragma warning restore CA1031
     }
 
     /// <summary>
@@ -373,7 +491,16 @@ internal sealed class ReplayAnchor
     /// cannot pass, and requires a directory separator after the root, so
     /// <c>C:\rootevil</c> cannot pass as <c>C:\root</c>.
     /// </summary>
-    private bool IsAllowedPath(string? path)
+    /// <remarks>
+    /// The excised sub-roots apply only when <paramref name="forWrite"/> is true, and the
+    /// asymmetry is the point. Excising <c>Programs\Startup</c> exists to stop a planted
+    /// record WRITING an executable into a per-logon execution surface. Applying it to
+    /// deletes as well inverted the intent: a <c>shortcut_create</c> with an explicit path
+    /// into the all-users Startup folder is documented and supported, and refusing its
+    /// <c>delete_shortcut</c> record left the shortcut auto-starting after uninstall — the
+    /// anchor creating the persistence it was added to prevent.
+    /// </remarks>
+    private bool IsAllowedPath(string? path, bool forWrite)
     {
         var full = Normalize(path);
         if (full is null)
@@ -381,18 +508,32 @@ internal sealed class ReplayAnchor
             return false;
         }
 
-        // Excisions win over roots: the Start Menu is allowed, its Startup subtree is not.
-        foreach (var excludedRoot in _excludedRoots)
+        if (forWrite && IsExcised(full))
         {
-            if (IsUnder(full, excludedRoot))
-            {
-                return false;
-            }
+            return false;
         }
 
         foreach (var root in _fileRoots)
         {
             if (IsUnder(full, root))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>True when the path is in a sub-root nothing may WRITE to.</summary>
+    private bool IsExcised(string? path)
+    {
+        var full = Normalize(path);
+        if (full is null)
+        {
+            return false;
+        }
+        foreach (var excludedRoot in _excludedRoots)
+        {
+            if (IsUnder(full, excludedRoot))
             {
                 return true;
             }
@@ -775,8 +916,11 @@ internal sealed class ReplayAnchor
         // EnvSetStep captures the EXPANDED form into the journal. Compare against both
         // so a legitimate restore is not refused over a spelling difference — that
         // would break every real machine-scope uninstall.
-        var expanded = ReadEnv(isMachine, r.Name, expand: true);
-        var literal = ReadEnv(isMachine, r.Name, expand: false);
+        //
+        // Read from the PRE-REPLAY snapshot, never live — see _envSnapshot for why a live
+        // read lets two records compose into a primitive neither of them is.
+        var expanded = SnapshotEnv(isMachine, r.Name, expand: true);
+        var literal = SnapshotEnv(isMachine, r.Name, expand: false);
 
         if (r.PreviouslyAbsent)
         {
@@ -872,6 +1016,25 @@ internal sealed class ReplayAnchor
             return Allow(record);
         }
 
+        // A variable the system depends on is never eligible for the whole-value model
+        // below: no installer legitimately `set`s PATH or ComSpec, and the subset rule must
+        // keep governing them. Checked BEFORE the model rather than as one conjunct inside
+        // it, and refused with its OWN code, so that deleting this guard changes the
+        // observable outcome — as one conjunct it was unfalsifiable, because a
+        // system-critical variable's value is never wholly install-owned anyway and the
+        // model would have refused on that instead.
+        if (IsSystemCriticalVariable(r.Name))
+        {
+            return Refuse(
+                record,
+                "restore_env",
+                target,
+                ReplayRefusalCode.EnvironmentSystemVariableNotReplaceable,
+                $"restore_env refused: {r.Scope}-scope '{r.Name}' is a variable the system " +
+                $"depends on, so it may only have entries removed; restoring '{foreignEntry}' " +
+                "would replace its contents wholesale");
+        }
+
         // Model (2): action: set — the DOCUMENTED DEFAULT for env_set, and the case model
         // (1) alone can never accept. A `set` REPLACES the value, so the prior value is by
         // construction absent from the current one: a manifest that repoints machine
@@ -880,18 +1043,12 @@ internal sealed class ReplayAnchor
         // JAVA_HOME dangling at the directory the uninstall just deleted, and reports a
         // REFUSED record on a completely legitimate uninstall.
         //
-        // The genuineness test that fits a whole-value replacement is the CURRENT value,
-        // not the prior one: if everything the variable holds right now is a directory
-        // this install owns, then this install had taken the variable over, and putting
-        // back whatever preceded it is exactly the undo. A planted record cannot exploit
-        // that — it would have to find a variable already pointing wholly inside a
-        // directory this install owns, and for machine scope that directory must also be
-        // admin-only writable.
-        //
-        // System-critical variables are excluded: no installer legitimately `set`s PATH,
-        // and the subset rule must keep governing them.
-        if (!IsSystemCriticalVariable(r.Name) &&
-            currentEntries.Count > 0 &&
+        // The genuineness test that fits a whole-value replacement is the value the
+        // variable held BEFORE THIS REPLAY BEGAN (see _envSnapshot — a live read lets an
+        // earlier record manufacture this precondition for a later one): if everything it
+        // held then is a directory this install owns, this install had taken the variable
+        // over, and putting back whatever preceded it is exactly the undo.
+        if (currentEntries.Count > 0 &&
             AllOwnedByThisInstall(currentEntries, isMachine))
         {
             return Allow(record);
@@ -943,6 +1100,23 @@ internal sealed class ReplayAnchor
         }
 
         return OperatingSystem.IsWindows() && StateDirectorySecurity.IsAdminOnlyWritable(full);
+    }
+
+    /// <summary>
+    /// The value <paramref name="name"/> held before this replay started. Reads through
+    /// to the registry once and memoizes; see <see cref="_envSnapshot"/> for why the
+    /// memoization is load-bearing.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private string? SnapshotEnv(bool isMachine, string name, bool expand)
+    {
+        var key = $"{(isMachine ? "machine" : "user")}|{(expand ? "expanded" : "literal")}|{name}";
+        if (!_envSnapshot.TryGetValue(key, out var value))
+        {
+            value = ReadEnv(isMachine, name, expand);
+            _envSnapshot[key] = value;
+        }
+        return value;
     }
 
     [SupportedOSPlatform("windows")]

@@ -1167,6 +1167,21 @@ new and nothing is trusted from it. Until then `docs/guides/uninstaller.md`
 documents the symptom and points publishers at an `uninstall:` step, which runs
 before the journal replay and is not anchored. **M**
 
+**Related, and deliberately unfixed — the anchor floor stays equality-only.**
+`UninstallEngine.IsPlausibleInstallDirectory` rejects only a volume root and exact
+matches against the well-known system directories, so a journal recording
+`installDir: C:\ProgramData\Sigil` re-widens the anchor to the shared state-root
+parent — i.e. back inside the threat model that the per-app narrowing
+(branch-review finding 3) closes. Tightening the floor to require
+`StateDirectorySecurity.IsAdminOnlyWritable` for machine scope would refuse the
+uninstall of exactly the installs **this row's own lane S2 grandfathers** — those
+sitting outside the `%ProgramFiles%` roots because they predate containment — so
+the human partner ruled it stays as it is. The reasoning is recorded in the
+method's remarks; the residual is bounded because the escalating consequences (a
+machine-wide execution mapping, a machine `PATH` entry) each independently require
+an admin-only-writable target. Recorded here so the S1 × S2 interaction is not
+rediscovered as a new finding.
+
 ---
 
 # Verified sound

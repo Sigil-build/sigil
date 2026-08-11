@@ -211,6 +211,12 @@ public enum ReplayRefusalCode
     ContentSourceOutsideInstallRoots = 11,
 
     /// <summary>
+    /// A variable the system depends on (<c>PATH</c>, <c>ComSpec</c>, …) may only have
+    /// entries removed; the record would have replaced its contents wholesale.
+    /// </summary>
+    EnvironmentSystemVariableNotReplaceable = 12,
+
+    /// <summary>
     /// The key is an execution mapping (a shell verb, a class registration, a driver map)
     /// and the program it would be restored to is not one this install owns.
     /// </summary>

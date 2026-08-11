@@ -97,9 +97,9 @@ Machine-scope state is also refused outright unless both its directory and `unin
 
 |Record kind|Replayed when|
 |---|---|
-|File and directory records (`file_copy`, `directory_create`, `file_delete`, `directory_delete`, config edits, shortcuts, the uninstaller itself)|The target - **and, for records that restore content, the backup or stash the content comes from** - is inside `install_dir`, the Desktop or Start Menu folder of the scope being uninstalled, or the app's own `%ProgramData%\Sigil\<AppId>` / `%LocalAppData%\Sigil\<AppId>` state directory. The all-users `Programs\Startup` folder is excluded.|
+|File and directory records (`file_copy`, `directory_create`, `file_delete`, `directory_delete`, config edits, shortcuts, the uninstaller itself)|The target - **and, for records that restore content, the backup or stash the content comes from** - is inside `install_dir`, the Desktop or Start Menu folder of the scope being uninstalled, or the app's own `%ProgramData%\Sigil\<AppId>` / `%LocalAppData%\Sigil\<AppId>` state directory. Nothing may *write* into the `Programs\Startup` folder, though a shortcut your installer placed there is still *removed* normally.|
 |`registry_write` and the registry delete records|The key is under `Software\` in HKLM or HKCU. Keys that define how Windows runs something - shell verbs (`…\shell\<verb>\command`), COM server paths, driver maps, `Run`/`RunOnce`, `App Paths`, Image File Execution Options, policy keys - are only replayed when the value being restored points at a program inside `install_dir`, and for HKLM that program's directory must also be administrator-only writable. `HKU` and `HKCC` are never replayed.|
-|`env_set`|The restore either puts back a value whose entries are all already present (the `append` / `prepend` shape), or replaces a variable whose current value points wholly inside `install_dir` (the `set` shape). `PATH` and other variables Windows depends on are never deleted, and a machine-scope entry must be administrator-only writable.|
+|`env_set`|The restore either puts back a value whose entries are all already present (the `append` / `prepend` shape), or replaces a variable that pointed wholly inside `install_dir` before the uninstall began (the `set` shape - so an app that repointed `JAVA_HOME` at its own JRE has that reversed). `PATH` and other variables Windows depends on may only have entries removed, never be replaced or deleted, and a machine-scope entry must be administrator-only writable.|
 |`service_install`|The service's registered `ImagePath` runs a binary inside `install_dir`, or the service no longer exists.|
 |`com_register`|The DLL path is re-derived from `install_dir`; a recorded path that does not resolve inside it is never loaded.|
 
@@ -115,7 +115,9 @@ refused: restore_file refused: 'C:\Windows\System32\drivers\etc\hosts' is outsid
 
 followed by a summary line naming how many records were refused.
 
-**If you see refusals on an uninstall you believe is legitimate, that is worth investigating rather than ignoring.** Either the journal was tampered with, or the app writes somewhere the anchor does not yet cover - most commonly a step that writes outside `install_dir`, such as into `%ProgramData%\<YourApp>`. Data written outside the anchored locations is left on disk when the app is removed; delete it from an `uninstall:` step, which runs before the journal replay and is not anchored.
+**A healthy uninstall emits no refusal lines at all.** In particular, `file_delete`, `directory_delete`, `ini_write`, `json_edit` and `xml_edit` stash the prior content under `%TEMP%` so a mid-install rollback can put it back; that stash is reclaimed the moment the install commits, so at uninstall time those records simply have nothing to restore and are replayed as no-ops, silently. Seeing nothing is the expected outcome.
+
+**So if you do see refusals, that is worth investigating rather than ignoring.** Either the journal was tampered with, or the app writes somewhere the anchor does not cover - most commonly a step whose destination is outside `install_dir`, such as `%ProgramData%\<YourApp>`. Data written outside the anchored locations is left on disk when the app is removed; delete it from an `uninstall:` step, which runs before the journal replay and is not anchored.
 
 ### `cannot upgrade: … is not verified`
 

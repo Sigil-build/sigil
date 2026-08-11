@@ -9,6 +9,7 @@ using FluentAssertions;
 using Microsoft.Win32;
 using SigilBuild.Core.Manifest;
 using SigilBuild.Wrapper.Engine;
+using SigilBuild.Wrapper.Steps;
 using SigilBuild.Wrapper.Tests.Helpers;
 using Xunit;
 
@@ -276,10 +277,23 @@ public class ReplayAnchoringTests
         // Arrange — the register's wording for these rows is "arbitrary file / tree write
         // FROM AN ATTACKER-CHOSEN STASH". Checking only the destination is a narrower
         // guarantee than that: the bytes still come from wherever the record says.
+        //
+        // The source is CREATED here, which is what makes this the planted case rather
+        // than the ordinary one: a persisted record whose stash was already reclaimed
+        // names a path that no longer exists, and that must stay quiet (see
+        // A_persisted_record_whose_stash_was_reclaimed_replays_silently).
         using var installDir = new TempDir();
         using var elsewhere = new TempDir();
         var destination = Path.Combine(installDir.Path, "app.exe");
         var source = Path.Combine(elsewhere.Path, "evil.bin");
+        if (type == "restore_deleted_directory")
+        {
+            Directory.CreateDirectory(source);
+        }
+        else
+        {
+            File.WriteAllText(source, "attacker bytes");
+        }
 
         // Act
         var verdict = Anchor(installDir.Path).Check(SourcedRecord(type, destination, source));
@@ -288,6 +302,36 @@ public class ReplayAnchoringTests
         verdict.Refusal.Should().NotBeNull();
         verdict.Refusal!.Code.Should().Be(ReplayRefusalCode.ContentSourceOutsideInstallRoots);
         verdict.Refusal.Message.Should().Contain("evil.bin");
+    }
+
+    [WindowsTheory("Windows path semantics")]
+    [InlineData("restore_file")]
+    [InlineData("restore_deleted_file")]
+    [InlineData("restore_deleted_directory")]
+    [InlineData("restore_config_file")]
+    public void A_persisted_record_whose_stash_was_reclaimed_replays_silently(string type)
+    {
+        // Arrange — the shape EVERY persisted file_delete / directory_delete / ini_write /
+        // json_edit / xml_edit record has after a successful install: the stash under
+        // %TEMP% was reclaimed at commit, but the record still names it. Refusing on the
+        // path alone made a healthy uninstall emit the very log line the documentation
+        // tells publishers to investigate.
+        using var installDir = new TempDir();
+        var destination = Path.Combine(installDir.Path, "app.exe");
+        var reclaimed = Path.Combine(
+            Path.GetTempPath(), "sigil-fd-" + Guid.NewGuid().ToString("N"));
+        File.Exists(reclaimed).Should().BeFalse("the stash is gone, which is the whole point");
+
+        // Act
+        var verdict = Anchor(installDir.Path).Check(SourcedRecord(type, destination, reclaimed));
+
+        // Assert
+        verdict.Refusal.Should().BeNull(
+            "the undo is already a no-op, so a healthy uninstall must log nothing");
+
+        // …and the source it would read has been rewritten to something that cannot appear
+        // later, so a file materialising between this check and the copy is not read.
+        SourceOf(verdict.Record).Should().NotBe(reclaimed);
     }
 
     [WindowsTheory("Windows path semantics")]
@@ -313,29 +357,78 @@ public class ReplayAnchoringTests
             "file_copy rollback has");
     }
 
+    [WindowsTheory("Windows path semantics")]
+    [InlineData("file_delete")]
+    [InlineData("directory_delete")]
+    [InlineData("ini_write")]
+    [InlineData("json_edit")]
+    [InlineData("xml_edit")]
+    public async Task A_legitimate_uninstall_of_a_stash_backed_step_replays_without_a_single_refusal(
+        string stepType)
+    {
+        // Arrange — the end-to-end shape of Important 1, driven through the REAL steps
+        // rather than hand-built records: run the step, then reclaim the transient stash
+        // exactly as the engine does when the install commits, then replay the persisted
+        // journal ANCHORED. Every one of these five step types stashes under %TEMP%, so a
+        // source check that looked only at the path refused all of them on a healthy
+        // uninstall.
+        using var installDir = new TempDir();
+        var journal = new RollbackJournal();
+        var step = StepFactory.Create(StashBackedSpec(stepType, installDir.Path));
+
+        var ran = await step.RunAsync(StepContext.Empty, journal, CancellationToken.None);
+        ran.Success.Should().BeTrue("the fixture needs the step to have actually run");
+        journal.Records.Should().NotBeEmpty();
+
+        // What InstallSession does on commit, before the journal is persisted.
+        journal.DiscardTransientStashes();
+
+        var progress = new CapturingProgress();
+
+        // Act
+        var outcome = await journal.UndoAsync(
+            ReplayAnchorage.ForInstall(installDir.Path, "sigil.stash.app", InstallScope.User),
+            progress,
+            CancellationToken.None);
+
+        // Assert
+        outcome.RefusedRecords.Should().BeEmpty(
+            "a healthy uninstall of a stash-backed step must not report a security refusal " +
+            "— it is the first thing the documentation tells a publisher to investigate");
+        progress.Messages.Should().NotContain(
+            m => m.StartsWith("refused:", StringComparison.Ordinal));
+    }
+
     [WindowsFact("Windows shell folders")]
     public void The_all_users_startup_folder_is_not_reachable_even_though_the_start_menu_is()
     {
         // Arrange — Startup is INSIDE the Start Menu subtree and is a per-logon execution
-        // surface. Sigil never places a shortcut there (ShortcutCreateStep resolves only
-        // start_menu and desktop, to the folder itself), so excising it costs no
-        // legitimate replay while removing the compounding half of the source finding.
+        // surface, so nothing may WRITE there. The treatment is deliberately asymmetric:
+        // shortcut_create accepts an explicit location, a publisher may legitimately place
+        // a startup shortcut, and refusing its removal would leave that shortcut
+        // auto-starting after uninstall — the anchor creating the persistence it exists to
+        // prevent.
         using var installDir = new TempDir();
         var startMenu = ScopeLayout.For(InstallScope.Machine).StartMenuFolder;
         var anchor = Anchor(installDir.Path);
+        var startupLnk = Path.Combine(startMenu, "Programs", "Startup", "acme.lnk");
 
         // Act
         var ordinary = anchor.Check(new RollbackRecord.DeleteShortcut(
             Path.Combine(startMenu, "Programs", "Acme", "Acme.lnk")));
-        var startup = anchor.Check(new RollbackRecord.DeleteShortcut(
-            Path.Combine(startMenu, "Programs", "Startup", "evil.lnk")));
+        var removingAStartupShortcut = anchor.Check(new RollbackRecord.DeleteShortcut(startupLnk));
+        var writingIntoStartup = anchor.Check(new RollbackRecord.RestoreDeletedFile(
+            startupLnk, Path.Combine(installDir.Path, "planted.lnk")));
 
         // Assert
+        removingAStartupShortcut.RefusalMessage.Should().BeNull(
+            "an installer may place a startup shortcut, and its removal at uninstall must " +
+            "replay or the app keeps auto-starting after it has been removed");
+        writingIntoStartup.RefusalMessage.Should().NotBeNull();
+        writingIntoStartup.RefusalMessage!.Should().Contain("never write to it",
+            "a planted record must not be able to populate a per-logon execution surface");
         ordinary.RefusalMessage.Should().BeNull(
             "an ordinary Start Menu shortcut must still be removable");
-        startup.RefusalMessage.Should().NotBeNull(
-            "the all-users Startup folder is a persistence location, not a shortcut folder " +
-            "this installer writes");
     }
 
     [WindowsFact("Windows shell folders")]
@@ -887,22 +980,82 @@ public class ReplayAnchoringTests
         }
     }
 
-    [WindowsFact("Windows registry semantics")]
-    public void The_set_model_never_applies_to_a_system_critical_variable()
+    [WindowsTheory("Windows registry semantics")]
+    [InlineData("machine", "Path")]
+    [InlineData("user", "Path")]
+    [InlineData("machine", "ComSpec")]
+    public void The_set_model_never_applies_to_a_system_critical_variable(string scope, string name)
     {
         // Arrange — no installer legitimately `set`s PATH, so the subset rule must keep
-        // governing it however install-owned the current value happens to look. Read-only:
-        // the real machine PATH is consulted and never written.
+        // governing it however install-owned the current value happens to look.
+        //
+        // The assertion is on the CODE, not merely on "a refusal happened", and that is
+        // what makes the guard falsifiable. Asserting a refusal alone could not fail:
+        // a system-critical variable's value is never wholly install-owned anyway, so with
+        // the guard deleted the set model would refuse it on that instead and the test
+        // would stay green. The guard now runs first and carries its own code, so deleting
+        // it changes EnvironmentSystemVariableNotReplaceable into
+        // EnvironmentIntroducesForeignEntry and this fails. Read-only throughout.
         using var installDir = new TempDir();
         var record = new RollbackRecord.RestoreEnv(
-            "machine", "Path", PriorValue: @"C:\Users\Public\evil", PreviouslyAbsent: false);
+            scope, name, PriorValue: @"C:\Users\Public\evil", PreviouslyAbsent: false);
 
         // Act
         var verdict = Anchor(installDir.Path).Check(record);
 
         // Assert
-        verdict.RefusalMessage.Should().NotBeNull();
-        verdict.RefusalMessage!.Should().Contain(@"C:\Users\Public\evil");
+        verdict.Refusal.Should().NotBeNull();
+        verdict.Refusal!.Code.Should().Be(
+            ReplayRefusalCode.EnvironmentSystemVariableNotReplaceable,
+            "the exclusion must be observable, or it is untested");
+    }
+
+    [WindowsFact("Windows registry semantics")]
+    public void Two_records_cannot_compose_into_a_whole_value_env_write()
+    {
+        // Arrange — the composition Important 2 reported. Each record is individually
+        // plausible; the pair is not. Record A restores an install-owned value (allowed by
+        // the subset model, because the target is inside install_dir), which — if the set
+        // model consulted the LIVE value — would manufacture exactly the "this install owns
+        // the whole variable" precondition record B needs to write anything at all. For a
+        // machine variable such as COR_PROFILER_PATH that is code injection into every
+        // .NET process on the box.
+        //
+        // User scope and a GUID-named scratch variable, because the point is the ordering
+        // rule rather than the hive, and this must never touch a real machine variable.
+        // The mid-sequence write is done by the test rather than by replaying record A, so
+        // nothing is broadcast and no real undo runs.
+        using var installDir = new TempDir();
+        var name = "SIGIL_ANCHOR_COMP_" + Guid.NewGuid().ToString("N");
+        var installOwned = Path.Combine(installDir.Path, "profiler.dll");
+
+        try
+        {
+            WriteUserEnv(name, @"C:\Users\Public\seed");   // pre-replay: NOT install-owned
+            var anchor = Anchor(installDir.Path);
+
+            // Act — record A is legitimate on its own.
+            var first = anchor.Check(new RollbackRecord.RestoreEnv(
+                "user", name, PriorValue: installOwned, PreviouslyAbsent: false));
+
+            // …and now the variable holds what record A would have written.
+            WriteUserEnv(name, installOwned);
+
+            var second = anchor.Check(new RollbackRecord.RestoreEnv(
+                "user", name, PriorValue: @"C:\Users\Public\evil.dll", PreviouslyAbsent: false));
+
+            // Assert
+            first.RefusalMessage.Should().BeNull("record A is individually plausible");
+            second.Refusal.Should().NotBeNull(
+                "the set model's premise must be the value the variable held BEFORE the " +
+                "replay began; read live, a record can manufacture the precondition for " +
+                "the next one and the pair composes into a primitive neither record is");
+            second.Refusal!.Code.Should().Be(ReplayRefusalCode.EnvironmentIntroducesForeignEntry);
+        }
+        finally
+        {
+            DeleteUserEnv(name);
+        }
     }
 
     [WindowsFact("Windows registry semantics")]
@@ -1112,7 +1265,7 @@ public class ReplayAnchoringTests
         env.Refusal.Should().NotBeNull();
         env.Refusal!.RecordType.Should().Be("restore_env");
         env.Refusal.Target.Should().Be("env:machine:Path");
-        env.Refusal.Code.Should().Be(ReplayRefusalCode.EnvironmentIntroducesForeignEntry);
+        env.Refusal.Code.Should().Be(ReplayRefusalCode.EnvironmentSystemVariableNotReplaceable);
 
         service.Refusal.Should().NotBeNull();
         service.Refusal!.RecordType.Should().Be("remove_service");
@@ -1152,6 +1305,61 @@ public class ReplayAnchoringTests
 
     private static ReplayAnchor AnchorFor(string installDir, string appId, InstallScope scope) =>
         ReplayAnchor.For(ReplayAnchorage.ForInstall(installDir, appId, scope))!;
+
+    /// <summary>
+    /// A real step spec of <paramref name="stepType"/> whose rollback record stashes the
+    /// prior content under <c>%TEMP%</c>, with its target materialised inside
+    /// <paramref name="installDir"/>.
+    /// </summary>
+    private static InstallStep StashBackedSpec(string stepType, string installDir)
+    {
+        var target = Path.Combine(installDir, "config.dat");
+        switch (stepType)
+        {
+            case "file_delete":
+                File.WriteAllText(target, "prior");
+                return new InstallStep.FileDelete(
+                    "s", target, IfMissing: "fail", When: null, OnFailure: OnFailure.Fail);
+
+            case "directory_delete":
+                var dir = Path.Combine(installDir, "subtree");
+                Directory.CreateDirectory(dir);
+                File.WriteAllText(Path.Combine(dir, "f.txt"), "prior");
+                return new InstallStep.DirectoryDelete(
+                    "s", dir, Recursive: true, When: null, OnFailure: OnFailure.Fail);
+
+            case "ini_write":
+                File.WriteAllText(target, "[s]\nk=old\n");
+                return new InstallStep.IniWrite(
+                    "s", target, "s", "k", "new", CreateIfMissing: false,
+                    When: null, OnFailure: OnFailure.Fail);
+
+            case "json_edit":
+                File.WriteAllText(target, "{\"k\":\"old\"}");
+                return new InstallStep.JsonEdit(
+                    "s", target, "/k", "new", CreateIfMissing: false,
+                    When: null, OnFailure: OnFailure.Fail);
+
+            case "xml_edit":
+                File.WriteAllText(target, "<root><k>old</k></root>");
+                return new InstallStep.XmlEdit(
+                    "s", target, "/root/k", Attribute: null, Value: "new",
+                    CreateIfMissing: false, When: null, OnFailure: OnFailure.Fail);
+
+            default:
+                throw new ArgumentOutOfRangeException(nameof(stepType), stepType, "unmapped step type");
+        }
+    }
+
+    /// <summary>The content source a verdict's record would actually read.</summary>
+    private static string? SourceOf(RollbackRecord record) => record switch
+    {
+        RollbackRecord.RestoreFile r => r.BackupPath,
+        RollbackRecord.RestoreDeletedFile r => r.StashPath,
+        RollbackRecord.RestoreDeletedDirectory r => r.StashPath,
+        RollbackRecord.RestoreConfigFile r => r.StashPath,
+        _ => null,
+    };
 
     /// <summary>
     /// A record of <paramref name="type"/> writing to <paramref name="destination"/> with

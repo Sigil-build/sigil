@@ -19,8 +19,24 @@ internal sealed class FileCopyStep : IStep
     {
         // Source may be a payload:// URI (rebased onto the extracted payload
         // root); destination is always a real install-side path.
+        //
+        // R16: `to` went through ctx.Resolve, not ctx.ResolvePath — so it bypassed
+        // even the payload:// traversal guard every other path-taking step gets.
+        // It is a path field and now resolves like one.
         var from = ctx.ResolvePath(_spec.From);
-        var to = ctx.Resolve(_spec.To);
+        var to = ctx.ResolvePath(_spec.To);
+
+        // R16: contain the destination BEFORE Directory.CreateDirectory, which
+        // would otherwise materialize a whole tree outside install_dir — and,
+        // where the manifest carried an unresolved token, a tree whose top
+        // directory is literally named "{var.typo}".
+        var refusal = StepDestinationGuard.Check(
+            ctx.InstallDir, "file_copy", "to", to, _spec.AllowOutsideInstallDir);
+        if (refusal is not null)
+        {
+            return Task.FromResult(StepResult.Failed(refusal));
+        }
+
         Directory.CreateDirectory(to);
 
         var (rootDir, pattern, recurse) = SplitGlob(from);

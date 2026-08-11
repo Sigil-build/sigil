@@ -500,7 +500,21 @@ public sealed class InstallSession
         // (e.g. /Update → 64) still produces a log, and write the final exit code
         // as the last line.
         EnsureLog();
-        var code = await RunHeadlessCoreAsync(output, error, ct).ConfigureAwait(false);
+        int code;
+        try
+        {
+            code = await RunHeadlessCoreAsync(output, error, ct).ConfigureAwait(false);
+        }
+        catch (InstallDirRejectedException ex)
+        {
+            // R3: a refused install_dir is a user-input error, not a crash. The
+            // silent path renders it as a plain failure (exit 1) with nothing
+            // installed — the resolver throws before any journal is opened.
+            _log?.WriteLine($"result: refused — {ex.Message}");
+            error.WriteLine(ex.Message);
+            code = 1;
+        }
+
         _log?.WriteLine($"exit code: {code}");
         return code;
     }
@@ -594,17 +608,74 @@ public sealed class InstallSession
     /// <c>&lt;scope root&gt;\&lt;App.Name&gt;</c>. Does NOT consider a previously
     /// collected path, so re-toggling scope recomputes a clean default.
     /// </summary>
-    public string ResolveDefaultInstallDir(InstallScope? scope = null) =>
-        InstallDirResolver.Resolve(
-            scope: scope ?? _scope,
-            appName: _blob.AppName,
-            appId: _blob.AppId,
-            manifestInstallDir: _blob.InstallDir,
-            cliOverride: _parsed.InstallDir,
-            collected: null,
-            // P3: an upgrade pre-fills the prior install dir so the Destination screen
-            // defaults to the existing location (preserving user data).
-            priorInstallDir: PriorInstallDirDefault);
+    /// <summary>
+    /// R3 grandfather clause: a recovered <c>priorInstallDir</c> that resolves
+    /// outside the scope root is HONOURED (an install predating the containment
+    /// rule must stay upgradable and cleanly removable), but the exemption is
+    /// recorded in the <c>/LOG</c> naming the directory. A quiet allowance is how
+    /// an exemption becomes the norm.
+    /// </summary>
+    /// <remarks>
+    /// Only the app's EXISTING location is exempt. Any other out-of-root
+    /// destination — typed into the wizard, passed as <c>/D=</c>, or declared in
+    /// the manifest — is still refused, so pairing an out-of-root prior install
+    /// with <c>/D=C:\Users\Public\evil</c> does not become a bypass. Because the
+    /// test keys on the destination rather than on which source supplied it, the
+    /// exemption (and this line) also fire on the headed path, where the wizard
+    /// echoes the prefilled prior directory back as the collected value.
+    /// </remarks>
+    private void WarnGrandfatheredPriorInstallDir(string? collected)
+    {
+        var dir = InstallDirResolver.GrandfatheredPriorDir(
+            _scope, _blob.AppName, _blob.AppId, _blob.InstallDir,
+            collected, _parsed.InstallDir, PriorInstallDirDefault);
+        if (dir is null)
+        {
+            return;
+        }
+
+        _log?.WriteLine(
+            $"install dir: honouring the prior install directory '{dir}', which is OUTSIDE the " +
+            $"{ScopeLayout.For(_scope).Name} scope root. It predates the install_dir containment rule (R3) " +
+            "and is honoured so this install stays upgradable and cleanly removable. " +
+            "A NEW destination outside the root is still refused.");
+    }
+
+    public string ResolveDefaultInstallDir(InstallScope? scope = null)
+    {
+        var effective = scope ?? _scope;
+        try
+        {
+            return InstallDirResolver.Resolve(
+                scope: effective,
+                appName: _blob.AppName,
+                appId: _blob.AppId,
+                manifestInstallDir: _blob.InstallDir,
+                cliOverride: _parsed.InstallDir,
+                collected: null,
+                // P3: an upgrade pre-fills the prior install dir so the Destination screen
+                // defaults to the existing location (preserving user data).
+                priorInstallDir: PriorInstallDirDefault);
+        }
+        catch (InstallDirRejectedException ex)
+        {
+            // R3: this is the wizard's PRE-FILL, computed by App before any window
+            // exists — a throw here would take the process down instead of showing
+            // a failure. Fall back to the scope default so the Destination screen
+            // opens on a legal path (visible to the user), and record the refusal
+            // in the /LOG. The rule itself is not weakened: whatever the user
+            // finally confirms is re-resolved through the checking path in
+            // RunInstallCoreAsync, which refuses it there.
+            //
+            // ScopeDefault, NOT the checking overload: <InstallRoot>\<AppName> is
+            // itself junction-able, so re-entering Resolve here could throw a
+            // SECOND rejection straight out of the catch that exists to stop the
+            // first one — and App.axaml.cs has no try/catch, so the wizard would
+            // die with no window at all. ScopeDefault cannot throw.
+            _log?.WriteLine($"install dir: {ex.Message} Falling back to the scope default.");
+            return InstallDirResolver.ScopeDefault(effective, _blob.AppName, _blob.AppId);
+        }
+    }
 
     /// <summary>
     /// True when the effective scope is <see cref="InstallScope.Auto"/>-derived and
@@ -678,6 +749,44 @@ public sealed class InstallSession
     private string? PriorInstallDirDefault =>
         _plan.RemovesPriorVersion
         && _plan.FoundScope == _scope       // same-scope upgrade only; a scope change uses the new scope's default
+        && !string.IsNullOrEmpty(_plan.PriorInstallDir)
+            ? _plan.PriorInstallDir
+            : null;
+
+    /// <summary>
+    /// The directory this app is RECORDED as installed in — the uninstall path's
+    /// equivalent of <see cref="PriorInstallDirDefault"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Deliberately NOT <see cref="PriorInstallDirDefault"/>, which additionally
+    /// requires <c>_plan.RemovesPriorVersion</c>. That is an upgrade concept: an
+    /// uninstall run sees the installed version equal to the packed one, so
+    /// <see cref="UpgradePlanner"/> classifies it <c>UpgradeAction.Same</c> and
+    /// <c>RemovesPriorVersion</c> is false — which would make the argument always
+    /// <c>null</c> here, and the grandfather fix inert on this path.
+    /// </para>
+    /// <para>
+    /// It matters because <c>ctx.InstallDir</c> at uninstall does two jobs, and both
+    /// silently targeted the WRONG directory for a grandfathered install (one living
+    /// outside the scope root because it predates containment): the P6/G7
+    /// files-in-use gate scans it, so a running app went undetected and the journal
+    /// replay proceeded against files in use; and <c>{install_dir}</c> in
+    /// <c>uninstall:</c> steps and pre/post-uninstall hooks expanded to a default
+    /// location that does not exist. The resolver does not throw for that — the
+    /// default IS contained — so it failed quietly, which is the worse failure.
+    /// </para>
+    /// <para>
+    /// Provenance and blast radius are the same as the install-side grandfather
+    /// clause, and it carries the same human-partner ruling: the value is the app's
+    /// own recorded <c>InstallLocation</c> from ARP (HKLM for machine scope, which is
+    /// ACL-protected; HKCU for user scope, which crosses no privilege boundary), and
+    /// it exempts exactly that one directory. <c>uninstall.exe /D=&lt;out-of-root&gt;</c>
+    /// still resolves to a DIFFERENT destination and is still refused.
+    /// </para>
+    /// </remarks>
+    private string? RecordedInstallDirForUninstall =>
+        _plan.FoundScope == _scope
         && !string.IsNullOrEmpty(_plan.PriorInstallDir)
             ? _plan.PriorInstallDir
             : null;
@@ -770,6 +879,10 @@ public sealed class InstallSession
         // rather than letting the author wonder why /P had no effect.
         WarnIgnoredLockedOverrides();
 
+        // R3 grandfather clause: an upgrade whose prior install lives outside the
+        // scope root is honoured rather than refused, but never silently.
+        WarnGrandfatheredPriorInstallDir(CollectedInstallDir);
+
         // P3 downgrade guard (defense-in-depth): the headless path already exits with
         // DowngradeBlockedExitCode and the wizard routes to a notice screen instead of
         // calling this — but never run a blocked downgrade if something reaches here.
@@ -789,10 +902,22 @@ public sealed class InstallSession
                 payloadRoot = payload.Root;
             }
 
-            var ctx = StepContext.From(
-                _blob, _parsed, payloadRoot, _collectedValues, _scope, _collectedOptions, CollectedInstallDir,
-                // P3: an upgrade installs into the prior location (default destination).
-                priorInstallDir: PriorInstallDirDefault);
+            StepContext ctx;
+            try
+            {
+                ctx = StepContext.From(
+                    _blob, _parsed, payloadRoot, _collectedValues, _scope, _collectedOptions, CollectedInstallDir,
+                    // P3: an upgrade installs into the prior location (default destination).
+                    priorInstallDir: PriorInstallDirDefault);
+            }
+            catch (InstallDirRejectedException ex)
+            {
+                // R3: refuse before anything is laid down. Both the wizard's
+                // Failed screen and the silent path render this as an install
+                // failure rather than letting it escape unhandled.
+                _log?.WriteLine($"result: refused — {ex.Message}");
+                return new InstallOutcome(false, ex.Message);
+            }
 
             // P7: hand the run's secrets to the log for redaction, and tee the
             // engine's progress (step + rollback lines) into the /LOG file.
@@ -1538,8 +1663,27 @@ public sealed class InstallSession
     /// (<c>{var.*}</c> / <c>{install_dir}</c>). No wizard-collected values or payload
     /// apply at uninstall; the install dir resolves to the manifest / CLI / default.
     /// </summary>
+    /// <remarks>
+    /// <c>priorInstallDir</c> is threaded through for the R3 grandfather clause, and
+    /// it comes from <see cref="RecordedInstallDirForUninstall"/> rather than
+    /// <see cref="PriorInstallDirDefault"/> — the latter is gated on an upgrade
+    /// concept that is never true on this path, which would leave the argument
+    /// permanently <c>null</c> and the fix inert. See that property for what
+    /// silently breaks without it.
+    /// </remarks>
     private StepContext BuildUninstallContext() =>
-        StepContext.From(_blob, _parsed, payloadRoot: null, collected: null, scope: _scope);
+        StepContext.From(
+            _blob, _parsed, payloadRoot: null, collected: null, scope: _scope,
+            priorInstallDir: RecordedInstallDirForUninstall);
+
+    /// <summary>
+    /// Test seam for <see cref="BuildUninstallContext"/>. It exists so the
+    /// grandfather pin drives the REAL method rather than reconstructing its
+    /// arguments by hand — a hand-built equivalent stays green when the argument is
+    /// deleted, which is exactly how the first version of that pin failed to guard
+    /// anything.
+    /// </summary>
+    internal StepContext BuildUninstallContextForTesting() => BuildUninstallContext();
 
     /// <summary>
     /// The LAST-RESORT anchor for a persisted-journal replay (R1 clause (c)): the
@@ -1584,7 +1728,19 @@ public sealed class InstallSession
         // the same reversal trail as the headless path.
         EnsureLog();
         var effectiveProgress = _log is null ? progress : new LoggingProgress(progress, _log);
-        var ctx = BuildUninstallContext();
+
+        StepContext ctx;
+        try
+        {
+            ctx = BuildUninstallContext();
+        }
+        catch (InstallDirRejectedException ex)
+        {
+            // R3: `uninstall.exe /D=<out-of-root>` reaches the same resolver.
+            // Surface it on the wizard's failure screen, not as a crash.
+            _log?.WriteLine($"result: uninstall refused — {ex.Message}");
+            return new InstallOutcome(false, ex.Message);
+        }
 
         // P2: pre_uninstall hooks (abort on failure) around the journal replay.
         var preHook = await HookRunner.RunAsync(
@@ -1720,9 +1876,16 @@ public sealed class InstallSession
 #pragma warning disable CA1031 // Launch is a convenience: never fault the install on a bad target.
         try
         {
+            // priorInstallDir matches what RunInstallCoreAsync used. Without it a
+            // GRANDFATHERED install — one that legitimately lives outside the scope
+            // root, which R3's exemption exists to keep working — makes
+            // InstallDirResolver refuse here, the throw lands in the blanket catch
+            // below, and the Done screen's "Launch <app>" button silently does
+            // nothing. The install succeeded; only the launch was lost.
             var ctx = StepContext.From(
                 _blob, _parsed, payloadRoot: null, collected: _collectedValues,
-                scope: _scope, collectedOptions: _collectedOptions, collectedInstallDir: CollectedInstallDir);
+                scope: _scope, collectedOptions: _collectedOptions, collectedInstallDir: CollectedInstallDir,
+                priorInstallDir: PriorInstallDirDefault);
 
             var path = ctx.ResolvePath(_blob.RunAfterInstallPath!);
             System.Collections.Generic.List<string>? args = null;

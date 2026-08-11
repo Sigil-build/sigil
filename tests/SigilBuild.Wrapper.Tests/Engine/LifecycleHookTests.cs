@@ -20,8 +20,13 @@ namespace SigilBuild.Wrapper.Tests.Engine;
 /// </summary>
 public sealed class LifecycleHookTests
 {
+    // R16 contains directory_create's `path` to install_dir. These hooks create
+    // marker directories in an OS temp directory, which no real silent install
+    // resolves as install_dir, so the fixture declares the out-of-tree write with
+    // the production per-step opt-out rather than the rule being relaxed for it.
+    // What is under test here is hook ordering, not containment.
     private static InstallStep.DirectoryCreate Mkdir(string id, string path, OnFailure onFailure)
-        => new(id, path, When: null, onFailure);
+        => new(id, path, When: null, onFailure) { AllowOutsideInstallDir = true };
 
     // A step that always fails (glob root does not exist), used to exercise a
     // failing hook without needing Windows-specific programs.

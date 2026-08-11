@@ -18,14 +18,34 @@ internal static class ConfigFileEditor
     /// as a step failure (the file is left untouched; the journal entry recorded
     /// before the write makes rollback a no-op).
     /// </param>
+    /// <param name="stepType">
+    /// The manifest step type (<c>ini_write</c> / <c>json_edit</c> /
+    /// <c>xml_edit</c>), used to name the step in an R16 containment refusal.
+    /// </param>
+    /// <param name="allowOutsideInstallDir">
+    /// The step's <c>allow_outside_install_dir</c> opt-out (R16).
+    /// </param>
     public static StepResult Edit(
         StepContext ctx, RollbackJournal journal, string rawPath, bool createIfMissing,
-        Func<string?, string> transform)
+        Func<string?, string> transform, string stepType, bool allowOutsideInstallDir)
     {
         ArgumentNullException.ThrowIfNull(ctx);
         ArgumentNullException.ThrowIfNull(journal);
 
         var path = ctx.ResolvePath(rawPath);
+
+        // R16: File.WriteAllText below traverses reparse points and truncates an
+        // existing target in place, keeping its DACL — so an attacker-planted
+        // placeholder outside install_dir stays attacker-writable after the
+        // elevated installer writes to it — and Directory.CreateDirectory would
+        // materialize the whole tree. Refused before the file is even stat'ed.
+        var refusal = StepDestinationGuard.Check(
+            ctx.InstallDir, stepType, "path", path, allowOutsideInstallDir);
+        if (refusal is not null)
+        {
+            return new StepResult(false, refusal);
+        }
+
         var existed = File.Exists(path);
         if (!existed && !createIfMissing)
         {

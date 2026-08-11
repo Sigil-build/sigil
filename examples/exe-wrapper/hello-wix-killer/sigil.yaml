@@ -13,11 +13,15 @@ package:
   formats: [exe]
   architectures: [x64]
 
+# The destination is deliberately NOT a parameter. `{install_dir}` is the
+# installer's own resolved destination: it defaults to `<scope root>\<app name>`,
+# the wizard's Destination screen writes to it, `/D=` overrides it, and an upgrade
+# reuses the prior location. A `parameters.install_dir` would be a second,
+# unrelated value that diverges from all four the moment the user picks anywhere
+# else — and `%ProgramFiles%` in a parameter default is never expanded (step paths
+# get no environment-variable expansion), so it would resolve relative to the
+# working directory and be refused for landing outside install_dir.
 parameters:
-  install_dir:
-    type: path
-    default: "%ProgramFiles%\\HelloWiXKiller"
-    install_time: true
   registered_user:
     type: string
     default: "Default User"
@@ -27,7 +31,7 @@ install_steps:
   - id: copy-app
     type: file_copy
     from: payload/**
-    to: ${parameters.install_dir}
+    to: "{install_dir}"
   - id: reg-displayname
     type: registry_write
     hive: HKCU
@@ -47,8 +51,10 @@ install_steps:
     hive: HKCU
     key: "Software\\HelloWiXKiller"
     name: InstallDir
-    type_value: REG_EXPAND_SZ
-    value: ${parameters.install_dir}
+    # REG_SZ, not REG_EXPAND_SZ: {install_dir} resolves to a literal absolute
+    # path, so there is nothing left for the registry to expand.
+    type_value: REG_SZ
+    value: "{install_dir}"
   - id: reg-user
     type: registry_write
     hive: HKCU
@@ -56,16 +62,20 @@ install_steps:
     name: RegisteredUser
     type_value: REG_SZ
     value: ${parameters.registered_user}
+  # `start_menu` and `desktop` are named anchors that resolve to the SCOPE-CORRECT
+  # shell folder — the all-users folders for a machine install, the current user's
+  # for a per-user one. Writing a folder called "StartMenu" inside the install
+  # directory, as this example used to, puts no entry in anyone's Start Menu.
   - id: shortcut-startmenu
     type: shortcut_create
-    target: "${parameters.install_dir}\\app.exe"
-    location: "${parameters.install_dir}\\StartMenu"
+    target: "{install_dir}\\app.exe"
+    location: start_menu
     name: HelloWiXKiller
     description: "Launch HelloWiXKiller"
   - id: shortcut-desktop
     type: shortcut_create
-    target: "${parameters.install_dir}\\app.exe"
-    location: "${parameters.install_dir}\\Desktop"
+    target: "{install_dir}\\app.exe"
+    location: desktop
     name: HelloWiXKiller-Desktop
     description: "Launch HelloWiXKiller"
 

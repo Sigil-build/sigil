@@ -94,14 +94,24 @@ public class ScheduledTaskCreateStepTests
     }
 
     [Fact]
-    public async Task Journal_records_DeleteScheduledTask_before_attempting_the_create()
+    public async Task An_unanchored_program_is_refused_before_schtasks_is_ever_started()
     {
-        // Locally-runnable end-to-end assertion (no admin required): the
-        // rollback record is appended BEFORE schtasks.exe runs, so even if the
-        // create itself fails (e.g. access denied — this sandbox is not
-        // elevated) or the process never returns, the journal already knows
-        // how to undo. The live create+query+delete leg needs /RU SYSTEM
-        // elevation and is verified on the CI VM (AGENTS.md §2).
+        // Was `Journal_records_DeleteScheduledTask_before_attempting_the_create`.
+        // R3/R9 changed what this arrangement means: a context with no resolved
+        // install_dir now fails the containment guard, so the step returns before
+        // the journal entry AND before schtasks.exe is started. That is strictly
+        // the safer local assertion — the old shape issued a real
+        // `schtasks /Create … /RU SYSTEM` that only failed because this sandbox is
+        // unelevated, and would have created a live SYSTEM task on an elevated
+        // runner.
+        //
+        // What is asserted locally now is the invariant that replaced it: this
+        // step journals NOTHING on any path that does not reach schtasks.exe —
+        // here, in every case in PrivilegedStepContainmentTests, and in
+        // StepValueInjectionTests' quote refusal. Journal-BEFORE-exec ordering on
+        // the success path is verified end-to-end on the CI VM by
+        // ScheduledTaskCreateInstallTests, which is the only place it can be
+        // observed without creating a real SYSTEM task.
         if (!OperatingSystem.IsWindows())
         {
             return;
@@ -112,10 +122,10 @@ public class ScheduledTaskCreateStepTests
             Trigger: "logon", RunLevel: "limited", When: null, OnFailure: OnFailure.Continue);
         var journal = new RollbackJournal();
 
-        await new ScheduledTaskCreateStep(spec).RunAsync(StepContext.Empty, journal, default);
+        var result = await new ScheduledTaskCreateStep(spec).RunAsync(StepContext.Empty, journal, default);
 
-        journal.Records.Should().ContainSingle()
-            .Which.Should().BeOfType<RollbackRecord.DeleteScheduledTask>()
-            .Which.TaskName.Should().Be("SigilTestTask_DoesNotPersist");
+        result.Success.Should().BeFalse();
+        result.Error.Should().Contain("no resolved install_dir");
+        journal.Records.Should().BeEmpty("nothing was attempted, so there is nothing to undo");
     }
 }

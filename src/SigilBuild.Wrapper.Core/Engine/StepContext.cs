@@ -497,11 +497,36 @@ public sealed class StepContext
     /// <exception cref="System.FormatException">
     /// A <c>payload://</c> path was used but no payload is available for this
     /// run, or the relative part escapes the payload root (a path-traversal
-    /// attempt).
+    /// attempt); or a <c>{token}</c> survived substitution (register row R16).
     /// </exception>
     public string ResolvePath(string template)
     {
         var resolved = Resolve(template);
+
+        // R16: a brace token that never resolved must not reach the filesystem.
+        // The check lives HERE, at the one resolver every path-valued step field
+        // goes through, rather than in the per-step destination guards.
+        // Containment legitimately varies per step — some writes deliberately land
+        // outside install_dir — but "this path still contains an unresolved token"
+        // never does: it is a manifest typo in `directory_create`, `run_program`,
+        // `shortcut_create` and `scheduled_task_create` exactly as much as in
+        // `file_copy`. Previously an unknown token was left literal, so one typo in
+        // an installer.vars name silently created a directory named "{var.dest}"
+        // and the install reported success. InstallEngine turns the throw into a
+        // typed step failure.
+        var token = BraceTokenScanner.FirstUnresolved(resolved);
+        if (token is not null)
+        {
+            throw new System.FormatException(
+                string.Create(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    $"the path '{resolved}' still contains the unresolved token '{{{token}}}' after " +
+                    $"substitution (from '{template}'). Refusing to use it as a path — writing it " +
+                    $"verbatim would create a directory literally named '{{{token}}}'. Check the " +
+                    $"spelling: an installer.vars entry must be declared before a '{{var.<name>}}' " +
+                    $"token can expand."));
+        }
+
         if (!resolved.StartsWith(PayloadScheme, System.StringComparison.Ordinal))
         {
             return resolved;

@@ -26,7 +26,8 @@ internal sealed class IniWriteStep : IStep
 
         var result = ConfigFileEditor.Edit(
             ctx, journal, _spec.Path, _spec.CreateIfMissing,
-            current => IniEditor.Set(current, section, key, value));
+            current => IniEditor.Set(current, section, key, value),
+            "ini_write", _spec.AllowOutsideInstallDir);
 
         return Task.FromResult(result);
     }
@@ -39,8 +40,26 @@ internal sealed class IniWriteStep : IStep
 /// </summary>
 internal static class IniEditor
 {
+    /// <exception cref="ArgumentException">
+    /// <paramref name="section"/>, <paramref name="key"/> or <paramref name="value"/>
+    /// contains a carriage return or line feed, or begins with <c>[</c>
+    /// (register row R32).
+    /// </exception>
     public static string Set(string? content, string section, string key, string value)
     {
+        // R32: section/key/value are ctx.Resolve-expanded and concatenated
+        // verbatim into "key=value", so a value of "9\n[admin]\nenabled=true"
+        // wrote arbitrary entries into another section — which matters as soon as
+        // the value comes from a wizard field or a registry_read var rather than a
+        // literal. Rejected rather than escaped: an INI has no escape for a
+        // newline inside a value, and all three are pack-time-authored, so a hard
+        // failure surfaces the mistake to the publisher instead of silently
+        // mangling it. ConfigFileEditor turns the throw into a step failure with
+        // the file left untouched.
+        RejectLineInjection("section", section);
+        RejectLineInjection("key", key);
+        RejectLineInjection("value", value);
+
         var newline = content is not null && content.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\r\n";
         if (content is not null && !content.Contains("\r\n", StringComparison.Ordinal) && content.Contains('\n', StringComparison.Ordinal))
         {
@@ -105,6 +124,39 @@ internal static class IniEditor
         lines.Insert(insertAt, key + "=" + value);
         return string.Join(newline, lines);
     }
+
+    /// <summary>
+    /// Refuse the three shapes that let an <c>ini_write</c> field write something
+    /// other than the one <c>key=value</c> it declares (R32): a carriage return or
+    /// line feed, which starts a new INI line, and a leading <c>[</c>, which is
+    /// how a section header begins.
+    /// </summary>
+    private static void RejectLineInjection(string field, string text)
+    {
+        if (text.Contains('\r', StringComparison.Ordinal) || text.Contains('\n', StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                $"ini_write: '{field}' must not contain a carriage return or line feed — it would " +
+                $"inject additional lines into the INI file (got '{Describe(text)}')",
+                field);
+        }
+
+        if (text.Length > 0 && text[0] == '[')
+        {
+            throw new ArgumentException(
+                $"ini_write: '{field}' must not begin with '[' — that is how an INI section header " +
+                $"starts (got '{text}')",
+                field);
+        }
+    }
+
+    /// <summary>
+    /// Render a rejected value with its line breaks made visible, so the failure
+    /// message shows what was wrong instead of splitting itself across lines.
+    /// </summary>
+    private static string Describe(string text) =>
+        text.Replace("\r", "\\r", StringComparison.Ordinal)
+            .Replace("\n", "\\n", StringComparison.Ordinal);
 
     private static int FindNextHeader(List<string> lines, int from)
     {

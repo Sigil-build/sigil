@@ -65,12 +65,30 @@ internal sealed class FirewallRuleStep : IStep
         ArgumentNullException.ThrowIfNull(journal);
 
         var name = ctx.Resolve(_spec.Name);
-        // Program may reference the extracted payload (payload://) or {install_dir}.
+        // Program, when set, must resolve INSIDE install_dir. A payload:// value
+        // rebases onto the extraction temp directory, which is user-writable and is
+        // deleted when the run ends, so the guard below refuses it — file_copy the
+        // executable into install_dir first. See PrivilegedTargetGuard's remarks.
         var program = _spec.Program is null ? null : ctx.ResolvePath(_spec.Program);
 
         if (string.IsNullOrWhiteSpace(name))
         {
             return StepResult.Failed("firewall_rule: name is empty after substitution");
+        }
+
+        // R3/R9: `program=` scopes the rule to one executable, so a path an
+        // unprivileged user can replace hands that user the firewall exemption the
+        // publisher granted their own binary. Only checked when a program was
+        // declared — a program-less rule has no target to anchor. Before the
+        // journal entry, so a refused step never queues a DeleteFirewallRule for a
+        // rule this installer did not add.
+        if (program is not null)
+        {
+            var refusal = PrivilegedTargetGuard.Check("firewall_rule", "program", ctx.InstallDir, program);
+            if (refusal is not null)
+            {
+                return StepResult.Failed(refusal);
+            }
         }
 
         // Record the inverse BEFORE any mutation (including the idempotency

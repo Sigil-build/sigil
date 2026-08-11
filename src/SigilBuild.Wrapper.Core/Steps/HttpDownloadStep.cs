@@ -32,6 +32,18 @@ internal sealed class HttpDownloadStep : IStep
         var url = ctx.Resolve(_spec.Url);
         var dest = ctx.ResolvePath(_spec.Dest);
 
+        // R16: contain the download destination before anything is created. The
+        // web-installer stub legitimately downloads outside install_dir — it lands
+        // in the per-run staging directory, which resolves from its own token, so
+        // the token check passes and the containment check is the one the stub's
+        // synthesized step opts out of.
+        var refusal = StepDestinationGuard.Check(
+            ctx.InstallDir, "http_download", "dest", dest, _spec.AllowOutsideInstallDir);
+        if (refusal is not null)
+        {
+            return new StepResult(false, refusal);
+        }
+
         // Defense-in-depth: pack-time rejects http://, but a token-built URL is
         // re-checked here at run time.
         if (!url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))

@@ -67,7 +67,11 @@ public sealed class ScreenParamFlowTests
 
         var steps = new InstallStep[]
         {
-            new InstallStep.DirectoryCreate("g", gatedDir, When: "param.autostart == true", OnFailure.Fail),
+            // R16: gatedDir is in an OS temp directory, never install_dir, so the
+            // out-of-tree write is declared with the production per-step opt-out.
+            // Under test here is parameter gating, not containment.
+            new InstallStep.DirectoryCreate("g", gatedDir, When: "param.autostart == true", OnFailure.Fail)
+                { AllowOutsideInstallDir = true },
         };
 
         // autostart = false → the step's `when` is false → skipped.

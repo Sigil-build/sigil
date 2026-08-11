@@ -123,7 +123,11 @@ public sealed class InstallLoggingTests
             InstallSteps: new InstallStep[]
             {
                 // Step 1 succeeds and journals a RemoveDirectory (fresh dir)…
-                new InstallStep.DirectoryCreate("mk", Path.Combine(tmp.Path, "sub"), When: null, OnFailure.Rollback),
+                // R16: an OS temp directory is never install_dir, so the
+                // out-of-tree write is declared with the production per-step
+                // opt-out. Under test here is the /LOG rollback narrative.
+                new InstallStep.DirectoryCreate("mk", Path.Combine(tmp.Path, "sub"), When: null, OnFailure.Rollback)
+                    { AllowOutsideInstallDir = true },
                 // …step 2 fails (glob root does not exist) → rollback replays step 1.
                 new InstallStep.FileCopy(
                     "cp",
@@ -165,8 +169,10 @@ public sealed class InstallLoggingTests
             {
                 // Gated on a LOCKED option whose default is true → the step must run
                 // even though the CLI tried to force the option off.
+                // R16: gatedDir is in an OS temp directory — see the note above.
                 new InstallStep.DirectoryCreate(
-                    "mk", gatedDir, When: "option.add_to_path", OnFailure.Fail),
+                    "mk", gatedDir, When: "option.add_to_path", OnFailure.Fail)
+                    { AllowOutsideInstallDir = true },
             },
             PreInstall: Array.Empty<InstallStep>(),
             PostInstall: Array.Empty<InstallStep>(),

@@ -54,7 +54,11 @@ public sealed class SecretHygieneTests
         // A step whose resolved path embeds the secret — so the rollback journal's
         // RemoveDirectory record would carry it verbatim if not redacted.
         var dir = tmp.Path + "/app-${parameters.license_key}";
-        var blob = BlobWith(new InstallStep.DirectoryCreate("mk", dir, When: null, OnFailure.Fail));
+        // R16: an OS temp directory is never install_dir, so the out-of-tree write
+        // is declared with the production per-step opt-out. Under test here is
+        // secret redaction in the journal and the log.
+        var blob = BlobWith(new InstallStep.DirectoryCreate("mk", dir, When: null, OnFailure.Fail)
+        { AllowOutsideInstallDir = true });
         var parsed = CommandLineParser.Parse(new[] { $"/Plicense_key={Secret}" }, blob.Parameters);
         var ctx = StepContext.From(blob, parsed);
 
@@ -100,7 +104,13 @@ public sealed class SecretHygieneTests
         var blob = new WrapperBlob(
             AppId: "com.acme.Studio",
             Parameters: new[] { LicenseKey() },
-            InstallSteps: new InstallStep[] { new InstallStep.DirectoryCreate("mk", dir, When: null, OnFailure.Fail) },
+            // R16: an OS temp directory is never install_dir — see the note above.
+            // Note the {var.tainted} token must still RESOLVE, opt-out or not.
+            InstallSteps: new InstallStep[]
+            {
+                new InstallStep.DirectoryCreate("mk", dir, When: null, OnFailure.Fail)
+                    { AllowOutsideInstallDir = true },
+            },
             PreInstall: Array.Empty<InstallStep>(),
             PostInstall: Array.Empty<InstallStep>(),
             UpdateSteps: Array.Empty<InstallStep>(),
@@ -162,27 +172,36 @@ public sealed class SecretHygieneTests
     // redaction for these three step types.
 
     [Fact]
-    public async Task ScheduledTaskCreate_secret_in_name_is_absent_from_journal()
+    public void ScheduledTaskCreate_secret_in_name_is_absent_from_journal()
     {
         if (!OperatingSystem.IsWindows())
         {
             return;
         }
 
-        var blob = BlobWith(new InstallStep.ScheduledTaskCreate(
-            "t", "SigilTestTask_${parameters.license_key}", "app.exe", Arguments: null,
-            Trigger: "logon", RunLevel: "limited", When: null, OnFailure: OnFailure.Continue));
+        // R3/R9 changed how this record can be produced. `scheduled_task_create`
+        // now refuses a program that is not anchored in an admin-only-writable
+        // install_dir, so driving the step far enough to journal would mean
+        // anchoring it somewhere admin-only — and then schtasks.exe DOES run, with
+        // /RU SYSTEM, creating a live SYSTEM task named after the secret on any
+        // elevated runner. The record is therefore appended directly. The property
+        // under test is unchanged and still exercises exactly the surface it
+        // always did: UninstallStateStore's redaction over a DeleteScheduledTask
+        // record whose task name came out of ctx.Resolve. That the step appends
+        // this record before it launches schtasks is asserted end-to-end by
+        // ScheduledTaskCreateInstallTests on the CI VM.
+        var blob = BlobWith();
         var parsed = CommandLineParser.Parse(new[] { $"/Plicense_key={Secret}" }, blob.Parameters);
         var ctx = StepContext.From(blob, parsed);
 
-        var result = await new InstallEngine().RunAsync(
-            Array.Empty<InstallStep>(), blob.InstallSteps, Array.Empty<InstallStep>(),
-            ctx, progress: null, CancellationToken.None);
+        var journal = new RollbackJournal();
+        journal.Append(new RollbackRecord.DeleteScheduledTask(
+            ctx.Resolve("SigilTestTask_${parameters.license_key}")));
 
         var appId = "t11-1-secret-" + Guid.NewGuid().ToString("N");
         try
         {
-            UninstallStateStore.Save(appId, result.Journal, InstallScope.User, ctx.SecretValues);
+            UninstallStateStore.Save(appId, journal, InstallScope.User, ctx.SecretValues);
             var content = File.ReadAllText(UninstallStateStore.PathFor(appId, InstallScope.User));
             content.Should().NotContain(Secret, "the persisted journal must never contain a secret value");
             content.Should().Contain("***", "the secret occurrence in the journal must be redacted");
@@ -234,11 +253,24 @@ public sealed class SecretHygieneTests
         }
 
         // A non-existent path (LoadFailed) — safe to run locally without admin
-        // or a real self-registering DLL (mirrors ComRegisterStepTests).
+        // or a real self-registering DLL (mirrors ComRegisterStepTests), and safe
+        // on an elevated runner too: nothing is ever registered.
+        //
+        // R3/R9: the DLL path is now anchored to install_dir and must sit in an
+        // admin-only-writable directory, so the run is machine-scope into
+        // %ProgramFiles%\Common Files — a real admin-only directory — with a file
+        // that does not exist in it. The step is admitted, journals its inverse,
+        // and then LoadLibraryEx fails, which is exactly the arrangement this test
+        // has always used.
         var blob = BlobWith(new InstallStep.ComRegister(
-            "reg", @"C:\does\not\exist\${parameters.license_key}.dll", When: null, OnFailure: OnFailure.Continue));
+            "reg", @"{install_dir}\${parameters.license_key}.dll", When: null, OnFailure: OnFailure.Continue));
         var parsed = CommandLineParser.Parse(new[] { $"/Plicense_key={Secret}" }, blob.Parameters);
-        var ctx = StepContext.From(blob, parsed);
+        var ctx = StepContext.From(
+            blob,
+            parsed,
+            scope: InstallScope.Machine,
+            collectedInstallDir: Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Common Files"));
 
         var result = await new InstallEngine().RunAsync(
             Array.Empty<InstallStep>(), blob.InstallSteps, Array.Empty<InstallStep>(),

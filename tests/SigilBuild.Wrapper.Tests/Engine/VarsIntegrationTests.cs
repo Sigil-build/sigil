@@ -49,7 +49,13 @@ public sealed class VarsIntegrationTests
             Parameters: Array.Empty<ParameterDefinition>(),
             InstallSteps: new InstallStep[]
             {
-                new InstallStep.FileCopy("cp", srcFile, "{var.dest}", Overwrite: true, When: null, OnFailure.Fail),
+                // R16: the registry-backed destination is an OS temp directory,
+                // never install_dir, so the out-of-tree write is declared with the
+                // production per-step opt-out. What is under test is the var
+                // data-flow — and note the {var.dest} token still has to RESOLVE:
+                // an undeclared var would now fail the step, opt-out or not.
+                new InstallStep.FileCopy("cp", srcFile, "{var.dest}", Overwrite: true, When: null, OnFailure.Fail)
+                    { AllowOutsideInstallDir = true },
             },
             PreInstall: Array.Empty<InstallStep>(),
             PostInstall: Array.Empty<InstallStep>(),

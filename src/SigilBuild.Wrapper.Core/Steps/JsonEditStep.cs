@@ -29,7 +29,8 @@ internal sealed class JsonEditStep : IStep
 
         var result = ConfigFileEditor.Edit(
             ctx, journal, _spec.Path, _spec.CreateIfMissing,
-            current => JsonEditor.Set(current, pointer, value));
+            current => JsonEditor.Set(current, pointer, value),
+            "json_edit", _spec.AllowOutsideInstallDir);
 
         return Task.FromResult(result);
     }

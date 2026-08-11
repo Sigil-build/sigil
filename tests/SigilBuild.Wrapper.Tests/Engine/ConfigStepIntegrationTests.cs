@@ -110,11 +110,20 @@ public sealed class ConfigStepIntegrationTests
             var blob = new WrapperBlob(
                 AppId: appId,
                 Parameters: Array.Empty<ParameterDefinition>(),
+                // R16 contains every step destination to install_dir. These three
+                // edit files in an OS temp directory, which no real silent install
+                // resolves as install_dir — so the fixture declares the out-of-tree
+                // write with the very per-step manifest opt-out a publisher editing
+                // %ProgramData% would use. The production rule is not relaxed;
+                // StepDestinationContainmentTests exercises it directly.
                 InstallSteps: new InstallStep[]
                 {
-                    new InstallStep.IniWrite("i", ini, "app", "x", "9", false, null, OnFailure.Fail),
-                    new InstallStep.JsonEdit("j", json, "/a", "2", false, null, OnFailure.Fail),
-                    new InstallStep.XmlEdit("x", xml, "/root/a", null, "new", false, null, OnFailure.Fail),
+                    new InstallStep.IniWrite("i", ini, "app", "x", "9", false, null, OnFailure.Fail)
+                        { AllowOutsideInstallDir = true },
+                    new InstallStep.JsonEdit("j", json, "/a", "2", false, null, OnFailure.Fail)
+                        { AllowOutsideInstallDir = true },
+                    new InstallStep.XmlEdit("x", xml, "/root/a", null, "new", false, null, OnFailure.Fail)
+                        { AllowOutsideInstallDir = true },
                 },
                 PreInstall: Array.Empty<InstallStep>(),
                 PostInstall: Array.Empty<InstallStep>(),
@@ -155,7 +164,10 @@ public sealed class ConfigStepIntegrationTests
                 },
                 InstallSteps: new InstallStep[]
                 {
-                    new InstallStep.IniWrite("i", ini, "auth", "token", "${parameters.token}", false, null, OnFailure.Fail),
+                    // R16: an OS temp directory is never install_dir — see the
+                    // note in Silent_install_applies_all_three_config_edits.
+                    new InstallStep.IniWrite("i", ini, "auth", "token", "${parameters.token}", false, null, OnFailure.Fail)
+                        { AllowOutsideInstallDir = true },
                 },
                 PreInstall: Array.Empty<InstallStep>(),
                 PostInstall: Array.Empty<InstallStep>(),

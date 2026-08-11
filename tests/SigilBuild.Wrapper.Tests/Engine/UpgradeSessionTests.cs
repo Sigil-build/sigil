@@ -27,11 +27,17 @@ public sealed class UpgradeSessionTests
         Scope: scope,
         Version: version);
 
+    // R3: an install_dir is now contained to the scope root, so a user-scope
+    // prior install must sit inside the user's own root for the resolver to
+    // accept it as an upgrade destination. (It used to be a bare C:\Apps\Acme.)
+    private static readonly string PriorDir =
+        Path.Combine(ScopeLayout.For(InstallScope.User).InstallRoot, "Acme");
+
     private static UpgradeState Installed(
         string version, InstallScope scope = InstallScope.User, string? uninstallExe = null) =>
         new(Found: true, InstalledVersion: version,
-            PriorInstallDir: @"C:\Apps\Acme",
-            PriorUninstallExe: uninstallExe ?? @"C:\Apps\Acme\uninstall.exe",
+            PriorInstallDir: PriorDir,
+            PriorUninstallExe: uninstallExe ?? Path.Combine(PriorDir, "uninstall.exe"),
             FoundScope: scope);
 
     private static InstallSession Session(WrapperBlob blob, UpgradeState state, params string[] args)
@@ -121,12 +127,12 @@ public sealed class UpgradeSessionTests
     public void Same_scope_upgrade_defaults_the_destination_to_the_prior_install_dir()
     {
         var state = new UpgradeState(Found: true, InstalledVersion: "1.0.0",
-            PriorInstallDir: @"C:\Apps\Acme", PriorUninstallExe: @"C:\Apps\Acme\uninstall.exe",
+            PriorInstallDir: PriorDir, PriorUninstallExe: Path.Combine(PriorDir, "uninstall.exe"),
             FoundScope: InstallScope.User);
         // Auto manifest, no flag → resolves user; prior install is user → same scope.
         var session = Session(Blob("2.0.0", InstallScope.Auto), state, "/silent");
 
-        session.ResolveDefaultInstallDir().Should().Be(@"C:\Apps\Acme", "an in-place upgrade keeps the prior dir");
+        session.ResolveDefaultInstallDir().Should().Be(PriorDir, "an in-place upgrade keeps the prior dir");
     }
 
     [Fact]

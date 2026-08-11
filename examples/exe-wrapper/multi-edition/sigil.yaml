@@ -20,23 +20,25 @@ parameters:
     default: community
     install_time: true
     description: Which feature set to install.
-  install_dir:
-    type: path
-    default: "%ProgramFiles%\\MultiEdition"
-    install_time: true
 
+# The destination is deliberately NOT a parameter. Use the `{install_dir}` runtime
+# token — the installer's own resolved destination, which the wizard's Destination
+# screen, `/D=` and upgrade-in-place all feed. A parameter default of
+# "%ProgramFiles%\\MultiEdition" is never environment-expanded (step paths get no
+# environment-variable expansion), so it would resolve relative to the working
+# directory and be refused for landing outside install_dir.
 install_steps:
   - id: copy-base
     type: file_copy
     from: payload/base/**
-    to: ${parameters.install_dir}
+    to: "{install_dir}"
   - id: copy-pro
     type: file_copy
     from: payload/pro/**
-    to: "${parameters.install_dir}\\pro"
+    to: "{install_dir}\\pro"
     when: "parameters.edition in ['professional', 'enterprise']"
   - id: copy-ent
     type: file_copy
     from: payload/ent/**
-    to: "${parameters.install_dir}\\enterprise"
+    to: "{install_dir}\\enterprise"
     when: "parameters.edition == 'enterprise'"

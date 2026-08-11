@@ -111,7 +111,11 @@ public sealed class FilesInUseTests
                 Parameters: Array.Empty<ParameterDefinition>(),
                 InstallSteps: new InstallStep[]
                 {
-                    new InstallStep.DirectoryCreate("body", body, When: null, OnFailure.Fail),
+                    // R16: an OS temp directory is never install_dir, so the
+                    // out-of-tree write is declared with the production per-step
+                    // opt-out. Under test here is the files-in-use gate.
+                    new InstallStep.DirectoryCreate("body", body, When: null, OnFailure.Fail)
+                        { AllowOutsideInstallDir = true },
                 },
                 PreInstall: Array.Empty<InstallStep>(),
                 PostInstall: Array.Empty<InstallStep>(),
@@ -153,7 +157,11 @@ public sealed class FilesInUseTests
                 Parameters: Array.Empty<ParameterDefinition>(),
                 InstallSteps: new InstallStep[]
                 {
-                    new InstallStep.DirectoryCreate("body", body, When: null, OnFailure.Fail),
+                    // R16: an OS temp directory is never install_dir, so the
+                    // out-of-tree write is declared with the production per-step
+                    // opt-out. Under test here is the files-in-use gate.
+                    new InstallStep.DirectoryCreate("body", body, When: null, OnFailure.Fail)
+                        { AllowOutsideInstallDir = true },
                 },
                 PreInstall: Array.Empty<InstallStep>(),
                 PostInstall: Array.Empty<InstallStep>(),

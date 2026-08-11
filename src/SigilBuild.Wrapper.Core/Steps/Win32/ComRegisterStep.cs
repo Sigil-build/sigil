@@ -47,11 +47,26 @@ internal sealed class ComRegisterStep : IStep
         ArgumentNullException.ThrowIfNull(ctx);
         ArgumentNullException.ThrowIfNull(journal);
 
-        // Path may reference the extracted payload (payload://) or {install_dir}.
+        // Path must resolve INSIDE install_dir. A payload:// value rebases onto the
+        // extraction temp directory, which is user-writable and is deleted when the
+        // run ends, so the guard below refuses it — file_copy the DLL into
+        // install_dir first. See PrivilegedTargetGuard's remarks.
         var path = ctx.ResolvePath(_spec.Path);
         if (string.IsNullOrWhiteSpace(path))
         {
             return Task.FromResult(StepResult.Failed("com_register: path is empty after substitution"));
+        }
+
+        // R3/R9: this DLL is loaded into the ELEVATED installer process and its
+        // DllRegisterServer export is invoked, so a user-writable path here is
+        // straight code execution as administrator. Anchored inside install_dir
+        // and required to sit in an admin-only-writable directory, before the
+        // journal entry — a refused step must not queue an UnregisterCom for a
+        // registration it never made.
+        var refusal = PrivilegedTargetGuard.Check("com_register", "path", ctx.InstallDir, path);
+        if (refusal is not null)
+        {
+            return Task.FromResult(StepResult.Failed(refusal));
         }
 
         // Journal the inverse (DllUnregisterServer) BEFORE registering so an

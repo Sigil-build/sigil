@@ -47,7 +47,15 @@ internal sealed class ServiceInstallStep : IStep
         ArgumentNullException.ThrowIfNull(ctx);
 
         var name = ctx.Resolve(_spec.Name);
-        var binaryPath = ctx.Resolve(_spec.BinaryPath);
+        // R16: binary_path is a PATH field and now resolves like one — it used
+        // ctx.Resolve, so it got neither the payload:// traversal guard nor the
+        // unresolved-token check every other path field has. It must resolve INSIDE
+        // install_dir: a payload:// value rebases onto the extraction temp
+        // directory, which is user-writable and is deleted when the run ends, so
+        // the guard below refuses it — file_copy the binary into install_dir first
+        // (which the guide already prescribes for sequencing reasons). See
+        // PrivilegedTargetGuard's remarks.
+        var binaryPath = ctx.ResolvePath(_spec.BinaryPath);
         var displayName = string.IsNullOrEmpty(_spec.DisplayName) ? name : ctx.Resolve(_spec.DisplayName);
         var description = _spec.Description is null ? null : ctx.Resolve(_spec.Description);
 
@@ -59,6 +67,19 @@ internal sealed class ServiceInstallStep : IStep
         {
             return StepResult.Failed("service_install: binary_path is empty after substitution");
         }
+        // R3/R9: the service binary is launched by the SCM, so it must be anchored
+        // inside install_dir AND live somewhere no unprivileged user can rewrite
+        // it. Checked BEFORE File.Exists so an out-of-tree path is reported as the
+        // refusal it is rather than as a missing file, and before the journal
+        // entry so a refused step never queues a RemoveService for a service this
+        // installer did not create.
+        var refusal = PrivilegedTargetGuard.Check(
+            "service_install", "binary_path", ctx.InstallDir, binaryPath);
+        if (refusal is not null)
+        {
+            return StepResult.Failed(refusal);
+        }
+
         if (!File.Exists(binaryPath))
         {
             return StepResult.Failed(

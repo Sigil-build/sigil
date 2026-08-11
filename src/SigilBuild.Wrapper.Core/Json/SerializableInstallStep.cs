@@ -29,6 +29,15 @@ internal sealed record SerializableInstallStep
     public string? When { get; init; }
     public string OnFailure { get; init; } = "fail";
 
+    /// <summary>
+    /// R16 destination-containment opt-out. Envelope field like
+    /// <see cref="When"/> / <see cref="OnFailure"/>, not per-step, so the
+    /// converters carry it in one place at the end of each switch. Nullable so an
+    /// older blob (which has no such property) deserializes to "not set" rather
+    /// than to a value the manifest never wrote.
+    /// </summary>
+    public bool? AllowOutsideInstallDir { get; init; }
+
     // file_copy
     public string? From { get; init; }
     public string? To { get; init; }
@@ -149,6 +158,16 @@ internal static class SerializableInstallStepConverter
         ArgumentNullException.ThrowIfNull(s);
         var onFailure = ParseOnFailure(s.OnFailure);
 
+        var step = ToTypedStep(s, onFailure);
+
+        // R16: the envelope opt-out, applied once rather than in all 18 arms.
+        return s.AllowOutsideInstallDir == true
+            ? step with { AllowOutsideInstallDir = true }
+            : step;
+    }
+
+    private static InstallStep ToTypedStep(SerializableInstallStep s, OnFailure onFailure)
+    {
         return s.Type switch
         {
             "file_copy" => new InstallStep.FileCopy(
@@ -327,6 +346,17 @@ internal static class SerializableInstallStepConverter
     public static SerializableInstallStep FromInstallStep(InstallStep step)
     {
         ArgumentNullException.ThrowIfNull(step);
+
+        var dto = ToDto(step);
+
+        // R16: the envelope opt-out, applied once rather than in all 18 arms.
+        // Written only when set, so a manifest that never used it produces the
+        // same blob bytes it always did — pack output stays byte-stable.
+        return step.AllowOutsideInstallDir ? dto with { AllowOutsideInstallDir = true } : dto;
+    }
+
+    private static SerializableInstallStep ToDto(InstallStep step)
+    {
         var onFailure = FormatOnFailure(step.OnFailure);
 
         return step switch

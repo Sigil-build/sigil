@@ -138,9 +138,12 @@ public sealed class InstallDirContractTests
     {
         var blob = MakeBlob(appName: "Acme Studio", installDir: "{scope_root}/Acme Studio");
 
+        // R3: /D= is now contained to the scope root, so the fixture points at a
+        // legal user-scope destination (it used to be a bare C:\Tools\Acme).
+        var chosen = Path.Combine(ScopeLayout.For(InstallScope.User).InstallRoot, "Tools", "Acme");
         var withD = InstallSession.ForTesting(
-            blob, CommandLineParser.Parse(new[] { "/silent", "/D=" + Path.Combine("C:", "Tools", "Acme") }, blob.Parameters));
-        withD.ResolveDefaultInstallDir().Should().Be(Path.GetFullPath(Path.Combine("C:", "Tools", "Acme")));
+            blob, CommandLineParser.Parse(new[] { "/silent", "/D=" + chosen }, blob.Parameters));
+        withD.ResolveDefaultInstallDir().Should().Be(Path.GetFullPath(chosen));
 
         var noFlag = InstallSession.ForTesting(blob, CommandLineParser.Parse(new[] { "/silent" }, blob.Parameters));
         noFlag.ResolveDefaultInstallDir(InstallScope.User)

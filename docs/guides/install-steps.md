@@ -284,6 +284,12 @@ Self-registers a COM DLL by loading it and invoking its exported `HRESULT DllReg
 
 Journals an `UnregisterCom` record (DLL path only) **before** the register, so a mid-install crash or `setup.exe /Uninstall` both call `DllUnregisterServer` on the same path. A DLL that fails to load or has no `DllRegisterServer` export fails the step with a diagnostic message; on rollback, the same failure modes are tolerated best-effort (mirrors `service_install`'s `RemoveService` pattern).
 
+> **What this step grants — read before you write one.** `com_register` is an explicit grant of **arbitrary code execution as administrator** to the DLL you name. Sigil loads it into the elevated installer process and calls one of its exports; it guarantees only that the DLL is the one you shipped, sitting where only administrators can have put it (the anchoring rules above). It cannot guarantee anything about what your `DllRegisterServer` then does.
+>
+> Two practical consequences. A DLL that **faults** takes the installer down with it — the journal is already on disk, so `setup.exe /Uninstall` or a re-run still unwinds the install, but the run itself is lost — and there is **no timeout**, so a `DllRegisterServer` that hangs wedges the install. Keep self-registration code short and defensive, and prefer failing with a non-zero `HRESULT` over throwing.
+>
+> This is deliberate, not an oversight. Running the DLL in a `regsvr32.exe` child would not lower its privileges — a child inherits the installer's elevated token, and machine-global COM registration is what the step is *for* — so it would buy crash isolation at the cost of bitness guesswork, unusable exit codes, and a heavily EDR-flagged process launch in every installer. The reasoning is recorded in [ADR-012](../architecture/adr-012-com-registration-isolation.md).
+
 ```yaml
 - id: register-shell-extension
   type: com_register

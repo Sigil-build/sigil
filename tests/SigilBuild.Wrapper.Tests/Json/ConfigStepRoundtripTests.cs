@@ -29,6 +29,41 @@ public class ConfigStepRoundtripTests
         RoundTrip(step).Should().BeEquivalentTo(step);
     }
 
+    [Theory]
+    [InlineData(JsonValueType.Text)]
+    [InlineData(JsonValueType.Json)]
+    public void JsonEdit_value_type_roundtrips(JsonValueType valueType)
+    {
+        var step = new InstallStep.JsonEdit(
+            "j", "a.json", "/a", "42", CreateIfMissing: false, null, OnFailure.Fail, valueType);
+
+        RoundTrip(step).Should().BeEquivalentTo(step);
+    }
+
+    /// <summary>
+    /// Register row R35. A blob written before <c>JsonEditValueType</c> existed carries
+    /// no such property, and it must decode to the SAFE mode rather than to the
+    /// inferring one — otherwise the fix would apply only to freshly packed installers.
+    /// </summary>
+    [Fact]
+    public void JsonEdit_from_a_blob_with_no_value_type_decodes_as_string()
+    {
+        var legacy = new SerializableInstallStep
+        {
+            Id = "j",
+            Type = "json_edit",
+            OnFailure = "fail",
+            Path = "a.json",
+            Pointer = "/a",
+            JsonEditValue = "true",
+            // JsonEditValueType deliberately absent.
+        };
+
+        SerializableInstallStepConverter.ToInstallStep(legacy)
+            .Should().BeOfType<InstallStep.JsonEdit>()
+            .Which.ValueType.Should().Be(JsonValueType.Text);
+    }
+
     [Fact]
     public void XmlEdit_roundtrips_with_and_without_attribute()
     {

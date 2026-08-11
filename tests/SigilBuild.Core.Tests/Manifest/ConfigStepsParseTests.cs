@@ -57,4 +57,65 @@ public class ConfigStepsParseTests
     public void Missing_required_field_diagnoses(string step)
         => ManifestParser.Parse(Yaml(step), "s.yaml")
             .Diagnostics.Should().Contain(d => d.Code == DiagnosticCodes.MissingRequiredStepField);
+
+    // ── json_edit.value_type (register row R35) ──────────────────────────────
+
+    /// <summary>
+    /// Register row R35. The step used to infer the written node's type from the
+    /// resolved value, which let a wizard field or a <c>registry_read</c> var write an
+    /// object where the manifest author wrote a string. An omitted <c>value_type</c>
+    /// must therefore mean <c>string</c>, not the old inference.
+    /// </summary>
+    [Fact]
+    public void Json_edit_value_type_defaults_to_string()
+    {
+        var result = ManifestParser.Parse(
+            Yaml("{ id: j, type: json_edit, path: a.json, pointer: /a, value: \"1\" }"), "s.yaml");
+
+        result.Diagnostics.Should().NotContain(d => d.Severity == DiagnosticSeverity.Error);
+        result.Manifest!.InstallSteps!.OfType<InstallStep.JsonEdit>().Single()
+            .ValueType.Should().Be(
+                JsonValueType.Text,
+                "an omitted value_type must be the SAFE default, so today's inference " +
+                "becomes the opt-in rather than the fallback");
+    }
+
+    [Theory]
+    [InlineData("string", JsonValueType.Text)]
+    [InlineData("json", JsonValueType.Json)]
+    public void Json_edit_value_type_is_parsed(string spelled, JsonValueType expected)
+    {
+        var result = ManifestParser.Parse(
+            Yaml($"{{ id: j, type: json_edit, path: a.json, pointer: /a, value: \"1\", value_type: {spelled} }}"),
+            "s.yaml");
+
+        result.Diagnostics.Should().NotContain(d => d.Severity == DiagnosticSeverity.Error);
+        result.Manifest!.InstallSteps!.OfType<InstallStep.JsonEdit>().Single()
+            .ValueType.Should().Be(expected);
+    }
+
+    [Fact]
+    public void Json_edit_value_type_is_not_reported_as_an_unknown_field()
+    {
+        var result = ManifestParser.Parse(
+            Yaml("{ id: j, type: json_edit, path: a.json, pointer: /a, value: \"1\", value_type: json }"),
+            "s.yaml");
+
+        result.Diagnostics.Should().NotContain(
+            d => d.Code == DiagnosticCodes.StepParameterMismatch,
+            "value_type is a recognized json_edit field, not a typo");
+    }
+
+    [Fact]
+    public void Json_edit_rejects_an_unknown_value_type_rather_than_guessing()
+    {
+        var result = ManifestParser.Parse(
+            Yaml("{ id: j, type: json_edit, path: a.json, pointer: /a, value: \"1\", value_type: yaml }"),
+            "s.yaml");
+
+        result.Diagnostics.Should().Contain(
+            d => d.Code == DiagnosticCodes.InvalidStepFieldValue,
+            "a misspelled value_type must not silently pick a mode — which mode the step " +
+            "runs in decides the shape of what lands in the application's config");
+    }
 }

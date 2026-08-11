@@ -70,4 +70,82 @@ public sealed class ScopeLayoutTests
         user.StartMenuFolder.Should().Be(
             Environment.GetFolderPath(Environment.SpecialFolder.StartMenu));
     }
+
+    /// <summary>
+    /// Register row R52. Containment (<c>InstallDirResolver.IsContained</c>) accepted
+    /// <c>%ProgramFiles(x86)%</c> while <see cref="ScopeLayout"/> modelled only
+    /// <c>%ProgramFiles%</c>, so the PERMITTED destinations and the DEFAULT destination
+    /// were two independently-maintained facts. This asserts they are one fact: every
+    /// root containment accepts is a root the layout itself declares.
+    /// </summary>
+    /// <remarks>
+    /// The parent-commit form of this test replaced <c>layout.InstallRoots</c> with
+    /// <c>new[] { layout.InstallRoot }</c> — the roots <c>ScopeLayout</c> modelled
+    /// before the fix — and failed on exactly this path.
+    /// </remarks>
+    [Fact]
+    public void Machine_layout_declares_every_root_containment_accepts()
+    {
+        var layout = ScopeLayout.For(InstallScope.Machine);
+        var x86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+        if (string.IsNullOrEmpty(x86))
+        {
+            throw new InvalidOperationException(
+                "this test needs a 64-bit Windows host with a %ProgramFiles(x86)% root");
+        }
+
+        var underX86 = Path.Combine(x86, "Contoso");
+
+        InstallDirResolver.IsContained(layout, underX86).Should().BeTrue(
+            "lane S2 widened machine containment to both Program Files roots");
+
+        IsUnderAnyDeclaredRoot(layout, underX86).Should().BeTrue(
+            "ScopeLayout must declare every root containment accepts — otherwise the " +
+            "default install destination and the permitted install destinations are two " +
+            "facts that drift apart silently (R52). Declared roots: {0}",
+            string.Join(", ", layout.InstallRoots));
+    }
+
+    [Fact]
+    public void User_layout_declares_every_root_containment_accepts()
+    {
+        var layout = ScopeLayout.For(InstallScope.User);
+        var underProfile = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Contoso");
+
+        InstallDirResolver.IsContained(layout, underProfile).Should().BeTrue(
+            "user scope crosses no privilege boundary, so the whole profile is permitted");
+
+        IsUnderAnyDeclaredRoot(layout, underProfile).Should().BeTrue(
+            "ScopeLayout must declare every root containment accepts (R52). Declared roots: {0}",
+            string.Join(", ", layout.InstallRoots));
+    }
+
+    [Fact]
+    public void The_default_install_root_is_the_first_declared_root()
+    {
+        foreach (var scope in new[] { InstallScope.Machine, InstallScope.User })
+        {
+            var layout = ScopeLayout.For(scope);
+            layout.InstallRoots.Should().NotBeEmpty();
+            layout.InstallRoots[0].Should().Be(
+                layout.InstallRoot,
+                "the default destination must be one of the permitted destinations, and " +
+                "callers rely on the first entry being the default ({0} scope)",
+                layout.Name);
+        }
+    }
+
+    private static bool IsUnderAnyDeclaredRoot(ScopeLayout layout, string candidate)
+    {
+        foreach (var root in layout.InstallRoots)
+        {
+            if (!string.IsNullOrWhiteSpace(root)
+                && PathContainment.IsUnderWithoutTraversal(root, candidate))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 }

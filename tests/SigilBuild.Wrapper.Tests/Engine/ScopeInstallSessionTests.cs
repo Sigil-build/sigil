@@ -101,20 +101,31 @@ public sealed class ScopeInstallSessionTests
             .Should().Be(ScopeLayout.For(InstallScope.Machine).InstallRoot);
     }
 
+    /// <summary>
+    /// Was <c>State_records_scope_and_is_honored_regardless_of_flag</c>, which asserted
+    /// that a machine-scope load falls through to the user-scope directory and adopts
+    /// the scope recorded inside the file. That is register row R1 clause (b) — the
+    /// vulnerability, not a feature — so the test now asserts the refusal instead: a
+    /// machine-scope load never reads <c>%LocalAppData%</c>, and the scope of a state
+    /// file is the scope of the directory it was found in.
+    /// </summary>
     [Fact]
-    public void State_records_scope_and_is_honored_regardless_of_flag()
+    public void State_is_loaded_only_from_the_requested_scopes_own_directory()
     {
         var appId = "sigil.scope." + Guid.NewGuid().ToString("N");
         try
         {
             var journal = new RollbackJournal();
 
-            // Installed per-user; the state file records user scope.
+            // Installed per-user; the state file lands in %LocalAppData%.
             UninstallStateStore.Save(appId, journal, InstallScope.User);
 
-            // Even when the uninstall is invoked preferring machine scope, the
-            // store searches both and honors the recorded (user) scope.
-            var loaded = UninstallStateStore.TryLoad(appId, InstallScope.Machine);
+            // An uninstall invoked preferring machine scope must not see it at all.
+            UninstallStateStore.TryLoad(appId, InstallScope.Machine).Should().BeNull(
+                "a machine-scope operation reading the user's own profile is R1");
+
+            // The same state IS found in its own scope, and reports that scope.
+            var loaded = UninstallStateStore.TryLoad(appId, InstallScope.User);
             loaded.Should().NotBeNull();
             loaded!.Scope.Should().Be(InstallScope.User);
         }

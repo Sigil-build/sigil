@@ -52,7 +52,7 @@ public class FileDeleteStepTests
         result.Success.Should().BeTrue();
         File.Exists(target).Should().BeFalse("file should be gone after step");
 
-        await journal.UndoAsync(default);
+        await journal.UndoAsync(ReplayAnchorage.InProcess);
 
         File.Exists(target).Should().BeTrue("rollback must restore the file");
         File.ReadAllBytes(target).Should().Equal(originalBytes, "restored bytes must be identical");

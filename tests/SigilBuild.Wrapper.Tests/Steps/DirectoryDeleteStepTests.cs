@@ -70,7 +70,7 @@ public class DirectoryDeleteStepTests
         result.Success.Should().BeTrue();
         Directory.Exists(target).Should().BeFalse("directory should be gone after step");
 
-        await journal.UndoAsync(default);
+        await journal.UndoAsync(ReplayAnchorage.InProcess);
 
         Directory.Exists(target).Should().BeTrue("rollback must restore the directory");
         File.Exists(Path.Combine(target, "a.txt")).Should().BeTrue();

@@ -87,6 +87,38 @@ internal static class ArpRegistration
     }
 
     /// <summary>
+    /// The <c>InstallLocation</c> recorded for <paramref name="appId"/> in the
+    /// scope-correct hive, or <c>null</c> when there is no ARP key, no value, or it
+    /// cannot be read.
+    /// </summary>
+    /// <remarks>
+    /// R1 clause (c): this is the second-best source of the directory an install
+    /// actually used, after the directory recorded in <c>uninstall.json</c> itself. It
+    /// matters for state written before that field existed — the installed base — where
+    /// the alternative is recomputing a DEFAULT destination that is wrong for every
+    /// <c>/D=</c> or wizard-chosen install. For machine scope the value lives in HKLM
+    /// and is therefore admin-authored, the same trust level as the machine state file.
+    /// Read-only and best-effort: the caller treats <c>null</c> as "fall through".
+    /// </remarks>
+    public static string? TryGetInstallLocation(string appId, InstallScope scope)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(appId);
+#pragma warning disable CA1031 // Best-effort probe; an unreadable key simply yields no answer.
+        try
+        {
+            using var key = HiveFor(scope).OpenSubKey(
+                $@"{UninstallKeyRoot}\{appId}", writable: false);
+            var value = key?.GetValue("InstallLocation") as string;
+            return string.IsNullOrWhiteSpace(value) ? null : value;
+        }
+        catch
+        {
+            return null;
+        }
+#pragma warning restore CA1031
+    }
+
+    /// <summary>
     /// Best-effort delete of the ARP key for <paramref name="appId"/> from the
     /// scope-correct hive (T12). Missing keys are silently ignored.
     /// </summary>

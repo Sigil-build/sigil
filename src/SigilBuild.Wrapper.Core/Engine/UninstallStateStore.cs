@@ -29,8 +29,24 @@ using SigilBuild.Wrapper.Json;
 /// </remarks>
 internal static class UninstallStateStore
 {
-    /// <summary>The two candidate scopes, searched in preference order by <see cref="TryLoad"/>.</summary>
-    private static readonly InstallScope[] AllScopes = { InstallScope.Machine, InstallScope.User };
+    /// <summary>
+    /// R19: <c>uninstall.json</c> is attacker-supplied bytes until it has been read
+    /// and validated, and the read materializes the whole file. Cap it <em>before</em>
+    /// the read, not after. A real journal is one short record per mutation an
+    /// installer made — a few hundred records of a few dozen bytes each — so 4 MB is
+    /// three orders of magnitude of headroom and still an instant read. Anything
+    /// larger is not a Sigil journal.
+    /// </summary>
+    private const long MaxStateFileBytes = 4L * 1024 * 1024;
+
+    /// <summary>
+    /// R19: the size cap alone does not bound the work, because the records are tiny
+    /// — 4 MB of <c>[null,null,…]</c> is on the order of a million of them. A real
+    /// install journals one record per file, registry value, shortcut and PATH edit,
+    /// so 50,000 is far beyond any plausible installer while still bounding
+    /// rehydration and the replay that follows it.
+    /// </summary>
+    private const int MaxStateRecords = 50_000;
 
     /// <summary>
     /// Per-app state directory: <c>&lt;StateRoot&gt;\Sigil\&lt;AppId&gt;</c>
@@ -51,7 +67,14 @@ internal static class UninstallStateStore
     /// the <paramref name="Scope"/> the install was recorded under (which drives
     /// ARP-hive and state-dir selection on uninstall).
     /// </summary>
-    public sealed record LoadedState(RollbackJournal Journal, InstallScope Scope);
+    /// <param name="InstallDir">
+    /// The directory the install actually landed in, as recorded at save time, or
+    /// <c>null</c> for state written before the field existed. This — not a recomputed
+    /// default — is what the caller anchors the replay to (R1 clause (c)); a wizard- or
+    /// <c>/D=</c>-chosen destination is not recoverable any other way at uninstall time.
+    /// </param>
+    public sealed record LoadedState(
+        RollbackJournal Journal, InstallScope Scope, string? InstallDir);
 
     /// <summary>
     /// The outcome of a load attempt. <paramref name="State"/> is the rehydrated
@@ -68,13 +91,16 @@ internal static class UninstallStateStore
     /// <paramref name="scope"/> in the file (T12). <paramref name="progress"/>
     /// carries the R1 hardening trail (e.g. a repaired state-directory DACL) into
     /// the console / wizard log / <c>/LOG</c> file; the store has no logger of its own.
+    /// <paramref name="installDir"/> is the directory the install actually landed in and
+    /// is recorded so the uninstall can anchor its replay to it (R1 clause (c)).
     /// </summary>
     public static void Save(
         string appId,
         RollbackJournal journal,
         InstallScope scope,
         System.Collections.Generic.IReadOnlyList<string>? secretValues = null,
-        IProgress<StepProgress>? progress = null)
+        IProgress<StepProgress>? progress = null,
+        string? installDir = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(appId);
         ArgumentNullException.ThrowIfNull(journal);
@@ -107,6 +133,7 @@ internal static class UninstallStateStore
             AppId = appId,
             Version = "1",
             Scope = scope,
+            InstallDir = string.IsNullOrWhiteSpace(installDir) ? null : installDir,
             Records = records,
         };
 
@@ -204,16 +231,19 @@ internal static class UninstallStateStore
 
     /// <summary>
     /// Load and rehydrate the persisted journal for <paramref name="appId"/>,
-    /// honoring the scope it was installed under (T12). The
-    /// <paramref name="preferredScope"/> (resolved from the uninstall command
-    /// line, e.g. the <c>/allusers</c> ARP <c>UninstallString</c>) is searched
-    /// first; if absent there, the opposite scope's directory is tried so an
-    /// interactive uninstall still locates state. The returned
-    /// <see cref="LoadedState.Scope"/> is the scope recorded <em>in</em> the file
-    /// and drives ARP-hive / state-dir selection. Returns <c>null</c> when no
-    /// state file exists in either scope or the JSON is unreadable; the caller
+    /// from <paramref name="preferredScope"/>'s directory and <em>only</em> that
+    /// directory (R1). <paramref name="preferredScope"/> is resolved from the
+    /// uninstall command line (e.g. the <c>/allusers</c> ARP <c>UninstallString</c>);
+    /// there is deliberately no fall-through to the opposite scope, because that let a
+    /// machine-scope operation read <c>%LocalAppData%</c>. The returned
+    /// <see cref="LoadedState.Scope"/> is the scope of the DIRECTORY the file was found
+    /// in — never the <c>scope</c> field inside the file — and drives ARP-hive /
+    /// state-dir selection. Returns <c>null</c> when no
+    /// state file exists in that scope; the caller
     /// (<c>UninstallEngine</c>) translates that into the documented "no uninstall
-    /// state found" error. Machine-scope state is refused outright (R1) unless BOTH
+    /// state found" error. A file that exists but is oversized, malformed, over the
+    /// record ceiling or un-rehydratable is a <em>refusal</em>, not an absence (R19).
+    /// Machine-scope state is refused outright (R1) unless BOTH
     /// its directory (<see cref="StateDirectorySecurity.IsTrusted"/>) and the
     /// <c>uninstall.json</c> file itself
     /// (<see cref="StateDirectorySecurity.IsTrustedFile"/>) pass the provenance check,
@@ -233,9 +263,11 @@ internal static class UninstallStateStore
     /// <summary>
     /// <see cref="TryLoad"/> with the refusal distinguished from the absence: a
     /// non-<c>null</c> <see cref="LoadAttempt.RefusalReason"/> means state WAS present
-    /// and was rejected on R1 provenance grounds. Reporting that as "no uninstall
-    /// state found" would tell the operator the opposite of what happened and would
-    /// mask an attack, so <c>UninstallEngine</c> consumes this shape.
+    /// and was rejected — on R1 provenance grounds, or on R19 readability grounds
+    /// (size ceiling, malformed JSON, record ceiling, un-rehydratable record).
+    /// Reporting either as "no uninstall state found" would tell the operator the
+    /// opposite of what happened and would mask an attack, so
+    /// <c>UninstallEngine</c> consumes this shape.
     /// </summary>
     public static LoadAttempt Load(
         string appId,
@@ -244,83 +276,146 @@ internal static class UninstallStateStore
     {
         ArgumentException.ThrowIfNullOrEmpty(appId);
 
-        // Search the preferred scope first, then the other, so uninstall finds
-        // state regardless of a missing/auto scope flag.
-        var order = preferredScope == InstallScope.Machine
-            ? AllScopes
-            : new[] { InstallScope.User, InstallScope.Machine };
+        // R1 clause (b): ONE scope, and only the requested one. This used to search
+        // the preferred scope and then fall through to the OPPOSITE scope, so an
+        // elevated /allusers uninstall read %LocalAppData% — a directory the
+        // unprivileged user owns outright — whenever %ProgramData% held no state,
+        // which is the normal case on a machine that never had a machine-scope
+        // install. Crossing the boundary is the bug; convenience is not a reason to
+        // reintroduce it. A machine uninstall that finds nothing must report "no
+        // state", not silently reach into the user's profile.
+        var dirScope = preferredScope == InstallScope.Machine
+            ? InstallScope.Machine
+            : InstallScope.User;
 
-        foreach (var dirScope in order)
+        var path = PathFor(appId, dirScope);
+        if (!File.Exists(path))
         {
-            var path = PathFor(appId, dirScope);
-            if (!File.Exists(path))
+            return new LoadAttempt(null, null);
+        }
+
+        // R1: an unprivileged user can pre-create %ProgramData%\Sigil\<AppId>
+        // and become CREATOR OWNER of the file the elevated uninstall later
+        // replays. Refuse rather than replay, and say so.
+        if (dirScope == InstallScope.Machine && OperatingSystem.IsWindows())
+        {
+            var dir = DirectoryFor(appId, dirScope);
+
+            // BOTH objects must be trusted. The directory alone is not enough:
+            // File.WriteAllText truncates in place, so a pre-created uninstall.json
+            // keeps its attacker owner and ACEs even inside a hardened directory
+            // (see UninstallStateStore.WriteReplacingAnyExistingFile). The file
+            // alone is not enough either: a writable directory lets an attacker
+            // swap the file wholesale.
+            var directoryTrusted = StateDirectorySecurity.IsTrusted(dir);
+            var fileTrusted = StateDirectorySecurity.IsTrustedFile(path);
+
+            if (!directoryTrusted || !fileTrusted)
             {
-                continue;
+                var what = !directoryTrusted && !fileTrusted
+                    ? "the state directory and the state file"
+                    : !directoryTrusted ? "the state directory" : "the state file";
+                var reason =
+                    $"refusing state in '{dir}': {what} failed the provenance check " +
+                    "(the owner must be SYSTEM, Administrators or TrustedInstaller, and no " +
+                    "non-administrator may hold a write-class right), so an unprivileged " +
+                    "user could have authored — or could still alter — the records";
+                progress?.Report(new StepProgress(0, 0, reason, IsError: true));
+                return new LoadAttempt(null, reason);
+            }
+        }
+
+        // R19: read, deserialize AND rehydrate under ONE try. Rehydration used to sit
+        // outside it, and it throws on an unknown discriminator, a null array element
+        // or a missing required field (SerializableRollbackRecord.ToRollbackRecord) —
+        // none of which the deserialize-only catch covered, and which nothing above
+        // (UninstallEngine.RunAsync, InstallSession) caught either. A one-line planted
+        // file therefore killed every install AND every uninstall of that AppId with
+        // an unhandled exception: a persistent, per-app denial of service that any
+        // user who can write the state directory could arm. Failing closed here is
+        // right; failing fatally is not.
+        SerializableRollbackJournal? s;
+        RollbackJournal journal;
+        try
+        {
+            // Bounded BEFORE the read, so an oversized file is never materialized.
+            var length = new FileInfo(path).Length;
+            if (length > MaxStateFileBytes)
+            {
+                return Unreadable(
+                    path,
+                    $"the state file is {length} bytes, over the {MaxStateFileBytes}-byte ceiling",
+                    progress);
             }
 
-            // R1: an unprivileged user can pre-create %ProgramData%\Sigil\<AppId>
-            // and become CREATOR OWNER of the file the elevated uninstall later
-            // replays. Refuse rather than replay, and say so — and do NOT fall
-            // through to the other scope, because a silent skip here reads as
-            // "no prior install" and would mask an attack.
-            if (dirScope == InstallScope.Machine && OperatingSystem.IsWindows())
-            {
-                var dir = DirectoryFor(appId, dirScope);
+            s = JsonSerializer.Deserialize(
+                File.ReadAllText(path),
+                WrapperBlobJsonContext.Default.SerializableRollbackJournal);
 
-                // BOTH objects must be trusted. The directory alone is not enough:
-                // File.WriteAllText truncates in place, so a pre-created uninstall.json
-                // keeps its attacker owner and ACEs even inside a hardened directory
-                // (see UninstallStateStore.WriteReplacingAnyExistingFile). The file
-                // alone is not enough either: a writable directory lets an attacker
-                // swap the file wholesale.
-                var directoryTrusted = StateDirectorySecurity.IsTrusted(dir);
-                var fileTrusted = StateDirectorySecurity.IsTrustedFile(path);
-
-                if (!directoryTrusted || !fileTrusted)
-                {
-                    var what = !directoryTrusted && !fileTrusted
-                        ? "the state directory and the state file"
-                        : !directoryTrusted ? "the state directory" : "the state file";
-                    var reason =
-                        $"refusing state in '{dir}': {what} failed the provenance check " +
-                        "(the owner must be SYSTEM, Administrators or TrustedInstaller, and no " +
-                        "non-administrator may hold a write-class right), so an unprivileged " +
-                        "user could have authored — or could still alter — the records";
-                    progress?.Report(new StepProgress(0, 0, reason, IsError: true));
-                    return new LoadAttempt(null, reason);
-                }
-            }
-
-            var json = File.ReadAllText(path);
-            SerializableRollbackJournal? s;
-            try
-            {
-                s = JsonSerializer.Deserialize(
-                    json,
-                    WrapperBlobJsonContext.Default.SerializableRollbackJournal);
-            }
-#pragma warning disable CA1031 // Corrupt state file → skip → caller surfaces a clear error.
-            catch
-            {
-                continue;
-            }
-#pragma warning restore CA1031
             if (s is null)
             {
-                continue;
+                return Unreadable(path, "the state file deserialized to nothing", progress);
             }
 
-            var journal = new RollbackJournal();
-            foreach (var rec in s.Records)
+            // A literal `"records": null` binds null over the property initializer.
+            var records = s.Records;
+            if (records is null)
+            {
+                return Unreadable(path, "the state file carries no records array", progress);
+            }
+
+            if (records.Length > MaxStateRecords)
+            {
+                return Unreadable(
+                    path,
+                    $"the state file declares {records.Length} records, over the " +
+                    $"{MaxStateRecords}-record ceiling",
+                    progress);
+            }
+
+            journal = new RollbackJournal();
+            foreach (var rec in records)
             {
                 journal.Append(rec.ToRollbackRecord());
             }
-            // Honor the scope recorded in the file (falls back to the directory's
-            // scope for pre-T12 state that predates the recorded field).
-            return new LoadAttempt(new LoadedState(journal, s.Scope), null);
         }
+#pragma warning disable CA1031 // The point of R19: ANY failure here is "state unreadable", never an escape.
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return Unreadable(path, $"the state file could not be read ({ex.Message})", progress);
+        }
+#pragma warning restore CA1031
 
-        return new LoadAttempt(null, null);
+        // The scope is the DIRECTORY's scope, deliberately — never s.Scope.
+        //
+        // R1 clause (b): the serialized `scope` field is attacker-controlled data. It
+        // drove the ARP hive (HKLM vs HKCU) and the state directory that the uninstall
+        // then wrote to and deleted, so a user-scope file claiming "machine" made an
+        // unprivileged uninstall operate on machine-wide state. A value read out of the
+        // object whose trustworthiness is in question can never decide the privilege
+        // that object is handled with. The field stays on the wire DTO for backward
+        // compatibility with state written before this fix — reading it back must never
+        // be reintroduced.
+        return new LoadAttempt(new LoadedState(journal, dirScope, s.InstallDir), null);
+    }
+
+    /// <summary>
+    /// R19: state that is PRESENT but cannot be read as a journal — oversized,
+    /// malformed, over the record ceiling, or carrying a record that will not
+    /// rehydrate. Reported as a <em>refusal</em> on the same channel as the R1
+    /// provenance refusal, deliberately: both mean "there is a file here and it was
+    /// not replayed", and collapsing that into the absence channel would print "no
+    /// uninstall state found" for a file the operator can see on disk — the same
+    /// misreport R1 closed, and the same cover for an attacker.
+    /// </summary>
+    private static LoadAttempt Unreadable(
+        string path, string detail, IProgress<StepProgress>? progress)
+    {
+        var reason =
+            $"refusing state at '{path}': {detail}. Nothing was replayed. Remove the file " +
+            "as an administrator and reinstall, or investigate who wrote it";
+        progress?.Report(new StepProgress(0, 0, reason, IsError: true));
+        return new LoadAttempt(null, reason);
     }
 
     /// <summary>

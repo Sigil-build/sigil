@@ -39,7 +39,15 @@ dotnet publish src/SigilBuild.Cli -c Release -r win-x64 -p:PublishAot=true \
   -o publish/win-x64
 ```
 
-The resulting `publish/win-x64/sigil.exe` is a single-file ~1 MB binary.
+The resulting `publish/win-x64/sigil.exe` is **not** single-file: the CLI
+project sets no `PublishSingleFile` (`src/SigilBuild.Cli/SigilBuild.Cli.csproj`)
+and links against `SigilBuild.Packaging` (SkiaSharp, for logo resizing) and
+`SigilBuild.Signing` (NSec.Cryptography, for ZIP manifest signing), so
+`publish/win-x64/` also holds `libSkiaSharp.dll` and `libsodium.dll`
+(`Directory.Packages.props:28,45-47`). CI enforces `sigil.exe` itself at
+**≤ 15 MB** (`.github/workflows/ci.yml:241`); the last locally measured build
+was 13.98 MB (`docs/plan/release/02-READINESS_REPORT.md:105`) — not the ~1 MB
+this guide used to claim.
 
 ## 3. Generate a manifest
 
@@ -106,23 +114,33 @@ unparseable `version`) are caught here too.
 
 ## 5. Pack it
 
-> **Sprint-4-onwards.** `sigil pack` is wired to the CLI today and validates
-> manifests, but the packaging back-end is incomplete — only the ZIP path is
-> functional in the current alpha. The MSIX path lands in Sprint 4. Treat the
-> command below as a smoke test for now.
+> All three package formats — ZIP, MSIX, and EXE-wrapper — are implemented
+> and shipping (`SigilBuild.Packaging.Zip.ZipPackager`,
+> `.Msix.MsixPackager`, `.ExeWrapper.ExeWrapperPackager`). What is **not**
+> built yet is the `publish` stage and delta updates — see
+> [ADR-010](architecture/adr-010-delta-update-deferral.md).
 
 ```bash
 sigil pack sigil.yaml --out ./dist
 ```
 
-Output goes under `./dist/<app-id>-<version>/`.
+For `package.formats: [zip]`, output lands as a flat file directly under
+`--out`: `./dist/<app.id>-<app.version>-<arch>.zip`
+(`src/SigilBuild.Packaging/Zip/ZipPackager.cs:24-25`) — not in a
+per-build subdirectory.
 
 ## 6. Build the branded wizard (EXE-wrapper format)
 
 `sigil pack` with `package.format: exe` produces a single self-extracting
-`setup.exe` that opens a branded Windows wizard on double-click. The wizard
-flow is built dynamically from your `parameters:` block — there's no per-page
-XAML to write.
+`<App.Name>-<version>-<arch>-Setup.exe` that opens a branded Windows wizard on
+double-click (`src/SigilBuild.Packaging/ExeWrapper/ExeWrapperPackager.cs:134`
+— e.g. `HelloSigil-0.1.0-x64-Setup.exe`, not the generic `setup.exe` this
+guide used to show). The wizard flow is built dynamically from your
+`parameters:` block — there's no per-page XAML to write. The Choose Install
+Location screen itself is **not** part of that dynamic flow: it is always
+rendered, second after Welcome, whether or not you declare any parameters at
+all (`InstallerViewModel.cs:1041-1045`) — see
+[Installer wizard](guides/installer-wizard.md#screen-flow).
 
 Extend the minimal manifest with the wizard knobs you'll most often touch:
 
@@ -136,14 +154,6 @@ installer:
       accent:  "#7C3AED"
 
 parameters:
-  install_dir:
-    type: path
-    install_time: true
-    default: "C:\\Program Files\\Hello Sigil"
-    description: "Install location"
-    # No screen: field — install_dir always renders on the dedicated
-    # Install Location page (with disk-space readout).
-
   server_url:
     type: string
     install_time: true
@@ -157,6 +167,13 @@ parameters:
     description: "Send anonymous usage telemetry"
     screen: "Privacy"             # Renders as a CheckBox on a 'Privacy' page.
 
+install_steps:
+  - id: copy-app
+    type: file_copy
+    from: payload/**
+    to: "{install_dir}"           # the resolved destination — do NOT declare
+                                   # a parameter named `install_dir` to mean this.
+
 uninstall:
   - id: stop-service
     type: run_program
@@ -167,11 +184,12 @@ uninstall:
 ```
 
 The wizard flow is now:
-**Welcome → License → Install Location (with disk-space card) → Server Settings → Privacy → Installing → Finish**.
+**Welcome → Install Location (with disk-space card) → Server Settings → Privacy → Installing → Finish**
+(License would insert after Install Location if this manifest declared one).
 
 Per-parameter widget choice is automatic: `type: enum` with a `values:` list renders a ComboBox; `type: enum` with a `source: { url, items_path, value_property, label_property }` block renders a ComboBox populated by an HTTPS fetch at page-attach; `type: bool` renders a CheckBox; everything else renders a TextBox. See the [manifest reference](manifest-reference.md) for every field.
 
-When the manifest declares an `uninstall:` block, the packager produces a sibling `uninstaller.exe` inside `setup.exe` and the wrapper drops it to `<install_dir>\uninstaller.exe` on install success — plus a Control Panel "Add/Remove Programs" entry pointing at it.
+When the manifest declares an `uninstall:` block, the packager produces a sibling `uninstall.exe` inside the Setup.exe and the wrapper drops it to `<install_dir>\uninstall.exe` on install success — plus a Control Panel "Add/Remove Programs" entry pointing at it.
 
 ## 7. Next steps
 

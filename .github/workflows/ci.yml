@@ -330,3 +330,47 @@ jobs:
           name: sigil-win-x64
           path: publish/win-x64/sigil.exe
           if-no-files-found: error
+
+  # SUP.2 / R42: scan NuGet dependencies (including transitive) against the
+  # nuget.org-mirrored advisory feed and fail on High/Critical findings.
+  #
+  # Deliberately a SEPARATE job, not a step inside `build`: this check depends
+  # on an external, time-varying advisory feed rather than on this repo's own
+  # source. If a new advisory lands for an unrelated transitive package while
+  # someone else's unrelated PR is open, only THIS job goes red — it stays
+  # legible as "a new advisory landed" rather than being buried inside (or
+  # conflated with) the coverage-gated `build` check, and a maintainer can
+  # re-run/triage it without re-running the full build+test matrix. It is
+  # still a required, failing check on purpose (per SUP.2) — Dependabot
+  # (.github/dependabot.yml, weekly) is the intended remediation path when it
+  # fires, not silencing the gate.
+  vulnerability-scan:
+    name: vulnerability scan (nuget)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: restore
+        run: dotnet restore Sigil.slnx
+
+      - name: dotnet list package --vulnerable --include-transitive
+        shell: pwsh
+        run: |
+          $output = dotnet list Sigil.slnx package --vulnerable --include-transitive 2>&1
+          $output | ForEach-Object { Write-Host $_ }
+          # Vulnerable-package rows look like:
+          #   > PackageName   1.0.0   1.0.0   High   https://github.com/advisories/...
+          # Match only the Severity column (surrounded by whitespace) so this
+          # doesn't false-positive on a package name that merely contains
+          # "High" or "Critical".
+          $findings = $output | Select-String -Pattern '^\s*>\s.*\s(High|Critical)\s'
+          if ($findings) {
+            Write-Host "::error::High or Critical severity vulnerable package(s) found — see SUP.2/R42. Do not silence this gate; file a register row and route the bump through review."
+            foreach ($line in $findings) { Write-Host "::error::$line" }
+            exit 1
+          }
+          Write-Host "No High/Critical vulnerable packages found."

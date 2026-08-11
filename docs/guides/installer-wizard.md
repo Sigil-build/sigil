@@ -4,16 +4,16 @@ When you produce an `exe`-format package (see [Packaging formats](packaging-form
 
 ## Screen flow
 
-The screen list is built at runtime from your manifest. Welcome, License, Installing, and Finish are always rendered. The middle pages are dynamic:
+The screen list is built at runtime from your manifest. Welcome, Choose Install Location, Installing, and Finish are always rendered; License and the built-in Options page are the only conditional ones. The middle pages are dynamic:
 
 1. **Welcome** — branded splash with app name + version.
-2. **License** — license text (placeholder today; a `installer.license_path` field lands post-MVP).
-3. **Choose Install Location** — auto-inserted when the manifest declares an `install_dir` parameter. Includes a TextBox, Browse..., and a live disk-space readout via `DriveInfo`.
+2. **Choose Install Location** — **always rendered**, immediately after Welcome, whether or not your manifest declares any `parameters:` at all. `InstallerViewModel.RebuildFlow` adds this node (`InstallerStep.InstallOptions`) unconditionally; `License` and the built-in `Options` page, added right after it, are each gated behind their own `if` (`src/SigilBuild.Installer.Host/ViewModels/InstallerViewModel.cs:1041-1055`). It is not tied to declaring a parameter named `install_dir` — see the warning under [Parameters](parameters.md#cli-overrides-at-install-time). Includes a TextBox, Browse..., and a live disk-space readout via `DriveInfo`.
+3. **License** — license text (placeholder today; a `installer.license_path` field lands post-MVP), shown only when the manifest has one.
 4. **N x parameter pages** — one page per unique `screen:` value declared on install-time parameters, in first-appearance order. Parameters without a `screen:` value collapse into a trailing synthetic "Install Options" page.
 5. **Installing** — progress feed driven by the step engine.
 6. **Finish** — completion summary.
 
-`/S` on the command line suppresses every interactive screen and runs the manifest end-to-end using parameter defaults plus any `/Name=Value` overrides. See [Parameters](parameters.md).
+`/S` on the command line suppresses every interactive screen and runs the manifest end-to-end using parameter defaults plus any `/PName=Value` overrides. See [Parameters](parameters.md).
 
 ## Brand slots
 
@@ -51,7 +51,7 @@ installer:
   icon: ./brand/setup.ico
 ```
 
-The `.ico` is stamped into the produced `setup.exe`'s Explorer icon, into the wizard process, and into the deployed `uninstaller.exe`. Omit the field and Sigil uses a bundled default (the Saki / Alexandre Moore icon, credited in the OSS README).
+The `.ico` is stamped into the produced `setup.exe`'s Explorer icon, into the wizard process, and into the deployed `uninstall.exe`. Omit the field and Sigil uses a bundled default (the Saki / Alexandre Moore icon, credited in the OSS README).
 
 ## Per-parameter widget selection
 
@@ -88,16 +88,16 @@ Rules:
 
 - Parameters sharing a `screen:` value render on the same wizard page in declaration order.
 - Unlabelled parameters fall through to a synthetic `Install Options` page at the end.
-- The reserved `install_dir` parameter is always pulled out onto the dedicated Choose Install Location page; it is excluded from every group even if you set `screen:` on it.
-- If the manifest declares neither `install_dir` nor any install-time parameter, the wizard still renders an empty Install Options page so the flow has a slot between License and Installing.
+- **There is no reserved `install_dir` parameter.** The Choose Install Location screen (previous section) is a fixed part of the flow, wired to the engine's own `{install_dir}` resolution — it does not read a manifest parameter of that name. Do not declare one; see the warning in [Parameters](parameters.md#cli-overrides-at-install-time).
+- If the manifest declares no install-time parameters at all, the wizard still renders an empty Install Options page so the flow has a slot between License and Installing.
 
 ## Silent install
 
 ```bash
-setup.exe /S /install_dir="C:\Apps\MyApp" /edition=professional
+setup.exe /S /D="C:\Apps\MyApp" /Pedition=professional
 ```
 
-`/S` skips every screen and runs the step list non-interactively. Any `/Name=Value` tokens override the matching `install_time: true` parameter default. Undeclared parameters are rejected at parse time. Bool values write back as the literal strings `True` / `False`.
+`/S` skips every screen and runs the step list non-interactively. `/D=path` overrides the install directory (see [the setup.exe reference](../setup-exe-reference.md#d)); any `/PName=Value` tokens override the matching `install_time: true` parameter default — the `P` prefix is required, a bare `/Name=Value` is rejected (`CommandLineParser.cs:497,503-504`). Undeclared parameter names are rejected at parse time. Bool values write back as the literal strings `True` / `False`.
 
 ## See also
 

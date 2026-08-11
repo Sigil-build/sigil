@@ -15,6 +15,9 @@ docs (build, test, branch policy), see [`../CONTRIBUTING.md`](../CONTRIBUTING.md
 - [**Manifest reference**](manifest-reference.md) — every key in `sigil.yaml`,
   with type, default, and description. *Auto-generated from
   [`schemas/sigil-schema.json`](../schemas/sigil-schema.json).*
+- [**setup.exe reference**](setup-exe-reference.md) — every runtime flag the
+  produced installer/uninstaller accepts (`/S`, `/D=`, `/PName=Value`, exit
+  codes, …). *Hand-written — see the page for why it cannot be generated.*
 
 ## Guides
 
@@ -25,7 +28,7 @@ not sure which output format you need.
 - [Installer wizard](guides/installer-wizard.md) — branded wizard host, brand slots, screen grouping, install icon.
 - [Parameters](guides/parameters.md) — install-time parameters, types, dynamic dropdowns.
 - [Install steps](guides/install-steps.md) — every step type with a worked example.
-- [Uninstaller](guides/uninstaller.md) — auto-generated `uninstaller.exe` + Add/Remove Programs entry.
+- [Uninstaller](guides/uninstaller.md) — auto-generated `uninstall.exe` + Add/Remove Programs entry.
 - [Upgrades & downgrades](guides/upgrades.md) — version-aware install, `/force-downgrade`, install-dir preservation.
 - [Updates](guides/updates.md) — the `updates:` block, signed channel manifests, `/Update` exit codes, and the web installer (`--payload web`).
 - [Prerequisites](guides/prerequisites.md) — detect-then-install dependency units (VC++ redist, .NET runtime).

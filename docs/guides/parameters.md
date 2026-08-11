@@ -6,9 +6,9 @@ The `parameters:` map is a typed declaration of inputs your manifest needs at pa
 
 ```yaml
 parameters:
-  install_dir:
+  log_dir:
     type: path
-    default: "%ProgramFiles%\\MyApp"
+    default: "%ProgramData%\\MyApp\\Logs"
     install_time: true
   edition:
     type: enum
@@ -18,6 +18,15 @@ parameters:
 ```
 
 The wizard surfaces every `install_time: true` parameter; non-install-time parameters resolve at pack time only.
+
+> **Do not declare a parameter named `install_dir`.** It reads as if it should
+> mean "where the app is being installed", but a parameter is just another
+> value — it does not follow the wizard's Destination screen, `/D=`, or an
+> upgrade-in-place. The real, always-current install location is the
+> `{install_dir}` brace token, resolved by the engine and substituted directly
+> into step fields (`StepContext.cs:616-637`); it is not a `${parameters.*}`
+> value at all. See [Install steps](install-steps.md#write-the-destination-as-install_dir)
+> for the full rationale and worked examples.
 
 ## Types
 
@@ -53,14 +62,14 @@ A missing env var is a hard pack-time error (SIG0020), not a silent empty string
 
 ## Install-time substitution inside steps
 
-Step arguments support `${parameters.<name>}` and the `app.*` namespace (`${app.name}`, `${app.version}`, `${app.id}`, `${app.publisher}`, `${app.description}`, `${app.homepage}`). Resolution happens just before each step runs:
+Step arguments support `${parameters.<name>}` and the `app.*` namespace (`${app.name}`, `${app.version}`, `${app.id}`, `${app.publisher}`, `${app.description}`, `${app.homepage}`), plus the single-brace engine tokens `{install_dir}`, `{scope_root}`, `{app.name}`, `{app.id}`, and `{var.<name>}` (`StepContext.cs:616-637`). Resolution happens just before each step runs:
 
 ```yaml
 install_steps:
   - id: copy-app
     type: file_copy
     from: payload/**
-    to: ${parameters.install_dir}
+    to: "{install_dir}"
   - id: stamp-registry
     type: registry_write
     hive: HKLM
@@ -70,15 +79,18 @@ install_steps:
     value: "${app.version}"
 ```
 
+`to: "{install_dir}"` is the resolved destination itself — not `${parameters.install_dir}`, which would only work if you had (incorrectly) declared a parameter by that name. See [Install steps](install-steps.md#write-the-destination-as-install_dir).
+
 Unknown identifiers are a hard runtime error - typos surface as a `FormatException` from the step engine, never as an empty string.
 
 ## CLI overrides at install time
 
 ```bash
-setup.exe /S /install_dir="C:\Apps\MyApp" /edition=professional
+setup.exe /S /D="C:\Apps\MyApp" /Pedition=professional
 ```
 
-- One `/Name=Value` token per parameter. Last write wins.
+- `/D=path` overrides the install directory — not a parameter override; see [the setup.exe reference](../setup-exe-reference.md#d).
+- One `/PName=Value` token per declared parameter. Last write wins. The `P` prefix is mandatory: a bare `/Name=Value` is rejected with `UsageException: unrecognized flag` (`CommandLineParser.cs:497,503-504`).
 - Names match the canonical schema spelling case-insensitively; values preserve case.
 - Undeclared names are rejected (`UsageException`) - silent typos can't reach the step engine.
 - The wizard's silent-install child process uses the same syntax to forward the user's edits.

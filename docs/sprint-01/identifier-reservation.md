@@ -2,6 +2,17 @@
 
 This document records the identifier reservations and access-control settings established at the start of Sprint 1, per Plan _1 Tasks 1 and 9. Items marked "to verify" require a live check against the relevant external registry.
 
+> **Status as of the release-candidate track (register row R41a): the NuGet
+> IDs below are still unclaimed.** `README.md` tells users to
+> `dotnet tool install -g SigilBuild` (aspirationally, under "Install") while
+> neither `SigilBuild` nor `SigilBuild.UpdateSdk` has been reserved on
+> nuget.org. Going public with an unclaimed package ID your own README
+> advertises invites a name squat. **This is an orchestrator action item for
+> G4, before the repo gets wider attention** — see
+> `docs/plan/release/00-GAP_REGISTER.md`'s R41a. Reserve both IDs, then
+> either update the rows below to "Reserved" with the date, or delete this
+> file.
+
 ---
 
 ## Package Identifiers

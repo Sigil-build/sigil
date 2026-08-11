@@ -1,5 +1,11 @@
 # Orchestration plan — exe-installer track (spec T1–T17)
 
+> **Read-only history (AGENTS.md).** This file is not updated to match the
+> code — e.g. "527 tests green" below predates the security (S-track) and
+> release-candidate (RC) work entirely and the P0–P13 feature-parity track
+> is never mentioned. For current state, see
+> [`docs/plan/release/00-GAP_REGISTER.md`](release/00-GAP_REGISTER.md).
+
 Status: **COMPLETE (2026-07-09)** — all waves G0–G5 executed on integration
 branch `feat/exe-installer-track` (subagent-per-lane worktrees, merged at each
 gate). T1–T18 + an install-dir-unify fix all merged; 527 tests green, 0 skipped;

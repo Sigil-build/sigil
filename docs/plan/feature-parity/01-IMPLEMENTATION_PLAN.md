@@ -1,5 +1,11 @@
 # Implementation plan — feature-parity track (P0–P13)
 
+> **Read-only history (AGENTS.md).** This file is not updated to match the
+> code — e.g. P13's checklist row below still shows Pushed ☐ / Merged ☐,
+> though P13 (`1be494c`) has long since merged to `main` and was the
+> audited HEAD for the release-candidate track. For current state, see
+> [`docs/plan/release/00-GAP_REGISTER.md`](../release/00-GAP_REGISTER.md).
+
 Companion to [`00-GAP_ANALYSIS.md`](00-GAP_ANALYSIS.md). Same execution model
 as `docs/plan/ORCHESTRATION_PLAN.md` §0–§1 (standing rules, worktrees, gates,
 CI VM verdict) — those rules apply verbatim; this file only defines the lanes.

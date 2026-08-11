@@ -2,8 +2,10 @@
 *       @Sigil-build/maintainers
 
 # Architecture changes need a tech lead review
-/sigil-docs/architecture/    @Sigil-build/tech-leads
-/sigil-docs/decisions.md     @Sigil-build/tech-leads
+# (was /sigil-docs/architecture/ + /sigil-docs/decisions.md — R27: the first
+# was a stale, colliding ADR tree and the second never existed; sigil-docs/
+# is gone and docs/architecture/ is the one live tree.)
+/docs/architecture/          @Sigil-build/tech-leads
 
 # CI / build / packaging plumbing
 /.github/                                   @Sigil-build/devops

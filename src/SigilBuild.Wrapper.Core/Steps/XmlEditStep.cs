@@ -1,6 +1,7 @@
 namespace SigilBuild.Wrapper.Steps;
 
 using System;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml;
@@ -38,12 +39,65 @@ internal sealed class XmlEditStep : IStep
 
 internal static class XmlEditor
 {
+    /// <summary>
+    /// The XXE posture of every <c>xml_edit</c> parse, stated rather than inherited
+    /// (register row R33).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b><see cref="XmlReaderSettings.XmlResolver"/> = <c>null</c>.</b> On .NET 10 this
+    /// is already the default for both <see cref="XmlDocument"/> and
+    /// <see cref="XmlReaderSettings"/>, so external-entity file disclosure and SSRF are
+    /// blocked today whether we say so or not. Saying so is the point: an unasserted
+    /// framework default can be revoked by a future framework, an
+    /// <c>AppContext</c> switch, or a runtimeconfig knob, and this parse runs inside an
+    /// elevated process over a file the manifest chose. It is set on the document too,
+    /// not only the reader, because the document is what would resolve anything on a
+    /// later <c>Save</c>/validate path.
+    /// </para>
+    /// <para>
+    /// <b><see cref="DtdProcessing.Prohibit"/>.</b> The resolver default never covered
+    /// the <em>internal</em> DTD subset, which was parsed and expanded with no cap — the
+    /// billion-laughs shape (<c>&lt;!ENTITY lol2 "&amp;lol;&amp;lol;&amp;lol;…"&gt;</c>)
+    /// costs the elevated installer memory and time before any edit happens, and per
+    /// register row R16 the target file can sit somewhere an attacker writes. Prohibit
+    /// makes a document that so much as declares a <c>&lt;!DOCTYPE&gt;</c> an
+    /// <see cref="XmlException"/>, which <c>ConfigFileEditor</c> surfaces as a step
+    /// failure with the file untouched.
+    /// </para>
+    /// <para>
+    /// <b>Prohibit rather than a capped Parse</b> is a deliberate strictness choice: no
+    /// shipped example, and no configuration format the guides teach editing, declares a
+    /// DTD, so the refusal costs nothing real, and "no DTD reaches this parser" is an
+    /// invariant a reviewer can check by reading one line. A capped
+    /// <see cref="DtdProcessing.Parse"/> with
+    /// <see cref="XmlReaderSettings.MaxCharactersFromEntities"/> would accept more
+    /// documents at the cost of a number to tune and a bound to argue about.
+    /// </para>
+    /// <para>
+    /// <see cref="XmlReaderSettings.IgnoreWhitespace"/> stays <c>false</c> (the default),
+    /// which is what keeps <see cref="XmlDocument.PreserveWhitespace"/> meaningful, and
+    /// comments / processing instructions are likewise preserved so a config file
+    /// survives a round trip through this step.
+    /// </para>
+    /// </remarks>
+    private static XmlReaderSettings SecureReaderSettings() => new()
+    {
+        DtdProcessing = DtdProcessing.Prohibit,
+        XmlResolver = null,
+        IgnoreWhitespace = false,
+        IgnoreComments = false,
+        IgnoreProcessingInstructions = false,
+    };
+
     public static string Set(string? content, string xpath, string? attribute, string value, bool createIfMissing)
     {
-        var doc = new XmlDocument { PreserveWhitespace = true };
+        var doc = new XmlDocument { PreserveWhitespace = true, XmlResolver = null };
         if (!string.IsNullOrWhiteSpace(content))
         {
-            doc.LoadXml(content!);
+            using var text = new StringReader(content!);
+            using var reader = XmlReader.Create(text, SecureReaderSettings());
+            doc.Load(reader);
         }
 
         var node = doc.SelectSingleNode(xpath) as XmlElement;

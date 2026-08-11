@@ -322,36 +322,64 @@ public sealed class InstallDirContainmentTests
         act.Should().Throw<InstallDirRejectedException>().WithMessage("*outside*");
     }
 
+    // ── The two post-install contexts, driven through their REAL entry points ──
+    //
+    // An earlier version of these pins rebuilt StepContext.From by hand with the
+    // same arguments. That guarded nothing: deleting `priorInstallDir` from the
+    // production call sites left it green, because the expectation was constructed
+    // from something other than the thing under test. Both tests below now go
+    // through the real member, and both go red if the argument is removed.
+
     [WindowsFact("Windows scope roots")]
-    public void Post_install_contexts_must_thread_the_prior_dir_or_a_grandfathered_app_cannot_be_launched()
+    public async Task Done_screen_launch_resolves_a_grandfathered_install_dir()
     {
-        // The grandfather ruling exists so a pre-containment install keeps working.
-        // Two contexts are built AFTER the install completes and are easy to miss:
-        // the Done screen's "Launch <app>" (InstallSession.LaunchAppUnelevated) and
-        // uninstall-time hook resolution (BuildUninstallContext). Both omitted
-        // priorInstallDir, so for a grandfathered app they threw
-        // InstallDirRejectedException into a blanket catch — the launch button
-        // silently did nothing, and the uninstall hook context failed to build.
+        // Drives the real InstallSession.LaunchAppUnelevated. Its resolution failure
+        // mode is silence — InstallDirRejectedException lands in a blanket catch and
+        // the method just returns false — so the observable is the /LOG line the
+        // method writes immediately after resolving and before starting anything.
+        // No process is created: the target does not exist, so the launch itself
+        // fails after the line is written.
+        using var tmp = new TempDir();
+        var logPath = Path.Combine(tmp.Path, "launch.log");
+
+        var blob = UpgradeBlob() with { RunAfterInstallPath = @"{install_dir}\app.exe" };
+        var session = InstallSession.ForTesting(
+            blob,
+            CommandLineParser.Parse(new[] { "/silent", $"/LOG={logPath}" }, blob.Parameters),
+            PriorOutOfRoot());
+
+        await session.RunHeadlessAsync(new StringWriter(), new StringWriter());
+        session.LaunchAppUnelevated();
+
+        File.ReadAllText(logPath).Should().Contain(
+            $@"launch: {OutOfRootPriorDir}\app.exe",
+            "the Done screen's Launch button must resolve {install_dir} to the grandfathered " +
+            "location — without the prior dir the resolver refuses and the button silently no-ops");
+    }
+
+    [WindowsFact("Windows scope roots")]
+    public void Uninstall_context_resolves_a_grandfathered_install_dir()
+    {
+        // Drives the real InstallSession.BuildUninstallContext (via a one-line
+        // internal seam that calls it — not a reconstruction of it).
         //
-        // This pins the contract those two call sites now satisfy: same arguments,
-        // with and without the prior dir.
+        // Note this pin would have stayed green against the FIRST attempt at the
+        // fix, which passed PriorInstallDirDefault: that property additionally
+        // requires _plan.RemovesPriorVersion, and an uninstall run classifies as
+        // UpgradeAction.Same, so the argument was always null. The resolver does not
+        // throw for that — it quietly returns the DEFAULT location — which is why
+        // the assertion here is on the resolved value, not on the absence of an
+        // exception.
         var blob = UpgradeBlob();
-        var parsed = CommandLineParser.Parse(new[] { "/silent" }, blob.Parameters);
+        var session = InstallSession.ForTesting(
+            blob,
+            CommandLineParser.Parse(new[] { "/silent" }, blob.Parameters),
+            PriorOutOfRoot());
 
-        var withoutPrior = () => StepContext.From(
-            blob, parsed, payloadRoot: null, collected: null, scope: InstallScope.User,
-            collectedOptions: null, collectedInstallDir: OutOfRootPriorDir);
-
-        withoutPrior.Should().Throw<InstallDirRejectedException>(
-            "without the prior dir the grandfathered location is just an out-of-root path");
-
-        var ctx = StepContext.From(
-            blob, parsed, payloadRoot: null, collected: null, scope: InstallScope.User,
-            collectedOptions: null, collectedInstallDir: OutOfRootPriorDir,
-            priorInstallDir: OutOfRootPriorDir);
-
-        ctx.InstallDir.Should().Be(OutOfRootPriorDir,
-            "threading the prior dir is what lets a post-install context resolve at all");
+        session.BuildUninstallContextForTesting().InstallDir.Should().Be(
+            OutOfRootPriorDir,
+            "uninstall scans this directory for files-in-use and expands {install_dir} in " +
+            "uninstall steps and hooks against it");
     }
 
     [WindowsFact("Windows scope roots")]

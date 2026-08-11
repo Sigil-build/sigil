@@ -744,6 +744,44 @@ public sealed class InstallSession
             ? _plan.PriorInstallDir
             : null;
 
+    /// <summary>
+    /// The directory this app is RECORDED as installed in — the uninstall path's
+    /// equivalent of <see cref="PriorInstallDirDefault"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Deliberately NOT <see cref="PriorInstallDirDefault"/>, which additionally
+    /// requires <c>_plan.RemovesPriorVersion</c>. That is an upgrade concept: an
+    /// uninstall run sees the installed version equal to the packed one, so
+    /// <see cref="UpgradePlanner"/> classifies it <c>UpgradeAction.Same</c> and
+    /// <c>RemovesPriorVersion</c> is false — which would make the argument always
+    /// <c>null</c> here, and the grandfather fix inert on this path.
+    /// </para>
+    /// <para>
+    /// It matters because <c>ctx.InstallDir</c> at uninstall does two jobs, and both
+    /// silently targeted the WRONG directory for a grandfathered install (one living
+    /// outside the scope root because it predates containment): the P6/G7
+    /// files-in-use gate scans it, so a running app went undetected and the journal
+    /// replay proceeded against files in use; and <c>{install_dir}</c> in
+    /// <c>uninstall:</c> steps and pre/post-uninstall hooks expanded to a default
+    /// location that does not exist. The resolver does not throw for that — the
+    /// default IS contained — so it failed quietly, which is the worse failure.
+    /// </para>
+    /// <para>
+    /// Provenance and blast radius are the same as the install-side grandfather
+    /// clause, and it carries the same human-partner ruling: the value is the app's
+    /// own recorded <c>InstallLocation</c> from ARP (HKLM for machine scope, which is
+    /// ACL-protected; HKCU for user scope, which crosses no privilege boundary), and
+    /// it exempts exactly that one directory. <c>uninstall.exe /D=&lt;out-of-root&gt;</c>
+    /// still resolves to a DIFFERENT destination and is still refused.
+    /// </para>
+    /// </remarks>
+    private string? RecordedInstallDirForUninstall =>
+        _plan.FoundScope == _scope
+        && !string.IsNullOrEmpty(_plan.PriorInstallDir)
+            ? _plan.PriorInstallDir
+            : null;
+
     // P9 design D2: NOT migrated to the catalog. This feeds the console/silent path
     // (RunHeadlessAsync's stderr) — the headless twin of the wizard's localized
     // DowngradeBlocked notice screen (InstallerViewModel.cs, which correctly stays on
@@ -1356,16 +1394,26 @@ public sealed class InstallSession
     /// apply at uninstall; the install dir resolves to the manifest / CLI / default.
     /// </summary>
     /// <remarks>
-    /// <c>priorInstallDir</c> is threaded through for the R3 grandfather clause. An
-    /// app installed before containment existed lives outside the scope root, so
-    /// without it <see cref="InstallDirResolver"/> refuses and this throws
-    /// <see cref="InstallDirRejectedException"/> — during the UNINSTALL of exactly
-    /// the installs the grandfather ruling exists to keep working.
+    /// <c>priorInstallDir</c> is threaded through for the R3 grandfather clause, and
+    /// it comes from <see cref="RecordedInstallDirForUninstall"/> rather than
+    /// <see cref="PriorInstallDirDefault"/> — the latter is gated on an upgrade
+    /// concept that is never true on this path, which would leave the argument
+    /// permanently <c>null</c> and the fix inert. See that property for what
+    /// silently breaks without it.
     /// </remarks>
     private StepContext BuildUninstallContext() =>
         StepContext.From(
             _blob, _parsed, payloadRoot: null, collected: null, scope: _scope,
-            priorInstallDir: PriorInstallDirDefault);
+            priorInstallDir: RecordedInstallDirForUninstall);
+
+    /// <summary>
+    /// Test seam for <see cref="BuildUninstallContext"/>. It exists so the
+    /// grandfather pin drives the REAL method rather than reconstructing its
+    /// arguments by hand — a hand-built equivalent stays green when the argument is
+    /// deleted, which is exactly how the first version of that pin failed to guard
+    /// anything.
+    /// </summary>
+    internal StepContext BuildUninstallContextForTesting() => BuildUninstallContext();
 
     /// <summary>
     /// GUI entry point for the interactive uninstall flow (T15): drive

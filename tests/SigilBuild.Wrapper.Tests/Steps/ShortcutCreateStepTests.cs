@@ -163,4 +163,121 @@ public class ShortcutCreateStepTests
         Directory.Exists(nested).Should().BeTrue();
         File.Exists(Path.Combine(nested, "Sigil.lnk")).Should().BeTrue();
     }
+
+    // ── R54: the explicit-path branch of `location` ──────────────────────────
+
+    /// <summary>
+    /// Register row R54. The named anchors are contained by construction; an
+    /// explicit path was contained by nothing, so an elevated run would create a
+    /// directory tree anywhere on the volume, write a <c>.lnk</c> into it, and
+    /// journal a <see cref="RollbackRecord.DeleteShortcut"/> that unlinks that
+    /// path unconditionally at rollback or uninstall.
+    /// </summary>
+    [WindowsFact("writes a .lnk through the real ShellLink COM path")]
+    public async Task Explicit_location_outside_every_shortcut_root_is_refused()
+    {
+        using var installDir = new TempDir();
+        using var elsewhere = new TempDir();
+        var stranded = Path.Combine(elsewhere.Path, "Planted");
+
+        var spec = new InstallStep.ShortcutCreate(
+            Id: "s",
+            Target: @"C:\Windows\notepad.exe",
+            Location: stranded,
+            Name: "Evil",
+            Args: null,
+            WorkingDir: null,
+            Icon: null,
+            Description: null,
+            When: null,
+            OnFailure: OnFailure.Fail);
+
+        var result = await StepRun.RefusalAsync(new ShortcutCreateStep(spec), Ctx(installDir.Path));
+
+        result.Error.Should().Contain(
+            "outside every directory a shortcut may be written to",
+            "an unanchored 'location' lets an elevated install materialize a tree " +
+            "anywhere and queue an unconditional delete of that path (R54)");
+        Directory.Exists(stranded).Should().BeFalse(
+            "the refusal must land before Directory.CreateDirectory");
+        File.Exists(Path.Combine(stranded, "Evil.lnk")).Should().BeFalse();
+    }
+
+    [WindowsFact("NTFS directory junctions")]
+    public async Task Explicit_location_reached_through_a_junction_is_refused()
+    {
+        using var installDir = new TempDir();
+        using var elsewhere = new TempDir();
+
+        var link = Path.Combine(installDir.Path, "Shortcuts");
+        Junction.CreateOrFail(link, elsewhere.Path);
+
+        var spec = new InstallStep.ShortcutCreate(
+            Id: "s",
+            Target: @"C:\Windows\notepad.exe",
+            Location: link,
+            Name: "Hop",
+            Args: null,
+            WorkingDir: null,
+            Icon: null,
+            Description: null,
+            When: null,
+            OnFailure: OnFailure.Fail);
+
+        var result = await StepRun.RefusalAsync(new ShortcutCreateStep(spec), Ctx(installDir.Path));
+
+        result.Error.Should().Contain("directory junction");
+        File.Exists(Path.Combine(elsewhere.Path, "Hop.lnk")).Should().BeFalse();
+    }
+
+    /// <summary>
+    /// The over-refusal guard for R54. These are the destinations a real manifest
+    /// asks for, and every one of them must still be accepted. Asserted through
+    /// the predicate rather than by running the step: CI runs elevated, and
+    /// writing into the runner's own Start Menu or Desktop to prove a point is
+    /// exactly the kind of host mutation this track is trying to stop.
+    /// </summary>
+    [WindowsFact("resolves real shell folders")]
+    public void Legitimate_shortcut_destinations_are_all_still_accepted()
+    {
+        using var installDir = new TempDir();
+        var ctx = Ctx(installDir.Path);
+        var machine = ScopeLayout.For(InstallScope.Machine);
+        var user = ScopeLayout.For(InstallScope.User);
+
+        var permitted = new[]
+        {
+            installDir.Path,
+            Path.Combine(installDir.Path, "Tools"),
+            machine.StartMenuFolder,
+            Path.Combine(machine.StartMenuFolder, "Programs", "Contoso"),
+            machine.DesktopFolder,
+            user.StartMenuFolder,
+            Path.Combine(user.StartMenuFolder, "Programs", "Contoso"),
+            user.DesktopFolder,
+        };
+
+        foreach (var location in permitted)
+        {
+            ShortcutCreateStep.CheckLocationContained(ctx, location).Should().BeNull(
+                "'{0}' is an ordinary place for an installer to put a shortcut and " +
+                "must not be refused by R54's containment", location);
+        }
+    }
+
+    [WindowsFact("resolves real shell folders")]
+    public void A_location_outside_the_permitted_roots_is_named_in_the_refusal()
+    {
+        using var installDir = new TempDir();
+
+        var refusal = ShortcutCreateStep.CheckLocationContained(
+            Ctx(installDir.Path), @"C:\Windows\System32\Sigil");
+
+        refusal.Should().NotBeNull();
+        refusal.Should().Contain(@"C:\Windows\System32\Sigil");
+        refusal.Should().Contain("start_menu", "the message must say what IS allowed");
+    }
+
+    private static StepContext Ctx(string installDir) =>
+        new(new System.Collections.Generic.Dictionary<string, object?>(), installDir: installDir);
 }

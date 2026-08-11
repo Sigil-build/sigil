@@ -52,11 +52,17 @@ public sealed class LaunchTests
 #pragma warning restore CA1031
     }
 
-    [Fact]
-    public async Task LaunchAppUnelevated_starts_the_run_after_install_target()
+    /// <summary>
+    /// The half of the launch contract that holds on ANY Windows host, elevated or
+    /// not: the session advertises a run-after-install target and
+    /// <c>LaunchAppUnelevated</c> reports that it started one. Kept separate from
+    /// <see cref="LaunchAppUnelevated_direct_spawn_produces_the_observable_side_effect"/>
+    /// so an elevated runner still executes these assertions instead of returning
+    /// early from a single combined test (register row R6).
+    /// </summary>
+    [WindowsFact]
+    public void LaunchAppUnelevated_reports_starting_the_run_after_install_target()
     {
-        if (!OperatingSystem.IsWindows()) return;
-
         using var tmp = new TempDir();
         var marker = Path.Combine(tmp.Path, "launched.txt");
         var session = InstallSession.ForTesting(
@@ -67,33 +73,43 @@ public sealed class LaunchTests
         session.LaunchLabel.Should().Contain("Launch");
 
         session.LaunchAppUnelevated().Should().BeTrue();
+    }
 
-        // Launcher.LaunchUnelevated only takes the plain Process.Start path
-        // (Launcher.TryLaunchDirect) — a same-session, same-token spawn whose
-        // side effect is reliably observable — when the current process is
-        // NOT elevated. When it IS elevated, it de-elevates via the desktop
-        // shell's duplicated primary token (Launcher.TryLaunchViaShellToken),
-        // which can succeed (the process gets created) while the child never
-        // lands in an observable context on a headless/non-interactive CI
-        // runner (no matching desktop/session, no guaranteed write access to
-        // this process's temp dir) — exactly the token-level behavior this
-        // class's own doc comment above says belongs to the VM matrix, not a
-        // unit test. So only assert the marker materializes when we know the
-        // reliable direct-spawn path was taken; the de-elevation attempt
-        // itself is already covered by the assertion above.
-        if (Elevation.IsProcessElevated())
-        {
-            return; // soft-skip — de-elevation side effect belongs to the VM matrix
-        }
+    /// <summary>
+    /// The observable side effect of the launch — the child process actually runs —
+    /// which only the unelevated code path can be relied on to produce.
+    /// </summary>
+    /// <remarks>
+    /// Launcher.LaunchUnelevated only takes the plain Process.Start path
+    /// (Launcher.TryLaunchDirect) — a same-session, same-token spawn whose side
+    /// effect is reliably observable — when the current process is NOT elevated.
+    /// When it IS elevated it de-elevates via the desktop shell's duplicated
+    /// primary token (Launcher.TryLaunchViaShellToken), which can succeed (the
+    /// process gets created) while the child never lands in an observable context
+    /// on a headless/non-interactive CI runner (no matching desktop/session, no
+    /// guaranteed write access to this process's temp dir) — exactly the
+    /// token-level behaviour this class's doc comment says belongs to the VM
+    /// matrix. So the marker assertion is gated on the reliable direct-spawn path,
+    /// and the gate now reports a genuine Skipped result naming that precondition
+    /// instead of returning early and reporting PASSED (register row R6).
+    /// </remarks>
+    [UnelevatedWindowsFact]
+    public async Task LaunchAppUnelevated_direct_spawn_produces_the_observable_side_effect()
+    {
+        using var tmp = new TempDir();
+        var marker = Path.Combine(tmp.Path, "launched.txt");
+        var session = InstallSession.ForTesting(
+            LaunchBlob("com.acme.launch-" + Guid.NewGuid().ToString("N"), marker),
+            CommandLineParser.Parse(Array.Empty<string>(), Array.Empty<ParameterDefinition>()));
+
+        session.LaunchAppUnelevated().Should().BeTrue();
 
         (await WaitForFileAsync(marker)).Should().BeTrue("the run_after_install target should have started");
     }
 
-    [Fact]
+    [WindowsFact]
     public async Task Silent_launch_starts_the_app_and_silent_alone_does_not()
     {
-        if (!OperatingSystem.IsWindows()) return;
-
         using var tmp = new TempDir();
 
         // /silent /launch → the app starts.

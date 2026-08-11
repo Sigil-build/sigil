@@ -27,6 +27,35 @@ internal sealed class WindowsFactAttribute : FactAttribute
 }
 
 /// <summary>
+/// A <see cref="FactAttribute"/> for the narrow case of a Windows test whose
+/// assertion is only observable when the current process is <b>not</b> elevated —
+/// today just the run-after-install de-elevation side effect (see
+/// <c>LaunchTests</c>). Reports a genuine Skipped result on a non-Windows host or
+/// an elevated one, rather than the <c>if (Elevation.IsProcessElevated()) return;</c>
+/// early return that reported PASSED on every elevated runner (register row R6).
+/// </summary>
+/// <remarks>
+/// CI runs elevated, so this gate fires there: the skip reason in the trx is the
+/// honest statement that the de-elevation path's observable effect belongs to the
+/// VM matrix, not to a unit-test host.
+/// </remarks>
+internal sealed class UnelevatedWindowsFactAttribute : FactAttribute
+{
+    public UnelevatedWindowsFactAttribute(string reason = "Windows-only API")
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Skip = reason;
+        }
+        else if (SigilBuild.Wrapper.Engine.Elevation.IsProcessElevated())
+        {
+            Skip = "process is elevated: the de-elevation launch path's side effect is not "
+                 + "observable from an elevated host (belongs to the VM matrix)";
+        }
+    }
+}
+
+/// <summary>
 /// The <see cref="TheoryAttribute"/> counterpart of <see cref="WindowsFactAttribute"/>.
 /// Same contract, same reason: a genuine Skipped result off Windows.
 /// </summary>

@@ -82,8 +82,17 @@ public sealed class PriorUninstallerTrustTests
     /// entirely — or a fixture that silently failed to plant the key — must not leave
     /// it green. The fixture is verified through the raw registry API, which does not
     /// depend on the process token, and only then is the resolver's answer asserted
-    /// against the contract for the token this run actually has.
+    /// against the contract for the host this run is actually on.
     /// </summary>
+    /// <remarks>
+    /// Branches on the OUTCOME observed, not on an elevation reading. The earlier shape —
+    /// <c>if (Elevation.IsProcessElevated()) …</c> — took its expectation from the same
+    /// signal <see cref="InstalledStateResolver.Resolve"/> consults, so it agreed with the
+    /// implementation by construction: had the elevation probe been broken to return
+    /// <c>false</c>, the resolver would have read HKCU and the test would have asserted
+    /// exactly that and passed. Each arm now proves the host really is the one its outcome
+    /// implies, through <see cref="ObservedElevation"/>, which uses a different API.
+    /// </remarks>
     [WindowsFact("Windows registry")]
     public void The_same_HKCU_entry_is_readable_and_is_resolved_per_the_elevation_contract()
     {
@@ -103,22 +112,24 @@ public sealed class PriorUninstallerTrustTests
 
         var user = InstalledStateResolver.Resolve(appId, InstallScope.User);
 
-        if (Elevation.IsProcessElevated())
+        if (user.Found)
         {
-            // R2's second half: an ELEVATED user-scope run is a privilege boundary
-            // too, so it must not read HKCU either.
-            user.Found.Should().BeFalse(
-                "an elevated process must not resolve an ARP entry out of the user hive, " +
-                "whatever scope it was asked for");
-        }
-        else
-        {
-            user.Found.Should().BeTrue(
-                "an unelevated per-user run legitimately reads its own hive — refusing " +
-                "that would break every per-user upgrade");
+            ObservedElevation.IsElevated().Should().BeFalse(
+                "resolving an HKCU entry is legitimate ONLY unelevated; doing so on an " +
+                "elevated host would mean R2's second half had been lost");
+
             user.InstalledVersion.Should().Be("0.0.1");
             user.PriorUninstallExe.Should().Be(@"C:\Users\Public\evil.exe");
             user.FoundScope.Should().Be(InstallScope.User);
+        }
+        else
+        {
+            // R2's second half: an ELEVATED user-scope run is a privilege boundary
+            // too, so it must not read HKCU either.
+            ObservedElevation.IsElevated().Should().BeTrue(
+                "an unelevated per-user run legitimately reads its own hive — refusing " +
+                "that would break every per-user upgrade, so an empty result here on an " +
+                "unelevated host is a defect, not the elevated contract");
         }
     }
 

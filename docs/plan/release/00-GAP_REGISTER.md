@@ -26,6 +26,48 @@ Two numbers to hold onto: the suite reports **1096 passes with a single skip**,
 and that single skip is the only honest one — see **R6**. The plan docs'
 "527 tests green" (`ORCHESTRATION_PLAN.md:6`) is stale by half.
 
+## Stage 1 outcome (2026-08-11) — these numbers supersede the table above
+
+Stage 1 closed 17 rows across four lanes, merged in the order S1 → S2 → S3 → T1.
+RC head `86c2799`. **Measured on CI, not locally** — the local box cannot
+AOT-publish, so it skips several packaging tests CI runs.
+
+| Check | Audit (2026-07-28) | RC `86c2799` (CI) |
+|---|---|---|
+| Tests | 1097 total · 1096 passed · **1 skipped** | **1538 total · 1517 passed · 21 skipped · 0 failed** |
+| Format gate | fails, 28 files | passes (Stage 0) |
+| `SigilBuild.Core` coverage | 63.89% | **69.51%** (floor 69%) |
+| `SigilBuild.Packaging` coverage | 72.00% | **86.51%** (floor 72%) |
+| `SigilBuild.Signing` coverage | 68.79% | **68.79%** (floor 68%) |
+| `SigilBuild.Wrapper.Core` coverage | 77.64% | **79.47%** (floor 79%) |
+| Project-wide union | 74.74% | **78.04%** (floor 77%) |
+
+**The skip count is the point, not a regression.** 1 → 21 is not the suite getting
+worse; it is the suite starting to tell the truth. Roughly 28 tests were reporting
+`Passed` while asserting nothing. 21 is the honest size of the untested surface,
+and every one of them names its missing precondition.
+
+Coverage floors were re-pinned upward on the integrated tree at the T1 merge, at
+the measured value **rounded down** — a ratchet, not the aspirational targets in
+`AGENTS.md`. Nothing was lowered.
+
+| Row | Lane | Merge |
+|---|---|---|
+| R1, R2, R19 | S1 | `31ae3a3` (#19), `5b65712` (#20) |
+| R3, R9, R16, R31, R32 | S2 | `4505b24` (#21) |
+| R4, R5, R10, R11, R12, R17 | S3 | `72d6437` (#22) |
+| R6, R21, R22 | T1 | `86c2799` (#23) |
+
+Three of those are **not** simply "fixed": **R9** is closed but the row's own text
+is wrong (see its status note), **R16** is partial (clause 3 unimplemented), and
+**R22**'s guards cannot be proven until the VM matrix runs at G3.
+
+Stage 1 also produced **fourteen new rows** — R44, filed mid-stage, and R45–R57 in
+the "Filed during Stage 1" section below. Eleven **over-refusals** were caught and
+fixed before merge: cases where a security fix refused legitimate behaviour, the
+worst being that **both shipped exe-wrapper examples aborted at their first
+`file_copy`** while CI stayed green, because the example gate is schema-only.
+
 ---
 
 ## Severity rubric
@@ -43,6 +85,13 @@ Effort: **S** ≤ 1 day · **M** 1–3 days · **L** ≈ 1 week.
 
 ### R1 — Elevated replay of unauthenticated, user-writable install state
 **Component:** Wrapper.Core / Engine · **Effort: L**
+
+> **STATUS — FIXED in Stage 1** (lane S1; primitives `31ae3a3` / PR #19, main body
+> `5b65712` / PR #20). Both negative tests were confirmed failing at the parent
+> commit by the orchestrator, not accepted on the lane's word: the directory
+> attack fails at `8ad077d`, the file attack at `5d3fd98`. Forcing the anchoring
+> predicate to `Allow` fails 51 tests. See **R44** for the one composite this fix
+> does not cover.
 
 This is the prior review's B1. It is **confirmed, and materially worse than
 described** — the blast radius extends to the install path, not just uninstall.
@@ -101,6 +150,12 @@ free-form path.
 ### R2 — Elevated installer spawns an executable path taken from HKCU
 **Component:** Wrapper.Core / upgrade · **Effort: M**
 
+> **STATUS — FIXED in Stage 1** (lane S1, `5b65712` / PR #20). The probe order is
+> now asymmetric by design — see `InstalledStateResolver.ScopeProbeOrder`, and do
+> not "restore the symmetry". This fix is what broke a **pre-existing** test on CI
+> that planted an HKCU entry and asserted it was read: CI runs elevated, so the
+> elevated arm was reached there and nowhere locally. Fixed test-only in `728c957`.
+
 `InstalledStateResolver.Resolve` probes the **user** hive as a fallback even
 when the tentative scope is machine:
 
@@ -139,6 +194,13 @@ or to live under an admin-only directory before spawning.
 
 ### R3 — `/D=` is unvalidated and privileged step targets are unanchored → SYSTEM binary in a user-writable directory
 **Component:** Wrapper.Core / steps + install-dir resolution · **Effort: M**
+
+> **STATUS — FIXED in Stage 1** (lane S2, `4505b24` / PR #21). 6 of the 8 negative
+> tests fail at the parent, and the 2 that pass are exactly the positive controls.
+> Both `%ProgramFiles%` roots are accepted; a recovered prior install dir is
+> **grandfathered and logged** so non-default prior installs stay upgradable.
+> Reducing the grandfather clause to "a prior install exists" re-opens the hole —
+> that reduction was run and reproduced the escalation.
 
 `InstallDirResolver.Resolve` accepts the `/D=` command-line override and only
 canonicalizes it — there is **no containment check against the scope root**:
@@ -196,6 +258,13 @@ non-administrators.
 ### R4 — Elevated process loads native DLLs from a per-user cache gated only by a marker file
 **Component:** Wrapper.Core / native bootstrap · **Effort: M**
 
+> **STATUS — FIXED in Stage 1** (lane S3, `72d6437` / PR #22). The marker is now a
+> fast path consulted only *alongside* an ACL check and a full content comparison,
+> never instead of them. Note the elevated cache root moved to
+> `%ProgramData%\sigil-runtime` — **not** `%ProgramData%\Sigil`, deliberately, so a
+> squatted directory can be repaired rather than turning R1's plant into a denial
+> of service. The G1 gate text below still names the old `%LocalAppData%` path.
+
 ```
 src/SigilBuild.Wrapper.Core/Engine/NativeRuntimeBootstrap.cs:85-86
     var baseDir = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -234,6 +303,9 @@ marker file.
 ### R5 — Web-installer stub verifies, then executes, a predictably-named `%TEMP%` file
 **Component:** Packaging / ExeWrapper · **Effort: M**
 
+> **STATUS — FIXED in Stage 1** (lane S3, `72d6437` / PR #22). Confirmed failing at
+> the parent: the swapped binary really was launched, and exited 0.
+
 The `--payload web` stub's blob is two independent steps — an `http_download`
 followed by a `run_program` of the same path:
 
@@ -265,6 +337,12 @@ open with sharing that denies write/delete across the launch.
 
 ### R6 — VM-gated and runtime-gated tests soft-skip by returning early, so they report **Passed**
 **Component:** tests / CI · **Effort: S** (the fix; the consequence is large)
+
+> **STATUS — FIXED in Stage 1** (lane T1, `86c2799` / PR #23). Every gate is now an
+> attribute that sets xunit's `Skip`, naming the missing precondition. The measured
+> consequence: the suite went from **1 skip** to **21 on CI / 27 locally**. Note
+> `Assert.SkipUnless` — which the stage document prescribed — **does not exist** in
+> xunit 2.9.2; custom `FactAttribute` subclasses replace it.
 
 The uniform construct is an early `return`, not `Assert.Skip`:
 
@@ -384,6 +462,16 @@ SIG0235) and re-check the substituted URL in `HttpOptionsLoader.LoadAsync`.
 ### R9 — `/P<name>=` values flow unvalidated into privileged step fields
 **Component:** Wrapper.Core / steps · **Effort: M**
 
+> **STATUS — CLOSED in Stage 1, but NOT "fixed as written"** (lane S2, `4505b24` /
+> PR #21). Privileged targets now require containment **and**
+> admin-only-writability. **The row's own text is wrong on one point and the
+> implementation deliberately departs from it:** this row names `payload://` as a
+> safe source for a privileged target. The implementation **refuses** it, because
+> the payload extracts into the invoking user's own `%TEMP%` — replaceable between
+> extraction and use, and deleted at end of run — so a scheduled task or service
+> pointing into it targets a path that no longer exists. Anyone reconciling this
+> row against the code should reconcile toward the code.
+
 `Cli/CommandLineParser.cs:590-594` accepts `/PName=Value`; the values are
 forwarded verbatim to the elevated child and expand via `ctx.Resolve*` into
 `scheduled_task_create.program` (`/RU SYSTEM`), `service_install.binary_path`,
@@ -400,6 +488,10 @@ to declare a parameter in a privileged field.
 
 ### R10 — No size cap on any download; the channel manifest is fully buffered before its signature is checked
 **Component:** Wrapper.Core / net · **Effort: S**
+
+> **STATUS — FIXED in Stage 1** (lane S3, `72d6437` / PR #22). `maxBytes` rejects up
+> front on `Content-Length` **and** aborts mid-stream on a server that lies about
+> it; the pre-authentication manifest buffer is capped.
 
 ```
 src/SigilBuild.Wrapper.Core/Engine/SigilDownloader.cs:118   var total = resp.Content.Headers.ContentLength;  // progress only
@@ -422,6 +514,13 @@ fetch at a few hundred KB.
 ### R11 — Nothing downloaded is Authenticode-verified before elevated execution
 **Component:** Wrapper.Core · **Effort: S**
 
+> **STATUS — FIXED in Stage 1** (lane S3, `72d6437` / PR #22), with a documented
+> per-prerequisite opt-out that fails closed. Two limitations are filed rather than
+> claimed done: the policy is *inferred* from `SignDeclared` rather than declared
+> (**R45**), and `WinVerifyTrust` accepts any machine-trusted chain — including a
+> per-user root any non-admin can install — so this is **integrity, not publisher
+> identity** (**R49**).
+
 `AuthenticodeVerifier.VerifyFile` exists and is AOT-clean
 (`Engine/AuthenticodeVerifier.cs:63`), but its only caller in the entire tree is
 `Engine/WrapperBlob.cs:498`, which uses it to decide whether to render a
@@ -439,6 +538,15 @@ unsigned redistributables.
 
 ### R12 — Prerequisite and update binaries: verify→launch gap, default ACLs, no handle held
 **Component:** Wrapper.Core · **Effort: M**
+
+> **STATUS — FIXED in Stage 1** (lane S3, `72d6437` / PR #22). `SecureStaging` gives
+> a private per-run directory; `OpenVerified` re-hashes **from the open handle** and
+> returns a `FileShare.Read` handle held across the launch. Orchestrator-run at the
+> parent commit `31ae3a3`: all four `StagedExecutionTests` fail there with
+> meaningful assertions, including *"a staged setup whose bytes no longer match the
+> sha256 it was verified under must never be launched, **but found True**"* — the
+> TOCTOU firing live. An elevated run that cannot establish an admin-only staging
+> root now **throws rather than degrading**.
 
 ```
 src/SigilBuild.Wrapper.Core/Engine/PrerequisiteRunner.cs:237   Path.Combine(Path.GetTempPath(), $"sigil-prereq-{Guid.NewGuid():N}.exe")
@@ -515,6 +623,14 @@ and retain the state file when any record failed.
 ### R16 — No path containment on any step destination; config edits follow junctions and inherit attacker DACLs
 **Component:** Wrapper.Core / steps · **Effort: M**
 
+> **STATUS — PARTIALLY FIXED in Stage 1** (lane S2, `4505b24` / PR #21). Clauses 1
+> and 2 are done: destinations are contained with a documented per-step opt-out
+> (`allow_outside_install_dir`), and the unresolved-`{brace}` check moved into the
+> **resolver** so it covers every path field rather than one step.
+> **Clause 3 — resetting the DACL on machine-scope files the installer creates — was
+> never in the lane's task list and is NOT implemented.** Do not read this row as
+> closed. The opt-out also has no counterpart in the replay anchor: that is **R44**.
+
 Containment logic is re-implemented three times and shared nowhere —
 `StepContext.cs:523-537` (payload sources only), `PayloadExtraction.cs:108-118`
 (zip-slip), `NativeRuntimeBootstrap.cs:190-191`. **No step destination is checked
@@ -541,6 +657,17 @@ on files the installer creates in machine scope.
 
 ### R17 — `AuthenticodeVerifier` disables revocation checking
 **Component:** Wrapper.Core · **Effort: S**
+
+> **STATUS — FIXED in Stage 1** (lane S3, `72d6437` / PR #22). Whole-chain revocation,
+> with "unavailable" rendered as a state **distinct** from both trusted and forged.
+> The lane widened the scope on its own initiative and found two more defects in the
+> contiguous `0x80092010..0x80092014` band: `CRYPT_E_NO_REVOCATION_DLL` was an
+> over-refusal, and **`CRYPT_E_REVOKED` was waivable by `allow_unsigned`** — a
+> revoked signature and an unsigned binary had become the same class of problem,
+> decided by which Windows layer noticed. Now unconditional.
+> **No revocation behaviour has real-fixture proof**; the band is verified by
+> mapping against documented semantics, not by observed API returns. See **R46**,
+> **R47**, **R48**.
 
 `Engine/AuthenticodeVerifier.cs:31,95` — `fdwRevocationChecks = WTD_REVOKE_NONE`.
 A revoked publisher certificate still renders the "Signed by …" trust line in
@@ -572,6 +699,15 @@ secret channel.
 
 ### R19 — Hostile `uninstall.json` crashes the elevated process; unbounded read
 **Component:** Wrapper.Core · **Effort: S**
+
+> **STATUS — FIXED in Stage 1** (lane S1, `5b65712` / PR #20). Rehydration moved
+> inside `TryLoad`'s `catch` and is treated as "state unreadable"; file-size and
+> record-count ceilings added. Reverting only `UninstallStateStore.cs` reproduces
+> the four exact pre-fix escapes: `unknown rollback record type`, `missing required
+> field 'path'`, `ArgumentNullException`, `NullReferenceException`.
+> A refusal is reported as a refusal, never as an absence — reporting "no uninstall
+> state found" for a file the operator can see on disk is the same cover for an
+> attacker that R1 closed.
 
 ```
 src/SigilBuild.Wrapper.Core/Engine/UninstallStateStore.cs:157-160   catch { continue; }   // covers ONLY Deserialize
@@ -631,6 +767,15 @@ the gate alone turns every subsequent PR red).
 ### R21 — Coverage gate is line-only and project-wide-only; per-assembly targets unenforced and unmet; three shipping assemblies absent from the denominator
 **Component:** CI · **Effort: S**
 
+> **STATUS — FIXED in Stage 1** (lane T1, `86c2799` / PR #23), with one deliberate
+> tolerance. Per-assembly floors are enforced, set at the **measured value rounded
+> down** — a ratchet, not the aspirational `AGENTS.md` targets. The three
+> zero-line assemblies are reported via `::warning::` but do **not** fail the build:
+> hard-failing would have turned the required `build` check red at this merge and
+> blocked every Stage 2/3 lane behind it. **This tolerance is temporary** — move
+> `SigilBuild.Cli`, `SigilBuild.Wrapper` and `SigilBuild.Installer.Host` into
+> `ASSEMBLY_FLOORS` the day each reports nonzero coverage.
+
 `ci.yml:64` `THRESHOLD = 0.65`; `ci.yml:79-84` parses only `lines/line` `hits`,
 so **branch coverage is never evaluated**; `ci.yml:96` *prints* the per-assembly
 rate and `ci.yml:99` compares only the project-wide total. The
@@ -658,6 +803,12 @@ allowlist that fails when one is missing; parse branch coverage.
 
 ### R22 — Two of three VM jobs can pass vacuously
 **Component:** CI · **Effort: S**
+
+> **STATUS — FIXED in Stage 1, UNPROVEN** (lane T1, `86c2799` / PR #23). Both jobs
+> now assert the `SIGIL_VM_TESTS` marker **and** the staged host exe before
+> `dotnet test`. The guards could **not** be proven by watching a VM job fail with
+> the marker unset: `wrapper-vm-tests.yml` is `workflow_dispatch`-only and needs
+> admin plus a disposable VM. That proof belongs to gate **G3**, not G1.
 
 `wrapper-vm-tests.yml:231-236` (p11) hard-fails when the runner is not elevated,
 with the comment *"an unelevated runner would make this whole job go green
@@ -936,6 +1087,10 @@ diagnostic that `signingKey` decodes as base64 and imports as a P-256 SPKI.
 ### R31 — `schtasks /TR` is built by string concatenation with unescaped quotes
 **Component:** Wrapper.Core / steps · **Effort: S**
 
+> **STATUS — FIXED in Stage 1** (lane S2, `4505b24` / PR #21). `"` is rejected in
+> `program`, and the validation runs **before anything is journalled**. 12 of the 15
+> R31/R32 tests fail at the parent; the 3 that pass are "still accepted" controls.
+
 ```
 src/SigilBuild.Wrapper.Core/Steps/ScheduledTaskCreateStep.cs:110-112
     var trValue = string.IsNullOrEmpty(arguments) ? $"\"{program}\"" : $"\"{program}\" {arguments}";
@@ -955,6 +1110,10 @@ proper escaping.
 
 ### R32 — `ini_write` does not escape CRLF: line injection into the INI
 **Component:** Wrapper.Core / steps · **Effort: S**
+
+> **STATUS — FIXED in Stage 1** (lane S2, `4505b24` / PR #21). `\r`, `\n` and a
+> leading `[` are rejected. The leading-`[` rejection on a *value* is a conservative
+> over-rejection, as specified.
 
 `Steps/IniWriteStep.cs:94` `lines[i] = key + "=" + value;` and `:105`
 (insert path). `section`, `key`, and `value` are `ctx.Resolve`-expanded and
@@ -1181,6 +1340,187 @@ method's remarks; the residual is bounded because the escalating consequences (a
 machine-wide execution mapping, a machine `PATH` entry) each independently require
 an admin-only-writable target. Recorded here so the S1 × S2 interaction is not
 rediscovered as a new finding.
+
+---
+
+# Filed during Stage 1
+
+Rows **R45–R57** were not in the 2026-07-28 audit. Every one was found while
+fixing something else — by a lane, or by a review of a lane — and filed rather
+than absorbed, per the "a lane that finds a gap not in the register stops and
+files a new row" rule in `03-RC_ORCHESTRATION.md`. They are grouped by the lane
+that raised them; severity is per row.
+
+## From lane S3 (downloaded-binary trust)
+
+The lane's own call: **R45 and R48 are the two it would not ship without.**
+
+### R45 — The downloaded-binary signature policy is inferred, not declared
+**Component:** Wrapper.Core + manifest · **Effort: S** · **SHOULD-FIX**
+
+R11's gate decides whether a downloaded binary must be Authenticode-valid by
+reading `SignDeclared` — i.e. "did this publisher configure signing for their own
+output" — and using it as a proxy for "should downloads be verified". Those are
+different questions, and a publisher who signs nothing gets no verification on
+anything they download and run elevated.
+
+**Fix:** an explicit `installer.require_signed_downloads`, defaulting to
+`SignDeclared` so behaviour is unchanged, blob-carried and pack-time validated.
+Smallest row of the four, and it names the policy the other three argue about.
+
+### R46 — A blackholed CRL/OCSP responder suppresses revocation
+**Component:** Wrapper.Core · **Effort: M** · **SHOULD-FIX**
+
+R17 now checks revocation, and correctly renders "unavailable" as distinct from
+"trusted". But `RevocationUnavailable` is not a refusal, so revocation of a stolen
+signing key is suppressible by anyone who can blackhole two hostnames — on a
+corporate network, a captive portal, or a compromised resolver.
+
+**The only row in this group with a live adversary.** Candidate fixes — OCSP
+stapling via the signed channel manifest, Microsoft's disallowed-certificate list,
+known-good caching with transition detection, opt-in hard-fail — are all design
+conversations, and one of them touches the unbuilt publish stage. Pick one
+deliberately; do not let the default stand by inattention.
+
+### R47 — One `fdwRevocationChecks` constant serves two callers that want opposite policies
+**Component:** Wrapper.Core · **Effort: M** · **POST-v1**
+
+The security gate wants to be strict and online. The wizard's cosmetic "Signed
+by …" line wants to be fast and never block. They share one constant.
+
+**Caveat for whoever splits them:** a cache-only trust line that renders
+*identically* to an online-verified one reintroduces R17's bug in a new place —
+the operator cannot tell the two apart, which was the whole defect.
+
+### R48 — The trust-line lookup blocks the wizard's UI thread
+**Component:** Installer.Host · **Effort: S** · **RELEASE-GATING**
+
+The call site is **confirmed** UI-blocking. The **stall magnitude is UNMEASURED**:
+the ~15 s figure is Windows' documented CRL timeout, not an observed number, and
+this box is online so it returns `Trusted` immediately. Needs an offline
+cold-cache first-run measurement before release.
+
+Do the off-thread fix regardless of what the number turns out to be — a first-run
+wizard that appears hung is a first impression, and the measurement only decides
+how urgent it was.
+
+### R49 — Authenticode validity is integrity, not publisher identity
+**Component:** Wrapper.Core · **Effort: M** · **POST-v1**
+
+`WinVerifyTrust` accepts any chain the machine trusts, **including a root any
+non-administrator can install into their own store**. So "Authenticode-valid"
+means the bytes were not altered after signing — not that the publisher signed
+them. Pinning needs an authenticated publisher identity in the pack-time manifest,
+which does not exist yet. Filed rather than half-built; recorded here so nobody
+reads R11's fix as identity verification.
+
+### R50 — One `New-Item` at `%ProgramData%\sigil-runtime` costs every elevated install ~18 MB
+**Component:** Wrapper.Core / native bootstrap · **Effort: M** · **SHOULD-FIX**
+
+The R4 fix falls back to a per-run GUID directory when the shared cache root
+cannot be established or repaired. A squat that cannot be repaired — a *file* at
+that path, or an owner-pinned deny ACE — is not a security hole (that is the
+designed refusal), but the fallback is **never reclaimed**, so an unprivileged
+user can arm an unbounded ~18 MB-per-install disk leak with one command.
+
+**Constraints any fix must meet — these are what killed the original sweep:**
+guards must read from an **open handle** with reparse-point checks, never through
+the path, and a reclaim must not race a concurrent install that is using the
+directory it is about to delete.
+
+## From lane S1 (trusted state)
+
+### R51 — Registry replay anchoring is a denylist, and it is not converging
+**Component:** Wrapper.Core / Engine + wire schema · **Effort: M** · **SHOULD-FIX**
+
+R1's replay anchor permits registry writes by denying known-dangerous key shapes.
+Three consecutive review rounds each produced another name the denylist missed —
+`Classes\…\shell\open\command` and `App Paths\*`, then `txtfile`, `lnkfile`,
+`mscfile`, `Drivers32`. The lane was told to stop adding names and deny the
+*shape*, which it did; that bought time, it did not close the class.
+**Enumeration is losing to the search space.**
+
+**Durable fix:** a manifest-declared registry key allowlist, resolved at replay
+time from the **signed blob** — not carried in the journal, for exactly the reason
+in R44: the journal is the untrusted artefact, so a permission it carries about
+itself is worthless. Ruled by the human partner as a later stage because it is a
+wire-schema change.
+
+### R52 — `ScopeLayout` models one install root while containment accepts three
+**Component:** Wrapper.Core / Engine · **Effort: S** · **SHOULD-FIX**
+
+`ScopeLayout.cs:61-65` hardcodes `SpecialFolder.ProgramFiles` as *the* machine
+install root. Lane S2's containment accepts both `%ProgramFiles%` roots, and
+correctly declined to widen a shared surface mid-lane. The result is that the
+**permitted** destinations and the **default** destination are now described in
+two places and can drift apart silently.
+
+**Fix:** give `ScopeLayout` a root *set* and derive containment from it.
+
+### R53 — An elevated process replays user-scope state at all
+**Component:** Wrapper.Core / Engine · **Effort: M** · **POST-v1**
+
+`PerformReinstallCleanupAsync` with `_scope == User` replays state out of the
+user's own profile from an elevated process. R1 clause (b) stopped a *machine*
+operation from crossing into `%LocalAppData%`; this is the different question of
+whether an elevated run should replay user-scope state **even when the scope is
+genuinely user**. The records are anchored, so this is not the pre-R1 hole — but
+the privilege asymmetry is the same shape and deserves a decision rather than an
+inheritance. Raised by S1.3.
+
+### R54 — `shortcut_create.location`'s explicit-path branch has no containment
+**Component:** Wrapper.Core / steps · **Effort: S** · **SHOULD-FIX**
+
+Pre-existing, and outside lane S2's task list. The named anchors
+(`start_menu`, `desktop`, …) are contained; an explicit path is not.
+
+## From lane T1 and the merge gate
+
+### R55 — The docs still teach the broken `parameters.install_dir` idiom, and two migration guides state something false
+**Component:** docs · **Effort: S** · **SHOULD-FIX** · **route to lane DOC (Stage 3)**
+
+Declaring a parameter named `install_dir` creates a *second*, unrelated value that
+diverges from the real one the moment a user installs anywhere but the default.
+The correct idiom is `{install_dir}` — the single value that the default,
+`installer.install_dir:`, the wizard's Destination screen, `/D=`, upgrade-in-place
+and the containment guards all agree on. Lane S2 converted 13 snippets in the
+files it owned; the idiom survives in:
+
+- `docs/guides/parameters.md:63`
+- `docs/guides/uninstaller.md:61`
+- `docs/migration/from-inno.md:21`
+- `docs/migration/from-wix.md:65`
+- `docs/migration/from-nsis.md:55`
+
+**`from-wix.md` and `from-nsis.md` additionally assert that a destination screen is
+"auto-inserted when `parameters.install_dir` is declared". That is false** —
+`InstallerViewModel.cs:1045` adds it unconditionally. Migration guides are the
+first thing a switching publisher reads.
+
+**Also for lane DOC, a release note rather than a doc fix:** S2's
+`directory_create` containment required the `allow_outside_install_dir` opt-out in
+**11 pre-existing fixtures**. That is real ergonomic friction for any publisher
+creating a `%ProgramData%` directory, and they should meet it in the release notes
+rather than in a failed install.
+
+### R56 — Hook-phase refusal notices go nowhere
+**Component:** Wrapper.Core / Engine · **Effort: S** · **SHOULD-FIX**
+
+`ctx.ProgressSink` is set only by `InstallEngine`, so the disarm and
+staging-refusal notices raised during a `pre_install` hook or an uninstall hook are
+reported to nothing. A security refusal that is not logged is, from the operator's
+side, indistinguishable from a silent success — the exact failure mode R1 and R19
+were fixed to remove, surviving in the one phase nobody checked.
+
+### R57 — A test deletes an HKLM key on an elevated runner
+**Component:** tests · **Effort: S** · **NOTE**
+
+`tests/SigilBuild.Wrapper.Tests/…/UninstallEngineTests.cs:76` calls
+`DeleteSubKeyTree` against `HKLM\…\Uninstall\sigil.test.<guid>` in a swallowing
+`finally`. Pre-existing (present at the merge base), and harmless today because no
+test creates that key — but **CI runs elevated**, so it is the one line in the
+suite that would do something real to the host given an app-id collision.
+One-line removal whenever that file is next touched.
 
 ---
 

@@ -30,9 +30,14 @@
 > be rebased before merging. That is the correct trade for this track — it
 > guarantees each lane's checks ran against the integrated tree — but it makes
 > the G1 merge order (S1 → S2 → S3 → T1) a serial rebase chain, not a free-for-all.
-> `bypass_actors` is empty and `current_user_can_bypass` is `never`, so **direct
-> pushes to `release/**` will also stop working** once it is active; bookkeeping
-> edits to these plan docs then need a PR like anything else.
+> **CORRECTED 2026-08-11 — this paragraph previously said the opposite.** It read
+> "`bypass_actors` is empty and `current_user_can_bypass` is `never`". Measured on
+> the live ruleset: `current_user_can_bypass: always`, with **two** bypass actors
+> (`OrganizationAdmin`, and `RepositoryRole` id 5). So direct pushes to
+> `release/**` do **not** stop working for the repository owner. Stage 2's
+> orchestration reasons from this sentence, which is why it is corrected rather
+> than quietly deleted — but note that "can bypass" is not "should": every Stage 1
+> lane went through a PR, and the merge order held because of it.
 
 ### CI evidence captured at G0 (authoritative — resolves audit UNVERIFIED items)
 
@@ -48,14 +53,41 @@
 `SigilBuild.Cli`, `SigilBuild.Wrapper` and `SigilBuild.Installer.Host`
 contribute zero lines. T1 fixes this.
 
+### CI evidence captured at G1 (supersedes the G0 table above)
+
+RC head `86c2799`, CI run 31510096635 — green, including `aot publish (win-x64)`.
+
+| Metric | G0 | G1 |
+|---|---|---|
+| Tests | 1097 · 1 skipped | **1538 · 1517 passed · 21 skipped · 0 failed** |
+| `SigilBuild.Core` coverage | 63.89% | **69.51%** |
+| `SigilBuild.Packaging` coverage | 72.00% | **86.51%** |
+| `SigilBuild.Signing` coverage | 68.79% | **68.79%** |
+| `SigilBuild.Wrapper.Core` coverage | 77.64% | **79.47%** |
+| Project-wide union | 74.74% | **78.04%** |
+
+Two things this table does not say. **The three zero-line assemblies still report
+zero** — T1 made the absence loud (`::warning::`) rather than fixing it, because
+hard-failing would have turned the required `build` check red at the merge and
+blocked every Stage 2/3 lane behind it. And **`SigilBuild.Packaging` jumps 14
+points on CI purely because CI stages the win-x64 runtime**, which unskips nine
+tests the dev box cannot run — the floors are pinned to the *local* measurement
+precisely so they can never fail an otherwise-green CI run.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: use `superpowers:subagent-driven-development`
 > (recommended) or `superpowers:executing-plans` to implement the stage documents
 > task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Close all 46 findings in
+**Goal:** Close all findings in
 [`00-GAP_REGISTER.md`](00-GAP_REGISTER.md) on the branch
 `release/v0.1.0-alpha`, ending in a signed, tagged `v0.1.0-alpha` that a
 stranger can download and run.
+
+> The audit opened with **46**. Stage 1 closed 17 and filed **14 more** (R44–R57),
+> all of them found while fixing something else. Expect the register to keep
+> growing as lanes land: a stage that adds no rows either got lucky or was not
+> looking. Cite the register for the current count rather than repeating a number
+> here.
 
 **Architecture:** Five sequential stages of parallel, file-disjoint lanes. Each
 lane is a branch cut from the RC that opens a PR into the RC; the orchestrator
@@ -140,9 +172,16 @@ trust would repeat precisely the failure being fixed.
 |---|---|
 | RC branch | `release/v0.1.0-alpha`, cut from `main` @ `1be494c` |
 | Lane branches | `rc/<lane>-<slug>`, cut **from the RC**, never from `main` |
-| Lane completion | PR into the RC; `pr-guards` gates it; orchestrator squash-merges |
+| Lane completion | PR into the RC; `pr-guards` gates it; **a human merges** — see below |
 | Track completion | one PR RC → `main`, then tag `v0.1.0-alpha` |
 | Urgent `main` fixes | cherry-pick onto the RC; do not merge `main` into the RC mid-stage |
+
+**The orchestrator cannot merge lane PRs — discovered at S1a, 2026-08-11.** The
+ruleset sets `required_approving_review_count: 1` and GitHub forbids approving
+your own PR, so **every** lane PR needs a human hand-merge (or the count dropped
+to 0). `gh pr merge --admin` is refused by the sandbox classifier and **must not
+be worked around**. Budget for a human round-trip at each link of the Stage 2 and
+Stage 3 merge chains, not just at the gate.
 
 **Completed 2026-07-28:** stale remote branches archived as `archive/*` tags
 (pushed to origin) and deleted. `git ls-remote --heads origin` now returns
@@ -246,10 +285,23 @@ assumed.**
 
 ### G1 — after Stage 1
 
-Merge order: **S1 → S2 → S3 → T1**.
+Merge order: **S1 → S2 → S3 → T1**. All four merged: `5b65712` (#20, after
+`31ae3a3` / #19), `4505b24` (#21), `72d6437` (#22), `86c2799` (#23).
 
-Four attacks, run **by hand as a standard (non-admin) user**. Each must be
-refused with a log line naming the reason — not crash, not silently proceed:
+**Five** attacks (the heading said four and listed five), run **by hand as a
+standard (non-admin) user**. Each must be refused with a log line naming the
+reason — not crash, not silently proceed.
+
+**How these are executed on this machine.** The dev box cannot Native-AOT-publish
+(`vswhere` / MSVC linker, `MSB3073` exit 123), so there is no real `Setup.exe` to
+attack. Each artifact is therefore planted **by hand as the standard user** — which
+is the half of the attack that must succeed — and the victim half drives
+`InstallSession` / `UninstallEngine` / `InstalledStateResolver` /
+`NativeRuntimeBootstrap` directly from a small elevated harness. The harness
+borrows the `SigilBuild.Wrapper.Tests` assembly name to reach `internal` members,
+but is deliberately **not** the test project: that project installs a process-wide
+`NeverStageElevatedForTesting` floor via `[ModuleInitializer]`, and running these
+attacks under it would exercise a path production never takes.
 
 - [ ] Plant `C:\ProgramData\Sigil\<AppId>\uninstall.json` with a `restore_file`
       record targeting `C:\Windows\System32\`. Run an elevated machine-scope
@@ -260,21 +312,49 @@ refused with a log line naming the reason — not crash, not silently proceed:
       with `DisplayVersion=0.0.1` and `UninstallString` pointing at a scratch
       exe. Run an elevated machine-scope install of that AppId. The scratch exe
       must **not** run. *(R2)*
-- [ ] `Setup.exe /allusers /D=C:\Users\Public\evil` is rejected. *(R3)*
-- [ ] Pre-create `%LocalAppData%\Sigil\runtime\<sha>\` with a bogus
-      `libSkiaSharp.dll` and a valid `.sigil-runtime-complete` marker. The
-      elevated wizard must not load it. *(R4)*
+- [x] `Setup.exe /allusers /D=C:\Users\Public\evil` is rejected. *(R3)* — **PASSED
+      2026-08-11.** Refusal line: *"The install directory 'C:\Users\Public\evil' is
+      outside the machine scope root 'C:\Program Files', 'C:\Program Files (x86)'
+      (or reaches it through a directory junction). Refusing to install there —
+      {install_dir} feeds SYSTEM-level step targets. Nothing was installed."* The
+      wizard-collected path is refused identically, and the positive control
+      (`/D=C:\Program Files\SigilG1Probe`) still resolves, so the check is not
+      vacuous.
+- [ ] Pre-create the elevated native-runtime cache with a bogus `libSkiaSharp.dll`
+      and a valid `.sigil-runtime-complete` marker. The elevated wizard must not
+      load it. *(R4)* — **the path in this line was stale**: the R4 fix moved the
+      elevated root to `%ProgramData%\sigil-runtime\<sha>\`, not
+      `%LocalAppData%\Sigil\runtime\<sha>\`. Attack the new one.
+
+Plus one probe the plan did not ask for, added because **S3's entire elevated path
+rests on it**: does a directory `CreateHardened` produces actually satisfy
+`IsAdminOnlyWritable` under a real elevated token? If it does not, every elevated
+install refuses. It fails only on a box with `NoDefaultAdminOwner=1`, where
+`%ProgramFiles%`'s inherit-only `CREATOR OWNER:(F)` materialises as a concrete
+user ACE. Run through the **real** predicate, not a PowerShell replica of it.
+
+- [ ] Elevated ACL probe: `IsAdminOnlyWritable(dir)` and `IsTrustedFile(file)` on
+      a fresh `%ProgramFiles%` directory, on a `CreateHardened` one, and — as the
+      non-vacuity control — on `%ProgramData%` itself, which must be **rejected**.
 
 Then:
 
-- [ ] `dotnet test -c Release` reports a **non-zero skip count**. Record the
-      exact number here → `______`. That number is the honest size of the
-      untested surface.
-- [ ] No test soft-skips by returning early (`grep -rn "// soft-skip" tests/`
+- [x] `dotnet test -c Release` reports a **non-zero skip count**. Record the
+      exact number here → **21** (CI run 31510096635 on `86c2799`; **27** locally).
+      That number is the honest size of the untested surface, against the **1** this
+      stage started with. Take the CI figure as authoritative: the local run differs
+      legitimately by `+1` (an unelevated-only fact that skips on the elevated
+      runner) and `−7` (CI stages the runtime, so seven packaging tests actually
+      run).
+- [x] No test soft-skips by returning early (`grep -rn "// soft-skip" tests/`
       and `grep -rn '"SKIP:' tests/` both return nothing)
-- [ ] CI green including the new per-assembly coverage floors
-- [ ] For each security PR: the negative test was confirmed failing on the
-      parent commit (orchestrator ran it, did not take the lane's word)
+- [x] CI green including the new per-assembly coverage floors
+- [x] For each security PR: the negative test was confirmed failing on the
+      parent commit (orchestrator ran it, did not take the lane's word) — R1's
+      directory attack at `8ad077d` and file attack at `5d3fd98`; R12's four
+      `StagedExecutionTests` at `31ae3a3`; R3's 6-of-8 and R31/R32's 12-of-15 at
+      the S2 parent, in each case with the passing remainder being the positive
+      controls.
 
 ### G2 — after Stages 2 and 3
 
@@ -339,10 +419,11 @@ Merge order: **S4 → S5 → S6 → REL → SUP → DOC**.
 | Lane | Branch | Started | PR | Merged | Gate |
 |------|--------|:---:|:---:|:---:|------|
 | F0  | `rc/f0-foundation` | ☑ | [#16](https://github.com/Sigil-build/sigil/pull/16) | ☑ `c82f5eb` | **G0 ✅** |
-| S1  | `rc/s1-trusted-state` | ☐ | ☐ | ☐ | G1 |
-| S2  | `rc/s2-path-containment` | ☐ | ☐ | ☐ | G1 |
-| S3  | `rc/s3-staged-execution` | ☐ | ☐ | ☐ | G1 |
-| T1  | `rc/t1-test-truth` | ☐ | ☐ | ☐ | G1 |
+| S1a | `rc/s1-trusted-state` | ☑ | [#19](https://github.com/Sigil-build/sigil/pull/19) | ☑ `31ae3a3` | G1 |
+| S1  | `rc/s1-trusted-state` | ☑ | [#20](https://github.com/Sigil-build/sigil/pull/20) | ☑ `5b65712` | G1 |
+| S2  | `rc/s2-path-containment` | ☑ | [#21](https://github.com/Sigil-build/sigil/pull/21) | ☑ `4505b24` | G1 |
+| S3  | `rc/s3-staged-execution` | ☑ | [#22](https://github.com/Sigil-build/sigil/pull/22) | ☑ `72d6437` | G1 |
+| T1  | `rc/t1-test-truth` | ☑ | [#23](https://github.com/Sigil-build/sigil/pull/23) | ☑ `86c2799` | G1 |
 | S4  | `rc/s4-network-update` | ☐ | ☐ | ☐ | G2 |
 | S5  | `rc/s5-residual-engine` | ☐ | ☐ | ☐ | G2 |
 | S6  | `rc/s6-step-hardening` | ☐ | ☐ | ☐ | G2 |

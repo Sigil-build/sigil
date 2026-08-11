@@ -80,14 +80,30 @@ public static partial class Program
         // un-elevated parent above never installs, so it must not hold the mutex while
         // the elevated child (which does) tries to take it. Held for the whole run;
         // the OS releases it if the process dies, so a crash never wedges the name.
-        using var instanceLock = SetupInstanceLock.TryAcquire(session.AppId, session.ResolvedScope);
+        using var instanceLock = SetupInstanceLock.TryAcquire(
+            session.AppId, session.ResolvedScope, out var lockRefusal);
+        if (lockRefusal != SetupInstanceLock.SetupLockRefusal.None)
+        {
+            // R34: record which branch was taken, in the always-on diagnostic log and
+            // the /LOG file. The headed MessageBox keeps the catalog string — adding a
+            // localized string for a squatted mutex name would be a lockstep change for
+            // a case no ordinary user meets — but an operator reading the log must be
+            // able to tell "someone else is installing" from "the guard's name is
+            // occupied by something else" from "we could not create the guard at all".
+            InstallerLog.Info($"single-instance guard: {lockRefusal}");
+        }
+
         if (instanceLock is null)
         {
             if (session.Silent)
             {
                 AttachParentConsole();
                 Console.Error.WriteLine(
-                    "another setup for this application is already running — close it and try again.");
+                    lockRefusal == SetupInstanceLock.SetupLockRefusal.NameNotAvailable
+                        ? "the single-instance guard for this application could not be taken: its " +
+                          "name is already occupied by another object. Another setup may be " +
+                          "running, or the name has been squatted. Nothing was installed."
+                        : "another setup for this application is already running — close it and try again.");
             }
             else if (OperatingSystem.IsWindows())
             {

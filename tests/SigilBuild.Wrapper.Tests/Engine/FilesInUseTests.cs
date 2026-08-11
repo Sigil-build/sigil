@@ -299,4 +299,39 @@ public sealed class FilesInUseTests
         a.Should().NotBeNull();
         b.Should().NotBeNull("a different app's setup is independent");
     }
+
+    /// <summary>
+    /// R34 — the <c>NULL</c>-handle branch used to fail OPEN. <c>CreateMutexW</c> returns
+    /// <c>NULL</c> when the name cannot be created, and the code answered with a
+    /// non-owning sentinel indistinguishable from a real lock, so two installs could
+    /// proceed concurrently. <c>ERROR_ALREADY_EXISTS</c> was the only branch that failed
+    /// closed.
+    /// </summary>
+    /// <remarks>
+    /// The squat is reproduced the cheap way, which is also the realistic way: the mutex
+    /// name is fully derivable from the public app id
+    /// (<see cref="SetupInstanceLock.NameFor"/>), and creating a DIFFERENT kind of kernel
+    /// object under it — here a semaphore — makes every later <c>CreateMutexW</c> on that
+    /// name fail with a <c>NULL</c> handle. Same user, same session, no privilege
+    /// required, and nothing survives the test: the semaphore dies with its handle.
+    /// </remarks>
+    [Fact]
+    public void A_squatted_guard_name_fails_closed_rather_than_pretending_to_hold_a_lock()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        var appId = "com.acme.p6squat-" + Guid.NewGuid().ToString("N");
+        var name = SetupInstanceLock.NameFor(appId, InstallScope.User);
+
+        // Occupy the guard's name with an object that is not a mutex.
+        using var squatter = new System.Threading.Semaphore(1, 1, name, out var createdNew);
+        createdNew.Should().BeTrue("the test must own the squat for this to prove anything");
+
+        var taken = SetupInstanceLock.TryAcquire(appId, InstallScope.User);
+
+        taken.Should().BeNull(
+            "the guard's name is occupied, so no exclusivity was established — answering " +
+            "with a non-owning sentinel lets a second setup run concurrently while both " +
+            "believe they hold the lock");
+    }
 }

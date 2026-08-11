@@ -36,10 +36,13 @@ public abstract record InstallStep(string Id, string? When, OnFailure OnFailure)
     /// Declared on the base record rather than on each destination step: it is
     /// parsed once, in the same place as <c>when</c> and <c>on_failure</c>, and
     /// travels the blob wire as one field. Only the steps that actually write
-    /// somewhere consult it (<c>file_copy</c>, <c>file_delete</c>,
-    /// <c>directory_delete</c>, <c>http_download</c>, <c>ini_write</c>,
-    /// <c>json_edit</c>, <c>xml_edit</c>), and only those accept the key — every
-    /// other step type reports it as an unrecognized field.
+    /// somewhere consult it — <c>file_copy</c>, <c>directory_create</c>,
+    /// <c>file_delete</c>, <c>directory_delete</c>, <c>http_download</c>,
+    /// <c>ini_write</c>, <c>json_edit</c>, <c>xml_edit</c> (eight) — and only those
+    /// accept the key. On every other step type it is both reported as an
+    /// unrecognized field (SIG0231) and left unapplied, so that diagnostic's
+    /// "ignored" wording is literally true. This list must match
+    /// <c>ManifestParser.ContainedDestinationStepTypes</c>.
     /// </para>
     /// <para>
     /// It does NOT relax the privileged-target rule on <c>service_install</c>,

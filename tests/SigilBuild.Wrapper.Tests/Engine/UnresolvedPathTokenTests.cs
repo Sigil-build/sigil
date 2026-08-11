@@ -233,7 +233,12 @@ public sealed class UnresolvedPathTokenWindowsTests
         // `location` fed Directory.CreateDirectory raw. The literal directory is
         // asserted absent relative to the current directory, which is where an
         // unrooted path would have landed.
-        var literal = Path.Combine(Directory.GetCurrentDirectory(), "{install_dir}");
+        //
+        // The probe names {var.typo}, the token this arrangement actually uses. It
+        // named {install_dir} before — a token that always RESOLVES — so the
+        // precondition could never have fired and was checking a directory nothing
+        // here would ever create.
+        var literal = Path.Combine(Directory.GetCurrentDirectory(), "{var.typo}");
         Directory.Exists(literal).Should().BeFalse("precondition: no leftover from an earlier run");
 
         var result = await RunThroughEngineAsync(
@@ -244,8 +249,7 @@ public sealed class UnresolvedPathTokenWindowsTests
         result.Success.Should().BeFalse();
         result.Error.Should().Contain("unresolved token '{var.typo}'");
         result.Journal.Records.Should().BeEmpty();
-        Directory.Exists(Path.Combine(Directory.GetCurrentDirectory(), "{var.typo}"))
-            .Should().BeFalse("the location directory must not have been created");
+        Directory.Exists(literal).Should().BeFalse("the location directory must not have been created");
     }
 
     [WindowsFact("Windows shell APIs")]

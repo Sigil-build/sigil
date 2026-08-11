@@ -1355,8 +1355,17 @@ public sealed class InstallSession
     /// (<c>{var.*}</c> / <c>{install_dir}</c>). No wizard-collected values or payload
     /// apply at uninstall; the install dir resolves to the manifest / CLI / default.
     /// </summary>
+    /// <remarks>
+    /// <c>priorInstallDir</c> is threaded through for the R3 grandfather clause. An
+    /// app installed before containment existed lives outside the scope root, so
+    /// without it <see cref="InstallDirResolver"/> refuses and this throws
+    /// <see cref="InstallDirRejectedException"/> — during the UNINSTALL of exactly
+    /// the installs the grandfather ruling exists to keep working.
+    /// </remarks>
     private StepContext BuildUninstallContext() =>
-        StepContext.From(_blob, _parsed, payloadRoot: null, collected: null, scope: _scope);
+        StepContext.From(
+            _blob, _parsed, payloadRoot: null, collected: null, scope: _scope,
+            priorInstallDir: PriorInstallDirDefault);
 
     /// <summary>
     /// GUI entry point for the interactive uninstall flow (T15): drive
@@ -1522,9 +1531,16 @@ public sealed class InstallSession
 #pragma warning disable CA1031 // Launch is a convenience: never fault the install on a bad target.
         try
         {
+            // priorInstallDir matches what RunInstallCoreAsync used. Without it a
+            // GRANDFATHERED install — one that legitimately lives outside the scope
+            // root, which R3's exemption exists to keep working — makes
+            // InstallDirResolver refuse here, the throw lands in the blanket catch
+            // below, and the Done screen's "Launch <app>" button silently does
+            // nothing. The install succeeded; only the launch was lost.
             var ctx = StepContext.From(
                 _blob, _parsed, payloadRoot: null, collected: _collectedValues,
-                scope: _scope, collectedOptions: _collectedOptions, collectedInstallDir: CollectedInstallDir);
+                scope: _scope, collectedOptions: _collectedOptions, collectedInstallDir: CollectedInstallDir,
+                priorInstallDir: PriorInstallDirDefault);
 
             var path = ctx.ResolvePath(_blob.RunAfterInstallPath!);
             System.Collections.Generic.List<string>? args = null;

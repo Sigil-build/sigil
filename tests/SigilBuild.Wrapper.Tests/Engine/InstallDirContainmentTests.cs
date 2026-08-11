@@ -297,10 +297,19 @@ public sealed class InstallDirContainmentTests
     [WindowsFact("Windows scope roots")]
     public void Out_of_root_cli_override_is_still_refused_when_a_prior_install_exists()
     {
-        // THE BYPASS TEST. The grandfather clause is gated on the prior dir
-        // WINNING the precedence — not on a prior install merely existing. A /D=
-        // outranks it, so this is a new attacker-reachable destination and stays
-        // refused even though an out-of-root prior install is recorded.
+        // THE BYPASS TEST. The grandfather clause is keyed on the DESTINATION, not
+        // on which source won the precedence: it exempts exactly one directory —
+        // the app's existing install location — by comparing the resolved path
+        // against the canonicalized prior path (InstallDirResolver.IsGrandfathered,
+        // :180-193). A /D= naming some OTHER out-of-root directory resolves to
+        // something that is not the prior location, so it is a new
+        // attacker-reachable destination and stays refused even though an
+        // out-of-root prior install is recorded.
+        //
+        // (The earlier wording here described a precedence gate. That rule was
+        // REVERSED in review round 3 because it made the exemption depend on the
+        // wizard not echoing back its own prefilled path, which refused every
+        // headed upgrade of a pre-containment install. Do not reinstate it.)
         var act = () => InstallDirResolver.Resolve(
             InstallScope.User,
             appName: "Acme",
@@ -311,6 +320,38 @@ public sealed class InstallDirContainmentTests
             priorInstallDir: OutOfRootPriorDir);
 
         act.Should().Throw<InstallDirRejectedException>().WithMessage("*outside*");
+    }
+
+    [WindowsFact("Windows scope roots")]
+    public void Post_install_contexts_must_thread_the_prior_dir_or_a_grandfathered_app_cannot_be_launched()
+    {
+        // The grandfather ruling exists so a pre-containment install keeps working.
+        // Two contexts are built AFTER the install completes and are easy to miss:
+        // the Done screen's "Launch <app>" (InstallSession.LaunchAppUnelevated) and
+        // uninstall-time hook resolution (BuildUninstallContext). Both omitted
+        // priorInstallDir, so for a grandfathered app they threw
+        // InstallDirRejectedException into a blanket catch — the launch button
+        // silently did nothing, and the uninstall hook context failed to build.
+        //
+        // This pins the contract those two call sites now satisfy: same arguments,
+        // with and without the prior dir.
+        var blob = UpgradeBlob();
+        var parsed = CommandLineParser.Parse(new[] { "/silent" }, blob.Parameters);
+
+        var withoutPrior = () => StepContext.From(
+            blob, parsed, payloadRoot: null, collected: null, scope: InstallScope.User,
+            collectedOptions: null, collectedInstallDir: OutOfRootPriorDir);
+
+        withoutPrior.Should().Throw<InstallDirRejectedException>(
+            "without the prior dir the grandfathered location is just an out-of-root path");
+
+        var ctx = StepContext.From(
+            blob, parsed, payloadRoot: null, collected: null, scope: InstallScope.User,
+            collectedOptions: null, collectedInstallDir: OutOfRootPriorDir,
+            priorInstallDir: OutOfRootPriorDir);
+
+        ctx.InstallDir.Should().Be(OutOfRootPriorDir,
+            "threading the prior dir is what lets a post-install context resolve at all");
     }
 
     [WindowsFact("Windows scope roots")]

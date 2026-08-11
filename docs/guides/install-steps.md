@@ -4,6 +4,20 @@
 
 The MUST-tier step set below is what's shipped today. `pre_install:` and `post_install:` accept the same step shapes and run before / after `install_steps:` respectively.
 
+## Write the destination as `{install_dir}`
+
+Every example on this page writes its destination as `{install_dir}`. That is the installer's own resolved destination, and it is the single value everything else agrees on:
+
+- it defaults to `<scope root>\<app name>` — `%ProgramFiles%\MyApp` for a machine install, `%LocalAppData%\Programs\MyApp` for a per-user one;
+- `installer.install_dir:` in the manifest overrides that default;
+- the wizard's **Destination** screen writes to it, and `/D=<path>` overrides it on the command line;
+- an upgrade reuses the prior version's location;
+- and it is what the containment guards described further down anchor on.
+
+**Do not declare a parameter called `install_dir`.** It is tempting — `${parameters.install_dir}` looks like it ought to mean the same thing — but a parameter is an unrelated second value: it does not follow the Destination screen, `/D=`, or an upgrade. The moment a user installs anywhere but the default, your steps write to one place while the installer records another.
+
+**And there is no `%VAR%` expansion in a step path.** A parameter defaulting to `"%ProgramFiles%\\MyApp"` does not resolve to Program Files: `%ProgramFiles%` is taken as a literal directory name, so the path is relative to the installer's working directory and is refused for landing outside `install_dir`. That exact pair of mistakes is what the two shipped manifests under `examples/exe-wrapper/` used to make.
+
 ## `file_copy`
 
 Copies one file or a glob pattern. Source paths are evaluated relative to the wrapper's extracted `payload/` directory; the destination is created if missing.
@@ -18,7 +32,7 @@ Copies one file or a glob pattern. Source paths are evaluated relative to the wr
 - id: deploy-payload
   type: file_copy
   from: payload/**
-  to: ${parameters.install_dir}
+  to: "{install_dir}"
   overwrite: true
 ```
 
@@ -29,7 +43,7 @@ Creates a directory (recursively, like `mkdir -p`). No-op if the directory alrea
 ```yaml
 - id: create-logs-dir
   type: directory_create
-  path: "${parameters.install_dir}\\logs"
+  path: "{install_dir}\\logs"
 ```
 
 ## `directory_delete`
@@ -39,7 +53,7 @@ Stashes the entire subtree to a temp location for rollback, then deletes. With `
 ```yaml
 - id: wipe-prior-install
   type: directory_delete
-  path: "${parameters.install_dir}"
+  path: "{install_dir}"
   recursive: true
   on_failure: continue
 ```
@@ -51,7 +65,7 @@ Stashes the file's bytes for rollback, then deletes. `if_missing: skip` (default
 ```yaml
 - id: clear-stale-config
   type: file_delete
-  path: "${parameters.install_dir}\\old.cfg"
+  path: "{install_dir}\\old.cfg"
   if_missing: skip
 ```
 
@@ -76,8 +90,10 @@ Writes a typed value under the requested hive / key / view. Snapshots the prior 
   hive: HKLM
   key: "Software\\${app.name}"
   name: InstallDir
-  type_value: REG_EXPAND_SZ
-  value: ${parameters.install_dir}
+  # REG_SZ, not REG_EXPAND_SZ: {install_dir} resolves to a literal absolute path,
+  # so there is nothing left for the registry to expand at read time.
+  type_value: REG_SZ
+  value: "{install_dir}"
 ```
 
 ## `registry_delete_value`
@@ -123,7 +139,7 @@ Writes a `.lnk` to a named anchor or an explicit directory. The journal records 
 ```yaml
 - id: shortcut-desktop
   type: shortcut_create
-  target: "${parameters.install_dir}\\app.exe"
+  target: "{install_dir}\\app.exe"
   location: desktop
   name: MyApp
   description: "Launch MyApp"
@@ -144,7 +160,7 @@ Writes a Windows environment variable to the user or machine hive (machine scope
   type: env_set
   scope: machine
   name: MYAPP_HOME
-  value: "${parameters.install_dir}"
+  value: "{install_dir}"
 ```
 
 ## `run_program`
@@ -165,7 +181,7 @@ Records NO journal entry: an external process is not invertible. If `run_program
 ```yaml
 - id: run-system-setup
   type: run_program
-  program: "${parameters.install_dir}\\SystemActions.exe"
+  program: "{install_dir}\\SystemActions.exe"
   args: ["${parameters.domain_name}", "${parameters.server_ip}"]
   wait: true
   expected_exit_codes: [0]
@@ -187,7 +203,7 @@ The second condition is the one that matters. A path can be perfectly contained 
 
 In practice this means **these four steps need a machine-scope install into an admin-only location**. `%ProgramFiles%` and `%ProgramFiles(x86)%` qualify. A per-user install root under `%LocalAppData%` does not — it is writable by the user who owns it — and neither does `%ProgramData%`, which grants `BUILTIN\Users` create rights by inheritance. `install_dir` is separately constrained to the scope root, so `Setup.exe /allusers /D=C:\Users\Public\evil` is refused before any step runs.
 
-The examples below all use `${parameters.install_dir}\…`, which satisfies both conditions for a machine-scope install. A path hard-coded outside the install directory does not, and will fail the step.
+The examples below all use `{install_dir}\…`, which satisfies both conditions for a machine-scope install. A path hard-coded outside the install directory does not, and will fail the step.
 
 > **A `payload://` target is refused for these four steps.** `payload://` resolves to the temporary directory the embedded payload is extracted into (`%TEMP%\sigil-…`), which fails both conditions: it is writable by the user who launched the installer, and Sigil **deletes it when the run finishes** — so a service or scheduled task pointing into it would be left pointing at a path that no longer exists. Sequence a `file_copy` from `payload://` into `install_dir` first, then point the privileged step at the copied location. That is the ordering `service_install` already required for its own reasons.
 
@@ -211,7 +227,7 @@ Registers a Windows service via `sc.exe create`, optionally starts it. Records a
 - id: install-update-service
   type: service_install
   name: MyAppUpdateService
-  binary_path: "${parameters.install_dir}\\Updater.exe"
+  binary_path: "{install_dir}\\Updater.exe"
   display_name: "MyApp Update Service"
   description: "Background updater for MyApp."
   start_type: auto
@@ -245,7 +261,7 @@ Journals a `DeleteScheduledTask` record (task name only) **before** the create, 
 - id: register-heartbeat-task
   type: scheduled_task_create
   name: MyAppHeartbeat
-  program: "${parameters.install_dir}\\heartbeat.exe"
+  program: "{install_dir}\\heartbeat.exe"
   trigger: daily
   run_level: limited
 ```
@@ -267,7 +283,7 @@ Journals an `UnregisterCom` record (DLL path only) **before** the register, so a
 ```yaml
 - id: register-shell-extension
   type: com_register
-  path: "${parameters.install_dir}\\ShellExt.dll"
+  path: "{install_dir}\\ShellExt.dll"
 ```
 
 ## `firewall_rule`
@@ -297,7 +313,7 @@ Journals a `DeleteFirewallRule` record (rule name only) **before** the delete-th
   name: MyApp Inbound
   direction: in
   action: allow
-  program: "${parameters.install_dir}\\app.exe"
+  program: "{install_dir}\\app.exe"
   port: 8443
   protocol: tcp
 ```
@@ -335,6 +351,10 @@ If a step genuinely needs to write outside the installed application — a machi
 > **There is no `%VAR%` expansion in a step path.** `%ProgramData%\MyApp` is not a path — it is a relative directory whose first component is literally `%ProgramData%`, and it would be created as such next to the running installer. The only substitutions a step path gets are the `{…}` runtime tokens listed under [Paths and tokens](#an-unresolved-token-in-a-path-fails-the-step) and `${…}` parameter templates. If you want the path written once rather than hard-coded per environment, `${ProgramData}` is expanded by **`sigil pack`** from the packing machine's environment — which means the resolved literal is baked into the package, so use it knowingly.
 
 The opt-out is per step and deliberate: it is a declaration that this particular write is meant to leave the install tree, not a global switch. It does **not** relax the [privileged-target rules](#privileged-step-targets-are-anchored--read-this-before-the-next-four-steps) on `service_install`, `scheduled_task_create`, `com_register` or `firewall_rule` — those have no opt-out.
+
+> **Known limitation — an out-of-tree write is not undone at uninstall (register row R44).** The step above *is* journaled, but the uninstaller's replay anchor currently accepts only records that point inside `install_dir`. A `RestoreConfigFile` naming `C:\ProgramData\MyApp\machine.ini` is therefore **refused during replay, while the Add/Remove Programs entry and the install state are removed anyway** — so the file you wrote stays on disk after uninstall and nothing tells the user.
+>
+> Until R44 lands (it resolves declared out-of-tree roots from the signed blob and widens the anchor to match), treat `allow_outside_install_dir` as **install-only**: use it for content you are content to leave behind, or delete that content explicitly from an `uninstall:` step, which runs before the journal replays.
 
 ### `ini_write` values cannot inject INI lines
 

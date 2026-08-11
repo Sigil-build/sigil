@@ -6,7 +6,8 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>sigil</ToolCommandName>
     <PackageId>SigilBuild</PackageId>
-    <Version>0.0.1-alpha</Version>
+    <!-- R24: Version comes from Directory.Build.props, the single source of
+         truth. Do not set it here; see the comment there. -->
     <Description>Sigil — declarative desktop-software distribution CLI.</Description>
     <PackageTags>installer;packaging;codesigning;msix;delta-update</PackageTags>
 

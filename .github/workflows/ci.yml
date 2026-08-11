@@ -241,7 +241,14 @@ jobs:
           if ($size -gt 15MB) { throw "sigil.exe is $sizeMb MB, exceeds 15 MB budget" }
           $output = & $exe --version
           if ($LASTEXITCODE -ne 0) { throw "sigil --version exited $LASTEXITCODE" }
-          if ($output.Trim() -ne "0.0.1-alpha") { throw "expected '0.0.1-alpha', got '$output'" }
+          # R24: there is exactly one source of truth for the version now --
+          # Directory.Build.props' <Version> element -- so assert agreement
+          # with THAT, not a literal that would silently drift the moment
+          # someone bumps the version and forgets this line (the original
+          # R24 bug, one level up).
+          $expectedVersion = (Select-Xml -Path "Directory.Build.props" -XPath "//Version").Node.InnerText.Trim()
+          if ([string]::IsNullOrWhiteSpace($expectedVersion)) { throw "could not read <Version> from Directory.Build.props" }
+          if ($output.Trim() -ne $expectedVersion) { throw "expected '$expectedVersion' (from Directory.Build.props), got '$output'" }
 
       - name: aot smoke - validate
         shell: pwsh

@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Threading.Tasks;
 using FluentAssertions;
 using SigilBuild.Cli;
@@ -19,8 +20,16 @@ public class VersionCommandTests
     }
 
     [Fact]
-    public async Task Main_WithVersionFlag_PrintsAssemblyVersion()
+    public async Task Reported_version_matches_the_assembly_informational_version()
     {
+        // R24: the CLI must report the version the build stamped onto the
+        // assembly, not a hand-maintained const -- assert agreement with
+        // AssemblyInformationalVersionAttribute rather than a literal.
+        var expected = typeof(Program).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()!
+            .InformationalVersion
+            .Split('+')[0];          // strip any source-revision suffix
+
         using var sw = new System.IO.StringWriter();
         var originalOut = System.Console.Out;
         System.Console.SetOut(sw);
@@ -33,7 +42,8 @@ public class VersionCommandTests
             System.Console.SetOut(originalOut);
         }
 
-        sw.ToString().Trim().Should().Be("0.0.1-alpha");
+        sw.ToString().Trim().Should().Be(expected,
+            "the CLI must report the version the build stamped, not a hand-maintained const");
     }
 
     [Fact]

@@ -16,6 +16,21 @@
     <PackageProjectUrl>https://sigil.build</PackageProjectUrl>
     <RepositoryUrl>https://github.com/Sigil-build/sigil</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+
+    <!-- R24: the ONE place the version lives. Every project inherits $(Version)
+         from here (the SDK stamps it onto AssemblyInformationalVersionAttribute,
+         which Program.cs reads at runtime instead of a hand-maintained const;
+         see SigilBuild.Cli/Program.cs). Do not add a <Version> element to any
+         individual .csproj; that would silently re-fork this single source.
+
+         This value is the FALLBACK used by every build that does not override
+         it (local builds, CI's non-tag pushes, `dotnet pack`). The orchestrator
+         picks the actual release number at G3/G4 by choosing the git tag;
+         release.yml passes that tag's version to `dotnet publish` via
+         `-p:Version=<tag-without-leading-v>`, which overrides this value for
+         that one signed run. Bump this line only when you want the FALLBACK
+         (non-release) version to move too. -->
+    <Version>0.1.0-alpha</Version>
   </PropertyGroup>
 
   <!-- Static graph restore is required so that ProjectReference metadata

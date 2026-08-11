@@ -2,7 +2,7 @@
 
 > ## Status: Stage 1 COMPLETE (2026-08-11) · Stages 2 and 3 ready to open
 >
-> **Stage 1's four lanes are merged and gate G1 is closed** at RC head `f300b39`
+> **Stage 1's four lanes are merged and gate G1 is closed** at RC head `c019df2`
 > — see the G1 block below for the five attacks and their refusal lines, and
 > `00-GAP_REGISTER.md` for the 17 rows closed and the 14 filed. Headline numbers:
 > **1538 tests · 1517 passed · 21 skipped · 0 failed**, project-wide coverage
@@ -205,7 +205,7 @@ the RC merges.
 |---|---|---|---|---|
 | 0 | [`04-STAGE-0-foundation.md`](04-STAGE-0-foundation.md) | F0 | **solo** | G0 |
 | 1 | [`05-STAGE-1-security-core.md`](05-STAGE-1-security-core.md) | S1, S2, S3, T1 | 4 parallel | **G1 ✅** |
-| 2 | [`06-STAGE-2-security-depth.md`](06-STAGE-2-security-depth.md) | S4, S5, S6 | 3 parallel | G2 |
+| 2 | [`06-STAGE-2-security-depth.md`](06-STAGE-2-security-depth.md) | S4, S5, S6, **S7** | 4 parallel | G2 |
 | 3 | [`07-STAGE-3-release-surface.md`](07-STAGE-3-release-surface.md) | REL, SUP, DOC | 3 parallel, **overlaps Stage 2** | G2 |
 | 4 | [`08-STAGE-4-verification.md`](08-STAGE-4-verification.md) | V1 | solo | G3, G4 |
 
@@ -215,8 +215,9 @@ Estimated calendar: 1 day + 1 week + (4 days ∥ 4 days) + 2 days ≈ **2.5 week
 
 ## Lane → finding map
 
-Every one of the 46 rows appears **exactly once**. This table is the audit
-trail; V1 walks it row by row.
+Every row appears **exactly once**. This table is the audit trail; V1 walks it
+row by row. It was 46 rows at the audit and is **60** after Stage 1 — see the
+note below the table for what changed and why R48 is deliberately unassigned.
 
 | Lane | Model | Findings | Count |
 |---|---|---|---|
@@ -225,18 +226,44 @@ trail; V1 walks it row by row.
 | `S2` path containment | opus-5 | R3, R9, R16, R31, R32 | 5 |
 | `S3` staged execution | opus-5 | R4, R5, R10, R11, R12, R17 | 6 |
 | `T1` test truth | sonnet-5 | R6, R21, R22 | 3 |
-| `S4` network + update | opus-5 | R8, R13, R14, R30, R37, R39 | 6 |
-| `S5` residual engine | sonnet-5 | R15, R18, R28, R29, R34, R38 | 6 |
-| `S6` step hardening + ADRs | opus-5 | R33, R35, R36 | 3 |
+| `S4` network + update | opus-5 | R8, R13, R14, R30, R37, R39, **R45, R46, R47, R49** | 10 |
+| `S5` residual engine | **opus-5** | R15, R18, R28, R29, R34, R38, **R48 (fix only), R53, R56, R57** | 10 |
+| `S6` step hardening + ADRs | opus-5 | R33, R35, R36, **R50, R52, R54** | 6 |
+| `S7` signed anchorage | opus-5 | **R44, R51** | 2 |
 | `REL` release scaffolding | sonnet-5 | R7, R23, R23a, R24 | 4 |
 | `SUP` supply chain | sonnet-5 | R42 | 1 |
-| `DOC` docs truth | sonnet-5 | R25, R26, R26a, R27, R41a, R43 | 6 |
+| `DOC` docs truth | sonnet-5 | R25, R26, R26a, R27, R41a, R43, **R55** | 7 |
 | `V1` verification | opus-5 | re-verifies all | — |
-| | | **Total** | **46** |
+| | | **Total** | **60** |
 
 Sorted check — R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18
 R19 R20 R21 R22 R23 R23a R24 R25 R26 R26a R27 R28 R29 R30 R31 R32 R33 R34 R35
-R36 R37 R38 R39 R40 R41 R41a R42 R43 = 46, no gaps, no repeats.
+R36 R37 R38 R39 R40 R41 R41a R42 R43 R44 R45 R46 R47 R48 R49 R50 R51 R52 R53 R54
+R55 R56 R57 = 60, no gaps, no repeats.
+
+> **R48 is split: S5 owns the fix, the human partner owns the worst-case number.**
+> The row was originally unassigned on the grounds that its deliverable was a
+> measurement no agent could produce. Half of that is no longer true.
+>
+> A **best-case floor of 335 ms** was measured on 2026-08-11 (online, warm cache,
+> embedded-signed target; runs 2 and 3 came back in 6–9 ms). That is the happy
+> path, and it is already past the ~100 ms at which a UI reads as unresponsive —
+> so **the off-thread fix is justified now** and does not wait on anything.
+>
+> What still cannot be produced from an agent run is the **worst** case: an
+> offline, cold-certificate-cache first run on real hardware. The human partner
+> measures that. Two traps are recorded in the row itself, both hit while
+> producing the floor — a *catalog*-signed Windows binary measures 0 ms and proves
+> nothing, and any run under ~200 ms means the setup was wrong.
+>
+> Do not let a lane quietly absorb this row and "verify" it with a fast run.
+>
+> **Amended 2026-08-11:** the table above was 46 rows and three of its lanes are
+> re-scoped. S5 moved sonnet-5 → **opus-5** (R15 caps the whole
+> "silently-unremovable" class, it consumes S1's `ReplayRefusalCode` contract, and
+> its own R18 task already pre-flagged an escalation). **S7 is a new lane**: R44
+> and R51 are one design — resolve declared roots and declared registry keys from
+> the **signed blob** at replay time — and building it twice was the alternative.
 
 ---
 
@@ -427,7 +454,13 @@ miniature.
 
 ### G2 — after Stages 2 and 3
 
-Merge order: **S4 → S5 → S6 → REL → SUP → DOC**.
+Merge order: **S4 → S5 → S6 → S7 → REL → SUP → DOC**.
+
+**S7 is fourth deliberately.** It rebases onto S5's `UninstallEngine` outcome
+handling and S6's `ScopeLayout` root set, and where S5 and S7 must agree on a
+shape in `ReplayAnchor`, **S7 adapts to what S5 landed**. DOC is last because
+R55, DOC.2 and the `uninstaller.md` caveat all describe behaviour the earlier
+lanes change.
 
 - [ ] Copy-paste the silent-install line from the **corrected**
       `docs/guides/parameters.md` into a real `Setup.exe` — it succeeds *(R26)*
@@ -496,6 +529,7 @@ Merge order: **S4 → S5 → S6 → REL → SUP → DOC**.
 | S4  | `rc/s4-network-update` | ☐ | ☐ | ☐ | G2 |
 | S5  | `rc/s5-residual-engine` | ☐ | ☐ | ☐ | G2 |
 | S6  | `rc/s6-step-hardening` | ☐ | ☐ | ☐ | G2 |
+| S7  | `rc/s7-signed-anchorage` | ☐ | ☐ | ☐ | G2 |
 | REL | `rc/rel-scaffolding` | ☐ | ☐ | ☐ | G2 |
 | SUP | `rc/sup-supply-chain` | ☐ | ☐ | ☐ | G2 |
 | DOC | `rc/doc-truth` | ☐ | ☐ | ☐ | G2 |

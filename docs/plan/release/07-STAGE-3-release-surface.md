@@ -19,7 +19,7 @@ Stage 2's lanes — REL → SUP → DOC.
 |---|---|---|---|
 | `REL` release scaffolding | sonnet-5 | `rc/rel-scaffolding` | R7, R23, R23a, R24 |
 | `SUP` supply chain | sonnet-5 | `rc/sup-supply-chain` | R42 |
-| `DOC` docs truth | sonnet-5 | `rc/doc-truth` | R25, R26, R26a, R27, R41a, R43 |
+| `DOC` docs truth | sonnet-5 | `rc/doc-truth` | R25, R26, R26a, R27, R41a, R43 · **+R55** |
 
 **Cross-lane rules:** `ci.yml` belongs to T1 (Stage 1) — REL and SUP **rebase
 onto the merged RC and append only**, never rewrite T1's coverage gate.
@@ -496,6 +496,49 @@ Four errors in a live, user-facing doc:
       the repo gets attention**.
 - [ ] **Step 4: Commit.**
 
+## Task DOC.8: the `parameters.install_dir` idiom, and two false claims (R55)
+
+**Added 2026-08-11**, after lane S2 found this in Stage 1 and fixed only the files
+it owned. Read row R55 in `00-GAP_REGISTER.md`.
+
+**The idiom itself.** Declaring a manifest parameter *named* `install_dir` creates
+a **second, unrelated value** that diverges from the real one the moment a user
+installs anywhere but the default. The correct idiom is **`{install_dir}`** — the
+single value that the default, `installer.install_dir:`, the wizard's Destination
+screen, `/D=`, upgrade-in-place and S2's containment guards all agree on. S2
+converted 13 snippets in the files it owned and rewrote both shipped
+`examples/exe-wrapper/**` manifests, which had been **aborting at their first
+`file_copy`** — CI stayed green because the example gate is schema-only.
+
+- [ ] **Step 1: Fix the five surviving files** — `docs/guides/parameters.md:63`,
+      `docs/guides/uninstaller.md:61`, `docs/migration/from-inno.md:21`,
+      `docs/migration/from-wix.md:65`, `docs/migration/from-nsis.md:55`.
+      **Re-derive the line numbers**; they are from Stage 1 and DOC.1/DOC.3 edit
+      two of these files ahead of you.
+
+- [ ] **Step 2: Delete a claim that is simply false.** `from-wix.md` and
+      `from-nsis.md` both assert that a destination screen is *"auto-inserted when
+      `parameters.install_dir` is declared"*. It is not — `InstallerViewModel.cs`
+      adds it **unconditionally**. Verify against the code before rewriting, per
+      this lane's standing rule, and cite the line in your PR summary.
+      **Migration guides are the first thing a switching publisher reads**, which
+      is why a false mechanism here costs more than the same sentence elsewhere.
+
+- [ ] **Step 3: A release note, not a doc fix.** S2's `directory_create`
+      containment required the `allow_outside_install_dir` opt-out in **11
+      pre-existing fixtures**. That is real friction for any publisher creating a
+      `%ProgramData%` directory, and they should meet it in the release notes
+      rather than in a failed install. **Hand the text to REL** for
+      `CHANGELOG.md`'s known-limitations section — REL merges before you.
+
+- [ ] **Step 4:** Lane **S7** owns R44 and will send you replacement text for
+      `docs/guides/uninstaller.md`'s R44 caveat once its fix lands. If S7 has not
+      merged by the time you finish, **leave the existing caveat alone** and say so
+      — a caveat describing a fixed bug is better than a doc promising a fix that
+      did not ship.
+
+- [ ] **Step 5: Commit.**
+
 ## Lane DOC definition of done
 
 - [ ] `docs.yml` green — it fails on generated-doc drift
@@ -505,4 +548,10 @@ Four errors in a live, user-facing doc:
 - [ ] `sigil-docs/` gone; CODEOWNERS points at `/docs/architecture/`
 - [ ] `docs/plan/**` content unchanged apart from the two banners
 - [ ] `docs/guides/install-steps.md`, `schemas/sigil-schema.json`,
-      `docs/manifest-reference.md`, and `examples/**` **untouched** (S2/S4 own them)
+      `docs/manifest-reference.md`, and `examples/**` **untouched** (S4 owns the
+      latter three; `install-steps.md` was S2's in Stage 1 and is **S6's** now —
+      still not yours)
+- [ ] R55: the five surviving `parameters.install_dir` snippets converted, and the
+      false "auto-inserted" claim deleted from both migration guides with the code
+      line cited
+- [ ] The `directory_create` friction note handed to REL, not written here

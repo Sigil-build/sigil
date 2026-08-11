@@ -129,7 +129,7 @@ Writes a `.lnk` to a named anchor or an explicit directory. The journal records 
 |Field|Notes|
 |---|---|
 |`target`|Path to the program.|
-|`location`|`start_menu`, `desktop`, or any explicit directory path.|
+|`location`|`start_menu`, `desktop`, or an explicit directory path — see the containment note below.|
 |`name`|Display name; `.lnk` is appended automatically.|
 |`args`|List of CLI args appended to the target.|
 |`working_dir`|Optional.|
@@ -144,6 +144,10 @@ Writes a `.lnk` to a named anchor or an explicit directory. The journal records 
   name: MyApp
   description: "Launch MyApp"
 ```
+
+> **`location` is anchored, but not to `install_dir`.** The whole point of `desktop` and `start_menu` is to write outside the installed application, so the [`install_dir` containment](#every-step-destination-is-contained-to-install_dir) that governs `file_copy` and the config editors cannot apply here. A wider anchor does: the resolved directory must sit under `install_dir`, under a **Start Menu** folder, or under a **Desktop** folder — either scope's — with no directory junction on the way down. Everything an installer normally does is inside that: a vendor subfolder such as `location: "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Contoso"`, a Startup shortcut, a `{install_dir}\\Tools` folder.
+>
+> Anything else **fails the step**, with the directory not created and the `.lnk` not written. There is no `allow_outside_install_dir` opt-out on this step. Before this rule, an explicit `location` was checked by nothing at all: an elevated install would `mkdir -p` a tree anywhere on the volume and journal a `DeleteShortcut` that unlinks that exact path at rollback or uninstall, whether or not this installer created it — which matters as soon as `location` carries a `${parameters.…}` or `{var.…}` value sourced from a wizard field or a `registry_read`.
 
 ## `env_set`
 

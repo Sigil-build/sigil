@@ -87,9 +87,16 @@ public sealed class ReinstallIdempotencyTests
 
         var appId = "sigil.reinstall." + Guid.NewGuid().ToString("N");
         var envVarName = "SIGIL_T10_PATH_" + Guid.NewGuid().ToString("N");
-        var shortcutDir = Path.Combine(Path.GetTempPath(), "sigil-reinstall-" + Guid.NewGuid().ToString("N"));
-        var envValue = Path.Combine(shortcutDir, "bin");
         var installDir = Path.Combine(ScopeLayout.For(InstallScope.User).InstallRoot, appId);
+
+        // R54: `shortcut_create.location` is now anchored to install_dir / a Start Menu
+        // folder / a Desktop folder, so this fixture's old `%TEMP%` stand-in for "a
+        // desktop" is refused — correctly, since no real manifest writes a shortcut
+        // there. A `Shortcuts` folder inside the install directory is a real shape,
+        // exercises the same non-duplication path, and keeps the test out of the
+        // runner's own Start Menu.
+        var shortcutDir = Path.Combine(installDir, "Shortcuts");
+        var envValue = Path.Combine(shortcutDir, "bin");
 
         var blob = Blob(appId, envVarName, envValue, shortcutDir);
 

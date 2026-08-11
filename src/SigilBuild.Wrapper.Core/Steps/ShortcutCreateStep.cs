@@ -54,6 +54,12 @@ internal sealed class ShortcutCreateStep : IStep
         var workingDirectory = _spec.WorkingDir is null ? null : ctx.ResolvePath(_spec.WorkingDir);
         var iconLocation = _spec.Icon is null ? null : ctx.ResolvePath(_spec.Icon);
 
+        var containmentRefusal = CheckLocationContained(ctx, locationDir);
+        if (containmentRefusal is not null)
+        {
+            return Task.FromResult(StepResult.Failed(containmentRefusal));
+        }
+
         var lnkPath = Path.Combine(locationDir, name + ".lnk");
 
         // `name` goes through Resolve, not ResolvePath — it is a display name, not
@@ -116,12 +122,13 @@ internal sealed class ShortcutCreateStep : IStep
     /// unresolved-token refusal, and the <c>payload://</c> traversal guard.
     /// </para>
     /// <para>
-    /// <b>Containment deliberately does not apply here.</b> The whole point of
-    /// <c>desktop</c> and <c>start_menu</c> is to write outside
-    /// <c>install_dir</c> — anchoring this field would refuse every ordinary
-    /// shortcut. <c>shortcut_create</c> is correspondingly not in R16's list of
-    /// contained destinations and does not accept
-    /// <c>allow_outside_install_dir</c>.
+    /// <b>R16's <c>install_dir</c> containment deliberately does not apply here.</b>
+    /// The whole point of <c>desktop</c> and <c>start_menu</c> is to write outside
+    /// <c>install_dir</c> — anchoring this field on the install directory would
+    /// refuse every ordinary shortcut. <c>shortcut_create</c> is correspondingly
+    /// not in R16's list of contained destinations and does not accept
+    /// <c>allow_outside_install_dir</c>. A <em>wider</em> anchor does apply — see
+    /// <see cref="CheckLocationContained"/> (register row R54).
     /// </para>
     /// </remarks>
     private static string ResolveLocation(string location, StepContext ctx) => location switch
@@ -130,4 +137,98 @@ internal sealed class ShortcutCreateStep : IStep
         "desktop" => ctx.Layout.DesktopFolder,
         _ => ctx.ResolvePath(location),
     };
+
+    /// <summary>
+    /// Register row R54: the named anchors are contained by construction, the
+    /// explicit-path branch was contained by nothing at all. Returns <c>null</c>
+    /// when <paramref name="locationDir"/> sits under a root a shortcut may
+    /// legitimately be written to, or a step-failure message naming those roots.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>What was unbounded.</b> An explicit <c>location</c> reached
+    /// <see cref="Directory.CreateDirectory(string)"/> and
+    /// <see cref="ShellLink.Save"/> from an elevated process with no check, and
+    /// the <see cref="RollbackRecord.DeleteShortcut"/> queued for it deletes
+    /// whatever file that path names at rollback or uninstall. So a manifest —
+    /// or a <c>${parameters.…}</c> / <c>{var.…}</c> value sourced from a wizard
+    /// field or a <c>registry_read</c> — could materialize a directory tree
+    /// anywhere on the volume and arrange for an arbitrary path to be deleted
+    /// later.
+    /// </para>
+    /// <para>
+    /// <b>The roots, and why each is on the list.</b> A shortcut belongs either
+    /// in the installed application's own tree or in shortcut real estate:
+    /// <list type="bullet">
+    ///   <item><description><c>install_dir</c> — a portable
+    ///   <c>{install_dir}\Tools</c> shortcut folder is ordinary.</description></item>
+    ///   <item><description><b>Both</b> scopes' Start Menu and Desktop folders.
+    ///   Those four are precisely where the named anchors point, so a manifest
+    ///   asking for a Start Menu <em>vendor subfolder</em> —
+    ///   <c>…\Start Menu\Programs\Contoso</c>, the single most common reason to
+    ///   spell the path out — keeps working. Both scopes rather than the run's
+    ///   own: a machine install writing a shortcut into the installing
+    ///   administrator's own profile is not an escalation, and a user-scope run
+    ///   cannot write the common folders anyway.</description></item>
+    /// </list>
+    /// There is no opt-out. Adding one would be a schema change, and no
+    /// legitimate destination is known that these roots exclude; a manifest that
+    /// really needs one can place the file with <c>file_copy</c>, which has
+    /// <c>allow_outside_install_dir</c>.
+    /// </para>
+    /// <para>
+    /// <b>No anchor, no check</b>, exactly as <see cref="StepDestinationGuard"/>
+    /// does it: a context with no <c>install_dir</c> is only reachable from a
+    /// hand-built one in the step unit tests. Production always has one —
+    /// <c>StepContext.From</c> calls <c>InstallDirResolver.Resolve</c>, which
+    /// never returns null.
+    /// </para>
+    /// </remarks>
+    /// <remarks>
+    /// <c>internal</c> is the test seam: the accepting cases are real Start Menu
+    /// and Desktop folders, and CI runs elevated, so a test that proved them by
+    /// running the step would write a <c>.lnk</c> into the runner's own profile.
+    /// Calling the predicate touches nothing.
+    /// </remarks>
+    internal static string? CheckLocationContained(StepContext ctx, string locationDir)
+    {
+        ArgumentNullException.ThrowIfNull(ctx);
+
+        if (string.IsNullOrWhiteSpace(ctx.InstallDir))
+        {
+            return null;
+        }
+
+        var roots = PermittedLocationRoots(ctx);
+        foreach (var root in roots)
+        {
+            if (!string.IsNullOrWhiteSpace(root)
+                && PathContainment.IsUnderWithoutTraversal(root, locationDir))
+            {
+                return null;
+            }
+        }
+
+        return string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"shortcut_create: the 'location' path '{locationDir}' is outside every " +
+            $"directory a shortcut may be written to ('{string.Join("', '", roots)}'), or " +
+            $"reaches one through a directory junction. Use 'start_menu', 'desktop', a " +
+            $"subfolder of either, or a path inside install_dir.");
+    }
+
+    private static string[] PermittedLocationRoots(StepContext ctx)
+    {
+        var machine = ScopeLayout.For(InstallScope.Machine);
+        var user = ScopeLayout.For(InstallScope.User);
+
+        return new[]
+        {
+            ctx.InstallDir!,
+            machine.StartMenuFolder,
+            machine.DesktopFolder,
+            user.StartMenuFolder,
+            user.DesktopFolder,
+        };
+    }
 }

@@ -623,19 +623,28 @@ public sealed class InstallSession
     /// shortcuts, or ARP rows. Always <c>false</c> off Windows and for the un-stamped
     /// <see cref="WrapperBlob.Empty"/> runtime.
     /// </summary>
-    public bool ExistingInstallDetected
+    /// <remarks>
+    /// Memoized. The answer requires a full load — file read, size check, deserialize,
+    /// rehydrate — and reports an R1 provenance refusal on the log sink as a side effect,
+    /// so evaluating it per access made the wizard and the core run each re-read the state
+    /// and emit the refusal line twice. The scope and app id are fixed for the lifetime of
+    /// a session, so the answer cannot change under us within one.
+    /// </remarks>
+    public bool ExistingInstallDetected =>
+        _existingInstallDetected ??= ComputeExistingInstallDetected();
+
+    private bool? _existingInstallDetected;
+
+    private bool ComputeExistingInstallDetected()
     {
-        get
+        if (ReferenceEquals(_blob, WrapperBlob.Empty) || !OperatingSystem.IsWindows())
         {
-            if (ReferenceEquals(_blob, WrapperBlob.Empty) || !OperatingSystem.IsWindows())
-            {
-                return false;
-            }
-            // R1: pass the log sink. Without it a refused machine-scope load would
-            // make this property answer false with no trace anywhere — literally
-            // "no prior install", which is the reading the brief forbids.
-            return UninstallStateStore.TryLoad(_blob.AppId, _scope, StateProgress) is not null;
+            return false;
         }
+        // R1: pass the log sink. Without it a refused machine-scope load would
+        // make this property answer false with no trace anywhere — literally
+        // "no prior install", which is the reading the brief forbids.
+        return UninstallStateStore.TryLoad(_blob.AppId, _scope, StateProgress) is not null;
     }
 
     /// <summary>
@@ -1098,8 +1107,6 @@ public sealed class InstallSession
     /// Intune as SYSTEM, IS a privilege boundary and IS gated. Widening the condition
     /// is safe; narrowing it is not.
     /// </para>
-    /// </remarks>
-    /// <remarks>
     /// <para>
     /// <paramref name="elevated"/> is a PARAMETER, not an internal
     /// <see cref="Elevation.IsProcessElevated"/> call, and that is load-bearing rather

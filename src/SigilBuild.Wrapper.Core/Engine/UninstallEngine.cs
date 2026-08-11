@@ -87,8 +87,12 @@ public sealed class UninstallEngine
         var anchorDir = ChooseAnchorDirectory(
             appId, loaded.Scope, loaded.InstallDir, fallbackInstallDir, progress);
 
+        // ForInstall, not ForInstallDir: the app id narrows the state-directory allowance
+        // to THIS app's own directory (one app's journal must not be able to delete or
+        // launder another app's uninstall.json), and the scope narrows the shortcut
+        // folders to the scope actually being replayed.
         var undo = await loaded.Journal
-            .UndoAsync(ReplayAnchorage.ForInstallDir(anchorDir), progress, ct)
+            .UndoAsync(ReplayAnchorage.ForInstall(anchorDir, appId, loaded.Scope), progress, ct)
             .ConfigureAwait(false);
 
         if (undo.RefusedRecords.Count > 0)

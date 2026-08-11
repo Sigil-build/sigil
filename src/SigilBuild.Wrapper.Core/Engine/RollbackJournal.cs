@@ -204,6 +204,13 @@ public enum ReplayRefusalCode
     RegistryOutsideApplicationSpace = 2,
 
     /// <summary>
+    /// The destination was in range but the content the record would restore comes from a
+    /// backup or stash outside the anchored roots — the register's "arbitrary file / tree
+    /// write from an attacker-chosen stash".
+    /// </summary>
+    ContentSourceOutsideInstallRoots = 11,
+
+    /// <summary>
     /// The key is an execution mapping (a shell verb, a class registration, a driver map)
     /// and the program it would be restored to is not one this install owns.
     /// </summary>

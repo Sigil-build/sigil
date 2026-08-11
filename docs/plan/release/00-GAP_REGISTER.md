@@ -1123,6 +1123,50 @@ HEAD. Per `AGENTS.md`, `docs/plan/*` is read-only history and should **not** be
 edited to match; this register is the correction. **Fix:** none — cite this file
 instead. **S**
 
+### R44 — S2's `allow_outside_install_dir` has no counterpart in S1's replay anchor: a supported opt-out leaves the app unremovable
+**Component:** Wrapper.Core / Engine + manifest · **Effort: M** · **Cross-lane: S1 × S2**
+
+Raised by lane S1 during its branch-review fix wave, from finding I-2 of
+`reports/s1-branch-review.md`. Neither lane can see this alone; it appears only
+once both are merged.
+
+**Lane S2** adds `allow_outside_install_dir` as a first-class, schema-and-docs
+manifest opt-out for a step whose destination is outside `install_dir`, and
+**documents `%ProgramData%\MyApp` as the example** of when to use it.
+
+**Lane S1** anchors rollback-journal replay (R1 clause (c)). The allowed roots are
+`install_dir`, the replayed scope's Desktop and Start Menu folders, and the app's
+own `<StateRoot>\Sigil\<AppId>` directory (`ReplayAnchor.For`). There is no
+counterpart to S2's opt-out, and nothing carries it into the persisted journal.
+
+**Composite failure.** A publisher follows S2's documented guidance and
+`file_copy` / `directory_create` / `ini_write`s into `%ProgramData%\MyApp`. Every
+one of those records is refused at uninstall; the data stays on disk; the ARP row
+and the uninstall state are removed anyway; and the log reports refusals for a
+**supported feature**. That is the "silently unremovable" class S1 closed four
+separate routes into, arriving through a door neither lane owns.
+
+**Why S1 did not fix it in-lane** — considered and rejected deliberately, not
+overlooked:
+
+1. It needs a persisted-format change (a per-record "this step declared itself
+   out-of-tree" marker) at the final fix wave of a branch already verdicted READY,
+   with no producer for the field on the branch: it would ship unpopulated and
+   untestable end to end.
+2. **More importantly, the naive form is unsafe.** The journal is the untrusted
+   artefact. A record carrying "I was declared out-of-tree" is a record saying "do
+   not anchor me", so a planted journal could opt itself out of the whole
+   mechanism R1 exists to build. To be safe the marker must be cross-checked
+   against a trusted copy of the manifest at replay time — and `UninstallEngine`
+   does not have the blob today. That is a design change, not a field.
+
+**Fix (Stage 2, to land before or with the first shipped build containing S2):**
+resolve the manifest's declared out-of-tree destinations from the **signed blob**
+at replay time and widen `ReplayAnchorage` with them; the journal records nothing
+new and nothing is trusted from it. Until then `docs/guides/uninstaller.md`
+documents the symptom and points publishers at an `uninstall:` step, which runs
+before the journal replay and is not anchored. **M**
+
 ---
 
 # Verified sound

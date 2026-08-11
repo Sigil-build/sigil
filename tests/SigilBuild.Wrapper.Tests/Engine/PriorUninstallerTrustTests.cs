@@ -35,9 +35,18 @@ using Xunit;
 /// </para>
 /// <para>
 /// <b>Nothing here writes HKLM.</b> The planted ARP entry is HKCU-only and
-/// uniquely named, and is removed in a <c>finally</c> via <c>using</c>. No test in
-/// this file starts a process: the refusal is asserted through the engine's typed
-/// outcome, and the acceptance through the predicate directly.
+/// uniquely named, and is removed in a <c>finally</c> via <c>using</c>.
+/// </para>
+/// <para>
+/// <b>No process is ever created</b> — which is a weaker claim than "no test calls
+/// <c>Process.Start</c>", and the difference is the point.
+/// <see cref="An_unelevated_per_user_upgrade_of_an_unsigned_uninstaller_is_not_gated"/>
+/// deliberately DOES reach <c>Process.Start</c> on an unelevated host: reaching it is
+/// the assertion, because that is what proves the gate did not fire. What it starts is
+/// <c>StubExe</c>'s two-byte <c>MZ</c> file, which is not a valid Win32 image, so the
+/// loader rejects it and <c>Process.Start</c> throws before any process exists — which
+/// is why the engine reports "failed to run". Every other test asserts through the
+/// engine's typed outcome or the predicate directly and never reaches a spawn at all.
 /// </para>
 /// </remarks>
 [SupportedOSPlatform("windows")]

@@ -196,6 +196,168 @@ public class ReplayAnchoringTests
             "uninstall replays");
     }
 
+    // ---------------------------------------------------------------------------
+    // The per-app state directory, and the content SOURCE of a record.
+    // ---------------------------------------------------------------------------
+
+    [WindowsFact("Windows-only state layout")]
+    public void One_apps_journal_cannot_reach_another_apps_state_file()
+    {
+        // Arrange — the allowlist used to be the SHARED <StateRoot>\Sigil parent, so a
+        // record in app A's journal could name app B's uninstall.json. Deleting it makes
+        // B unremovable ("no uninstall state found"); overwriting it is worse, because
+        // the elevated process writes inside the hardened directory and the result comes
+        // out Administrators-owned — passing B's provenance gate on its next load, which
+        // launders attacker content into trusted state. Predicate only; no file is
+        // created, read or deleted.
+        using var installDir = new TempDir();
+        var appA = "sigil.appA." + Guid.NewGuid().ToString("N");
+        var appB = "sigil.appB." + Guid.NewGuid().ToString("N");
+
+        var anchor = AnchorFor(installDir.Path, appA, InstallScope.User);
+        var victim = UninstallStateStore.PathFor(appB, InstallScope.User);
+
+        // Act
+        var deleted = anchor.Check(new RollbackRecord.RestoreFile(victim, false, null));
+        var overwritten = anchor.Check(new RollbackRecord.RestoreDeletedFile(
+            victim, Path.Combine(installDir.Path, "planted.json")));
+
+        // Assert
+        deleted.RefusalMessage.Should().NotBeNull();
+        deleted.RefusalMessage!.Should().Contain(appB,
+            "the state-directory allowance is this app's own directory, never the shared parent");
+        overwritten.RefusalMessage.Should().NotBeNull();
+        overwritten.RefusalMessage!.Should().Contain(appB);
+    }
+
+    [WindowsFact("Windows-only state layout")]
+    public void An_app_can_still_reach_its_own_state_directory()
+    {
+        // Arrange — the paired positive. Narrowing to the per-app directory must not
+        // narrow it to nothing.
+        using var installDir = new TempDir();
+        var appId = "sigil.own." + Guid.NewGuid().ToString("N");
+        var own = Path.Combine(
+            UninstallStateStore.DirectoryFor(appId, InstallScope.User), "scratch.dat");
+
+        // Act
+        var verdict = AnchorFor(installDir.Path, appId, InstallScope.User)
+            .Check(new RollbackRecord.RestoreFile(own, false, null));
+
+        // Assert
+        verdict.RefusalMessage.Should().BeNull();
+    }
+
+    [WindowsFact("Windows-only state layout")]
+    public void Without_an_app_id_no_state_directory_is_allowed_at_all()
+    {
+        // Arrange — ForInstallDir does not know whose state it is, so it allows none.
+        // Omission fails CLOSED, which is why the narrower overload can be optional.
+        using var installDir = new TempDir();
+        var appId = "sigil.own." + Guid.NewGuid().ToString("N");
+        var own = Path.Combine(
+            UninstallStateStore.DirectoryFor(appId, InstallScope.User), "scratch.dat");
+
+        // Act
+        var verdict = Anchor(installDir.Path)
+            .Check(new RollbackRecord.RestoreFile(own, false, null));
+
+        // Assert
+        verdict.RefusalMessage.Should().NotBeNull();
+    }
+
+    [WindowsTheory("Windows path semantics")]
+    [InlineData("restore_file")]
+    [InlineData("restore_deleted_file")]
+    [InlineData("restore_deleted_directory")]
+    [InlineData("restore_config_file")]
+    public void A_contained_destination_fed_from_an_uncontained_source_is_refused(string type)
+    {
+        // Arrange — the register's wording for these rows is "arbitrary file / tree write
+        // FROM AN ATTACKER-CHOSEN STASH". Checking only the destination is a narrower
+        // guarantee than that: the bytes still come from wherever the record says.
+        using var installDir = new TempDir();
+        using var elsewhere = new TempDir();
+        var destination = Path.Combine(installDir.Path, "app.exe");
+        var source = Path.Combine(elsewhere.Path, "evil.bin");
+
+        // Act
+        var verdict = Anchor(installDir.Path).Check(SourcedRecord(type, destination, source));
+
+        // Assert
+        verdict.Refusal.Should().NotBeNull();
+        verdict.Refusal!.Code.Should().Be(ReplayRefusalCode.ContentSourceOutsideInstallRoots);
+        verdict.Refusal.Message.Should().Contain("evil.bin");
+    }
+
+    [WindowsTheory("Windows path semantics")]
+    [InlineData("restore_file")]
+    [InlineData("restore_deleted_file")]
+    [InlineData("restore_deleted_directory")]
+    [InlineData("restore_config_file")]
+    public void A_source_inside_the_anchor_still_replays(string type)
+    {
+        // Arrange — the paired positive, and the reason checking the source costs nothing:
+        // FileCopyStep writes its backup as "<destination>.sigil-bak", i.e. beside the
+        // file it is backing up, so it is anchored exactly when the destination is.
+        using var installDir = new TempDir();
+        var destination = Path.Combine(installDir.Path, "app.exe");
+
+        // Act
+        var verdict = Anchor(installDir.Path)
+            .Check(SourcedRecord(type, destination, destination + ".sigil-bak"));
+
+        // Assert
+        verdict.RefusalMessage.Should().BeNull(
+            "a backup written beside its own destination is the shape every real " +
+            "file_copy rollback has");
+    }
+
+    [WindowsFact("Windows shell folders")]
+    public void The_all_users_startup_folder_is_not_reachable_even_though_the_start_menu_is()
+    {
+        // Arrange — Startup is INSIDE the Start Menu subtree and is a per-logon execution
+        // surface. Sigil never places a shortcut there (ShortcutCreateStep resolves only
+        // start_menu and desktop, to the folder itself), so excising it costs no
+        // legitimate replay while removing the compounding half of the source finding.
+        using var installDir = new TempDir();
+        var startMenu = ScopeLayout.For(InstallScope.Machine).StartMenuFolder;
+        var anchor = Anchor(installDir.Path);
+
+        // Act
+        var ordinary = anchor.Check(new RollbackRecord.DeleteShortcut(
+            Path.Combine(startMenu, "Programs", "Acme", "Acme.lnk")));
+        var startup = anchor.Check(new RollbackRecord.DeleteShortcut(
+            Path.Combine(startMenu, "Programs", "Startup", "evil.lnk")));
+
+        // Assert
+        ordinary.RefusalMessage.Should().BeNull(
+            "an ordinary Start Menu shortcut must still be removable");
+        startup.RefusalMessage.Should().NotBeNull(
+            "the all-users Startup folder is a persistence location, not a shortcut folder " +
+            "this installer writes");
+    }
+
+    [WindowsFact("Windows shell folders")]
+    public void A_machine_scope_replay_cannot_touch_the_per_user_shortcut_folders()
+    {
+        // Arrange — when the scope is known, only that scope's shortcut folders are in
+        // range. A machine uninstall has no business deleting a per-user shortcut.
+        using var installDir = new TempDir();
+        var userDesktop = Path.Combine(
+            ScopeLayout.For(InstallScope.User).DesktopFolder, "Acme.lnk");
+
+        // Act
+        var machineAnchor = AnchorFor(installDir.Path, "sigil.x", InstallScope.Machine);
+        var userAnchor = AnchorFor(installDir.Path, "sigil.x", InstallScope.User);
+
+        // Assert
+        machineAnchor.Check(new RollbackRecord.DeleteShortcut(userDesktop))
+            .RefusalMessage.Should().NotBeNull();
+        userAnchor.Check(new RollbackRecord.DeleteShortcut(userDesktop))
+            .RefusalMessage.Should().BeNull("the same record in its own scope must replay");
+    }
+
     [WindowsFact("Windows shell folders")]
     public async Task A_shortcut_in_the_start_menu_is_replayed_although_it_is_outside_the_install_dir()
     {
@@ -657,6 +819,93 @@ public class ReplayAnchoringTests
     }
 
     [WindowsFact("Windows registry semantics")]
+    public void A_set_style_env_restore_replays_when_the_install_owned_the_whole_variable()
+    {
+        // Arrange — `action: set` is env_set's DOCUMENTED DEFAULT and replaces the value,
+        // so the prior value is by construction absent from the current one. The
+        // append/prepend model alone can therefore never accept it: a manifest that
+        // repoints JAVA_HOME at its own JRE would have its restore refused, leaving
+        // JAVA_HOME dangling at the just-deleted install directory and reporting a REFUSED
+        // record on a completely legitimate uninstall.
+        //
+        // The fixture is a GUID-named scratch variable in the CURRENT USER's Environment
+        // key — never a system variable, never machine scope — created here and removed in
+        // the finally, following the pattern ReinstallIdempotencyTests already uses.
+        using var installDir = new TempDir();
+        var name = "SIGIL_ANCHOR_SET_" + Guid.NewGuid().ToString("N");
+        var ownedByInstall = Path.Combine(installDir.Path, "jre");
+
+        try
+        {
+            WriteUserEnv(name, ownedByInstall);
+
+            var record = new RollbackRecord.RestoreEnv(
+                "user", name, PriorValue: @"C:\Program Files\Java\jdk-21", PreviouslyAbsent: false);
+
+            // Act
+            var verdict = Anchor(installDir.Path).Check(record);
+
+            // Assert
+            verdict.RefusalMessage.Should().BeNull(
+                "the variable's current value is wholly a directory this install owns, so " +
+                "this install had taken it over and putting back what preceded it is the undo");
+        }
+        finally
+        {
+            DeleteUserEnv(name);
+        }
+    }
+
+    [WindowsFact("Windows registry semantics")]
+    public void A_set_style_env_restore_is_refused_when_the_install_did_not_own_the_variable()
+    {
+        // Arrange — the paired negative, and what stops the `set` model from becoming a
+        // way to write anything anywhere: the current value must be one this install
+        // wholly owns. Here it points somewhere else entirely, so neither model applies.
+        using var installDir = new TempDir();
+        using var elsewhere = new TempDir();
+        var name = "SIGIL_ANCHOR_SET_" + Guid.NewGuid().ToString("N");
+
+        try
+        {
+            WriteUserEnv(name, Path.Combine(elsewhere.Path, "jre"));
+
+            var record = new RollbackRecord.RestoreEnv(
+                "user", name, PriorValue: @"C:\Users\Public\evil", PreviouslyAbsent: false);
+
+            // Act
+            var verdict = Anchor(installDir.Path).Check(record);
+
+            // Assert
+            verdict.Refusal.Should().NotBeNull();
+            verdict.Refusal!.Code.Should().Be(ReplayRefusalCode.EnvironmentIntroducesForeignEntry);
+            verdict.Refusal.Message.Should().Contain(@"C:\Users\Public\evil");
+        }
+        finally
+        {
+            DeleteUserEnv(name);
+        }
+    }
+
+    [WindowsFact("Windows registry semantics")]
+    public void The_set_model_never_applies_to_a_system_critical_variable()
+    {
+        // Arrange — no installer legitimately `set`s PATH, so the subset rule must keep
+        // governing it however install-owned the current value happens to look. Read-only:
+        // the real machine PATH is consulted and never written.
+        using var installDir = new TempDir();
+        var record = new RollbackRecord.RestoreEnv(
+            "machine", "Path", PriorValue: @"C:\Users\Public\evil", PreviouslyAbsent: false);
+
+        // Act
+        var verdict = Anchor(installDir.Path).Check(record);
+
+        // Assert
+        verdict.RefusalMessage.Should().NotBeNull();
+        verdict.RefusalMessage!.Should().Contain(@"C:\Users\Public\evil");
+    }
+
+    [WindowsFact("Windows registry semantics")]
     public void User_scope_env_restore_of_the_install_dir_is_allowed()
     {
         // Arrange — the POSITIVE for user scope. A user-scope install legitimately lands
@@ -900,6 +1149,55 @@ public class ReplayAnchoringTests
 
     private static ReplayAnchor Anchor(string installDir) =>
         ReplayAnchor.For(ReplayAnchorage.ForInstallDir(installDir))!;
+
+    private static ReplayAnchor AnchorFor(string installDir, string appId, InstallScope scope) =>
+        ReplayAnchor.For(ReplayAnchorage.ForInstall(installDir, appId, scope))!;
+
+    /// <summary>
+    /// A record of <paramref name="type"/> writing to <paramref name="destination"/> with
+    /// its bytes coming from <paramref name="source"/>.
+    /// </summary>
+    private static RollbackRecord SourcedRecord(string type, string destination, string source) =>
+        type switch
+        {
+            "restore_file" => new RollbackRecord.RestoreFile(
+                destination, ExistedBefore: true, BackupPath: source),
+            "restore_deleted_file" => new RollbackRecord.RestoreDeletedFile(destination, source),
+            "restore_deleted_directory" =>
+                new RollbackRecord.RestoreDeletedDirectory(destination, source),
+            "restore_config_file" => new RollbackRecord.RestoreConfigFile(destination, source),
+            _ => throw new ArgumentOutOfRangeException(nameof(type), type, "unmapped record type"),
+        };
+
+    /// <summary>
+    /// Create a GUID-named scratch variable in the CURRENT USER's <c>Environment</c> key.
+    /// Never a system variable and never machine scope; removed by
+    /// <see cref="DeleteUserEnv"/> in the caller's <c>finally</c>. Same pattern as
+    /// <c>ReinstallIdempotencyTests</c>, which predates this lane.
+    /// </summary>
+    private static void WriteUserEnv(string name, string value)
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(UserEnvironmentKey, writable: true);
+        key.Should().NotBeNull("the fixture needs the per-user Environment key");
+        key!.SetValue(name, value, RegistryValueKind.String);
+    }
+
+    private static void DeleteUserEnv(string name)
+    {
+#pragma warning disable CA1031 // Best-effort removal of the test's own scratch variable.
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(UserEnvironmentKey, writable: true);
+            key?.DeleteValue(name, throwOnMissingValue: false);
+        }
+        catch
+        {
+            // Best-effort.
+        }
+#pragma warning restore CA1031
+    }
+
+    private const string UserEnvironmentKey = "Environment";
 
     private static RollbackRecord PathRecord(string type, string path) => type switch
     {

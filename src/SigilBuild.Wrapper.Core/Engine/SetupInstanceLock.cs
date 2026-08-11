@@ -53,22 +53,69 @@ public sealed partial class SetupInstanceLock : IDisposable
     }
 
     /// <summary>
+    /// Why <see cref="TryAcquire(string, InstallScope, out SetupLockRefusal)"/> returned
+    /// no lock, or how the one it returned was obtained. Distinct values because the
+    /// three are three different situations and used to be one (R34).
+    /// </summary>
+    public enum SetupLockRefusal
+    {
+        /// <summary>The lock was taken and this process owns the name.</summary>
+        None = 0,
+
+        /// <summary>
+        /// <c>ERROR_ALREADY_EXISTS</c> — another setup for this app+scope is running.
+        /// The ordinary, expected contention case.
+        /// </summary>
+        AnotherInstanceRunning = 1,
+
+        /// <summary>
+        /// The name exists but is not ours to take: <c>CreateMutexW</c> failed and the
+        /// object is there — either a mutex whose DACL denies us
+        /// (<c>ERROR_ACCESS_DENIED</c>) or, more cheaply for an attacker, a DIFFERENT
+        /// kind of kernel object squatting the name (<c>ERROR_INVALID_HANDLE</c>). Both
+        /// mean the guard cannot be established, so this fails closed exactly like
+        /// contention rather than proceeding without a guard.
+        /// </summary>
+        NameNotAvailable = 2,
+
+        /// <summary>
+        /// The name does NOT exist and we still could not create it — the
+        /// <c>Global\</c> namespace from a process without
+        /// <c>SeCreateGlobalPrivilege</c>, which is what a machine-scope
+        /// <c>/Update</c> (the one path that never self-elevates) looks like. There is
+        /// no second instance to protect against here, so a sentinel is returned and the
+        /// run proceeds UNGUARDED — but the caller is told, instead of the old silent
+        /// pretence that a lock was held.
+        /// </summary>
+        GuardUnavailable = 3,
+    }
+
+    /// <summary>
     /// Take the single-instance lock for this app+scope. Returns the owning lock, or
-    /// <c>null</c> when another setup instance already holds it. Off Windows there is
-    /// no contention model, so a non-owning sentinel lock is always returned.
+    /// <c>null</c> when the name is taken. Off Windows there is no contention model, so
+    /// a non-owning sentinel lock is always returned.
     /// </summary>
     public static SetupInstanceLock? TryAcquire(string appId, InstallScope scope)
+        => TryAcquire(appId, scope, out _);
+
+    /// <summary>
+    /// As <see cref="TryAcquire(string, InstallScope)"/>, reporting <em>which</em> branch
+    /// was taken so the caller can log it and pick the right message (R34).
+    /// </summary>
+    public static SetupInstanceLock? TryAcquire(
+        string appId, InstallScope scope, out SetupLockRefusal refusal)
     {
         var name = NameFor(appId, scope);
         if (!OperatingSystem.IsWindows())
         {
+            refusal = SetupLockRefusal.None;
             return new SetupInstanceLock(IntPtr.Zero, name);
         }
-        return TryAcquireWindows(name);
+        return TryAcquireWindows(name, out refusal);
     }
 
     [SupportedOSPlatform("windows")]
-    private static SetupInstanceLock? TryAcquireWindows(string name)
+    private static SetupInstanceLock? TryAcquireWindows(string name, out SetupLockRefusal refusal)
     {
         // bInitialOwner: false — ownership is irrelevant; existence is the signal.
         var handle = CreateMutexW(IntPtr.Zero, bInitialOwner: false, name);
@@ -76,9 +123,28 @@ public sealed partial class SetupInstanceLock : IDisposable
 
         if (handle == IntPtr.Zero)
         {
-            // Could not create the name at all (e.g. ACL on Global\ from a
-            // non-elevated process). Fail open: a missing guard is better than a
-            // setup that refuses to run.
+            // R34. This branch used to return a non-owning sentinel indistinguishable
+            // from a real lock, so two installs could run concurrently — and the name is
+            // fully derivable from the public app id, so producing this branch on demand
+            // was a same-user, no-privilege operation: create ANY other kind of kernel
+            // object (an event, a semaphore) under the name and CreateMutexW fails
+            // forever after.
+            //
+            // The fix is not "fail closed on every failure", which would break the one
+            // legitimate case: a machine-scope /Update never self-elevates, so it asks
+            // for a Global\ name without SeCreateGlobalPrivilege and is denied. That is
+            // ACCESS_DENIED too, so the error code alone cannot separate "the name is
+            // taken" from "we may not create names here". Asking whether the object
+            // EXISTS separates them exactly.
+            if (NameIsTaken(name))
+            {
+                refusal = SetupLockRefusal.NameNotAvailable;
+                return null;
+            }
+
+            // Nothing is there; we simply could not create it. Proceed, unguarded and
+            // said out loud.
+            refusal = SetupLockRefusal.GuardUnavailable;
             return new SetupInstanceLock(IntPtr.Zero, name);
         }
 
@@ -86,10 +152,34 @@ public sealed partial class SetupInstanceLock : IDisposable
         {
             // Someone else owns the install: release our reference and report.
             CloseHandle(handle);
+            refusal = SetupLockRefusal.AnotherInstanceRunning;
             return null;
         }
 
+        refusal = SetupLockRefusal.None;
         return new SetupInstanceLock(handle, name);
+    }
+
+    /// <summary>
+    /// True when a kernel object already occupies <paramref name="name"/> — whether it
+    /// is a mutex we are denied access to, or some other object type squatting the name.
+    /// </summary>
+    /// <remarks>
+    /// <c>OpenMutexW</c> reports <c>ERROR_FILE_NOT_FOUND</c> only when the name is
+    /// genuinely free; <c>ERROR_ACCESS_DENIED</c> (a mutex with a hostile DACL) and
+    /// <c>ERROR_INVALID_HANDLE</c> (the name is an event/semaphore/section) both mean it
+    /// is occupied.
+    /// </remarks>
+    [SupportedOSPlatform("windows")]
+    private static bool NameIsTaken(string name)
+    {
+        var probe = OpenMutexW(SYNCHRONIZE, bInheritHandle: false, name);
+        if (probe != IntPtr.Zero)
+        {
+            CloseHandle(probe);
+            return true;
+        }
+        return Marshal.GetLastWin32Error() != ERROR_FILE_NOT_FOUND;
     }
 
     // Reduce the AppId to a mutex-name-safe segment (no backslashes — they would
@@ -116,10 +206,16 @@ public sealed partial class SetupInstanceLock : IDisposable
     }
 
     private const int ERROR_ALREADY_EXISTS = 183;
+    private const int ERROR_FILE_NOT_FOUND = 2;
+    private const uint SYNCHRONIZE = 0x00100000;
 
     [SupportedOSPlatform("windows")]
     [LibraryImport("kernel32.dll", EntryPoint = "CreateMutexW", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
     private static partial IntPtr CreateMutexW(IntPtr lpMutexAttributes, [MarshalAs(UnmanagedType.Bool)] bool bInitialOwner, string lpName);
+
+    [SupportedOSPlatform("windows")]
+    [LibraryImport("kernel32.dll", EntryPoint = "OpenMutexW", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    private static partial IntPtr OpenMutexW(uint dwDesiredAccess, [MarshalAs(UnmanagedType.Bool)] bool bInheritHandle, string lpName);
 
     [SupportedOSPlatform("windows")]
     [LibraryImport("kernel32.dll", SetLastError = true)]

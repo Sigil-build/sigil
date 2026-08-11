@@ -254,32 +254,13 @@ public static class InstallDirResolver
     /// (register row R3).
     /// </summary>
     /// <remarks>
-    /// Machine scope anchors on the Program Files roots: <c>{install_dir}</c>
-    /// feeds <c>scheduled_task_create.program</c> and
-    /// <c>service_install.binary_path</c>, which run as SYSTEM, so the
-    /// destination must not be a directory an unprivileged user can write.
-    /// <b>Both</b> <c>%ProgramFiles%</c> and <c>%ProgramFiles(x86)%</c> are
-    /// accepted: both are admin-only and TrustedInstaller-owned, so containment
-    /// loses nothing, while refusing the x86 root would break the standard
-    /// 32-bit install shape on 64-bit Windows.
-    /// <para>
-    /// <see cref="ScopeLayout"/> models only ONE machine root
-    /// (<see cref="Environment.SpecialFolder.ProgramFiles"/>, see
-    /// <c>ScopeLayout.InstallRoot</c>), so the x86 root is added here rather
-    /// than there — <c>ScopeLayout</c> is shared surface and widening it is not
-    /// this lane's call. If it ever grows a root <i>set</i>, this method should
-    /// derive from it so the anchor and the installer's own notion of where
-    /// machine installs go cannot drift apart.
-    /// </para>
-    /// <para>
-    /// User scope crosses no privilege boundary, so the root is widened from
-    /// <c>%LocalAppData%\Programs</c> to the whole user profile — a user writing
-    /// inside their own profile is not an escalation. The check is kept because
-    /// an unanchored user-scope install still lets a manifest write anywhere the
-    /// user can. <c>%LocalAppData%</c> can be redirected off the profile (folder
-    /// redirection), so the scope's own install root is accepted as well;
-    /// otherwise the DEFAULT install would be refused on such machines.
-    /// </para>
+    /// The accepted roots are <see cref="ScopeLayout.InstallRoots"/> and nothing
+    /// else — see that member for why each root is on the list. Deriving them
+    /// there rather than restating them here is register row R52: before it, the
+    /// <em>permitted</em> destinations lived in this method and the
+    /// <em>default</em> destination lived in <c>ScopeLayout.InstallRoot</c>, and
+    /// the two could drift apart silently (they already had: this method accepted
+    /// <c>%ProgramFiles(x86)%</c>, which <c>ScopeLayout</c> did not model at all).
     /// </remarks>
     internal static bool IsContained(ScopeLayout layout, string resolved)
     {
@@ -298,21 +279,12 @@ public static class InstallDirResolver
 
     /// <summary>
     /// Every root a resolved <c>install_dir</c> for <paramref name="layout"/>
-    /// may legitimately sit under. A blank entry (e.g. <c>%ProgramFiles(x86)%</c>
-    /// on a 32-bit-only OS) is harmless — <see cref="PathContainment.IsUnder"/>
-    /// rejects a blank root.
+    /// may legitimately sit under — the layout's own declared root set (R52).
+    /// A blank entry (e.g. <c>%ProgramFiles(x86)%</c> on a 32-bit-only OS) is
+    /// harmless: <see cref="PathContainment.IsUnder"/> rejects a blank root.
     /// </summary>
-    private static string[] ContainmentRoots(ScopeLayout layout) => layout.IsMachine
-        ? new[]
-        {
-            layout.InstallRoot,
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
-        }
-        : new[] { layout.InstallRoot, UserContainmentRoot };
-
-    private static string UserContainmentRoot =>
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    private static System.Collections.Generic.IReadOnlyList<string> ContainmentRoots(ScopeLayout layout) =>
+        layout.InstallRoots;
 
     private static void EnsureContained(ScopeLayout layout, string resolved)
     {
@@ -331,9 +303,10 @@ public static class InstallDirResolver
                 $"{{install_dir}} feeds SYSTEM-level step targets. Nothing was installed."));
     }
 
-    private static System.Collections.Generic.List<string> DistinctNonBlank(string[] roots)
+    private static System.Collections.Generic.List<string> DistinctNonBlank(
+        System.Collections.Generic.IReadOnlyList<string> roots)
     {
-        var seen = new System.Collections.Generic.List<string>(roots.Length);
+        var seen = new System.Collections.Generic.List<string>(roots.Count);
         foreach (var r in roots)
         {
             if (string.IsNullOrWhiteSpace(r))

@@ -18,16 +18,16 @@ hooks and prerequisites that run around it — see below).
 | `AppName` | `app.name` | — |
 | `AppVersion` | `app.version` | Plain numeric dotted version (`1.2.3`) for precise [upgrade/downgrade](../guides/upgrades.md) comparison; SemVer pre-release tags (`1.2.0-rc1`) are not parsed as pre-release and fall back to lexicographic comparison. |
 | `AppPublisher` | `app.publisher` | Stamped into the ARP entry and the Authenticode signature's subject line. |
-| `DefaultDirName` | `parameters.install_dir.default` (or `installer.install_dir`) | Sigil's install-dir resolution chain (wizard-collected path → `/D=` → prior install dir on upgrade → `installer.install_dir` → scope-root default) supersedes Inno's `{autopf}`-style constant expansion; use `${scope_root}` / `${app.name}` tokens instead. |
+| `DefaultDirName` | `installer.install_dir` | Sigil's install-dir resolution chain (wizard-collected path → `/D=` → prior install dir on upgrade → `installer.install_dir` → scope-root default, `InstallDirResolver.cs:15-23`) supersedes Inno's `{autopf}`-style constant expansion; use the `{scope_root}` / `{app.name}` brace tokens inside the value, not a `parameters.install_dir` declaration — see the warning in [Parameters](../guides/parameters.md#cli-overrides-at-install-time). |
 | `DefaultGroupName` | `shortcut_create` step(s) with `location: start_menu` | No separate "group" concept — declare one `shortcut_create` per shortcut you want in the Start Menu folder. |
 | `PrivilegesRequired` (`admin`/`lowest`/`none`) | `installer.scope` (`machine`/`user`/`auto`) | Direct analog. |
 | `PrivilegesRequiredOverridesAllowed` | `installer.scope: auto` | Sigil's `auto` scope resolves per-machine-vs-per-user the same way Inno 6's override mechanism does, without a separate flag. |
 | `OutputBaseFilename` / `OutputDir` | `sigil pack --out <dir>` | Sigil names the artifact `<App>-<version>-<arch>-Setup.exe` deterministically; there is no free-form rename knob. |
 | `Compression` / `SolidCompression` | (automatic) | Sigil always packs the payload with zstd (`SIGIL_PAYLOAD_V2`) for deterministic, reproducible builds — not user-tunable. |
 | `SetupMutex` | (automatic) | Sigil's `Setup.exe` takes its own single-instance mutex unconditionally (gap G17, shipped with P6) — there is no manifest field to name or disable it, unlike Inno's opt-in `SetupMutex`. |
-| `UninstallDisplayIcon` / `UninstallDisplayName` | (automatic, from `installer.icon` / `app.name`) | The generated `uninstaller.exe` and its ARP row inherit these from the manifest; no separate keys. |
+| `UninstallDisplayIcon` / `UninstallDisplayName` | (automatic, from `installer.icon` / `app.name`) | The generated `uninstall.exe` and its ARP row inherit these from the manifest; no separate keys. |
 | `MinVersion` / `OnlyBelowVersion` | `when: os_version(...)` on a step, or a `prerequisites[]` entry with a `detect` expression | No dedicated OS-floor field yet; expression-gate the steps that need it. |
-| `Uninstallable=no` | omit `uninstall:` entirely | An app with no `uninstall:` block gets no `uninstaller.exe` and no ARP registration, matching Inno's `Uninstallable=no`. |
+| `Uninstallable=no` | omit `uninstall:` entirely | An app with no `uninstall:` block gets no `uninstall.exe` and no ARP registration, matching Inno's `Uninstallable=no`. |
 
 ## `[Files]` → `file_copy`
 
@@ -55,7 +55,7 @@ hooks and prerequisites that run around it — see below).
 | Inno directive | Sigil equivalent | Notes |
 |---|---|---|
 | `Root: HKLM; Subkey: "..."; ValueType: string; ValueName: "..."; ValueData: "..."` | `registry_write` (`hive`, `key`, `name`, `type_value`, `value`) | `type_value` accepts `REG_SZ`/`REG_EXPAND_SZ`/`REG_DWORD`/`REG_QWORD`/`REG_MULTI_SZ`/`REG_BINARY`. |
-| `Flags: uninsdeletevalue` | (automatic) | `registry_write` snapshots the prior value and journals a delete; rollback and `uninstaller.exe` both reverse it without a separate flag. |
+| `Flags: uninsdeletevalue` | (automatic) | `registry_write` snapshots the prior value and journals a delete; rollback and `uninstall.exe` both reverse it without a separate flag. |
 | `Flags: uninsdeletekeyifempty` / `uninsdeletekey` | `registry_delete_key` (`recursive: true` for the tree form) | Declare the delete explicitly in `uninstall:` rather than relying on an implicit flag. |
 | `RegQueryStringValue` / reading a value in `[Code]` | `registry_read(hive, key, value)` expression function → `installer.vars` | Declarative equivalent of Inno's `[Code]`-based registry read; exposed as `var.<name>` in `when:` clauses, screen defaults, and `{var.<name>}` brace tokens (gap G1, shipped P1). |
 
@@ -188,10 +188,10 @@ tool. Sigil ships one built in (gap G15, shipped P12):
 
 | Inno construct | Sigil equivalent | Notes |
 |---|---|---|
-| Auto-generated `unins000.exe` | `uninstaller.exe`, generated whenever the manifest has an `uninstall:` block | Packaged as a resource in `Setup.exe` and dropped to `install_dir\uninstaller.exe` on install success. |
-| ARP `UninstallString` / `QuietUninstallString` | (automatic) | The wrapper writes both, pointing at the deployed `uninstaller.exe`, mirroring Inno's own ARP registration. |
+| Auto-generated `unins000.exe` | `uninstall.exe`, generated whenever the manifest has an `uninstall:` block | Packaged as a resource in `Setup.exe` and dropped to `install_dir\uninstall.exe` on install success. |
+| ARP `UninstallString` / `QuietUninstallString` | (automatic) | The wrapper writes both, pointing at the deployed `uninstall.exe`, mirroring Inno's own ARP registration. |
 | `[UninstallDelete]` | `uninstall:` step list | The install journal already replays the reverse of every install step automatically; declare `uninstall:` only for extra tear-down the journal can't infer (stopping a service, clearing an AppData cache). |
-| `UninstallDisplayIcon` | `installer.icon` | Same icon stamps `Setup.exe`, the wizard, and `uninstaller.exe`. |
+| `UninstallDisplayIcon` | `installer.icon` | Same icon stamps `Setup.exe`, the wizard, and `uninstall.exe`. |
 
 ## Examples
 

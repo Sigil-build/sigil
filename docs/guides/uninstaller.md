@@ -4,7 +4,7 @@ When you produce an `exe` package, Sigil ships an uninstaller automatically. The
 
 ## How it works
 
-On a successful install, the wrapper drops a stamped copy of itself to `<install_dir>\uninstaller.exe` (~4 MB, embedded inside `setup.exe` as the `SIGIL_UNINSTALLER_V1` resource). It then writes a per-app entry under:
+On a successful install, the wrapper drops a stamped copy of itself to `<install_dir>\uninstall.exe` (~4 MB, embedded inside `setup.exe` as the `SIGIL_UNINSTALLER_V1` resource). It then writes a per-app entry under:
 
 ```
 HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\<AppId>
@@ -17,7 +17,7 @@ with these values:
 |`DisplayName`|`app.name`|
 |`DisplayVersion`|`app.version`|
 |`Publisher`|`app.publisher`|
-|`UninstallString`|`"<install_dir>\uninstaller.exe" /S /Uninstall`|
+|`UninstallString`|`"<install_dir>\uninstall.exe" /S /Uninstall`|
 |`EstimatedSize`|Total install footprint in KB|
 |`InstallDate`|YYYYMMDD|
 |`NoModify` / `NoRepair`|`1`|
@@ -29,7 +29,7 @@ Add or Remove Programs reads this key, so your app surfaces there with no extra 
 Run either path; both are equivalent:
 
 ```bash
-"<install_dir>\uninstaller.exe" /S          # silent (Add/Remove Programs uses this)
+"<install_dir>\uninstall.exe" /S          # silent (Add/Remove Programs uses this)
 setup.exe /Uninstall                        # interactive, from the original setup.exe
 ```
 
@@ -58,7 +58,7 @@ uninstall:
       - -ExecutionPolicy
       - Bypass
       - -File
-      - "${parameters.install_dir}\\StopAndRemoveServices.ps1"
+      - "{install_dir}\\StopAndRemoveServices.ps1"
     wait: true
     timeout_seconds: 120
     on_failure: continue

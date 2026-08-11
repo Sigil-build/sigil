@@ -45,15 +45,15 @@
 
 ## Uninstaller mapping
 
-> Shipped in D-016 (2026-05-14). WiX's `Product` element auto-registers an Add/Remove Programs entry with `MsiExec.exe /x{ProductCode}` as the uninstall command. Sigil produces a sibling `uninstaller.exe` and writes the same ARP entry.
+> Shipped in D-016 (2026-05-14). WiX's `Product` element auto-registers an Add/Remove Programs entry with `MsiExec.exe /x{ProductCode}` as the uninstall command. Sigil produces a sibling `uninstall.exe` and writes the same ARP entry.
 
 | WiX construct | Sigil equivalent | Notes |
 |---|---|---|
-| `<Product>` (auto-registers ARP entry) | top-level `uninstall:` step list + automatic deployment | the packager generates a ~4 MB stamped wrapper copy, embeds it as the `SIGIL_UNINSTALLER_V1` resource, and the wrapper drops it to `install_dir\uninstaller.exe` on install success |
+| `<Product>` (auto-registers ARP entry) | top-level `uninstall:` step list + automatic deployment | the packager generates a ~4 MB stamped wrapper copy, embeds it as the `SIGIL_UNINSTALLER_V1` resource, and the wrapper drops it to `install_dir\uninstall.exe` on install success |
 | `<RegistrySearch>` for `UninstallString` | (automatic) | the wrapper writes both `HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\<AppId>\UninstallString` and `QuietUninstallString` to point at the deployed exe |
-| `MsiExec.exe /x{...}` invocation | `<install_dir>\uninstaller.exe` (silent: append `/S`) | the dedicated exe replays the install journal automatically; the manifest's `uninstall:` block runs first for tear-down the journal can't infer |
-| `<Product Icon=`...`>` for the ARP icon | `installer.icon` | the same icon stamps `setup.exe`, the bundled wizard exe, and the produced `uninstaller.exe` |
-| `<Property Id="ARPNOREMOVE" Value="1"/>` | (no direct equivalent — omit `uninstall:` to skip generation) | when the manifest has no `uninstall:` block, no uninstaller.exe is generated and no ARP entry is written |
+| `MsiExec.exe /x{...}` invocation | `<install_dir>\uninstall.exe` (silent: append `/S`) | the dedicated exe replays the install journal automatically; the manifest's `uninstall:` block runs first for tear-down the journal can't infer |
+| `<Product Icon=`...`>` for the ARP icon | `installer.icon` | the same icon stamps `setup.exe`, the bundled wizard exe, and the produced `uninstall.exe` |
+| `<Property Id="ARPNOREMOVE" Value="1"/>` | (no direct equivalent — omit `uninstall:` to skip generation) | when the manifest has no `uninstall:` block, no uninstall.exe is generated and no ARP entry is written |
 
 ## Wizard page mapping
 
@@ -61,8 +61,8 @@
 
 | WixUI dialog | Sigil equivalent | Notes |
 |---|---|---|
-| `LicenseAgreementDlg` | always rendered (License step) | manifest will accept a license path field; placeholder text today |
-| `InstallDirDlg` (and the WixUI_InstallDir set's path picker) | auto-inserted when `parameters.install_dir` is declared | dedicated screen with TextBox + Browse… + drive selector + free-space readout |
+| `LicenseAgreementDlg` | rendered only when the manifest has a license (`installer.license_path` / `installer.license`) | placeholder text today; `InstallerViewModel.cs:1046-1049` gates this screen on `_hasLicense` |
+| `InstallDirDlg` (and the WixUI_InstallDir set's path picker) | **always rendered**, second after Welcome — **not** conditioned on declaring any parameter | dedicated screen with TextBox + Browse… + drive selector + free-space readout. There is no `parameters.install_dir` concept: `InstallerViewModel.RebuildFlow` adds this screen (`InstallerStep.InstallOptions`) unconditionally, unlike `License`/`Options` right after it (`InstallerViewModel.cs:1041-1055`). See the warning in [Parameters](../guides/parameters.md#cli-overrides-at-install-time). |
 | `CustomizeDlg` (WixUI_FeatureTree feature selector) | `parameters.<feature>.type: bool` with `screen:` grouping | one CheckBox per bool parameter; group with the new `screen:` field |
 | `WixUI_*` themed sequences | `parameters.<name>.screen: "Page Title"` | one wizard page per unique `screen` value, in declaration order |
 | `ProgressDlg` | always rendered (Installing step) | locked layout |

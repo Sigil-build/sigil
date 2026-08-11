@@ -140,10 +140,22 @@ internal sealed class ReplayAnchor
     /// <c>restore_deleted_file</c> would otherwise be able to populate.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Write-only: see <see cref="IsAllowedPath"/>. Deleting from these paths stays
     /// allowed, because <c>shortcut_create</c> accepts an explicit location and a
     /// publisher may legitimately place a startup shortcut there — whose removal at
-    /// uninstall must replay.
+    /// uninstall must replay, or the app keeps auto-starting after it has been removed.
+    /// </para>
+    /// <para>
+    /// <strong>The permit side cannot tell whose entry it is deleting.</strong> Nothing in
+    /// a <c>delete_shortcut</c> record establishes that the install created the file it
+    /// names, so a planted journal can delete ANY all-users Startup entry, and
+    /// <c>remove_directory</c> can remove the folder itself once empty. That is
+    /// destructive rather than elevating — it can disable another program's auto-start, not
+    /// run anything — and it is the trade the write/delete asymmetry deliberately makes:
+    /// the alternative leaves the installer's own startup shortcut running forever after
+    /// uninstall. Disclosed rather than discovered.
+    /// </para>
     /// </remarks>
     private static readonly string[] ExcludedRootSubPaths =
     {
@@ -407,12 +419,24 @@ internal sealed class ReplayAnchor
     /// documentation tells publishers to investigate.
     /// </para>
     /// <para>
-    /// When the source is absent the record's own undo is already a no-op, so instead of
-    /// refusing, the source is REWRITTEN to a path that cannot exist. That keeps the log
-    /// quiet for the ordinary case and closes the check-then-copy race in the same move: a
-    /// source that appears between this check and the copy is no longer the one the record
-    /// will read. A source that exists AND is out of range is still refused and logged —
-    /// that is the planted case.
+    /// When the source is absent the record is ALLOWED with its source REWRITTEN to a path
+    /// that cannot exist. That keeps the log quiet for the ordinary case and closes the
+    /// check-then-copy race in the same move: a source that appears between this check and
+    /// the copy is no longer the one the record will read. A source that exists AND is out
+    /// of range is still refused and logged — that is the planted case.
+    /// </para>
+    /// <para>
+    /// <strong>Rewriting is not always a no-op, and the difference is worth stating.</strong>
+    /// For <c>restore_deleted_file</c>, <c>restore_deleted_directory</c> and
+    /// <c>restore_config_file</c> the undo tests its stash for existence and returns, so a
+    /// rewritten source really does make the record do nothing. <c>restore_file</c> does
+    /// not: with no usable backup it falls through to <c>File.Delete(Path)</c>
+    /// (<c>RollbackRecord.RestoreFile.UndoAsync</c>), so a planted record that would
+    /// previously have been refused now DELETES its destination instead. That is accepted
+    /// rather than overlooked — the destination has already passed the containment check
+    /// above, and the identical deletion is reachable anyway through
+    /// <c>RestoreFile(ExistedBefore: false)</c>, which the anchor allows by design. So no
+    /// new primitive; a deletion inside the anchor, which was always permitted.
     /// </para>
     /// <para>
     /// A <c>restore_file</c> backup is written as <c>&lt;destination&gt;.sigil-bak</c>
@@ -460,8 +484,14 @@ internal sealed class ReplayAnchor
                 "attacker-content write");
         }
 
-        // Absent: the undo is a no-op already. Neuter the path rather than refuse, so an
-        // ordinary uninstall logs nothing and nothing that appears later can be read.
+        // Absent: allow, with the source rewritten so an ordinary uninstall logs nothing
+        // and nothing that appears later can be read. See the remarks for what "rewritten"
+        // means per record type — for restore_file it is a deletion, not a no-op.
+        //
+        // NOTE for anyone adding a content-bearing record: passing no `withSource` allows
+        // the record UNCHANGED, which leaves the check-then-copy race open for it. Every
+        // caller today supplies one; that is a constraint on new call sites, not an
+        // invariant this method enforces.
         return withSource is null
             ? Allow(record)
             : Allow(withSource(record, NeuteredSourcePath()));
@@ -1086,6 +1116,33 @@ internal sealed class ReplayAnchor
     /// purpose; they are user-writable, and a user-writable entry on the machine
     /// <c>PATH</c> — or in a machine-wide execution mapping — is the hijack.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>This predicate reads live system state and can be perturbed by an earlier
+    /// record in the same replay — in the PERMISSIVE direction.</strong> Stated precisely
+    /// because an earlier version of the lane's audit had the direction backwards, and a
+    /// future reader adding a predicate here will reason from it.
+    /// </para>
+    /// <para>
+    /// <see cref="StateDirectorySecurity.IsAdminOnlyWritable"/> evaluates the containing
+    /// directory when its target does not exist. So a <c>remove_directory</c> record
+    /// replayed earlier can delete a user-writable subdirectory of the install directory,
+    /// after which this predicate judges that path by the install directory's own ACL —
+    /// answering <c>true</c> where the still-present subdirectory would have answered
+    /// <c>false</c>. It gets looser, not stricter.
+    /// </para>
+    /// <para>
+    /// It is nonetheless not exploitable, for a reason independent of the drift: the
+    /// containment test above runs first and is unaffected by deletion, so the drift can
+    /// only ever apply to a path already inside the install directory. Turning such a path
+    /// into a usable machine <c>PATH</c> entry or execution-mapping target requires
+    /// re-creating it, and for a machine install the install directory is admin-only
+    /// writable — precisely the privilege an unprivileged attacker does not have. For user
+    /// scope the ACL half is not consulted at all. Pre-existing and left alone; recorded so
+    /// the next predicate that reads live state is judged on its own merits rather than by
+    /// analogy to this one.
+    /// </para>
+    /// </remarks>
     private bool OwnedByThisInstall(string? path, bool isMachine)
     {
         var full = Normalize(path);

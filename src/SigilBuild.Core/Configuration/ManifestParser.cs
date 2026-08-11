@@ -440,7 +440,11 @@ public static class ManifestParser
                 Args: GetSequence(node, "args"),
                 ExitCodesOk: GetIntSequence(node, "exit_codes_ok"),
                 ScopeRequired: scopeRequired,
-                TimeoutSeconds: GetNullableInt(node, "timeout_seconds")));
+                TimeoutSeconds: GetNullableInt(node, "timeout_seconds"),
+                // R11: opts this prerequisite out of the Authenticode gate in front of a
+                // downloaded installer's launch. Defaults false — the gate is the default
+                // and the waiver has to be written down.
+                AllowUnsigned: GetBool(node, "allow_unsigned", defaultValue: false)));
         }
 
         return list.Count == 0 ? null : list;

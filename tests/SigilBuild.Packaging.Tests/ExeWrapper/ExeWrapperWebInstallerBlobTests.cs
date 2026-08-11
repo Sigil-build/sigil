@@ -53,16 +53,40 @@ public class ExeWrapperWebInstallerBlobTests
         run.Program.Should().Be(download.HttpDest, "the run step must target exactly what the download step just wrote");
     }
 
+    /// <summary>
+    /// Register row R5. The stub used to emit <c>"{temp_dir}/" + fullPackageFileName</c>
+    /// — a pack-time constant derived from the public artifact name, identical in every
+    /// copy of the stub and landing in the shared per-user <c>%TEMP%</c> root. Any
+    /// process running as the same user (the normal split-token-admin case) could both
+    /// pre-plant that exact path before the download and swap it after the checksum, and
+    /// the stub launches it <c>requireAdministrator</c>.
+    /// </summary>
+    /// <remarks>
+    /// The destination must still be a literal token at pack time — a GUID baked into
+    /// the blob would break determinism — so the fix is a token that resolves at INSTALL
+    /// time to a freshly created, randomly named private directory. "Not
+    /// <c>{temp_dir}</c>" alone would be satisfied by any rename; that the resolved path
+    /// is unguessable from the artifact name is asserted engine-side in
+    /// <c>StagingDirTokenTests</c>.
+    /// </remarks>
     [Fact]
-    public void Download_dest_is_a_temp_dir_token_not_a_baked_in_path()
+    public void Download_dest_is_a_per_run_staging_token_not_a_predictable_temp_path()
     {
         var blob = Deserialize(ExeWrapperPackager.BuildWebStubBlobBytes(
             Manifest(), PackageUrl, PackageSha256, FullPackageFileName));
 
         var download = blob.InstallSteps.Single(s => s.Type == "http_download");
-        download.HttpDest.Should().StartWith("{temp_dir}/",
-            "the destination must be resolvable at INSTALL time, not a pack-time temp path (which would break determinism)");
+
+        download.HttpDest.Should().NotStartWith("{temp_dir}/",
+            "a predictable path in the shared %TEMP% root can be pre-planted before the download and " +
+            "swapped after the checksum, and the stub launches it elevated");
+        download.HttpDest.Should().StartWith("{staging_dir}/",
+            "the destination must resolve at INSTALL time to a freshly created, randomly named private " +
+            "directory — while staying a literal token at pack time, so two packs stay byte-identical");
         download.HttpDest.Should().EndWith(FullPackageFileName);
+
+        blob.InstallSteps.Single(s => s.Type == "run_program").Program.Should().Be(
+            download.HttpDest, "the run step must still target exactly what the download step wrote");
     }
 
     [Fact]

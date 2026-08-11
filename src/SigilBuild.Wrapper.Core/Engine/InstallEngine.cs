@@ -108,6 +108,15 @@ public sealed class InstallEngine
                 .ConfigureAwait(false);
             throw;
         }
+        finally
+        {
+            // R5: {staging_dir} is created lazily by the first step that resolves it and
+            // lives exactly as long as the run that needed it. Released after any
+            // rollback has replayed, so a journalled staged file is undone by the
+            // journal rather than vanishing underneath it. A no-op for a run that never
+            // used the token, which is nearly all of them.
+            ctx.ReleaseStaging();
+        }
     }
 
     /// <summary>

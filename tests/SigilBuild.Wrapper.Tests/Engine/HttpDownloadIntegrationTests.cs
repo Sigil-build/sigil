@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Http;
@@ -132,6 +133,200 @@ public sealed class HttpDownloadIntegrationTests
         code.Should().Be(1, "retries exhausted → the silent install exits non-zero");
         File.Exists(dest).Should().BeFalse("rollback removes any partial download");
         server.RequestCount.Should().Be(2, "1 initial attempt + 1 retry");
+    }
+
+    // ── Register row R5: the gap between the checksum and the launch ──────────
+
+    /// <summary>
+    /// The decisive R5 case, through the real steps: <c>http_download</c> writes and
+    /// verifies a binary, something replaces its bytes before the <c>run_program</c> that
+    /// executes it, and the launch must be refused.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The attacker is stood in for by a <c>file_copy</c> step between the two — an
+    /// ordinary catalog step, so no shell quoting or spawned helper can muddy what is
+    /// being asserted. It occupies exactly the window register row R5 describes: the
+    /// download handle is closed before the hash is compared and was never re-opened, so
+    /// pre-fix the swapped bytes were simply executed, elevated.
+    /// </para>
+    /// <para>
+    /// The substituted bytes are a valid image (the genuine payload plus one trailing
+    /// byte — a PE overlay), so a launch would <em>succeed</em>: the refusal can only
+    /// come from the re-verification, never from an unloadable file.
+    /// </para>
+    /// </remarks>
+    [WindowsFact("launches a real child process")]
+    public async Task A_downloaded_binary_swapped_before_run_program_is_never_launched()
+    {
+        var genuine = await File.ReadAllBytesAsync(
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe"));
+        var swapped = new byte[genuine.Length + 1];
+        genuine.CopyTo(swapped, 0);
+
+        using var server = new TlsHttpServer((_, _) => (200, genuine, 0));
+        using var _ = TrustServer(server);
+        using var tmp = new TempDir();
+
+        // Pin the staging siting to a scratch directory. Without this, {staging_dir}
+        // resolves through the production path, and on an ELEVATED host — which CI is —
+        // this test would create a directory in the real %ProgramData% and execute a copy
+        // of cmd.exe out of it.
+        using var scratch = new TempDir();
+        using var siting = SecureStaging.UseSitingForTesting(scratch.Path);
+
+        var ctx = new StepContext(new Dictionary<string, object?>(StringComparer.Ordinal));
+        var stagingDir = ctx.ResolvePath("{staging_dir}");
+        var dest = Path.Combine(stagingDir, "Acme-3.2.0-x64-Setup.exe");
+        stagingDir.Should().StartWith(scratch.Path, "no test may stage into a real %ProgramData% path");
+
+        // The attacker's copy carries the SAME file name, so copying it into the staging
+        // directory overwrites exactly the file that is about to be launched.
+        var attackerDir = Path.Combine(tmp.Path, "attacker");
+        Directory.CreateDirectory(attackerDir);
+        await File.WriteAllBytesAsync(
+            Path.Combine(attackerDir, "Acme-3.2.0-x64-Setup.exe"), swapped);
+
+        var result = await new InstallEngine().RunAsync(
+            new InstallStep[]
+            {
+                Step(server.Url("/pkg"), dest, Sha256Hex(genuine)),
+                new InstallStep.FileCopy(
+                    "swap",
+                    Path.Combine(attackerDir, "Acme-3.2.0-x64-Setup.exe"),
+                    stagingDir,
+                    Overwrite: true,
+                    When: null,
+                    OnFailure.Fail),
+                new InstallStep.RunProgram(
+                    "launch", dest, new[] { "/c", "exit", "/b", "0" }, Wait: true, Cwd: null,
+                    ExpectedExitCodes: new[] { 0 }, TimeoutSeconds: 30, When: null, OnFailure.Fail),
+            },
+            ctx);
+
+        result.Success.Should().BeFalse(
+            "a binary whose bytes changed after they were verified must never be executed — the sha256 " +
+            "protected the download, not the execution");
+        result.Error.Should().Contain("no longer matches its verified sha256");
+        result.Error.Should().Contain("refusing to run it");
+    }
+
+    /// <summary>
+    /// The positive control for the case above: with nothing tampering, the identical
+    /// download-then-run pair succeeds. Without it, "refused" could just as well mean
+    /// "this shape never worked".
+    /// </summary>
+    [WindowsFact("launches a real child process")]
+    public async Task An_untampered_downloaded_binary_is_verified_again_and_launched()
+    {
+        var genuine = await File.ReadAllBytesAsync(
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe"));
+
+        using var server = new TlsHttpServer((_, _) => (200, genuine, 0));
+        using var _ = TrustServer(server);
+
+        // See the test above: the siting is pinned so this never stages into, or executes
+        // from, a real %ProgramData% path on an elevated runner.
+        using var scratch = new TempDir();
+        using var siting = SecureStaging.UseSitingForTesting(scratch.Path);
+
+        var ctx = new StepContext(new Dictionary<string, object?>(StringComparer.Ordinal));
+        var stagingDir = ctx.ResolvePath("{staging_dir}");
+        stagingDir.Should().StartWith(scratch.Path, "no test may stage into a real %ProgramData% path");
+        var dest = Path.Combine(stagingDir, "Acme-3.2.0-x64-Setup.exe");
+
+        var result = await new InstallEngine().RunAsync(
+            new InstallStep[]
+            {
+                Step(server.Url("/pkg"), dest, Sha256Hex(genuine)),
+                new InstallStep.RunProgram(
+                    "launch", dest, new[] { "/c", "exit", "/b", "0" }, Wait: true, Cwd: null,
+                    ExpectedExitCodes: new[] { 0 }, TimeoutSeconds: 30, When: null, OnFailure.Fail),
+            },
+            ctx);
+
+        result.Success.Should().BeTrue(
+            "holding the verified handle across the launch must not block the launch — that is why the " +
+            "sharing mode is FileShare.Read and not FileShare.None");
+        Directory.Exists(Path.GetDirectoryName(dest)!).Should().BeFalse(
+            "the engine releases {staging_dir} when the run ends, so the downloaded package is not left behind");
+    }
+
+    /// <summary>
+    /// The other half of R5's residual: <c>SigilDownloader</c> opened its destination
+    /// with <see cref="FileMode.Create"/>, which opens an <em>existing</em> name and
+    /// truncates it. A hardlink planted at a predictable destination therefore had its
+    /// <b>target</b> rewritten — from an elevated process, an arbitrary-file-write
+    /// primitive.
+    /// </summary>
+    /// <remarks>
+    /// The victim here is a scratch file in a throwaway directory, never a real system
+    /// file: the mechanism is identical, and CI runs elevated, where aiming this at
+    /// anything real would damage the runner.
+    /// </remarks>
+    [WindowsFact("NTFS hard links")]
+    public async Task A_hardlink_planted_at_the_destination_does_not_get_its_target_rewritten()
+    {
+        var body = Encoding.UTF8.GetBytes("the-downloaded-payload");
+        using var server = new TlsHttpServer((_, _) => (200, body, 0));
+        using var _ = TrustServer(server);
+        using var tmp = new TempDir();
+
+        // The victim: a file the elevated process may write but must not be tricked into
+        // rewriting. A scratch file stands in for the real target of such an attack.
+        var victim = Path.Combine(tmp.Path, "victim.dat");
+        var victimBytes = Encoding.UTF8.GetBytes("bytes that must survive the download");
+        await File.WriteAllBytesAsync(victim, victimBytes);
+
+        // The attacker pre-plants a second NAME for the victim at the download's
+        // destination. Creating a hard link needs no privilege on NTFS.
+        var dest = Path.Combine(tmp.Path, "payload.bin");
+        CreateHardLink(dest, victim);
+
+        var result = await new InstallEngine().RunAsync(
+            new[] { Step(server.Url("/f"), dest, Sha256Hex(body)) },
+            new StepContext(new Dictionary<string, object?>(StringComparer.Ordinal)));
+
+        result.Success.Should().BeTrue();
+        File.ReadAllBytes(dest).Should().Equal(body, "the download still lands at its destination");
+        File.ReadAllBytes(victim).Should().Equal(
+            victimBytes,
+            "the download must unlink the planted NAME and create a fresh file, never write through it — " +
+            "FileMode.Create would have truncated the link's target instead");
+    }
+
+    /// <summary>
+    /// Create a hard link at <paramref name="link"/> pointing at <paramref name="target"/>
+    /// via <c>mklink /H</c>, which needs no privilege on NTFS. Asserts the link really
+    /// exists and really aliases the target — a test that silently degraded to "no link"
+    /// would pass vacuously, proving nothing at all.
+    /// </summary>
+    private static void CreateHardLink(string link, string target)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe"),
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        psi.ArgumentList.Add("/c");
+        psi.ArgumentList.Add("mklink");
+        psi.ArgumentList.Add("/H");
+        psi.ArgumentList.Add(link);
+        psi.ArgumentList.Add(target);
+
+        using var process = System.Diagnostics.Process.Start(psi)!;
+        var stdout = process.StandardOutput.ReadToEnd();
+        var stderr = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+
+        process.ExitCode.Should().Be(0, $"mklink /H must succeed: {stdout} {stderr}");
+        File.Exists(link).Should().BeTrue("precondition: the hard link must actually exist");
+        File.ReadAllBytes(link).Should().Equal(
+            File.ReadAllBytes(target),
+            "precondition: the link must genuinely alias the victim — otherwise this test proves nothing");
     }
 
     /// <summary>

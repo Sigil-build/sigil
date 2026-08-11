@@ -198,7 +198,7 @@ public sealed class ExeWrapperPackager : IPackager
     /// T12.5): exactly two install steps, reusing the EXISTING catalog —
     /// <list type="number">
     ///   <item><description>an <see cref="InstallStep.HttpDownload"/> of
-    ///   <paramref name="packageUrl"/> to <c>{temp_dir}/&lt;fullPackageFileName&gt;</c>,
+    ///   <paramref name="packageUrl"/> to <c>{staging_dir}/&lt;fullPackageFileName&gt;</c>,
     ///   verified against <paramref name="packageSha256"/> (the just-built full
     ///   package's actual sha256 — computed by the caller AFTER the resource
     ///   embed, so this is never a guess);</description></item>
@@ -227,7 +227,17 @@ public sealed class ExeWrapperPackager : IPackager
     internal static byte[] BuildWebStubBlobBytes(
         SigilManifest manifest, string packageUrl, string packageSha256, string fullPackageFileName)
     {
-        var downloadDest = "{temp_dir}/" + fullPackageFileName;
+        // R5: NOT "{temp_dir}/" + fullPackageFileName. That was a pack-time constant
+        // derived from the public artifact name — every copy of the stub named the same
+        // predictable path in the shared per-user %TEMP% root, so any process running as
+        // the same user could pre-plant that file before the download and swap it
+        // afterwards, between the checksum and the `requireAdministrator` launch.
+        // {staging_dir} resolves at INSTALL time to a freshly created GUID-named private
+        // directory (administrator-only when elevated), so the blob stays a deterministic
+        // literal while the actual path is unguessable and per-run. The second half of
+        // the fix is in the engine: run_program re-verifies a file this run downloaded,
+        // from a handle held across the launch.
+        var downloadDest = "{staging_dir}/" + fullPackageFileName;
 
         var installSteps = new InstallStep[]
         {

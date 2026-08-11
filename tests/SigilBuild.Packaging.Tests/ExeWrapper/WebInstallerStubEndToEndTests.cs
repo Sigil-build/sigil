@@ -116,21 +116,32 @@ public sealed class WebInstallerStubEndToEndTests
         var appId = "sigil.webstub.e2e." + Guid.NewGuid().ToString("N");
         var packageBytes = ReadCmdExeBytes();
         var packageSha256 = Sha256Hex(packageBytes);
-        // Unique per test run: the stub downloads to {temp_dir}/<fullPackageFileName>,
-        // and the production blob defines no cleanup step for it (unlike UpdateRunner,
-        // which deletes its own temp download) — a shared literal name here would let
-        // one test's leftover temp file collide with (and be restored by rollback
-        // into) a DIFFERENT test's run. See this test class's Cleanup for the matching
-        // best-effort delete.
+        // Unique per test run so two runs can never collide over a shared name.
         var fullPackageFileName = $"Acme-3.2.0-x64-Setup-{Guid.NewGuid():N}.exe";
 
         using var server = new RoutingTlsServer();
         using var _ = TrustServer(server);
         server.Map("/pkg/" + fullPackageFileName, packageBytes);
 
+        // Pin where {staging_dir} resolves. InstallSession builds its own StepContext and
+        // offers no seam of its own, so without this the stub would stage into the REAL
+        // %ProgramData% on an elevated host — which CI is — and execute a copy of cmd.exe
+        // out of it.
+        using var scratch = new ScratchDir();
+        using var siting = SecureStaging.UseSitingForTesting(scratch.Path);
+
+        // Register row R5's "pre-planted" half, end to end. This is the path the stub used
+        // to download to — {temp_dir}/<App>-<ver>-<arch>-Setup.exe, a pack-time constant
+        // derived from the public artifact name and therefore known to anyone holding the
+        // installer. Pre-fix the download landed exactly here, and HttpDownloadStep would
+        // have backed this file up and overwritten it. It must now be inert.
+        var oldPredictableDest = Path.Combine(Path.GetTempPath(), fullPackageFileName);
+        var prePlanted = Encoding.UTF8.GetBytes("attacker bytes waiting at the predictable path");
+        await File.WriteAllBytesAsync(oldPredictableDest, prePlanted);
+
         var blob = BuildStubBlob(appId, server.Url("/pkg/" + fullPackageFileName), packageSha256, fullPackageFileName);
         var installDir = Path.Combine(ScopeLayout.For(InstallScope.User).InstallRoot, appId);
-        var tempDest = Path.Combine(Path.GetTempPath(), fullPackageFileName);
+        var tempDest = oldPredictableDest;
 
         try
         {
@@ -139,6 +150,21 @@ public sealed class WebInstallerStubEndToEndTests
             outcome.Success.Should().BeTrue("the served package's sha256 matches, so the download verifies and the run succeeds");
             server.Hits("/pkg/" + fullPackageFileName).Should().Be(
                 1, "the stub's http_download step must fetch the package exactly once over real HTTP");
+
+            // The download went to the per-run staging directory, not the predictable one.
+            File.ReadAllBytes(oldPredictableDest).Should().Equal(
+                prePlanted,
+                "a file pre-planted at the OLD {temp_dir} destination must be neither overwritten nor " +
+                "backed-up-and-restored: the stub no longer downloads to any path derivable from the " +
+                "artifact name, which is half of register row R5");
+
+            // …and the engine released the staging directory when the run ended, so the
+            // downloaded package is not left behind. (R5's other half — re-verifying the
+            // staged file under a held handle immediately before run_program — is asserted
+            // decisively in HttpDownloadIntegrationTests, which can insert a tampering step
+            // between the two; the stub's own two-step blob has no room for one.)
+            Directory.EnumerateFileSystemEntries(scratch.Path).Should().BeEmpty(
+                "the run staged inside the pinned root and cleaned it up afterwards");
 
             // Delegation check (T12.5's critical fix), proven through the REAL
             // http_download + run_program pair rather than a hand-rolled marker step.
@@ -179,6 +205,11 @@ public sealed class WebInstallerStubEndToEndTests
         using var _ = TrustServer(server);
         server.Map("/pkg/" + fullPackageFileName, servedBytes);
 
+        // See the happy-path test: pinning the siting keeps this off the real %ProgramData%
+        // on an elevated runner, and gives the rollback assertion somewhere to look.
+        using var scratch = new ScratchDir();
+        using var siting = SecureStaging.UseSitingForTesting(scratch.Path);
+
         var blob = BuildStubBlob(appId, server.Url("/pkg/" + fullPackageFileName), intendedSha256, fullPackageFileName);
         var installDir = Path.Combine(ScopeLayout.For(InstallScope.User).InstallRoot, appId);
         var tempDest = Path.Combine(Path.GetTempPath(), fullPackageFileName);
@@ -188,7 +219,13 @@ public sealed class WebInstallerStubEndToEndTests
             var outcome = await InstallOnceAsync(blob);
 
             outcome.Success.Should().BeFalse("a sha256 mismatch on the downloaded package must fail the stub's http_download step");
-            File.Exists(tempDest).Should().BeFalse("a checksum-mismatch download must roll back (delete) the partial file");
+            Directory.EnumerateFiles(scratch.Path, fullPackageFileName, SearchOption.AllDirectories)
+                .Should().BeEmpty(
+                    "a checksum-mismatch download must roll back (delete) the partial file — asserted where " +
+                    "the download now actually lands, the per-run staging directory, not the %TEMP% path the " +
+                    "stub stopped using");
+            File.Exists(tempDest).Should().BeFalse(
+                "and nothing is written to the old predictable destination either");
 
             // No completion bookkeeping on a failed install either way (control: the
             // gate never even gets consulted on a step-failure outcome).
@@ -201,6 +238,39 @@ public sealed class WebInstallerStubEndToEndTests
         {
             Cleanup(appId, installDir);
             TryDeleteFile(tempDest);
+        }
+    }
+
+    /// <summary>
+    /// A throwaway directory that stands in for <c>%ProgramData%</c> while a test runs, so
+    /// nothing here ever stages into — or executes out of — a real machine-wide path.
+    /// </summary>
+    private sealed class ScratchDir : IDisposable
+    {
+        public ScratchDir()
+        {
+            Path = System.IO.Path.Combine(
+                System.IO.Path.GetTempPath(), $"sigil-webstub-{Guid.NewGuid():N}");
+            Directory.CreateDirectory(Path);
+        }
+
+        public string Path { get; }
+
+        public void Dispose()
+        {
+#pragma warning disable CA1031 // Best-effort test cleanup.
+            try
+            {
+                if (Directory.Exists(Path))
+                {
+                    Directory.Delete(Path, recursive: true);
+                }
+            }
+            catch
+            {
+                // A leftover scratch directory is the OS temp sweeper's problem.
+            }
+#pragma warning restore CA1031
         }
     }
 

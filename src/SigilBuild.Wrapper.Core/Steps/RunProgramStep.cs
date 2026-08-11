@@ -2,6 +2,7 @@ namespace SigilBuild.Wrapper.Steps;
 
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -39,6 +40,52 @@ internal sealed class RunProgramStep : IStep
 
         // Program / working dir may reference the extracted payload (payload://).
         var program = ctx.ResolvePath(_spec.Program);
+
+        // R5: when THIS run downloaded and hash-verified exactly this file, re-confirm
+        // it here — from a handle opened with FileShare.Read, which denies write and
+        // delete — and keep that handle open across Process.Start. The web-installer
+        // stub is an http_download followed by a run_program of the same path, and the
+        // gap between the two was the bug: the download's checksum said nothing about
+        // what would be executed a moment later. `verified` is null for everything this
+        // run did not download (payload binaries, system tools), which is unchanged.
+        FileStream? verified;
+        try
+        {
+            verified = ctx.OpenVerifiedForLaunch(program);
+        }
+        catch (Exception ex) when (
+            ex is StagedFileVerificationException or IOException or UnauthorizedAccessException)
+        {
+            // Fail closed: a downloaded binary that cannot be re-confirmed immediately
+            // before the launch is never launched.
+            return StepResult.Failed($"'{program}' was not started: {ex.Message}");
+        }
+
+        using var verifiedHandle = verified;
+
+        // R11: the web-installer stub's payload, and anything else this run downloaded and
+        // is now about to execute. `verified` is non-null only for those, so a run_program
+        // of a payload binary or a system tool is untouched — the outer package's own
+        // signature already covers the first and the OS the second. Armed only when THIS
+        // artifact declared signing (see DownloadedBinaryTrust): an unsigned stub demanding
+        // a signature on what it fetches is ceremony, and would break unsigned authors
+        // outright with no manifest knob to reach for. The check runs while the verified
+        // handle is held, so the bytes being judged are the bytes that will be mapped. When
+        // the gate is NOT armed, RefusalForArtifactDownload reports that on the progress
+        // channel instead of passing quietly — a check that silently did not happen reads,
+        // in a log, exactly like a check that passed.
+        if (verifiedHandle is not null)
+        {
+            var refusal = DownloadedBinaryTrust.RefusalForArtifactDownload(
+                program,
+                $"'{program}', downloaded by this install",
+                (msg, isErr) => ctx.ProgressSink?.Report(new StepProgress(0, 0, msg, isErr)));
+            if (refusal is not null)
+            {
+                return StepResult.Failed($"'{program}' was not started: {refusal}");
+            }
+        }
+
         var psi = new ProcessStartInfo
         {
             FileName = program,

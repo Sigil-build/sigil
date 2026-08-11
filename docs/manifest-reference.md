@@ -16,7 +16,7 @@ Source: `schemas/sigil-schema.json` (JSON Schema, draft-07).
 | `updates` | object | - | - | _(undocumented)_ |
 | `installer` | object | - | - | Branded Windows installer wizard config. Tokens are emitted at pack time by BrandTokenEmitter; WCAG-AA contrast is enforced against white text. |
 | `parameters` | object | - | - | Install-time / pack-time parameter declarations consumed by the wrapper installer (Sprint 5c). |
-| `install_steps` | array | - | - | Main install-time step list executed by the wrapper installer (Sprint 5c). Per-step parameter shapes are validated by the typed deserializer. |
+| `install_steps` | array | - | - | Main install-time step list executed by the wrapper installer (Sprint 5c). Per-step parameter shapes are validated by the typed deserializer. Path and argument fields may use brace tokens — {install_dir}, {var.*}, {param.*}, {temp_dir}, payload://… — and {staging_dir}. {staging_dir} (register row R5) resolves at INSTALL time to a freshly created, randomly named private directory for this run, administrator-only when the installer is elevated, and is deleted when the run ends. Use it as the dest of an http_download whose file a later run_program launches: the engine then re-verifies that file's sha256 from a handle denying write and delete, holds that handle across the launch, and — for an artifact that declared signing — Authenticode-checks it immediately before starting it. A fixed, predictable download destination gets none of that, and can be both pre-planted and swapped after the checksum. Note that {staging_dir} in a post_install hook is a SEPARATE directory from the install body's, reclaimed when the hook phase ends; a binary the install body downloaded cannot be launched from a hook. |
 | `pre_install` | array | - | - | Steps executed before the main install_steps block. |
 | `post_install` | array | - | - | Steps executed after the main install_steps block. |
 | `uninstall` | array | - | - | Steps executed at the start of `setup.exe /Uninstall`, BEFORE the rollback journal replays. Lets the manifest tear down services / scheduled tasks / external scripts that the install journal doesn't cover. |
@@ -236,6 +236,7 @@ file_associations component: shorthand boolean or an object with extensions.
 | `exit_codes_ok` | array | - | - | Exit codes treated as success; defaults to [0]. An accepted code of 3010 additionally flags reboot-required. |
 | `scope_required` | string | - | - | Requires the install to run in this scope; a mismatch with the resolved scope is a diagnostic at session start. Omit to accept any scope. |
 | `timeout_seconds` | integer | - | - | Optional per-prerequisite run timeout, in seconds. |
+| `allow_unsigned` | boolean | - | `False` | Launch this prerequisite even when its Authenticode signature does not establish trust. A DOWNLOADED prerequisite installer is signature-checked immediately before it is run and refused if it is unsigned or its signature is invalid; unsigned redistributables are common and legitimate, so this opts out of that check. It NEVER waives a revoked or explicitly distrusted certificate, and the sha256 is enforced either way. Ignored for a payload:// source, which is not checked at all — its integrity comes from the package's own signature. |
 
 ## Definition: `HookPhase`
 

@@ -58,6 +58,31 @@ internal interface IChildInstallerLauncher
 /// </summary>
 internal sealed class HttpUpdateResourceFetcher : IUpdateResourceFetcher
 {
+    /// <summary>
+    /// Ceiling on a channel-manifest / detached-signature body: 256 KiB.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>THIS BUFFER IS PRE-AUTHENTICATION.</b> It is filled, in full, in memory,
+    /// before <c>ChannelManifestVerifier.Verify</c> has said one word about the bytes
+    /// (<c>UpdateRunner.RunAsync</c> fetches at step 2 and verifies at step 4). Every
+    /// byte accepted here is therefore accepted on the say-so of whoever answered the
+    /// request — a hostile origin, a proxy, or anyone holding the DNS name. That makes
+    /// an unbounded read here a memory-exhaustion primitive reachable by an
+    /// unauthenticated party, which is register row R10's actual point, and it is why
+    /// this cap is three orders of magnitude below
+    /// <see cref="SigilDownloader.DefaultMaxBytes"/> rather than merely smaller.
+    /// </para>
+    /// <para>
+    /// The signature verification cannot be moved earlier: it is computed over the
+    /// exact fetched bytes, so the bytes have to exist first. Bounding how many of them
+    /// may exist is the only lever, and 256 KiB is roughly two orders of magnitude above
+    /// a real channel manifest (a few hundred bytes of JSON) and above its base64
+    /// signature.
+    /// </para>
+    /// </remarks>
+    internal const int MaxResourceBytes = 256 * 1024;
+
     private readonly TimeSpan _timeout;
 
     public HttpUpdateResourceFetcher(TimeSpan timeout) => _timeout = timeout;
@@ -68,15 +93,30 @@ internal sealed class HttpUpdateResourceFetcher : IUpdateResourceFetcher
         timeoutCts.CancelAfter(_timeout);
         try
         {
+            // ResponseHeadersRead, not ResponseContentRead: the latter buffers the whole
+            // body inside HttpClient before this method regains control, which is the
+            // unbounded pre-authentication read being closed. Headers first, then a
+            // metered copy.
             using var resp = await SigilHttpClient.Shared
-                .GetAsync(url, HttpCompletionOption.ResponseContentRead, timeoutCts.Token).ConfigureAwait(false);
+                .GetAsync(url, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode)
             {
                 return UpdateResourceResult.Failed($"HTTP {(int)resp.StatusCode} fetching '{url}'");
             }
 
-            var bytes = await resp.Content.ReadAsByteArrayAsync(timeoutCts.Token).ConfigureAwait(false);
-            return UpdateResourceResult.Ok(bytes);
+            if (resp.Content.Headers.ContentLength is long declared && declared > MaxResourceBytes)
+            {
+                return UpdateResourceResult.Failed(
+                    $"'{url}' declared {declared} bytes, above the {MaxResourceBytes}-byte ceiling for an " +
+                    "update resource — refusing to buffer an unverified body that large");
+            }
+
+            var bytes = await ReadBoundedAsync(resp, timeoutCts.Token).ConfigureAwait(false);
+            return bytes is null
+                ? UpdateResourceResult.Failed(
+                    $"'{url}' streamed more than the {MaxResourceBytes}-byte ceiling for an update resource — " +
+                    "refusing to buffer an unverified body that large")
+                : UpdateResourceResult.Ok(bytes);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -87,6 +127,34 @@ internal sealed class HttpUpdateResourceFetcher : IUpdateResourceFetcher
             // OperationCanceledException here (with ct not cancelled) is the per-request
             // timeout — a transient "could not check", not a user cancel.
             return UpdateResourceResult.Failed($"could not fetch '{url}': {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Copy at most <see cref="MaxResourceBytes"/> bytes out of the response, returning
+    /// <c>null</c> the instant the body proves to be longer. Metered rather than
+    /// buffered, because a response framed by connection-close declares no
+    /// <c>Content-Length</c> at all — the up-front check above never fires for it, and
+    /// the per-request timeout does not bound it either, since a body that keeps
+    /// arriving keeps the request alive.
+    /// </summary>
+    private static async Task<byte[]?> ReadBoundedAsync(HttpResponseMessage resp, CancellationToken ct)
+    {
+        var src = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        await using (src.ConfigureAwait(false))
+        {
+            using var buffer = new MemoryStream(capacity: 4096);
+            var chunk = new byte[8192];
+            int n;
+            while ((n = await src.ReadAsync(chunk.AsMemory(0, chunk.Length), ct).ConfigureAwait(false)) > 0)
+            {
+                if (buffer.Length + n > MaxResourceBytes)
+                {
+                    return null;
+                }
+                buffer.Write(chunk, 0, n);
+            }
+            return buffer.ToArray();
         }
     }
 }
@@ -108,8 +176,13 @@ internal sealed class SigilPackageDownloader : IUpdatePackageDownloader
     public async Task<UpdatePackageDownloadResult> DownloadAsync(
         string url, string destination, string sha256, CancellationToken ct)
     {
+        // R10: the update package is bounded by the absolute file-download backstop. Its
+        // sha256 comes from a SIGNED channel manifest, so its integrity is authenticated —
+        // but the size is not declared anywhere, and the bytes arrive before the hash can
+        // say anything, so an unbounded transfer is still an unbounded transfer.
         var result = await SigilDownloader
-            .DownloadVerifiedAsync(url, destination, sha256, _timeout, _maxAttempts, _report, ct)
+            .DownloadVerifiedAsync(
+                url, destination, sha256, _timeout, _maxAttempts, SigilDownloader.DefaultMaxBytes, _report, ct)
             .ConfigureAwait(false);
         return result.Success
             ? UpdatePackageDownloadResult.Ok()

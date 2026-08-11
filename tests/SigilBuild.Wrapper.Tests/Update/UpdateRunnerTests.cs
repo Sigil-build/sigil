@@ -23,7 +23,21 @@ namespace SigilBuild.Wrapper.Tests.Update;
 public class UpdateRunnerTests
 {
     private const string ManifestUrl = "https://updates.example.com/acme/stable.json";
+
+    /// <summary>A well-formed but meaningless digest, for the shape-only theory below.</summary>
     private const string GoodSha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    /// <summary>
+    /// The bytes <see cref="FakeDownloader"/> puts on disk, and their real digest. The
+    /// double must leave a file the runner can re-open and re-verify (R12): the runner
+    /// now holds the staged package open across the child launch, so a downloader that
+    /// reports success without writing anything is no longer a faithful stand-in for a
+    /// real one.
+    /// </summary>
+    private static readonly byte[] PackageBytes = Encoding.UTF8.GetBytes("the-downloaded-setup-payload");
+
+    private static readonly string PackageSha256 =
+        Convert.ToHexString(SHA256.HashData(PackageBytes)).ToLowerInvariant();
 
     // ── Test doubles (no mocking framework) ──────────────────────────────────
 
@@ -57,6 +71,12 @@ public class UpdateRunnerTests
             Url = url;
             Destination = destination;
             Sha256 = sha256;
+            if (_result.Success)
+            {
+                // A successful download leaves the verified bytes on disk — the runner
+                // re-opens and re-hashes them before it launches anything.
+                System.IO.File.WriteAllBytes(destination, PackageBytes);
+            }
             return Task.FromResult(_result);
         }
     }
@@ -82,8 +102,9 @@ public class UpdateRunnerTests
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static (byte[] Manifest, byte[] Signature, string PublicKeyBase64) SignedManifest(
-        string version, string sha256 = GoodSha256, string? minFromVersion = null)
+        string version, string? sha256 = null, string? minFromVersion = null)
     {
+        sha256 ??= PackageSha256;
         var minPart = minFromVersion is null ? string.Empty : $",\n  \"minFromVersion\": \"{minFromVersion}\"";
         var json =
             "{\n" +
@@ -188,7 +209,7 @@ public class UpdateRunnerTests
         code.Should().Be(3010, "the child installer's exit code is propagated verbatim");
         downloader.Called.Should().BeTrue();
         downloader.Url.Should().Be("https://updates.example.com/acme/2.0.0/Setup.exe");
-        downloader.Sha256.Should().Be(GoodSha256);
+        downloader.Sha256.Should().Be(PackageSha256);
         launcher.Called.Should().BeTrue();
         launcher.ExePath.Should().Be(downloader.Destination);
         launcher.Args.Should().Equal(expectedScopeFlag, "/silent");

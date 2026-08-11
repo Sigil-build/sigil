@@ -28,7 +28,18 @@ namespace SigilBuild.Installer.Host.Tests;
 public sealed class UpdateFlowTests
 {
     private const string ManifestUrl = "https://updates.example.com/acme/stable.json";
-    private const string GoodSha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    /// <summary>
+    /// The bytes <see cref="FakeDownloader"/> puts on disk, and their real digest. The
+    /// double must leave a file the runner can re-open and re-verify (register row
+    /// R12): the runner holds the staged package open across the child launch, so a
+    /// downloader that reports success without ever writing anything is no longer a
+    /// faithful stand-in for a real one.
+    /// </summary>
+    private static readonly byte[] PackageBytes = Encoding.UTF8.GetBytes("the-downloaded-setup-payload");
+
+    private static readonly string PackageSha256 =
+        Convert.ToHexString(SHA256.HashData(PackageBytes)).ToLowerInvariant();
 
     private sealed class FakeFetcher : IUpdateResourceFetcher
     {
@@ -46,6 +57,9 @@ public sealed class UpdateFlowTests
         public Task<UpdatePackageDownloadResult> DownloadAsync(string url, string destination, string sha256, CancellationToken ct)
         {
             Called = true;
+            // A successful download leaves the verified bytes on disk — the runner
+            // re-opens and re-hashes them before it launches anything.
+            System.IO.File.WriteAllBytes(destination, PackageBytes);
             return Task.FromResult(UpdatePackageDownloadResult.Ok());
         }
     }
@@ -73,7 +87,7 @@ public sealed class UpdateFlowTests
             "  \"schemaVersion\": 1,\n" +
             $"  \"version\": \"{version}\",\n" +
             $"  \"packageUrl\": \"https://updates.example.com/acme/{version}/Setup.exe\",\n" +
-            $"  \"sha256\": \"{GoodSha256}\"\n" +
+            $"  \"sha256\": \"{PackageSha256}\"\n" +
             "}";
         var bytes = Encoding.UTF8.GetBytes(json);
         using var ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);

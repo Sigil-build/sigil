@@ -107,19 +107,42 @@ public static class PrerequisiteRunner
 
             Report(progress, ctx, Strings.EngineInstallingPrerequisite(SessionLanguage.Current, p.Name), isError: false);
 
-            // b. acquire the source (bundled payload or verified download).
-            var (exePath, tempPath, acquireError) = await AcquireAsync(p, ctx, progress, ct).ConfigureAwait(false);
-            if (acquireError is not null)
+            // b. acquire the source (bundled payload or verified download). A download
+            //    lands in a private SecureStaging directory and comes back with an OPEN,
+            //    write-and-delete-denying handle over the sha256-verified bytes (R12).
+            var acquired = await AcquireAsync(p, ctx, progress, ct).ConfigureAwait(false);
+            if (acquired.Error is not null)
             {
-                return PrerequisiteOutcome.Failed($"prerequisite '{p.Name}': {acquireError}");
+                return PrerequisiteOutcome.Failed($"prerequisite '{p.Name}': {acquired.Error}");
             }
 
             int exitCode;
             try
             {
-                // c. run it.
+                // b2. R11: Authenticode, immediately before the launch and from inside the
+                //     window where the verified handle is already held, so the bytes being
+                //     judged are the bytes that will be executed. Only a DOWNLOADED
+                //     prerequisite is gated: a payload:// source came out of this very
+                //     executable's package, whose own signature already covers it, and
+                //     demanding a second signature on every bundled helper would be
+                //     ceremony. Fails closed unless the author declared allow_unsigned.
+                if (acquired.Downloaded)
+                {
+                    var refusal = DownloadedBinaryTrust.Refusal(
+                        acquired.ExePath!,
+                        $"prerequisite '{p.Name}'",
+                        p.AllowUnsigned,
+                        (msg, isErr) => Report(progress, ctx, msg, isErr));
+                    if (refusal is not null)
+                    {
+                        return PrerequisiteOutcome.Failed($"prerequisite '{p.Name}': {refusal}");
+                    }
+                }
+
+                // c. run it — WHILE the verified handle is still open, so nothing can
+                //    replace the bytes between the check and the launch.
                 var args = ResolveArgs(p.Args, ctx);
-                var (code, runError) = await launcher(exePath!, args, p.TimeoutSeconds, ct).ConfigureAwait(false);
+                var (code, runError) = await launcher(acquired.ExePath!, args, p.TimeoutSeconds, ct).ConfigureAwait(false);
                 if (runError is not null)
                 {
                     return PrerequisiteOutcome.Failed($"prerequisite '{p.Name}': {runError}");
@@ -128,10 +151,11 @@ public static class PrerequisiteRunner
             }
             finally
             {
-                if (tempPath is not null)
-                {
-                    TryDelete(tempPath); // prereqs are not journaled; clean the temp download.
-                }
+                // Order matters: the handle denies delete, so it must be released before
+                // the staging directory can be removed. Prereqs are not journaled, so the
+                // whole staging directory goes with it.
+                acquired.Handle?.Dispose();
+                acquired.Staging?.Dispose();
             }
 
             // d. accept the exit code. 3010 is the universal Windows "success, reboot
@@ -201,52 +225,124 @@ public static class PrerequisiteRunner
         _ => null,
     };
 
-    private static async Task<(string? ExePath, string? TempPath, string? Error)> AcquireAsync(
+    /// <summary>
+    /// An acquired prerequisite installer: the path to run, plus — for a download —
+    /// the private staging directory it lives in and the OPEN handle over its verified
+    /// bytes. The caller holds <see cref="Handle"/> across the launch and disposes both
+    /// afterwards, handle first.
+    /// </summary>
+    /// <param name="Downloaded">
+    /// True when the bytes came off the network rather than out of the package's own
+    /// payload. Only a download is Authenticode-gated (register row R11) — a
+    /// <c>payload://</c> source is already covered by the artifact's own signature.
+    /// </param>
+    private readonly record struct AcquiredSource(
+        string? ExePath, SecureStaging? Staging, FileStream? Handle, string? Error, bool Downloaded = false)
+    {
+        public static AcquiredSource Failed(string error) => new(null, null, null, error);
+    }
+
+    /// <summary>The staged download's file name inside its own private directory.</summary>
+    private const string StagedInstallerName = "prerequisite.exe";
+
+    private static async Task<AcquiredSource> AcquireAsync(
         InstallerPrerequisite p, StepContext ctx, IProgress<StepProgress>? progress, CancellationToken ct)
     {
         var source = p.Source;
 
-        // Bundled: resolve the payload:// path to the extracted file.
+        // Bundled: resolve the payload:// path to the extracted file. Nothing is staged
+        // and nothing is downloaded — the bytes came out of this very executable's
+        // payload container, which the session already owns.
         if (source.StartsWith("payload://", StringComparison.OrdinalIgnoreCase))
         {
             try
             {
                 var path = ctx.ResolvePath(source);
                 return File.Exists(path)
-                    ? (path, null, null)
-                    : (null, null, $"bundled source not found: {source}");
+                    ? new AcquiredSource(path, null, null, null)
+                    : AcquiredSource.Failed($"bundled source not found: {source}");
             }
             catch (FormatException ex)
             {
-                return (null, null, ex.Message);
+                return AcquiredSource.Failed(ex.Message);
             }
         }
 
-        // Downloaded: resolve {var.*} tokens, enforce https + sha256, verify to a temp file.
+        // Downloaded: resolve {var.*} tokens, enforce https + sha256, stage into a
+        // private per-run directory, then RE-verify from an open, write-and-delete-
+        // denying handle. Everything up to that open is the download's own business;
+        // from the open to Process.Start there is no window left (register row R12).
         var url = ctx.Resolve(source);
         if (!url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
         {
-            return (null, null, $"source must be a payload:// or https:// URL (got '{url}')");
+            return AcquiredSource.Failed($"source must be a payload:// or https:// URL (got '{url}')");
         }
         var sha = (p.Sha256 ?? string.Empty).Trim();
         if (sha.Length == 0)
         {
-            return (null, null, "an https:// source requires a sha256 checksum");
+            return AcquiredSource.Failed("an https:// source requires a sha256 checksum");
         }
 
-        var temp = Path.Combine(Path.GetTempPath(), $"sigil-prereq-{Guid.NewGuid():N}.exe");
-        var timeout = TimeSpan.FromSeconds(p.TimeoutSeconds is int t and > 0 ? t : DefaultTimeoutSeconds);
-        var result = await SigilDownloader.DownloadVerifiedAsync(
-            url, temp, sha, timeout, DownloadAttempts,
-            report: (msg, isErr) => Report(progress, ctx, msg, isErr),
-            ct).ConfigureAwait(false);
-
-        if (!result.Success)
+        SecureStaging staging;
+        try
         {
-            TryDelete(temp);
-            return (null, null, result.Error);
+            // An ELEVATED run that cannot obtain an administrator-only staging directory
+            // REFUSES: SecureStaging throws rather than degrading to a user-writable root,
+            // reporting the cause on this sink first — so it must reach the same progress
+            // channel as everything else here. The catch below turns the refusal into this
+            // method's ordinary typed failure.
+            staging = SecureStaging.Create(
+                "prereq", (msg, isErr) => Report(progress, ctx, msg, isErr));
         }
-        return (temp, temp, null);
+#pragma warning disable CA1031 // A staging failure becomes the same typed failure as every other failure in this method: a redirected or ACL-hostile %TEMP% must be diagnosable, not fatal to the host.
+        catch (Exception ex)
+        {
+            return AcquiredSource.Failed(
+                $"could not create a private staging directory for the download: {ex.Message}");
+        }
+#pragma warning restore CA1031
+
+        var acquired = false;
+        try
+        {
+            var temp = staging.PathFor(StagedInstallerName);
+            var timeout = TimeSpan.FromSeconds(p.TimeoutSeconds is int t and > 0 ? t : DefaultTimeoutSeconds);
+            // R10: bounded by the absolute file-download backstop. A prerequisite is a
+            // redistributable — tens of megabytes at the top end — so the ceiling only
+            // ever fires on an origin that is misbehaving.
+            var result = await SigilDownloader.DownloadVerifiedAsync(
+                url, temp, sha, timeout, DownloadAttempts, SigilDownloader.DefaultMaxBytes,
+                report: (msg, isErr) => Report(progress, ctx, msg, isErr),
+                ct).ConfigureAwait(false);
+
+            if (!result.Success)
+            {
+                return AcquiredSource.Failed(result.Error!);
+            }
+
+            FileStream handle;
+            try
+            {
+                handle = staging.OpenVerified(StagedInstallerName, sha);
+            }
+            catch (Exception ex) when (
+                ex is StagedFileVerificationException or IOException or UnauthorizedAccessException)
+            {
+                // Fail closed: an installer that cannot be re-confirmed under a held
+                // handle is never launched.
+                return AcquiredSource.Failed(ex.Message);
+            }
+
+            acquired = true;
+            return new AcquiredSource(temp, staging, handle, null, Downloaded: true);
+        }
+        finally
+        {
+            if (!acquired)
+            {
+                staging.Dispose();
+            }
+        }
     }
 
     // Real process launcher: mirrors run_program (redirected pipes drained, timeout
@@ -335,14 +431,6 @@ public static class PrerequisiteRunner
             if (codes[i] == code) return true;
         }
         return false;
-    }
-
-    private static void TryDelete(string path)
-    {
-#pragma warning disable CA1031 // Best-effort cleanup of a temp download.
-        try { if (File.Exists(path)) File.Delete(path); }
-        catch { /* best-effort */ }
-#pragma warning restore CA1031
     }
 
     private static void Report(IProgress<StepProgress>? progress, StepContext ctx, string message, bool isError)

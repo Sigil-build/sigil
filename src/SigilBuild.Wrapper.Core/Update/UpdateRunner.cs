@@ -174,20 +174,75 @@ internal sealed class UpdateRunner
 
         _report($"update: newer version available (installed {installedLabel} → {channel.Version})", false);
 
-        // 7. Download the new version's stamped Setup.exe and run it silently in the
-        //    current scope. Clean up the temp file regardless of outcome.
-        var dest = Path.Combine(
-            request.TempDirectory,
-            $"sigil-update-{SanitizeSegment(request.AppId)}-{Guid.NewGuid():N}.exe");
+        // 7. Download the new version's stamped Setup.exe into a private, per-run
+        //    staging directory and run it in the current scope. The staged file is
+        //    re-verified from an OPEN, write-and-delete-denying handle that is held
+        //    across the child launch — register row R12: verifying and then launching a
+        //    file nobody is holding leaves a window in which the bytes can be swapped.
+        //    Disposing the staging directory cleans up regardless of outcome.
+        var stagedName = $"sigil-update-{SanitizeSegment(request.AppId)}.exe";
+
+        SecureStaging created;
         try
         {
-            var download = await _downloader
-                .DownloadAsync(channel.PackageUrl, dest, channel.Sha256, ct)
-                .ConfigureAwait(false);
-            if (!download.Success)
+            // _report also carries SecureStaging's own refusal line: an ELEVATED run that
+            // cannot obtain an administrator-only staging directory throws rather than
+            // degrading to a user-writable one, and the cause arrives here first. That must
+            // never be swallowed; the catch below turns it into a typed exit code.
+            created = SecureStaging.Create("update", _report, request.TempDirectory);
+        }
+#pragma warning disable CA1031 // A staging failure becomes the same typed exit code as every other failure here; a redirected or ACL-hostile temp directory must not crash the host, which has no general catch.
+        catch (Exception ex)
+        {
+            _report($"update: could not create a private staging directory for the download — {ex.Message}", true);
+            return InstallSession.UpdateCheckFailedExitCode;
+        }
+#pragma warning restore CA1031
+
+        using var staging = created;
+        var dest = staging.PathFor(stagedName);
+
+        var download = await _downloader
+            .DownloadAsync(channel.PackageUrl, dest, channel.Sha256, ct)
+            .ConfigureAwait(false);
+        if (!download.Success)
+        {
+            _report($"update: download failed — {download.Error}", true);
+            return InstallSession.UpdateCheckFailedExitCode;
+        }
+
+        FileStream handle;
+        try
+        {
+            handle = staging.OpenVerified(stagedName, channel.Sha256);
+        }
+        catch (Exception ex) when (
+            ex is StagedFileVerificationException or IOException or UnauthorizedAccessException)
+        {
+            // Fail closed. A downloaded package that no longer matches the sha256 it was
+            // verified under is not a transient problem — it is the attack.
+            _report($"update: refusing to run the downloaded installer — {ex.Message}", true);
+            return InstallSession.UpdateCheckFailedExitCode;
+        }
+
+        using (handle)
+        {
+            // R11: Authenticode, immediately before the launch and from inside the window
+            // where the verified handle is already held. The channel manifest's signature
+            // authenticates the sha256, and the sha256 authenticates the bytes — but only
+            // against the manifest, and this process is about to run those bytes with the
+            // current scope's privileges. Armed only when THIS artifact declared signing:
+            // an installer that never claimed a signed provenance has no standing to
+            // demand one of its own successor, and would simply lose /Update entirely.
+            // When it is NOT armed, RefusalForArtifactDownload says so on this same report
+            // channel rather than passing quietly — an absent check nobody is told about is
+            // indistinguishable, in a log, from a check that passed.
+            var trustRefusal = DownloadedBinaryTrust.RefusalForArtifactDownload(
+                dest, $"the downloaded {channel.Version} installer", _report);
+            if (trustRefusal is not null)
             {
-                _report($"update: download failed — {download.Error}", true);
-                return InstallSession.UpdateCheckFailedExitCode;
+                _report($"update: {trustRefusal}", true);
+                return InstallSession.UpdateManifestRejectedExitCode;
             }
 
             var scopeFlag = request.Scope == InstallScope.Machine ? "/allusers" : "/currentuser";
@@ -213,10 +268,6 @@ internal sealed class UpdateRunner
 
             _report($"update: setup exited with code {childCode}", childCode != 0 && childCode != InstallSession.RebootRequiredExitCode);
             return childCode;
-        }
-        finally
-        {
-            TryDelete(dest);
         }
     }
 
@@ -257,22 +308,5 @@ internal sealed class UpdateRunner
         }
         var s = sb.ToString();
         return s.Length == 0 ? "app" : s;
-    }
-
-    private static void TryDelete(string path)
-    {
-#pragma warning disable CA1031 // Best-effort temp cleanup: a failure to delete must not fault the update.
-        try
-        {
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-        }
-        catch (Exception)
-        {
-            // best-effort
-        }
-#pragma warning restore CA1031
     }
 }

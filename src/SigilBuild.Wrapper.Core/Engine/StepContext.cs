@@ -19,6 +19,46 @@ public sealed class StepContext
     private readonly string? _appName;
     private readonly string _appId;
 
+    /// <summary>
+    /// Full path → the SHA-256 an <c>http_download</c> step in THIS run confirmed the
+    /// file's bytes against. Read by <see cref="Steps.RunProgramStep"/>, which re-checks
+    /// it under a held handle before launching. See
+    /// <see cref="OpenVerifiedForLaunch"/>.
+    /// </summary>
+    private readonly System.Collections.Generic.Dictionary<string, string> _verifiedDownloads =
+        new(System.StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Backing store for <c>{staging_dir}</c>; created on first use only.</summary>
+    private SecureStaging? _staging;
+
+    /// <summary>
+    /// The same, for a <c>{staging_dir}</c> first resolved AFTER the install body
+    /// released — i.e. by a <c>post_install</c> hook, which
+    /// <see cref="InstallSession"/> runs on this very context once
+    /// <see cref="InstallEngine"/>'s <c>finally</c> has already called
+    /// <see cref="ReleaseStaging"/>. Held separately so
+    /// <see cref="ReleasePostRunStaging"/> can reclaim it at the end of that hook phase
+    /// rather than it living forever. Before this existed, such a resolution minted a
+    /// second <see cref="SecureStaging"/> that <em>nothing disposed</em>.
+    /// </summary>
+    private SecureStaging? _postRunStaging;
+
+    /// <summary>
+    /// True once <see cref="ReleaseStaging"/> has run — the install body is over.
+    /// </summary>
+    private bool _released;
+
+    /// <summary>
+    /// Paths that WERE verified downloads before a release cleared them. A launch of one
+    /// of these is refused rather than quietly proceeding unverified: the file is no
+    /// longer covered by a re-hash under a held handle, and it is no longer
+    /// Authenticode-gated either, because both of those hang off
+    /// <see cref="OpenVerifiedForLaunch"/> returning non-null. Forgetting the path made
+    /// the launch look like an ordinary <c>run_program</c> of a file nobody downloaded,
+    /// which is exactly the silent-bypass shape this lane spent two rounds removing.
+    /// </summary>
+    private System.Collections.Generic.HashSet<string>? _releasedDownloads;
+
     public StepContext(
         System.Collections.Generic.IReadOnlyDictionary<string, object?> values,
         string? payloadRoot = null,
@@ -59,6 +99,183 @@ public sealed class StepContext
     /// <c>Total = 0</c> so they never move the overall progress bar.
     /// </summary>
     internal System.IProgress<StepProgress>? ProgressSink { get; set; }
+
+    /// <summary>
+    /// The directory <c>{staging_dir}</c> expands to: a freshly created, randomly named
+    /// private directory for this run, administrator-only when the process is elevated
+    /// (see <see cref="SecureStaging"/>). Created on first use and reused for the rest
+    /// of the engine run, so an <c>http_download</c> writing
+    /// <c>{staging_dir}/Setup.exe</c> and a <c>run_program</c> launching the same token
+    /// address the same file.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the destination half of register row R5. The web-installer stub used to
+    /// download to <c>{temp_dir}/&lt;App&gt;-&lt;ver&gt;-&lt;arch&gt;-Setup.exe</c> — a
+    /// pack-time constant derived from the public artifact name, so the path was known
+    /// to anyone holding the installer and could be pre-planted before the download and
+    /// swapped after it. A per-run GUID directory removes the "pre-planted" half;
+    /// <see cref="OpenVerifiedForLaunch"/> removes the "swapped after" half.
+    /// </para>
+    /// <para>
+    /// <b>After the install body, this moves to a second, separately reclaimed
+    /// directory.</b> <see cref="InstallSession"/> runs the <c>post_install</c> hook
+    /// phase on this same context <em>after</em> <see cref="InstallEngine"/>'s
+    /// <c>finally</c> has released the first one. Resolving the token there used to mint
+    /// a fresh <see cref="SecureStaging"/> with no owner and no disposal — an unbounded
+    /// leak of a hardened directory per install, in <c>%ProgramData%</c> when elevated.
+    /// It now lands in <c>_postRunStaging</c>, which
+    /// <see cref="ReleasePostRunStaging"/> reclaims when the hook phase ends, so the
+    /// capability is intact and the lifetime is bounded at both ends.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="StagingSecurityException">
+    /// This process is elevated and no administrator-only staging root could be
+    /// established. Refusing is the policy — see <see cref="SecureStaging"/>.
+    /// </exception>
+    internal string StagingDirectory =>
+        _released
+            ? (_postRunStaging ??= SecureStaging.Create("hook", ReportStagingLine)).Directory
+            : (_staging ??= SecureStaging.Create("stage", ReportStagingLine)).Directory;
+
+    /// <summary>
+    /// The engine's own progress channel, which is where every other engine component
+    /// reports. Deliberately not a discarding lambda: <c>SecureStaging</c> makes its
+    /// report parameter required precisely so a call site cannot drop the line that says
+    /// an elevated run refused to stage.
+    /// </summary>
+    private void ReportStagingLine(string message, bool isError) =>
+        ProgressSink?.Report(new StepProgress(0, 0, message, isError));
+
+    /// <summary>
+    /// Record that an <c>http_download</c> step in this run wrote
+    /// <paramref name="path"/> and confirmed its bytes hash to
+    /// <paramref name="sha256"/>.
+    /// </summary>
+    internal void RecordVerifiedDownload(string path, string sha256)
+    {
+        if (!string.IsNullOrEmpty(path) && !string.IsNullOrWhiteSpace(sha256))
+        {
+            _verifiedDownloads[System.IO.Path.GetFullPath(path)] = sha256.Trim();
+        }
+    }
+
+    /// <summary>
+    /// If <paramref name="program"/> is a file this run downloaded and verified, re-open
+    /// it with <see cref="System.IO.FileShare.Read"/> (denying write and delete),
+    /// re-hash it <em>from that handle</em>, and return the handle for the caller to hold
+    /// across <c>Process.Start</c>. Returns <c>null</c> for anything this run did not
+    /// download — a <c>run_program</c> of a payload binary or a system tool is unchanged.
+    /// </summary>
+    /// <remarks>
+    /// This is the second half of register row R5. A verify step and a launch step with a
+    /// gap between them is the bug: the SHA-256 protected the download, not the
+    /// execution. Re-doing the check adjacent to the launch, from a handle that survives
+    /// it, is what closes the gap.
+    /// </remarks>
+    /// <exception cref="StagedFileVerificationException">
+    /// The bytes changed after they were verified — refuse the launch.
+    /// </exception>
+    internal System.IO.FileStream? OpenVerifiedForLaunch(string program)
+    {
+        if (string.IsNullOrEmpty(program))
+        {
+            return null;
+        }
+
+        if (_verifiedDownloads.Count == 0 && _releasedDownloads is null)
+        {
+            return null;
+        }
+
+        var full = System.IO.Path.GetFullPath(program);
+
+        // A live record wins: a hook that re-downloaded to the same path after the release
+        // has re-established the guarantee and must not be penalised for the earlier one.
+        if (_verifiedDownloads.TryGetValue(full, out var sha256))
+        {
+            return SecureStaging.OpenVerifiedFile(full, sha256);
+        }
+
+        // Refuse, never forget. This is the cross-phase case: the install body downloaded
+        // and verified this file, the engine's finally cleared the record, and a
+        // post_install hook is now asking to launch it. Returning null here — which is
+        // what "forgetting" did — makes it indistinguishable from a run_program of a
+        // payload binary, so it gets no re-hash, no held handle and no Authenticode
+        // verdict, silently. R11's text is "before launching ANY downloaded binary"; a
+        // hook is not an exception to it.
+        if (_releasedDownloads is not null && _releasedDownloads.Contains(full))
+        {
+            throw new StagedFileVerificationException(
+                $"'{full}' was downloaded by this install, but its staging was released when the " +
+                "install body finished, so it can no longer be re-verified under a held handle or " +
+                "signature-checked immediately before launch; refusing to run it. Launch a downloaded " +
+                "binary from install_steps, or download it again inside the hook that runs it");
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Delete this run's <c>{staging_dir}</c> and stop treating its downloads as
+    /// verified. Called by <see cref="InstallEngine"/> once the run is over (success,
+    /// failure or rollback); a no-op when the run never used the token. Best-effort — a
+    /// staged file still held open by a launched child stays behind for the OS temp
+    /// sweeper.
+    /// </summary>
+    /// <remarks>
+    /// The paths are <em>remembered</em>, not forgotten. See
+    /// <see cref="_releasedDownloads"/>: a later launch of one of them is refused, because
+    /// the alternative is a launch that looks ordinary and silently has none of the
+    /// guarantees the install body's launches had.
+    /// </remarks>
+    internal void ReleaseStaging()
+    {
+        _released = true;
+        Retire(_staging);
+        _staging = null;
+        // A second engine run on the same context (the upgrade path runs one) must not
+        // leave a hook-phase directory from the first behind.
+        Retire(_postRunStaging);
+        _postRunStaging = null;
+    }
+
+    /// <summary>
+    /// Reclaim a <c>{staging_dir}</c> that a hook phase created after
+    /// <see cref="ReleaseStaging"/> had already run. Called by <see cref="HookRunner"/> at
+    /// the end of every phase; a no-op for the ordinary case where the phase resolved no
+    /// token, and a no-op for a <c>pre_install</c> hook phase, which runs BEFORE the
+    /// engine and whose staging the engine's own release still owns.
+    /// </summary>
+    internal void ReleasePostRunStaging()
+    {
+        if (_postRunStaging is null)
+        {
+            return;
+        }
+        Retire(_postRunStaging);
+        _postRunStaging = null;
+    }
+
+    /// <summary>
+    /// Dispose a staging directory and move every download recorded against it into the
+    /// refuse-on-launch set.
+    /// </summary>
+    private void Retire(SecureStaging? staging)
+    {
+        if (_verifiedDownloads.Count > 0)
+        {
+            _releasedDownloads ??= new System.Collections.Generic.HashSet<string>(
+                System.StringComparer.OrdinalIgnoreCase);
+            foreach (var path in _verifiedDownloads.Keys)
+            {
+                _releasedDownloads.Add(path);
+            }
+            _verifiedDownloads.Clear();
+        }
+
+        staging?.Dispose();
+    }
 
     /// <summary>
     /// The resolved per-scope layout for this run (T12): install root, ARP hive,
@@ -397,7 +614,8 @@ public sealed class StepContext
 
     /// <summary>
     /// Substitute the single-brace runtime tokens — <c>{install_dir}</c>,
-    /// <c>{scope_root}</c>, <c>{app.name}</c>, <c>{app.id}</c>, <c>{temp_dir}</c> —
+    /// <c>{scope_root}</c>, <c>{app.name}</c>, <c>{app.id}</c>, <c>{temp_dir}</c>,
+    /// <c>{staging_dir}</c> —
     /// that step paths and <c>when</c> expressions use (distinct from the
     /// <c>${...}</c> parameter templates handled by <see cref="Resolve"/>). This is
     /// what turns a step <c>to: "{install_dir}/app.txt"</c> into a real directory
@@ -435,6 +653,20 @@ public sealed class StepContext
             var tempDir = System.IO.Path.GetTempPath()
                 .TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
             result = result.Replace("{temp_dir}", tempDir, System.StringComparison.Ordinal);
+        }
+        // R5: the web-installer stub's download destination. Same determinism property
+        // as {temp_dir} — the packed step string stays a literal token, so two packs of
+        // the same manifest are byte-identical — but it resolves at INSTALL time to a
+        // freshly created GUID-named private directory instead of a predictable name in
+        // the shared %TEMP% root. Substituted last of the fixed tokens because, unlike
+        // the others, resolving it has a side effect: the directory is created.
+        if (result.Contains("{staging_dir}", System.StringComparison.Ordinal))
+        {
+            result = result.Replace(
+                "{staging_dir}",
+                StagingDirectory.TrimEnd(
+                    System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar),
+                System.StringComparison.Ordinal);
         }
         result = ReplaceVarTokens(result);
         return result;

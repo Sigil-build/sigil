@@ -35,6 +35,12 @@ namespace SigilBuild.Core.Manifest;
 /// or <c>currentuser</c> — a mismatch with the resolved install scope is a diagnostic at
 /// session start; <c>null</c> means any scope is acceptable.</param>
 /// <param name="TimeoutSeconds">Optional per-prerequisite run timeout, in seconds.</param>
+/// <param name="AllowUnsigned">Opt out of the Authenticode gate that otherwise refuses
+/// to launch a <em>downloaded</em> prerequisite installer whose signature does not
+/// establish trust (register row R11). Unsigned redistributables are common and
+/// legitimate, so this exists — but it never waives a <em>revoked</em> certificate, and
+/// the <c>sha256</c> is enforced regardless. Ignored for a <c>payload://</c> source,
+/// which is not gated at all: its integrity comes from the package's own signature.</param>
 public sealed record InstallerPrerequisite(
     string Name,
     string Detect,
@@ -43,4 +49,5 @@ public sealed record InstallerPrerequisite(
     IReadOnlyList<string>? Args = null,
     IReadOnlyList<int>? ExitCodesOk = null,
     string? ScopeRequired = null,
-    int? TimeoutSeconds = null);
+    int? TimeoutSeconds = null,
+    bool AllowUnsigned = false);

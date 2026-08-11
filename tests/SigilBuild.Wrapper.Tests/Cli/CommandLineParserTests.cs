@@ -369,4 +369,31 @@ public class CommandLineParserTests
             new[] { "/bogusflag" }, Array.Empty<ParameterDefinition>());
         act.Should().Throw<UsageException>();
     }
+
+    // ── R26: the docs used to teach a silent-install line the parser rejects ──
+    // (docs/guides/installer-wizard.md, docs/guides/parameters.md,
+    // docs/guides/packaging-formats.md). This pins the failure mode and the
+    // corrected line so the docs example can never silently regress again.
+
+    [Fact]
+    public void The_formerly_documented_bare_Name_equals_value_line_still_fails()
+    {
+        var schema = new[] { Param("edition", ParameterType.String, @default: "community") };
+        var act = () => CommandLineParser.Parse(
+            new[] { "/S", "/install_dir=C:\\Apps\\MyApp", "/edition=professional" }, schema);
+        act.Should().Throw<UsageException>()
+            .WithMessage("*unrecognized flag*install_dir*");
+    }
+
+    [Fact]
+    public void The_corrected_silent_install_line_from_the_docs_parses()
+    {
+        var schema = new[] { Param("edition", ParameterType.String, @default: "community") };
+        var parsed = CommandLineParser.Parse(
+            new[] { "/S", "/D=C:\\Apps\\MyApp", "/Pedition=professional" }, schema);
+
+        parsed.Silent.Should().BeTrue();
+        parsed.InstallDir.Should().Be(@"C:\Apps\MyApp");
+        parsed.Values["edition"].Should().Be("professional");
+    }
 }

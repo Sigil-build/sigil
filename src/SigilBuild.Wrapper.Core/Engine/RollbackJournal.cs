@@ -93,8 +93,11 @@ public sealed class RollbackJournal
     }
 
     /// <summary>
-    /// Replay every record in reverse (LIFO), best-effort: an individual failure is
-    /// swallowed so one bad record cannot strand the rest of an uninstall.
+    /// Replay every record in reverse (LIFO). An individual failure does not cascade —
+    /// the remaining records are still replayed — but it is no longer <em>swallowed</em>:
+    /// it is reported on <paramref name="progress"/> and returned in
+    /// <see cref="UndoOutcome.FailedRecords"/> so the caller can decline to report a
+    /// success it did not achieve (register row R15).
     /// </summary>
     /// <param name="anchorage">
     /// Whether the records must be anchored before replay, and to what (R1).
@@ -111,6 +114,7 @@ public sealed class RollbackJournal
     {
         var anchor = ReplayAnchor.For(anchorage);
         var refused = new System.Collections.Generic.List<RefusedRecord>();
+        var failed = new System.Collections.Generic.List<FailedRecord>();
 
         // Walk in reverse. Undo failures should not cascade — log and continue.
         var total = _records.Count;
@@ -143,18 +147,91 @@ public sealed class RollbackJournal
             {
                 await record.UndoAsync(ct).ConfigureAwait(false);
             }
-#pragma warning disable CA1031 // Best-effort undo: individual failures must not cascade.
-            catch
+            catch (System.OperationCanceledException)
             {
-                // Best-effort; swallow individual undo failures.
+                // A genuine cancel is the caller's business, not a per-record failure.
+                throw;
+            }
+            catch (UndoFailedException ex)
+            {
+                // The undo ran and did NOT achieve its goal: the service / task /
+                // firewall rule / COM registration is still there. R15 — the one
+                // outcome that must never be reported as a success.
+                completed++;
+                failed.Add(new FailedRecord(WireTypeOf(record), ex.Target, ex.Code, ex.Message));
+                progress?.Report(new StepProgress(
+                    completed, total, $"FAILED: {ex.Message}", IsError: true));
+                continue;
+            }
+#pragma warning disable CA1031 // A failing record must not cascade — but it IS recorded (R15), not swallowed.
+            catch (System.Exception ex)
+            {
+                completed++;
+                var message =
+                    $"{DescribeUndo(record)} could not be reversed — " +
+                    $"{ex.GetType().Name}: {ex.Message}";
+                failed.Add(new FailedRecord(
+                    WireTypeOf(record), TargetOf(record), UndoFailureCode.RecordThrew, message));
+                progress?.Report(new StepProgress(completed, total, $"FAILED: {message}", IsError: true));
+                continue;
             }
 #pragma warning restore CA1031
             completed++;
             progress?.Report(new StepProgress(completed, total, DescribeUndo(record), IsError: false));
         }
 
-        return new UndoOutcome(refused);
+        return new UndoOutcome(refused, failed);
     }
+
+    /// <summary>
+    /// The record's wire discriminator — the same string
+    /// <c>SerializableRollbackRecord.Type</c> uses — so a consumer can group failures by
+    /// kind without parsing prose. Kept as a local switch rather than routed through
+    /// <c>ToSerializable()</c>, which throws for the transient stash records that never
+    /// reach <c>uninstall.json</c>.
+    /// </summary>
+    private static string WireTypeOf(RollbackRecord record) => record switch
+    {
+        RollbackRecord.RestoreFile => "restore_file",
+        RollbackRecord.RemoveDirectory => "remove_directory",
+        RollbackRecord.DeleteShortcut => "delete_shortcut",
+        RollbackRecord.RestoreRegistryValue => "restore_registry_value",
+        RollbackRecord.RestoreRegistryKey => "restore_registry_key",
+        RollbackRecord.RestoreEnv => "restore_env",
+        RollbackRecord.RestoreDeletedFile => "restore_deleted_file",
+        RollbackRecord.RestoreDeletedDirectory => "restore_deleted_directory",
+        RollbackRecord.RestoreConfigFile => "restore_config_file",
+        RollbackRecord.RemoveUninstaller => "remove_uninstaller",
+        RollbackRecord.RemoveService => "remove_service",
+        RollbackRecord.DeleteScheduledTask => "delete_scheduled_task",
+        RollbackRecord.UnregisterCom => "unregister_com",
+        RollbackRecord.DeleteFirewallRule => "delete_firewall_rule",
+        _ => "unknown",
+    };
+
+    /// <summary>
+    /// The coordinate the record acts on, in the same natural form
+    /// <see cref="RefusedRecord.Target"/> uses. Declared fields only — never a resolved
+    /// parameter value — so a secret can never leak into a failure line.
+    /// </summary>
+    private static string TargetOf(RollbackRecord record) => record switch
+    {
+        RollbackRecord.RestoreFile r => r.Path,
+        RollbackRecord.RemoveDirectory r => r.Path,
+        RollbackRecord.DeleteShortcut r => r.Path,
+        RollbackRecord.RestoreRegistryValue r => $"{r.Hive}\\{r.Key}\\{r.Name}",
+        RollbackRecord.RestoreRegistryKey r => $"{r.Hive}\\{r.Key}",
+        RollbackRecord.RestoreEnv r => $"env:{r.Scope}:{r.Name}",
+        RollbackRecord.RestoreDeletedFile r => r.OriginalPath,
+        RollbackRecord.RestoreDeletedDirectory r => r.OriginalPath,
+        RollbackRecord.RestoreConfigFile r => r.OriginalPath,
+        RollbackRecord.RemoveUninstaller r => r.Path,
+        RollbackRecord.RemoveService r => r.ServiceName,
+        RollbackRecord.DeleteScheduledTask r => r.TaskName,
+        RollbackRecord.UnregisterCom r => r.DllPath,
+        RollbackRecord.DeleteFirewallRule r => r.RuleName,
+        _ => string.Empty,
+    };
 
     /// <summary>
     /// A short, prototype-style reversal line for the interactive uninstall log
@@ -292,6 +369,116 @@ public sealed record RefusedRecord(
     string Message);
 
 /// <summary>
+/// Why a record's undo did not achieve what it set out to (R15). A stable code, so a
+/// consumer can group, count and route failures without parsing prose — the same
+/// contract <see cref="ReplayRefusalCode"/> carries for refusals.
+/// </summary>
+/// <remarks>
+/// Explicitly numbered. <strong>Add members rather than renumbering or repurposing
+/// existing ones.</strong>
+/// </remarks>
+public enum UndoFailureCode
+{
+    /// <summary>
+    /// The record's undo threw. Covers every filesystem / registry / environment record:
+    /// a locked file, a denied ACL, a directory where a file was expected.
+    /// </summary>
+    RecordThrew = 1,
+
+    /// <summary>
+    /// <c>sc stop</c> + <c>sc delete</c> ran and the service is still registered — not
+    /// even marked for deletion. A Windows service the uninstall left behind, which for
+    /// a machine-scope install usually means a SYSTEM-context binary that still starts.
+    /// </summary>
+    ServiceStillPresent = 2,
+
+    /// <summary>
+    /// <c>schtasks /Delete</c> ran and the task is still present. The register's
+    /// "permanent SYSTEM scheduled task".
+    /// </summary>
+    ScheduledTaskStillPresent = 3,
+
+    /// <summary>
+    /// <c>netsh advfirewall firewall delete rule</c> ran and the rule still matches —
+    /// the register's "open firewall port".
+    /// </summary>
+    FirewallRuleStillPresent = 4,
+
+    /// <summary>
+    /// <c>DllUnregisterServer</c> could not be reached or returned a failure HRESULT, so
+    /// the machine-wide COM registration is still live.
+    /// </summary>
+    ComUnregisterFailed = 5,
+
+    /// <summary>
+    /// The external tool the undo needs (<c>sc.exe</c>, <c>schtasks.exe</c>,
+    /// <c>netsh.exe</c>) could not be launched, so whether the object was removed is
+    /// unknown. Unknown is not success.
+    /// </summary>
+    ExternalToolUnavailable = 6,
+}
+
+/// <summary>
+/// One record whose undo ran and did not achieve its goal (R15): what it was, what it
+/// was acting on, why, and the line that went to the log.
+/// </summary>
+/// <remarks>
+/// Deliberately the same shape as <see cref="RefusedRecord"/>, and for the same reason:
+/// a consumer must never have to parse <see cref="Message"/> to decide what happened.
+/// <see cref="Target"/> can be attacker-supplied text (it comes off a journal that was
+/// read from disk) and must be rendered as untrusted.
+/// </remarks>
+/// <param name="RecordType">The journal record's wire discriminator — <c>remove_service</c>, <c>restore_file</c>, …</param>
+/// <param name="Target">The coordinate the record acted on, in the same natural form <see cref="RefusedRecord.Target"/> uses.</param>
+/// <param name="Code">The stable reason, for grouping and routing.</param>
+/// <param name="Message">The human-readable line reported on the progress sink and written to the <c>/LOG</c> file. For operators, not for parsing.</param>
+public sealed record FailedRecord(
+    string RecordType,
+    string Target,
+    UndoFailureCode Code,
+    string Message);
+
+/// <summary>
+/// Thrown by a <see cref="RollbackRecord"/> whose undo ran to completion and left the
+/// thing it was meant to remove in place (R15). Distinct from an arbitrary exception so
+/// <see cref="RollbackJournal.UndoAsync"/> can attach the record's own
+/// <see cref="UndoFailureCode"/> instead of the generic
+/// <see cref="UndoFailureCode.RecordThrew"/>.
+/// </summary>
+public sealed class UndoFailedException : System.Exception
+{
+    public UndoFailedException()
+        : this(UndoFailureCode.RecordThrew, string.Empty, "the undo did not complete")
+    {
+    }
+
+    public UndoFailedException(string message)
+        : this(UndoFailureCode.RecordThrew, string.Empty, message)
+    {
+    }
+
+    public UndoFailedException(string message, System.Exception? innerException)
+        : base(message, innerException)
+    {
+        Code = UndoFailureCode.RecordThrew;
+        Target = string.Empty;
+    }
+
+    public UndoFailedException(UndoFailureCode code, string target, string message)
+        : base(message)
+    {
+        Code = code;
+        Target = target;
+    }
+
+    /// <summary>The stable reason the undo did not achieve its goal.</summary>
+    public UndoFailureCode Code { get; }
+
+    /// <summary>The coordinate that is still present (service name, task name, …).</summary>
+    public string Target { get; } = string.Empty;
+}
+
+/// <summary>
 /// The result of a <see cref="RollbackJournal.UndoAsync"/> replay.
 /// </summary>
 /// <param name="RefusedRecords">
@@ -301,8 +488,30 @@ public sealed record RefusedRecord(
 /// than being swallowed. Consumed by lane S5 in Stage 2 for R15 — see
 /// <see cref="RefusedRecord"/>.
 /// </param>
+/// <param name="FailedRecords">
+/// One entry per record whose undo ran and did not achieve its goal (R15). Distinct from
+/// <paramref name="RefusedRecords"/> in kind: a refusal means the record was never ours
+/// to replay, a failure means it was and the replay did not work. Both make
+/// <see cref="IsClean"/> false; only a failure is likely to succeed on a retry.
+/// </param>
 public sealed record UndoOutcome(
-    System.Collections.Generic.IReadOnlyList<RefusedRecord> RefusedRecords);
+    System.Collections.Generic.IReadOnlyList<RefusedRecord> RefusedRecords,
+    System.Collections.Generic.IReadOnlyList<FailedRecord> FailedRecords)
+{
+    /// <summary>
+    /// Back-compat overload for callers that predate <paramref name="FailedRecords"/>.
+    /// </summary>
+    public UndoOutcome(System.Collections.Generic.IReadOnlyList<RefusedRecord> refusedRecords)
+        : this(refusedRecords, System.Array.Empty<FailedRecord>())
+    {
+    }
+
+    /// <summary>
+    /// True when every record was replayed and every replay achieved its goal — the only
+    /// state in which an uninstall may report success.
+    /// </summary>
+    public bool IsClean => RefusedRecords.Count == 0 && FailedRecords.Count == 0;
+}
 
 public abstract record RollbackRecord
 {
@@ -658,38 +867,110 @@ public abstract record RollbackRecord
     /// <summary>
     /// Stops + deletes a Windows service created by <c>service_install</c>.
     /// Recorded BEFORE the create so an interrupted install can still unwind.
-    /// On uninstall this runs as part of the journal replay. sc.exe absence /
-    /// service-not-found is silently tolerated — the goal is "no service after
-    /// rollback," not "exact symmetric command execution."
+    /// On uninstall this runs as part of the journal replay.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The contract is the END STATE, not the exit code (R15).</strong> "No
+    /// service after rollback" is still the goal, so a service that does not exist is a
+    /// success even though <c>sc delete</c> exits 1060 for it — reporting that as a
+    /// failure would turn every uninstall of an app whose service a user already removed
+    /// into a permanently "failed" one. What is no longer tolerated is the opposite: the
+    /// service is <em>still registered</em> after both commands ran, which for a
+    /// machine-scope install means a SYSTEM-context binary that still starts, left behind
+    /// by an uninstall that reported success and then deleted the only record that could
+    /// have removed it.
+    /// </para>
+    /// <para>
+    /// A service marked for deletion (<c>DeleteFlag</c>) counts as removed: the SCM
+    /// completes it when the last handle closes, and refusing there would fail every
+    /// uninstall of a service that was running.
+    /// </para>
+    /// </remarks>
     public sealed record RemoveService(string ServiceName) : RollbackRecord
     {
         public override async System.Threading.Tasks.Task UndoAsync(System.Threading.CancellationToken ct)
         {
-            await RunScAsync(new[] { "stop", ServiceName }, ct).ConfigureAwait(false);
-            await RunScAsync(new[] { "delete", ServiceName }, ct).ConfigureAwait(false);
+            if (!System.OperatingSystem.IsWindows())
+            {
+                // There is no SCM to leave residue in, so there is nothing to fail at.
+                return;
+            }
+
+            await ExternalUndoTool.RunAsync("sc.exe", new[] { "stop", ServiceName }, ct)
+                .ConfigureAwait(false);
+            var deleteExit = await ExternalUndoTool
+                .RunAsync("sc.exe", new[] { "delete", ServiceName }, ct)
+                .ConfigureAwait(false);
+
+            // ERROR_SERVICE_DOES_NOT_EXIST — the goal already holds.
+            if (deleteExit is 0 or 1060)
+            {
+                return;
+            }
+
+            var residue = ServiceResidue(ServiceName);
+            if (residue is ServiceResidueState.Gone or ServiceResidueState.PendingDeletion)
+            {
+                return;
+            }
+
+            if (deleteExit is null)
+            {
+                throw new UndoFailedException(
+                    UndoFailureCode.ExternalToolUnavailable,
+                    ServiceName,
+                    $"remove_service: sc.exe could not be run, so whether service '{ServiceName}' " +
+                    "was removed is unknown — treating unknown as not removed");
+            }
+
+            throw new UndoFailedException(
+                UndoFailureCode.ServiceStillPresent,
+                ServiceName,
+                $"remove_service: service '{ServiceName}' is still registered after " +
+                $"sc delete (exit {deleteExit}) — it was NOT removed");
         }
 
-        private static async System.Threading.Tasks.Task RunScAsync(string[] args, System.Threading.CancellationToken ct)
+        private enum ServiceResidueState
         {
-            var psi = new System.Diagnostics.ProcessStartInfo("sc.exe")
+            Gone,
+            PendingDeletion,
+            Present,
+            Unknown,
+        }
+
+        private static ServiceResidueState ServiceResidue(string serviceName)
+        {
+            if (!System.OperatingSystem.IsWindows() || string.IsNullOrWhiteSpace(serviceName))
             {
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-            };
-            foreach (var a in args) psi.ArgumentList.Add(a);
+                return ServiceResidueState.Unknown;
+            }
+            return ReadServiceResidue(serviceName);
+        }
+
+        [SupportedOSPlatform("windows")]
+        private static ServiceResidueState ReadServiceResidue(string serviceName)
+        {
+#pragma warning disable CA1031 // An unreadable SCM key cannot confirm removal; say so rather than assuming either way.
             try
             {
-                using var proc = System.Diagnostics.Process.Start(psi);
-                if (proc is null) return;
-                await proc.WaitForExitAsync(ct).ConfigureAwait(false);
-                // sc.exe exit 1060 = service does not exist; benign on rollback.
+                using var key = Registry.LocalMachine.OpenSubKey(
+                    $@"System\CurrentControlSet\Services\{serviceName}", writable: false);
+                if (key is null)
+                {
+                    return ServiceResidueState.Gone;
+                }
+                // The SCM sets DeleteFlag when `sc delete` reached a running service; the
+                // removal completes when the last handle closes.
+                if (key.GetValue("DeleteFlag") is int flag && flag != 0)
+                {
+                    return ServiceResidueState.PendingDeletion;
+                }
+                return ServiceResidueState.Present;
             }
-#pragma warning disable CA1031 // Best-effort uninstall — sc.exe missing or admin denied is acceptable.
             catch
             {
+                return ServiceResidueState.Unknown;
             }
 #pragma warning restore CA1031
         }
@@ -698,40 +979,52 @@ public abstract record RollbackRecord
     /// <summary>
     /// Deletes a Windows Scheduled Task created by <c>scheduled_task_create</c>
     /// (P11, T11.1). Recorded BEFORE the create so an interrupted install can
-    /// still unwind. Mirrors <see cref="RemoveService"/>: schtasks.exe absence /
-    /// "task not found" is silently tolerated — the goal is "no task after
-    /// rollback," not "exact symmetric command execution." Only the task NAME
-    /// is carried — no secrets, no resolved program path.
+    /// still unwind. Mirrors <see cref="RemoveService"/>: the contract is the END
+    /// STATE — "no task after rollback" — not the exit code. <c>schtasks /Delete</c>
+    /// on a missing task exits non-zero and that is a SUCCESS; a task still present
+    /// after the delete is the failure (R15's "permanent SYSTEM scheduled task").
+    /// Only the task NAME is carried — no secrets, no resolved program path.
     /// </summary>
     public sealed record DeleteScheduledTask(string TaskName) : RollbackRecord
     {
         public override async System.Threading.Tasks.Task UndoAsync(System.Threading.CancellationToken ct)
         {
-            var psi = new System.Diagnostics.ProcessStartInfo("schtasks.exe")
+            if (!System.OperatingSystem.IsWindows())
             {
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-            };
-            psi.ArgumentList.Add("/Delete");
-            psi.ArgumentList.Add("/TN");
-            psi.ArgumentList.Add(TaskName);
-            psi.ArgumentList.Add("/F");
-            try
-            {
-                using var proc = System.Diagnostics.Process.Start(psi);
-                if (proc is null) return;
-                await proc.WaitForExitAsync(ct).ConfigureAwait(false);
-                // schtasks /Delete on a missing task exits non-zero ("The
-                // system cannot find the file specified" / ERROR_FILE_NOT_FOUND);
-                // benign on rollback, same tolerance as RemoveService above.
+                return;
             }
-#pragma warning disable CA1031 // Best-effort uninstall — schtasks.exe missing or admin denied is acceptable.
-            catch
+
+            var deleteExit = await ExternalUndoTool
+                .RunAsync("schtasks.exe", new[] { "/Delete", "/TN", TaskName, "/F" }, ct)
+                .ConfigureAwait(false);
+            if (deleteExit == 0)
             {
+                return;
             }
-#pragma warning restore CA1031
+            if (deleteExit is null)
+            {
+                throw new UndoFailedException(
+                    UndoFailureCode.ExternalToolUnavailable,
+                    TaskName,
+                    "delete_scheduled_task: schtasks.exe could not be run, so whether task " +
+                    $"'{TaskName}' was removed is unknown — treating unknown as not removed");
+            }
+
+            // Non-zero covers BOTH "no such task" (the goal already holds) and "access
+            // denied" (it emphatically does not). Only a query separates them.
+            var queryExit = await ExternalUndoTool
+                .RunAsync("schtasks.exe", new[] { "/Query", "/TN", TaskName }, ct)
+                .ConfigureAwait(false);
+            if (queryExit != 0)
+            {
+                return;
+            }
+
+            throw new UndoFailedException(
+                UndoFailureCode.ScheduledTaskStillPresent,
+                TaskName,
+                $"delete_scheduled_task: scheduled task '{TaskName}' still exists after " +
+                $"schtasks /Delete (exit {deleteExit}) — it was NOT removed");
         }
     }
 
@@ -740,34 +1033,43 @@ public abstract record RollbackRecord
     /// invoking its exported <c>DllUnregisterServer</c> through the same native
     /// path the register used (see
     /// <see cref="SigilBuild.Wrapper.Steps.Win32.ComRegistration"/>). Recorded
-    /// BEFORE the register so an interrupted install can still unwind. Mirrors
-    /// <see cref="RemoveService"/>'s best-effort contract: a missing
-    /// <c>DllUnregisterServer</c> export or a non-zero HRESULT on undo is
-    /// silently tolerated — the goal is "COM registration gone after rollback,"
-    /// not "exact symmetric call success." Only the DLL PATH is carried — no
-    /// secrets, no registry contents.
+    /// BEFORE the register so an interrupted install can still unwind. Only the DLL
+    /// PATH is carried — no secrets, no registry contents.
+    /// <para>
+    /// <strong>The outcome is no longer ignored (R15).</strong> The goal is "COM
+    /// registration gone after rollback", and unlike a missing service there is no
+    /// benign reading of a failed <c>DllUnregisterServer</c>: the export is missing, the
+    /// module will not load, or it returned a failure HRESULT — in all three the
+    /// machine-wide registration the install created is still live, and reporting the
+    /// uninstall as a success would delete the only record that could have removed it.
+    /// The record is replayed LIFO <em>before</em> the file records that delete the DLL,
+    /// so "the DLL is already gone" is not a case this has to tolerate.
+    /// </para>
     /// </summary>
     public sealed record UnregisterCom(string DllPath) : RollbackRecord
     {
         public override System.Threading.Tasks.Task UndoAsync(System.Threading.CancellationToken ct)
         {
-            try
+            if (!System.OperatingSystem.IsWindows())
             {
-                if (System.OperatingSystem.IsWindows())
-                {
-                    // Best-effort: the outcome (export missing / non-zero HR) is
-                    // intentionally ignored, exactly as RemoveService tolerates a
-                    // missing service. FreeLibrary is handled inside Invoke.
-                    _ = SigilBuild.Wrapper.Steps.Win32.ComRegistration.Invoke(DllPath, "DllUnregisterServer");
-                }
+                return System.Threading.Tasks.Task.CompletedTask;
             }
-#pragma warning disable CA1031 // Best-effort uninstall — a DLL that won't load / unregister on undo is acceptable.
-            catch
-            {
-            }
-#pragma warning restore CA1031
 
-            return System.Threading.Tasks.Task.CompletedTask;
+            // FreeLibrary is handled inside Invoke; the expected COM failure modes come
+            // back as an outcome rather than an exception.
+            var result = SigilBuild.Wrapper.Steps.Win32.ComRegistration.Invoke(
+                DllPath, "DllUnregisterServer");
+            if (result.Outcome == SigilBuild.Wrapper.Steps.Win32.ComRegistration.ComExportOutcome.Ok)
+            {
+                return System.Threading.Tasks.Task.CompletedTask;
+            }
+
+            throw new UndoFailedException(
+                UndoFailureCode.ComUnregisterFailed,
+                DllPath,
+                $"unregister_com: DllUnregisterServer on '{DllPath}' did not succeed " +
+                $"({result.Outcome}, win32 {result.Win32Error}, hr 0x{result.HResult:X8}) — " +
+                "the COM registration is still in place");
         }
     }
 
@@ -775,43 +1077,115 @@ public abstract record RollbackRecord
     /// Deletes a Windows Defender Firewall rule created by <c>firewall_rule</c>
     /// (P11, T11.3) via <c>netsh advfirewall firewall delete rule</c>. Recorded
     /// BEFORE the add so an interrupted install can still unwind. Mirrors
-    /// <see cref="RemoveService"/>/<see cref="DeleteScheduledTask"/>: netsh's
-    /// "No rules match the specified criteria" (the rule was never created, or
-    /// was already removed) is silently tolerated — the goal is "no rule after
-    /// rollback," not "exact symmetric command execution." Only the rule NAME
-    /// is carried — no secrets, no resolved program path.
+    /// <see cref="RemoveService"/>/<see cref="DeleteScheduledTask"/>: the contract is
+    /// the END STATE — "no rule after rollback". netsh's "No rules match the specified
+    /// criteria" is a SUCCESS (the rule was never created, or is already gone); a rule
+    /// that still matches after the delete is the failure (R15's "open firewall port").
+    /// Only the rule NAME is carried — no secrets, no resolved program path.
     /// </summary>
     public sealed record DeleteFirewallRule(string RuleName) : RollbackRecord
     {
         public override async System.Threading.Tasks.Task UndoAsync(System.Threading.CancellationToken ct)
         {
-            var psi = new System.Diagnostics.ProcessStartInfo("netsh.exe")
+            if (!System.OperatingSystem.IsWindows())
             {
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-            };
-            psi.ArgumentList.Add("advfirewall");
-            psi.ArgumentList.Add("firewall");
-            psi.ArgumentList.Add("delete");
-            psi.ArgumentList.Add("rule");
-            psi.ArgumentList.Add($"name={RuleName}");
-            try
-            {
-                using var proc = System.Diagnostics.Process.Start(psi);
-                if (proc is null) return;
-                await proc.WaitForExitAsync(ct).ConfigureAwait(false);
-                // netsh exits non-zero ("No rules match the specified
-                // criteria") when the rule is already gone; benign on
-                // rollback, same tolerance as RemoveService/DeleteScheduledTask
-                // above.
+                return;
             }
-#pragma warning disable CA1031 // Best-effort uninstall — netsh.exe missing or admin denied is acceptable.
-            catch
+
+            var deleteExit = await ExternalUndoTool.RunAsync(
+                "netsh.exe",
+                new[] { "advfirewall", "firewall", "delete", "rule", $"name={RuleName}" },
+                ct).ConfigureAwait(false);
+            if (deleteExit == 0)
             {
+                return;
             }
+            if (deleteExit is null)
+            {
+                throw new UndoFailedException(
+                    UndoFailureCode.ExternalToolUnavailable,
+                    RuleName,
+                    "firewall_rule: netsh.exe could not be run, so whether rule " +
+                    $"'{RuleName}' was removed is unknown — treating unknown as not removed");
+            }
+
+            // Non-zero is "no rules match" in the common case and a denial in the case
+            // that matters. Ask.
+            var queryExit = await ExternalUndoTool.RunAsync(
+                "netsh.exe",
+                new[] { "advfirewall", "firewall", "show", "rule", $"name={RuleName}" },
+                ct).ConfigureAwait(false);
+            if (queryExit != 0)
+            {
+                return;
+            }
+
+            throw new UndoFailedException(
+                UndoFailureCode.FirewallRuleStillPresent,
+                RuleName,
+                $"firewall_rule: rule '{RuleName}' still matches after netsh delete " +
+                $"(exit {deleteExit}) — it was NOT removed");
+        }
+    }
+}
+
+/// <summary>
+/// Runs one of the three external undo tools (<c>sc.exe</c>, <c>schtasks.exe</c>,
+/// <c>netsh.exe</c>) and returns its exit code, or <c>null</c> when the process could
+/// not be started at all.
+/// </summary>
+/// <remarks>
+/// The <c>null</c> is the point (R15): "could not run the tool" and "the tool ran and
+/// said the object is gone" used to be the same outcome — a swallowed exception — and
+/// only one of them means the uninstall achieved anything. stdout/stderr are redirected
+/// so a chatty tool never blocks on a full pipe, and read to completion for the same
+/// reason.
+/// </remarks>
+internal static class ExternalUndoTool
+{
+    internal static async System.Threading.Tasks.Task<int?> RunAsync(
+        string exe,
+        string[] args,
+        System.Threading.CancellationToken ct)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo(exe)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        foreach (var a in args)
+        {
+            psi.ArgumentList.Add(a);
+        }
+
+        System.Diagnostics.Process? proc;
+        try
+        {
+            proc = System.Diagnostics.Process.Start(psi);
+        }
+#pragma warning disable CA1031 // Any spawn failure is the same answer: we do not know what happened.
+        catch (System.Exception)
+        {
+            return null;
+        }
 #pragma warning restore CA1031
+
+        if (proc is null)
+        {
+            return null;
+        }
+
+        using (proc)
+        {
+            // Drain both pipes so a verbose tool cannot deadlock the wait.
+            var stdout = proc.StandardOutput.ReadToEndAsync(ct);
+            var stderr = proc.StandardError.ReadToEndAsync(ct);
+            await proc.WaitForExitAsync(ct).ConfigureAwait(false);
+            _ = await stdout.ConfigureAwait(false);
+            _ = await stderr.ConfigureAwait(false);
+            return proc.ExitCode;
         }
     }
 }

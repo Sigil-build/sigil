@@ -139,4 +139,132 @@ public class UninstallEngineTests
 #pragma warning restore CA1031
         }
     }
+
+    // ---- R15: an uninstall must not claim a success it did not achieve ----------------
+
+    /// <summary>
+    /// R15. The negative test. A journal record whose undo cannot succeed must make the
+    /// uninstall report failure AND leave <c>uninstall.json</c> on disk, because that
+    /// file is the only description of what is left to remove — deleting it after a
+    /// failed replay is what turned a partial uninstall into a permanently installed app.
+    /// </summary>
+    /// <remarks>
+    /// The record is a <c>restore_file</c> whose destination is an existing DIRECTORY:
+    /// <c>File.Copy</c> cannot overwrite one, so the undo throws. That is the same shape
+    /// as every real "the file was locked / access was denied" partial uninstall, and it
+    /// is deterministic on every OS without creating a service, a scheduled task, a
+    /// firewall rule or any other host object — which matters because CI runs elevated.
+    /// </remarks>
+    [Fact]
+    public async Task Uninstall_that_cannot_reverse_a_record_reports_failure_and_keeps_the_state_for_retry()
+    {
+        using var installDir = new TempDir();
+        var appId = "sigil.test." + Guid.NewGuid().ToString("N");
+        try
+        {
+            var blocked = Path.Combine(installDir.Path, "blocked");
+            Directory.CreateDirectory(blocked);
+            var backup = Path.Combine(installDir.Path, "blocked.sigil-bak");
+            File.WriteAllText(backup, "the content the undo would restore");
+
+            var journal = new RollbackJournal();
+            journal.Append(new RollbackRecord.RestoreFile(
+                blocked, ExistedBefore: true, BackupPath: backup));
+
+            UninstallStateStore.Save(
+                appId, journal, InstallScope.User,
+                secretValues: null, progress: null, installDir: installDir.Path);
+
+            var result = await new UninstallEngine().RunAsync(appId, installDir.Path, InstallScope.User);
+
+            result.Success.Should().BeFalse(
+                "a replay in which a record could not be reversed did not achieve what an " +
+                "Ok result claims — R15");
+            result.Error.Should().NotBeNull();
+            result.Error!.Should().Contain("could not be reversed");
+
+            File.Exists(UninstallStateStore.PathFor(appId, InstallScope.User)).Should().BeTrue(
+                "the state file is the only record of what is left to remove; deleting it " +
+                "after a failed uninstall leaves the app permanently installed with no retry");
+        }
+        finally
+        {
+#pragma warning disable CA1031 // Test cleanup must never mask the original assertion failure.
+            try { UninstallStateStore.Delete(appId, InstallScope.User); } catch { /* best-effort */ }
+#pragma warning restore CA1031
+        }
+    }
+
+    /// <summary>
+    /// R15, the other direction. A clean replay must still delete the state — retention
+    /// is for failures only, and a retained state file on the happy path would leave a
+    /// stale ARP row behind on every uninstall.
+    /// </summary>
+    [Fact]
+    public async Task Clean_uninstall_still_deletes_the_state()
+    {
+        using var installDir = new TempDir();
+        var appId = "sigil.test." + Guid.NewGuid().ToString("N");
+        try
+        {
+            var f = Path.Combine(installDir.Path, "f.txt");
+            File.WriteAllText(f, "x");
+
+            var journal = new RollbackJournal();
+            journal.Append(new RollbackRecord.RestoreFile(f, ExistedBefore: false, BackupPath: null));
+
+            UninstallStateStore.Save(
+                appId, journal, InstallScope.User,
+                secretValues: null, progress: null, installDir: installDir.Path);
+
+            var result = await new UninstallEngine().RunAsync(appId, installDir.Path, InstallScope.User);
+
+            result.Success.Should().BeTrue(result.Error ?? "clean replay");
+            File.Exists(f).Should().BeFalse();
+            File.Exists(UninstallStateStore.PathFor(appId, InstallScope.User)).Should().BeFalse();
+        }
+        finally
+        {
+#pragma warning disable CA1031 // Test cleanup must never mask the original assertion failure.
+            try { UninstallStateStore.Delete(appId, InstallScope.User); } catch { /* best-effort */ }
+#pragma warning restore CA1031
+        }
+    }
+
+    /// <summary>
+    /// R15's over-refusal guard, and the reason the three process-driven undos check the
+    /// END STATE rather than the exit code. <c>sc delete</c>, <c>schtasks /Delete</c> and
+    /// <c>netsh … delete rule</c> ALL exit non-zero when the object does not exist. If a
+    /// non-zero exit were the failure signal, every uninstall of an app whose service /
+    /// task / rule a user had already removed would report failure and retain state
+    /// forever — a survivable uninstall turned into an unremovable app, which is the
+    /// exact harm R15 exists to prevent.
+    /// </summary>
+    /// <remarks>
+    /// Asserts on the journal outcome only. Nothing here creates a service, a scheduled
+    /// task or a firewall rule — the names are fresh GUIDs that cannot exist, and CI runs
+    /// elevated, so a test that created one would create it on the runner for real.
+    /// </remarks>
+    [Fact]
+    public async Task Undo_of_an_already_absent_service_task_or_rule_is_not_a_failure()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var nonce = Guid.NewGuid().ToString("N");
+        var journal = new RollbackJournal();
+        journal.Append(new RollbackRecord.RemoveService("sigil-absent-svc-" + nonce));
+        journal.Append(new RollbackRecord.DeleteScheduledTask(@"\Sigil\absent-task-" + nonce));
+        journal.Append(new RollbackRecord.DeleteFirewallRule("sigil-absent-rule-" + nonce));
+
+        var outcome = await journal.UndoAsync(ReplayAnchorage.InProcess);
+
+        outcome.FailedRecords.Should().BeEmpty(
+            "an object that does not exist already satisfies 'no service / task / rule " +
+            "after rollback'; treating the tool's non-zero 'not found' exit as a failure " +
+            "would refuse legitimate uninstalls");
+        outcome.IsClean.Should().BeTrue();
+    }
 }

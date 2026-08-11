@@ -1,4 +1,6 @@
 using System;
+using System.IO;
+using System.Xml;
 using FluentAssertions;
 using SigilBuild.Wrapper.Steps;
 using Xunit;
@@ -115,5 +117,95 @@ public class ConfigEditorTests
     {
         var act = () => XmlEditor.Set("<root/>", "/root/missing", null, "v", createIfMissing: false);
         act.Should().Throw<InvalidOperationException>();
+    }
+
+    // ── XML: XXE posture (R33) ───────────────────────────────────────────────
+
+    /// <summary>
+    /// Register row R33. The internal DTD subset was parsed with no expansion cap, so
+    /// a config file the elevated installer edits could bill it for an unbounded
+    /// entity expansion (billion laughs) before a single byte was written. This is the
+    /// test that fails at the parent commit: the resolver default already blocked
+    /// EXTERNAL entities there, so only the DTD assertion proves anything.
+    /// </summary>
+    [Fact]
+    public void Xml_edit_refuses_a_document_declaring_an_internal_dtd_subset()
+    {
+        const string Xml = """
+            <?xml version="1.0"?>
+            <!DOCTYPE lolz [ <!ENTITY lol "lol"> <!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;"> ]>
+            <config><item>&lol2;</item></config>
+            """;
+
+        var act = () => XmlEditor.Set(Xml, "/config/item", null, "value", createIfMissing: false);
+
+        act.Should().Throw<XmlException>(
+            "DtdProcessing must be Prohibit — an internal DTD subset in a config file the " +
+            "elevated installer reads is an unbounded entity-expansion (billion laughs) " +
+            "vector, and the XmlResolver default never covered it");
+    }
+
+    [Fact]
+    public void Xml_edit_refuses_a_dtd_even_with_no_entities_at_all()
+    {
+        const string Xml = """
+            <!DOCTYPE config>
+            <config><item>x</item></config>
+            """;
+
+        var act = () => XmlEditor.Set(Xml, "/config/item", null, "value", createIfMissing: false);
+
+        act.Should().Throw<XmlException>(
+            "the invariant is 'no DTD reaches this parser', not 'no expensive DTD' — a " +
+            "reviewer must be able to check it by reading one line");
+    }
+
+    /// <summary>
+    /// The external-entity half. This already passed at the parent commit — .NET 10
+    /// defaults <c>XmlResolver</c> to <c>null</c> — and it is here precisely so that a
+    /// future framework or <c>AppContext</c> change that revokes the default cannot do
+    /// it silently.
+    /// </summary>
+    [Fact]
+    public void Xml_edit_never_resolves_an_external_entity()
+    {
+        var secret = Path.Combine(Path.GetTempPath(), "sigil-r33-" + Guid.NewGuid().ToString("N") + ".txt");
+        File.WriteAllText(secret, "TOP-SECRET-CANARY");
+        try
+        {
+            var xml =
+                "<?xml version=\"1.0\"?>\n" +
+                "<!DOCTYPE config [ <!ENTITY xxe SYSTEM \"file:///" +
+                secret.Replace('\\', '/') + "\"> ]>\n" +
+                "<config><item>&xxe;</item></config>";
+
+            var act = () => XmlEditor.Set(xml, "/config/item", null, "value", createIfMissing: false);
+
+            act.Should().Throw<XmlException>(
+                "an external entity must never be dereferenced by a parse running at high " +
+                "integrity — that is file disclosure and SSRF in one field");
+        }
+        finally
+        {
+            File.Delete(secret);
+        }
+    }
+
+    [Fact]
+    public void Xml_edit_still_preserves_declaration_comments_and_whitespace()
+    {
+        const string Xml = """
+            <?xml version="1.0" encoding="utf-8"?>
+            <!-- keep me -->
+            <config>
+              <item>old</item>
+            </config>
+            """;
+
+        var result = XmlEditor.Set(Xml, "/config/item", null, "new", createIfMissing: false);
+
+        result.Should().StartWith("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
+        result.Should().Contain("<!-- keep me -->");
+        result.Should().Contain("\n  <item>new</item>");
     }
 }

@@ -362,6 +362,15 @@ The opt-out is per step and deliberate: it is a declaration that this particular
 
 Rejected rather than escaped: an INI file has no escape for a newline inside a value, so escaping would silently mangle what you wrote. All three are pack-time-authored, so failing puts the problem in front of the publisher. The leading-`[` rule is deliberately conservative — a `[` in a *value* cannot itself create a section — so write `value: " [1,2,3]"` or quote it differently if you need one.
 
+### `xml_edit` refuses a document that declares a `<!DOCTYPE>`
+
+The XML a step edits is parsed with `XmlResolver = null` and `DtdProcessing = Prohibit`. Two separate guarantees:
+
+- **No external entity is ever dereferenced.** A `<!ENTITY x SYSTEM "file:///C:/…">` or `SYSTEM "http://…"` in the target file cannot make the elevated installer read a local file or reach the network on the document's behalf. .NET already defaults to this; Sigil sets it explicitly so that a future framework default, `AppContext` switch or runtimeconfig knob cannot revoke the guarantee without this assignment also changing.
+- **No DTD is parsed at all**, including a purely internal subset with no external references. This is the half the resolver default never covered: an internal subset can define nested entities whose expansion is exponential (the "billion laughs" shape), and — per the containment note above — the file being edited can sit somewhere an attacker is able to write.
+
+A document that declares a `<!DOCTYPE>` therefore **fails the step with the file untouched** rather than being edited, whether or not the doctype is expensive. If you must edit such a file, strip the doctype at pack time, or do the edit from a `run_program` step that owns its own parsing policy. Declarations, comments, processing instructions and whitespace all still survive an ordinary edit.
+
 ### An unresolved token in a path fails the step
 
 A `{token}` that is still present in a path after substitution — `{var.instal_dir}` for a typo'd `installer.vars` entry, say — **fails the step**. It is never written to disk. Previously an unknown brace token was left literal, so a single typo silently created a directory named `{var.instal_dir}` and the install "succeeded".

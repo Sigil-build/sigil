@@ -14,12 +14,12 @@ using FluentAssertions;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Soft-skips (returns Passed) when:
+/// Reports a genuine Skipped result (via <see cref="MsixVmFactAttribute"/>, register
+/// row R6) when:
 /// </para>
 /// <list type="bullet">
 ///   <item><description>The host is not Windows.</description></item>
 ///   <item><description><c>SIGIL_MSIX_VM_TESTS=1</c> is not set in the environment — keeps the test out of stock developer runs where Developer Mode may not be on.</description></item>
-///   <item><description>The Windows 10/11 SDK is not installed (MakeAppx.exe missing).</description></item>
 /// </list>
 /// <para>
 /// The test uses <c>-AllowUnsigned</c> which requires Developer Mode on the
@@ -32,10 +32,6 @@ public class MsixInstallSmokeTests
 {
     private const string ManifestRel = "examples/msix-local-sign/sigil.yaml";
     private const string ExpectedAppId = "com.example.LocalSignedApp";
-
-    private static bool ShouldRun() =>
-        OperatingSystem.IsWindows() &&
-        Environment.GetEnvironmentVariable("SIGIL_MSIX_VM_TESTS") == "1";
 
     private static string FindRepoRoot()
     {
@@ -51,14 +47,9 @@ public class MsixInstallSmokeTests
         throw new InvalidOperationException("could not locate Sigil.slnx");
     }
 
-    [Fact]
+    [MsixVmFact]
     public async Task Pack_and_install_unsigned_msix_via_AddAppxPackage_succeeds()
     {
-        if (!ShouldRun())
-        {
-            return; // soft-skip — see class remarks.
-        }
-
         var root = FindRepoRoot();
         var manifestPath = Path.Combine(root, ManifestRel.Replace('/', Path.DirectorySeparatorChar));
         File.Exists(manifestPath).Should().BeTrue($"example manifest must exist at {manifestPath}");

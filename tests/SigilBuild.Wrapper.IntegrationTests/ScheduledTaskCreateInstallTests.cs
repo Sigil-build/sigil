@@ -27,7 +27,8 @@ using Xunit;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Gating:</b> soft-skips (returns without asserting — the same convention
+/// <b>Gating:</b> reports a genuine Skipped result (via
+/// <see cref="VmSystemStepsFactAttribute"/>, register row R6 — the same convention
 /// as <c>PrerequisiteInstallTests</c>/<c>UpgradeInstallTests</c>) unless the
 /// host is Windows, <c>SIGIL_VM_TESTS=1</c> and <c>SIGIL_VM_SYSTEMSTEPS=1</c>
 /// are both set, AND the current process is elevated
@@ -49,20 +50,9 @@ using Xunit;
 [SupportedOSPlatform("windows")]
 public class ScheduledTaskCreateInstallTests
 {
-    private static bool ShouldRun() =>
-        OperatingSystem.IsWindows() &&
-        TestEnvironment.IsEnabled &&
-        Environment.GetEnvironmentVariable("SIGIL_VM_SYSTEMSTEPS") == "1" &&
-        Elevation.IsProcessElevated();
-
-    [Fact]
+    [VmSystemStepsFact]
     public async Task Create_then_reverse_scheduled_task_round_trip()
     {
-        if (!ShouldRun())
-        {
-            return; // soft-skip — see class remarks. Verified on the CI VM only.
-        }
-
         var taskName = $"SigilItTask_{Guid.NewGuid():N}";
         var program = Path.Combine(Environment.SystemDirectory, "cmd.exe");
 

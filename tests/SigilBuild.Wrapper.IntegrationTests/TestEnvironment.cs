@@ -25,7 +25,9 @@ internal static class TestEnvironment
     /// (the exact name + layout <c>WrapperRuntimeLocator.Locate</c> resolves at
     /// pack time). Until <c>scripts/publish-installer-runtime.ps1</c> stages it,
     /// <c>ExeWrapperPackager</c> cannot produce a setup exe and the integration
-    /// tests soft-skip. (The legacy <c>SigilBuild.Wrapper.exe</c> name predates the
+    /// tests report a genuine <c>Skipped</c> result (register row R6 — they used
+    /// to soft-skip via an early return that reported <c>Passed</c>; that was
+    /// fixed in T1.1). (The legacy <c>SigilBuild.Wrapper.exe</c> name predates the
     /// T3 rename to the Avalonia host; it is accepted as a fallback for continuity.)
     /// </summary>
     public static bool IsRuntimeAvailable

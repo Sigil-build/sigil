@@ -51,7 +51,8 @@ using Xunit;
 /// behavior.
 /// </para>
 /// <para>
-/// <b>Gating:</b> soft-skips (returns without asserting — the same convention
+/// <b>Gating:</b> reports a genuine Skipped result (via
+/// <see cref="VmSystemStepsFactAttribute"/>, register row R6 — the same convention
 /// as <c>PrerequisiteInstallTests</c>/<c>UpgradeInstallTests</c>) unless the
 /// host is Windows, <c>SIGIL_VM_TESTS=1</c> and <c>SIGIL_VM_SYSTEMSTEPS=1</c>
 /// are both set, AND the current process is elevated
@@ -64,20 +65,9 @@ using Xunit;
 [SupportedOSPlatform("windows")]
 public class ComRegisterInstallTests
 {
-    private static bool ShouldRun() =>
-        OperatingSystem.IsWindows() &&
-        TestEnvironment.IsEnabled &&
-        Environment.GetEnvironmentVariable("SIGIL_VM_SYSTEMSTEPS") == "1" &&
-        Elevation.IsProcessElevated();
-
-    [Fact]
+    [VmSystemStepsFact]
     public async Task ComRegisterStep_runs_the_full_register_journal_reverse_plumbing_under_elevation()
     {
-        if (!ShouldRun())
-        {
-            return; // soft-skip — see class remarks. Verified on the CI VM only.
-        }
-
         // kernel32.dll: present on every Windows host, loads fine, but has no
         // DllRegisterServer export — never touches real HKCR/CLSID state, so
         // this is safe to run for real (not a soft no-op) even under

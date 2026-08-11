@@ -19,9 +19,10 @@ namespace SigilBuild.Wrapper.IntegrationTests;
 ///   <item><description>v2 → v1 silent: blocked with the dedicated exit code (3);</description></item>
 ///   <item><description>v1 <c>/force-downgrade</c>: succeeds.</description></item>
 /// </list>
-/// Soft-skips (returns Passed) unless Windows + <c>SIGIL_VM_TESTS=1</c> +
-/// <c>SIGIL_VM_UPGRADE=1</c> + the staged AOT runtime — same convention as
-/// <see cref="MultiEditionInstallTests"/>. The pure four-path decision table and the
+/// Reports a genuine Skipped result (via <see cref="VmUpgradeFactAttribute"/>, register
+/// row R6) unless Windows + <c>SIGIL_VM_TESTS=1</c> + <c>SIGIL_VM_UPGRADE=1</c> + the
+/// staged AOT runtime — same convention as <see cref="MultiEditionInstallTests"/>. The
+/// pure four-path decision table and the
 /// prior-dir precedence are additionally covered by fast unit tests
 /// (<c>UpgradePlannerTests</c>, <c>InstallDirResolverTests</c>, <c>UpgradeSessionTests</c>).
 /// </summary>
@@ -30,21 +31,10 @@ public sealed class UpgradeInstallTests
     private const string UninstallRoot =
         @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
 
-    private static bool ShouldRun()
-        => OperatingSystem.IsWindows()
-            && TestEnvironment.IsEnabled
-            && Environment.GetEnvironmentVariable("SIGIL_VM_UPGRADE") == "1"
-            && TestEnvironment.IsRuntimeAvailable;
-
-    [Fact]
+    [VmUpgradeFact]
     [SupportedOSPlatform("windows")]
     public async Task Upgrade_replaces_older_version_preserving_install_dir_and_single_arp_row()
     {
-        if (!ShouldRun())
-        {
-            return; // soft-skip — see class remarks.
-        }
-
         using var sandbox = new VmSandbox();
         var appId = "com.sigil.p3." + Guid.NewGuid().ToString("N");
         // v1 installs into dir A; v2's manifest default is a DIFFERENT dir B. The
@@ -72,15 +62,10 @@ public sealed class UpgradeInstallTests
         }
     }
 
-    [Fact]
+    [VmUpgradeFact]
     [SupportedOSPlatform("windows")]
     public async Task Silent_downgrade_is_blocked_with_exit_code_3()
     {
-        if (!ShouldRun())
-        {
-            return; // soft-skip — see class remarks.
-        }
-
         using var sandbox = new VmSandbox();
         var appId = "com.sigil.p3." + Guid.NewGuid().ToString("N");
         var dir = Path.Combine(sandbox.Root, "app");
@@ -101,15 +86,10 @@ public sealed class UpgradeInstallTests
         }
     }
 
-    [Fact]
+    [VmUpgradeFact]
     [SupportedOSPlatform("windows")]
     public async Task Force_downgrade_replaces_the_newer_version()
     {
-        if (!ShouldRun())
-        {
-            return; // soft-skip — see class remarks.
-        }
-
         using var sandbox = new VmSandbox();
         var appId = "com.sigil.p3." + Guid.NewGuid().ToString("N");
         var dir = Path.Combine(sandbox.Root, "app");

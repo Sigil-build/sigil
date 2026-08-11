@@ -156,7 +156,10 @@ public sealed class UninstallViewModel : INotifyPropertyChanged
 
         var cts = new CancellationTokenSource();
         _cts = cts;
-        var progress = new Progress<StepProgress>(ApplyProgress);
+        // SerialProgress, not Progress<T>: with no SynchronizationContext the BCL type
+        // posts every report to the thread pool, so reports the engine made sequentially
+        // can execute ApplyProgress concurrently and race LogLines. See SerialProgress.
+        var progress = new SerialProgress<StepProgress>(ApplyProgress);
 
         try
         {

@@ -38,6 +38,33 @@ jobs:
       - name: build
         run: dotnet build Sigil.slnx --configuration Release --no-restore
 
+      # T1.2 (R6, CI half): WrapperRuntimeLocator.Locate() / RuntimeStagedFactAttribute
+      # resolve the staged host runtime at `runtimes/win-x64/SigilBuild.Installer.Host.exe`
+      # relative to AppContext.BaseDirectory -- which, for the packaging test project at
+      # `dotnet test` time, is that project's OWN build output directory, not the CLI's.
+      # Without staging here, every push runs the ExeWrapper packaging tests against an
+      # absent runtime and they report (honestly, post-T1.1) as Skipped instead of Passed.
+      # win-x64 ONLY: the tests need no more, and an AOT publish is expensive; aot-publish
+      # (below) separately stages win-x64 + win-arm64 for the real shipping artifacts. This
+      # duplicates that AOT publish on the critical path of every push -- see T1.2 report
+      # for the wall-clock cost trade-off and cheaper alternatives considered.
+      - name: stage installer host runtime for tests (win-x64)
+        shell: pwsh
+        run: |
+          ./scripts/publish-installer-runtime.ps1 `
+            -Rids win-x64 `
+            -Configuration Release `
+            -DestinationRoot tests/SigilBuild.Packaging.Tests/bin/Release/net10.0 `
+            -SizeGateMb 45
+
+      - name: verify staged win-x64 host runtime for tests
+        shell: pwsh
+        run: |
+          $exe = "tests/SigilBuild.Packaging.Tests/bin/Release/net10.0/runtimes/win-x64/SigilBuild.Installer.Host.exe"
+          if (-not (Test-Path $exe)) { throw "staged win-x64 host runtime missing at $exe -- the ExeWrapper packaging tests will silently skip instead of run (R6/R22 failure mode); publish-installer-runtime.ps1 must have failed silently, check its output above" }
+          $exeMb = [math]::Round((Get-Item $exe).Length / 1MB, 2)
+          Write-Host "staged win-x64 SigilBuild.Installer.Host.exe for tests: $exeMb MB"
+
       - name: test
         run: dotnet test Sigil.slnx --configuration Release --no-build --logger "trx;LogFileName=test-results.trx" --collect:"XPlat Code Coverage"
 
@@ -54,14 +81,75 @@ jobs:
           # true union instead: for each unique (assembly, file, line), record
           # max(hits) across all reports, then sum.
           #
-          # WBS targets per CLAUDE.md are Core >=80% / Signing+SDK >=85%; the
-          # gate here enforces a project-wide stop-gap of 65% (6pp under the
-          # measured baseline) and prints per-assembly numbers so regressions
-          # in any one component are visible. Integration-only wrappers
-          # (signtool/MakeAppx/Azure/COM) carry [ExcludeFromCodeCoverage].
+          # WBS targets per CLAUDE.md are Core >=80% / Signing+SDK >=85%. The
+          # project-wide ratchet (T1.3/R21) is set at the Stage 0 measured
+          # baseline rounded down; per-assembly floors below are ratchets too --
+          # raise them only when a lane demonstrably raises the measured number,
+          # never lower them. Integration-only wrappers (signtool/MakeAppx/Azure/
+          # COM) carry [ExcludeFromCodeCoverage].
           import glob, sys, xml.etree.ElementTree as ET
           from collections import defaultdict
+
+          # Floor of floors, retained for continuity/back-compat; PROJECT_WIDE_FLOOR
+          # below is the actual enforced gate and is strictly higher than this.
           THRESHOLD = 0.65
+
+          # T1.3/R21 per-assembly floors: set at the CURRENT MEASURED value
+          # rounded DOWN -- a ratchet, not the aspirational CLAUDE.md/AGENTS.md
+          # targets (Core >=80%, Signing/SDK >=85%).
+          #
+          # RE-PINNED at Stage 1 (T1, after S1+S2+S3 merged). The Stage 0 numbers
+          # were measured before three security lanes landed ~440 tests and a
+          # large amount of production code; Wrapper.Core had 0.05pp of headroom
+          # left. Measured on the integrated tree, previous floor in parentheses:
+          #   SigilBuild.Core            69.51%  -> 0.69  (was 0.63)
+          #   SigilBuild.Packaging       72.26%  -> 0.72  (was 0.72, unchanged)
+          #   SigilBuild.Signing         68.79%  -> 0.68  (was 0.68, unchanged)
+          #   SigilBuild.Wrapper.Core    79.17%  -> 0.79  (was 0.77)
+          #   project-wide union         77.05%  -> 0.77  (was 0.74)
+          # That run had no staged win-x64 installer-host runtime (the measuring
+          # machine cannot AOT-publish), so nine RuntimeStaged/Kiosk-gated
+          # SigilBuild.Packaging tests that CI does run were skipped. Union
+          # coverage is monotonic in tests executed, so each number above is a
+          # LOWER bound for CI and these floors cannot fail an otherwise-green run.
+          #
+          # SigilBuild.Installer.BrandGenerator (100.00%, 18 lines) and
+          # SigilBuild.Localization.Generator (97.42%) do report but are left
+          # unfloored on purpose: an 18-line assembly pinned at 100% is a cliff,
+          # not a ratchet.
+          PROJECT_WIDE_FLOOR = 0.77
+          ASSEMBLY_FLOORS = {
+              'SigilBuild.Core': 0.69,
+              'SigilBuild.Signing': 0.68,
+              'SigilBuild.Wrapper.Core': 0.79,
+              'SigilBuild.Packaging': 0.72,
+          }
+
+          # All nine shipping assemblies (AGENTS.md repo map). SigilBuild.Cli,
+          # SigilBuild.Wrapper and SigilBuild.Installer.Host report ZERO coverage
+          # lines today -- nothing in the coverlet-instrumented unit-test tree
+          # exercises them directly (only VM/integration suites do).
+          #
+          # RULING (T1.3, overrides plan text): a MISSING assembly is reported
+          # loudly via ::warning:: but does NOT fail the build -- hard-failing here
+          # would turn the required `build` check red the moment this lane merges,
+          # blocking every Stage 2/3 lane behind it. This tolerance is deliberate
+          # and TEMPORARY: move these three into ASSEMBLY_FLOORS (and delete this
+          # comment) the day each reports nonzero coverage. Per-assembly floors for
+          # assemblies that DO report still hard-fail below -- absence is reported,
+          # regression is enforced.
+          EXPECTED_ASSEMBLIES = {
+              'SigilBuild.Cli',
+              'SigilBuild.Core',
+              'SigilBuild.Installer.BrandGenerator',
+              'SigilBuild.Installer.Host',
+              'SigilBuild.Localization.Generator',
+              'SigilBuild.Packaging',
+              'SigilBuild.Signing',
+              'SigilBuild.Wrapper',
+              'SigilBuild.Wrapper.Core',
+          }
+
           files = glob.glob('**/TestResults/**/coverage.cobertura.xml', recursive=True)
           if not files:
               print("::error::no coverage.cobertura.xml files found — ensure coverlet is installed")
@@ -86,19 +174,39 @@ jobs:
           if not asm_keys:
               print("::error::no SigilBuild.* packages found in coverage reports")
               sys.exit(1)
-          print(f"{'assembly':<40} {'covered':>8} {'valid':>8} {'rate':>8}")
+          print(f"{'assembly':<40} {'covered':>8} {'valid':>8} {'rate':>8} {'floor':>8}")
           total_c = total_v = 0
+          failing = []
           for asm, keys in sorted(asm_keys.items()):
               valid = len(keys)
               covered = sum(1 for (f, ln) in keys if union_hits[(asm, f, ln)] > 0)
               total_c += covered
               total_v += valid
-              print(f"{asm:<40} {covered:>8} {valid:>8} {covered/valid if valid else 0:>8.2%}")
+              rate = covered / valid if valid else 0
+              floor = ASSEMBLY_FLOORS.get(asm)
+              floor_str = f"{floor:.0%}" if floor is not None else "n/a"
+              print(f"{asm:<40} {covered:>8} {valid:>8} {rate:>8.2%} {floor_str:>8}")
+              if floor is not None and rate < floor:
+                  failing.append((asm, rate, floor))
           rate = total_c / total_v
-          print(f"\nproject-wide union coverage: {total_c}/{total_v} = {rate:.2%}")
-          if rate < THRESHOLD:
-              print(f"::error::coverage {rate:.2%} is below the {THRESHOLD:.0%} threshold")
-              sys.exit(1)
+          print(f"\nproject-wide union coverage: {total_c}/{total_v} = {rate:.2%} (ratchet floor {PROJECT_WIDE_FLOOR:.0%})")
+
+          missing = sorted(EXPECTED_ASSEMBLIES - set(asm_keys.keys()))
+          exit_code = 0
+          if missing:
+              print(f"::warning::{len(missing)} expected assembly(ies) report ZERO coverage lines: {', '.join(missing)} (TEMPORARILY tolerated -- see comment above, T1.3/R21)")
+              for asm in missing:
+                  print(f"::warning::missing expected assembly: {asm} (0 lines observed in coverage reports)")
+
+          for asm, a_rate, floor in failing:
+              print(f"::error::{asm} coverage {a_rate:.2%} is below its {floor:.0%} floor")
+              exit_code = 1
+
+          if rate < PROJECT_WIDE_FLOOR:
+              print(f"::error::project-wide union coverage {rate:.2%} is below the {PROJECT_WIDE_FLOOR:.0%} ratchet floor")
+              exit_code = 1
+
+          sys.exit(exit_code)
           PY
 
       - name: upload test results

@@ -10,18 +10,14 @@ namespace SigilBuild.Wrapper.IntegrationTests;
 /// manifest in <c>examples/exe-wrapper/multi-edition</c>.
 /// </summary>
 /// <remarks>
-/// Tests soft-skip (return as Passed) when any of the following are missing:
+/// Tests report a genuine Skipped result (via <see cref="VmFactAttribute"/>, register
+/// row R6) when any of the following are missing:
 /// <list type="bullet">
 ///   <item><description>The host is not Windows.</description></item>
 ///   <item><description><c>SIGIL_VM_TESTS=1</c> is not set in the environment.</description></item>
 ///   <item><description>The AOT-published wrapper runtime is not staged under
 ///   <c>runtimes/win-x64/SigilBuild.Wrapper.exe</c> next to the test assembly.</description></item>
 /// </list>
-/// The repo doesn't currently take a dependency on <c>Xunit.SkippableFact</c>,
-/// so the tests use a soft-skip pattern (early <c>return</c>) rather than a
-/// "Skipped" verdict — they report as Passed in <c>dotnet test</c>. When
-/// <c>Xunit.SkippableFact</c> lands in <c>Directory.Packages.props</c>, prefer
-/// <c>Skip.IfNot(...)</c> for a more honest verdict.
 /// </remarks>
 public class MultiEditionInstallTests
 {
@@ -46,19 +42,9 @@ public class MultiEditionInstallTests
         return Path.Combine(dir, ManifestRel.Replace('/', Path.DirectorySeparatorChar));
     }
 
-    private static bool ShouldRun()
-        => System.OperatingSystem.IsWindows()
-            && TestEnvironment.IsEnabled
-            && TestEnvironment.IsRuntimeAvailable;
-
-    [Fact]
+    [VmFact]
     public async Task Pack_install_uninstall_roundtrip_for_enterprise_edition()
     {
-        if (!ShouldRun())
-        {
-            return; // soft-skip — see class remarks.
-        }
-
         using var sandbox = new VmSandbox();
         var manifestPath = FindManifest();
         var outDir = Path.Combine(sandbox.Root, "out");
@@ -76,14 +62,9 @@ public class MultiEditionInstallTests
         File.Exists(Path.Combine(sandbox.AppDir, "enterprise", "ent.txt")).Should().BeTrue();
     }
 
-    [Fact]
+    [VmFact]
     public async Task Community_edition_skips_pro_and_enterprise_steps()
     {
-        if (!ShouldRun())
-        {
-            return; // soft-skip — see class remarks.
-        }
-
         using var sandbox = new VmSandbox();
         var manifestPath = FindManifest();
         var outDir = Path.Combine(sandbox.Root, "out");

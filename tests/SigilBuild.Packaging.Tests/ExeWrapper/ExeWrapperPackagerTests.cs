@@ -59,25 +59,16 @@ public class ExeWrapperPackagerTests
     ///   resource-table alignment. THIS is what ADR-008's 5 MB cap governs, and it
     ///   is still enforced here.</description></item>
     /// </list>
-    /// Runtime-gated: skips gracefully when the AOT host is not staged (so a plain
-    /// <c>dotnet test</c> stays fast), and PASSES once the runtime is staged via
-    /// <c>scripts/publish-installer-runtime.ps1</c>.
+    /// Runtime-gated: reports a genuine Skipped result (via
+    /// <see cref="RuntimeStagedFactAttribute"/>, register row R6) when the AOT host is
+    /// not staged (so a plain <c>dotnet test</c> stays fast), and PASSES once the
+    /// runtime is staged via <c>scripts/publish-installer-runtime.ps1</c>.
     /// </summary>
-    [Fact]
+    [RuntimeStagedFact]
     public async Task PackAsync_wrapper_code_overhead_under_5mb_on_top_of_bundled_runtime()
     {
-        var wrapperPath = LocateStagedRuntime();
-        if (wrapperPath is null)
-        {
-            // AOT host runtime not staged for this session — skip gracefully.
-            // Stage it with scripts/publish-installer-runtime.ps1 -DestinationRoot
-            // <this test project's output dir> to exercise this path locally.
-            Console.WriteLine(
-                "SKIP: PackAsync_wrapper_code_overhead_under_5mb_on_top_of_bundled_runtime — " +
-                "runtimes/win-x64/SigilBuild.Installer.Host.exe not staged (non-Windows " +
-                "or AOT runtime not published). Run scripts/publish-installer-runtime.ps1.");
-            return;
-        }
+        // The RuntimeStagedFact precondition guarantees this is non-null when the test runs.
+        var wrapperPath = LocateStagedRuntime()!;
 
         var fixtureDir = Path.Combine(AppContext.BaseDirectory, "Fixtures", "minimal-payload");
         var outputDir = Path.Combine(Path.GetTempPath(), $"sigil-wrap-{Guid.NewGuid():N}");
@@ -140,29 +131,23 @@ public class ExeWrapperPackagerTests
     /// per declared architecture, each a valid PE carrying the stamped
     /// <c>SIGIL_BLOB_V1</c> + <c>SIGIL_PAYLOAD_V2</c> resources.
     /// <para>
-    /// Gating: mirrors the existing skip-gated pack tests — the test skips when the
-    /// AOT host runtime is not staged under <c>runtimes/win-x64/</c> (non-Windows,
-    /// or a plain build that has not run <c>scripts/publish-installer-runtime.ps1</c>),
-    /// so the normal <c>dotnet test</c> run never triggers the slow AOT publish.
-    /// When the real x64 runtime <b>is</b> staged, the test additionally stages an
-    /// arm64 stand-in (a copy of the x64 host — <c>BeginUpdateResourceW</c> works on
-    /// any PE regardless of its target machine) to exercise the multi-arch path, then
-    /// removes it. That stand-in is reached only inside the already-gated body, so the
-    /// plain-build skip path is unaffected.
+    /// Gating: mirrors the existing skip-gated pack tests — the test reports a genuine
+    /// Skipped result (via <see cref="RuntimeStagedFactAttribute"/>, register row R6)
+    /// when the AOT host runtime is not staged under <c>runtimes/win-x64/</c>
+    /// (non-Windows, or a plain build that has not run
+    /// <c>scripts/publish-installer-runtime.ps1</c>), so the normal <c>dotnet test</c>
+    /// run never triggers the slow AOT publish. When the real x64 runtime <b>is</b>
+    /// staged, the test additionally stages an arm64 stand-in (a copy of the x64 host —
+    /// <c>BeginUpdateResourceW</c> works on any PE regardless of its target machine) to
+    /// exercise the multi-arch path, then removes it. That stand-in is reached only
+    /// inside the already-gated body, so the plain-build skip path is unaffected.
     /// </para>
     /// </summary>
-    [Fact]
+    [RuntimeStagedFact]
     public async Task PackAsync_produces_arch_tagged_Setup_exe_with_sigil_resources_per_architecture()
     {
-        var runtime = LocateStagedRuntime();
-        if (runtime is null)
-        {
-            Console.WriteLine(
-                "SKIP: PackAsync_produces_arch_tagged_Setup_exe_with_sigil_resources_per_architecture — " +
-                "runtimes/win-x64/SigilBuild.Installer.Host.exe not staged (non-Windows or AOT " +
-                "runtime not published). Run scripts/publish-installer-runtime.ps1.");
-            return;
-        }
+        // The RuntimeStagedFact precondition guarantees this is non-null when the test runs.
+        var runtime = LocateStagedRuntime()!;
 
         var fixtureDir = Path.Combine(AppContext.BaseDirectory, "Fixtures", "minimal-payload");
         var payloadDir = Path.Combine(fixtureDir, "payload");

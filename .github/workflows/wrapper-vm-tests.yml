@@ -82,6 +82,19 @@ jobs:
             -DestinationRoot $dest `
             -SizeGateMb 45
 
+      # HARD GATE (T1.4/R22 — same shape as the p11 job's guard below): a dropped
+      # SIGIL_VM_TESTS or a silently empty runtime staging would make this whole
+      # job go green having exercised nothing, because TestEnvironment.IsEnabled
+      # soft-skips (not hard-fails) when either precondition is absent. Fail the
+      # job here instead so a green scope-matrix run is proof the legs actually ran.
+      - name: require SIGIL_VM_TESTS and a staged runtime (else this job would silently soft-skip)
+        shell: pwsh
+        run: |
+          if ($env:SIGIL_VM_TESTS -ne '1') { Write-Error "wrapper-vm-tests scope matrix requires SIGIL_VM_TESTS=1; refusing to pass vacuously"; exit 1 }
+          $exe = "tests/SigilBuild.Wrapper.IntegrationTests/bin/Release/net10.0/runtimes/win-x64/SigilBuild.Installer.Host.exe"
+          if (-not (Test-Path $exe)) { Write-Error "staged win-x64 installer host runtime missing at $exe; the VM-gated install/uninstall tests would silently soft-skip having exercised nothing; refusing to pass vacuously"; exit 1 }
+          Write-Host "SIGIL_VM_TESTS=1 and staged runtime confirmed present"
+
       # One run per scope exercises the whole contract (install → verify →
       # uninstall → verify, plus the T15 deleted-original and T10 double-install
       # scenarios) via the env toggles above. The integration tests pack a fixture
@@ -125,6 +138,12 @@ jobs:
   p12-update-webinstaller-vm:
     runs-on: windows-latest
     name: vm (p12 update + web-installer)
+    env:
+      # T1.4/R22: previously this job had no VM-mode marker at all, so nothing
+      # would notice if it were silently invoked without real VM intent. Set
+      # here and asserted by the guard step below, matching the scope-matrix
+      # and p11 jobs' convention.
+      SIGIL_VM_TESTS: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -151,6 +170,19 @@ jobs:
             -Configuration Release `
             -DestinationRoot $dest `
             -SizeGateMb 45
+
+      # HARD GATE (T1.4/R22 — same shape as the p11 job's guard below): without
+      # this, a dropped SIGIL_VM_TESTS or a silently empty runtime staging would
+      # make this job go green having exercised nothing. Fail the job here
+      # instead so a green p12 run is proof the web-installer pack path actually
+      # exercised a real staged AOT runtime.
+      - name: require SIGIL_VM_TESTS and a staged runtime (else this job would silently soft-skip)
+        shell: pwsh
+        run: |
+          if ($env:SIGIL_VM_TESTS -ne '1') { Write-Error "p12-update-webinstaller-vm requires SIGIL_VM_TESTS=1; refusing to pass vacuously"; exit 1 }
+          $exe = "tests/SigilBuild.Packaging.Tests/bin/Release/net10.0/runtimes/win-x64/SigilBuild.Installer.Host.exe"
+          if (-not (Test-Path $exe)) { Write-Error "staged win-x64 installer host runtime missing at $exe; the P12 web-installer pack tests would silently soft-skip having exercised nothing; refusing to pass vacuously"; exit 1 }
+          Write-Host "SIGIL_VM_TESTS=1 and staged runtime confirmed present"
 
       - name: run P12 update-engine end-to-end tests
         shell: pwsh

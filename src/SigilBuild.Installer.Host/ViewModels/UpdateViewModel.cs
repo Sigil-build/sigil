@@ -172,8 +172,11 @@ public sealed class UpdateViewModel : INotifyPropertyChanged
         // UninstallViewModel.ApplyProgress — UpdateRunner may report from a
         // thread-pool continuation (its internal awaits use ConfigureAwait(false)),
         // and an ObservableCollection must only be mutated on the UI thread.
-        IProgress<(string Message, bool IsError)> uiUpdates =
-            new Progress<(string Message, bool IsError)>(item => ApplyReport(item.Message, item.IsError));
+        // SerialProgress, not Progress<T>: with no SynchronizationContext the BCL type
+        // posts every report to the thread pool, so sequential reports can race inside
+        // ApplyReport's LogLines.Add. See SerialProgress.
+        var uiUpdates =
+            new SerialProgress<(string Message, bool IsError)>(item => ApplyReport(item.Message, item.IsError));
 
         void Report(string message, bool isError)
         {

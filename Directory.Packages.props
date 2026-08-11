@@ -41,19 +41,25 @@
          (encode) and the AOT installer host (decode), and reusable by the future
          delta-update engine (spec section 5). Pinned for deterministic output. -->
     <PackageVersion Include="ZstdSharp.Port" Version="0.8.8" />
-    <!-- Logo resize — bumped to 3.119.4-preview.1.1 to satisfy Avalonia 12 transitive requirement -->
-    <PackageVersion Include="SkiaSharp" Version="3.119.4-preview.1.1" />
-    <PackageVersion Include="SkiaSharp.NativeAssets.Win32" Version="3.119.4-preview.1.1" />
-    <PackageVersion Include="SkiaSharp.NativeAssets.Linux" Version="3.119.4-preview.1.1" />
+    <!-- Logo resize — SUP.4 (R42): stable since Avalonia.Skia 12.0.5, which
+         dropped its SkiaSharp dependency from 3.119.4-preview.1.1 to the
+         stable 3.119.4 release (verified against Avalonia.Skia's own
+         .nuspec for 12.0.2/12.0.5/12.1.0/12.1.1). Bumping Avalonia 12.0.2 ->
+         12.0.5 (patch-level; Avalonia.Skia's nuspec pins SkiaSharp to an
+         exact version, so the SkiaSharp bump requires this) removes the
+         preview native binary from privileged software. -->
+    <PackageVersion Include="SkiaSharp" Version="3.119.4" />
+    <PackageVersion Include="SkiaSharp.NativeAssets.Win32" Version="3.119.4" />
+    <PackageVersion Include="SkiaSharp.NativeAssets.Linux" Version="3.119.4" />
     <!-- Roslyn analyzer / source generator -->
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.11.0" />
     <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" />
     <!-- Avalonia installer host -->
-    <PackageVersion Include="Avalonia" Version="12.0.2" />
-    <PackageVersion Include="Avalonia.Desktop" Version="12.0.2" />
-    <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.0.2" />
-    <PackageVersion Include="Avalonia.Headless" Version="12.0.2" />
-    <PackageVersion Include="Avalonia.Headless.XUnit" Version="12.0.2" />
+    <PackageVersion Include="Avalonia" Version="12.0.5" />
+    <PackageVersion Include="Avalonia.Desktop" Version="12.0.5" />
+    <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.0.5" />
+    <PackageVersion Include="Avalonia.Headless" Version="12.0.5" />
+    <PackageVersion Include="Avalonia.Headless.XUnit" Version="12.0.5" />
     <PackageVersion Include="Svg.Skia" Version="2.0.0.4" />
   </ItemGroup>
 </Project>

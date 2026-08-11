@@ -1,7 +1,10 @@
 using System;
 using System.IO;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Xml;
 using FluentAssertions;
+using SigilBuild.Core.Manifest;
 using SigilBuild.Wrapper.Steps;
 using Xunit;
 
@@ -62,9 +65,17 @@ public class ConfigEditorTests
 
     // ── JSON ─────────────────────────────────────────────────────────────────
 
+    // The written value is a string in each of these: R35 made `value_type: string`
+    // the default, so `"2"` rather than `2` is the expected shape unless the step
+    // opts in with `value_type: json`.
     [Fact]
     public void Json_edits_an_existing_pointer()
-        => JsonEditor.Set("""{"a":{"b":1}}""", "/a/b", "2").Should().Contain("\"b\": 2");
+        => JsonEditor.Set("""{"a":{"b":1}}""", "/a/b", "2").Should().Contain("\"b\": \"2\"");
+
+    [Fact]
+    public void Json_edits_an_existing_pointer_with_a_number_under_value_type_json()
+        => JsonEditor.Set("""{"a":{"b":1}}""", "/a/b", "2", JsonValueType.Json)
+            .Should().Contain("\"b\": 2");
 
     [Fact]
     public void Json_adds_a_new_key()
@@ -74,19 +85,80 @@ public class ConfigEditorTests
     public void Json_creates_nested_objects_along_the_pointer()
     {
         var result = JsonEditor.Set("{}", "/a/b/c", "1");
-        result.Should().Contain("\"a\"").And.Contain("\"b\"").And.Contain("\"c\": 1");
+        result.Should().Contain("\"a\"").And.Contain("\"b\"").And.Contain("\"c\": \"1\"");
     }
 
+    // ── JSON: value typing (R35) ─────────────────────────────────────────────
+
+    /// <summary>
+    /// Register row R35. The step used to run every resolved value through
+    /// <c>JsonNode.Parse</c> and keep whatever came back, so a value sourced from a
+    /// wizard field, a <c>registry_read</c> var or <c>/P&lt;name&gt;=</c> chose the
+    /// SHAPE of the node written into the application's own configuration. The
+    /// default is now <c>string</c>, and the old inference is the <c>json</c> opt-in.
+    /// </summary>
     [Theory]
-    [InlineData("true", "true")]
-    [InlineData("42", "42")]
+    [InlineData("true", "\"true\"")]
+    [InlineData("42", "\"42\"")]
+    [InlineData("null", "\"null\"")]
     [InlineData("plain", "\"plain\"")]
-    public void Json_value_is_typed_when_it_parses_as_json_else_a_string(string value, string expectedJson)
+    public void Json_value_defaults_to_a_string_even_when_it_parses_as_json(string value, string expectedJson)
         => JsonEditor.Set("{}", "/k", value).Should().Contain("\"k\": " + expectedJson);
 
     [Fact]
+    public void Json_value_that_looks_like_an_object_is_written_as_a_string_by_default()
+    {
+        const string Injected = """{"name":"alice","admin":true}""";
+
+        var result = JsonEditor.Set("""{"user":"alice"}""", "/user", Injected);
+
+        var written = JsonNode.Parse(result)!["user"]!;
+        written.GetValueKind().Should().Be(
+            JsonValueKind.String,
+            "a value that happens to look like JSON must not become structure — that is a " +
+            "type-confusion channel into the application's own config (R35)");
+        written.GetValue<string>().Should().Be(
+            Injected, "the value is written verbatim, as the string it is");
+    }
+
+    [Fact]
+    public void Json_value_that_looks_like_an_array_is_written_as_a_string_by_default()
+    {
+        var result = JsonEditor.Set("{}", "/roles", "[\"admin\",\"root\"]");
+
+        JsonNode.Parse(result)!["roles"]!.GetValueKind().Should().Be(
+            JsonValueKind.String,
+            "an array-shaped value written where a string was expected changes how the " +
+            "application reads its own configuration");
+    }
+
+    [Theory]
+    [InlineData("true", JsonValueKind.True)]
+    [InlineData("42", JsonValueKind.Number)]
+    [InlineData("[1,2]", JsonValueKind.Array)]
+    [InlineData("{\"a\":1}", JsonValueKind.Object)]
+    public void Json_value_type_json_opts_back_into_structural_writes(string value, JsonValueKind expected)
+    {
+        var result = JsonEditor.Set("{}", "/k", value, JsonValueType.Json);
+
+        JsonNode.Parse(result)!["k"]!.GetValueKind().Should().Be(expected);
+    }
+
+    [Fact]
+    public void Json_value_type_json_with_a_non_json_value_fails_rather_than_degrading()
+    {
+        var act = () => JsonEditor.Set("{}", "/k", "not json at all", JsonValueType.Json);
+
+        act.Should().Throw<InvalidOperationException>(
+            "with the intent declared, a non-parsing value is a manifest error — silently " +
+            "degrading to a string would be a second way for the value's supplier to pick " +
+            "the written type")
+            .WithMessage("*value_type*");
+    }
+
+    [Fact]
     public void Json_creates_document_from_nothing()
-        => JsonEditor.Set(null, "/a", "1").Should().Contain("\"a\": 1");
+        => JsonEditor.Set(null, "/a", "1").Should().Contain("\"a\": \"1\"");
 
     // ── XML ──────────────────────────────────────────────────────────────────
 

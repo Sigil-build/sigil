@@ -1168,7 +1168,7 @@ public static class ManifestParser
     private static readonly string[] RunProgramFields = { "id", "type", "when", "on_failure", "program", "args", "wait", "cwd", "expected_exit_codes", "timeout_seconds" };
     private static readonly string[] HttpDownloadFields = { "id", "type", "when", "on_failure", "allow_outside_install_dir", "url", "dest", "sha256", "timeout_seconds", "retries" };
     private static readonly string[] IniWriteFields = { "id", "type", "when", "on_failure", "allow_outside_install_dir", "path", "section", "key", "value", "create_if_missing" };
-    private static readonly string[] JsonEditFields = { "id", "type", "when", "on_failure", "allow_outside_install_dir", "path", "pointer", "value", "create_if_missing" };
+    private static readonly string[] JsonEditFields = { "id", "type", "when", "on_failure", "allow_outside_install_dir", "path", "pointer", "value", "value_type", "create_if_missing" };
     private static readonly string[] XmlEditFields = { "id", "type", "when", "on_failure", "allow_outside_install_dir", "path", "xpath", "attribute", "value", "create_if_missing" };
 
     private static List<InstallStep>? ParseInstallSteps(
@@ -1305,6 +1305,9 @@ public static class ManifestParser
         "id", "type", "when", "on_failure",
         "name", "program", "arguments", "trigger", "run_level",
     };
+
+    /// <summary><c>json_edit.value_type</c> (register row R35).</summary>
+    private static readonly string[] JsonEditValueTypeValues = { "string", "json" };
 
     private static readonly string[] ScheduledTaskTriggerValues = { "logon", "daily", "onstart" };
     private static readonly string[] ScheduledTaskRunLevelValues = { "limited", "highest" };
@@ -1657,8 +1660,34 @@ public static class ManifestParser
         if (pointer is null) { ReportMissingField(id, "json_edit", "pointer", loc, diagnostics); return null; }
         var value = GetScalar(node, "value") ?? string.Empty;
         var createIfMissing = GetBool(node, "create_if_missing", defaultValue: false);
+
+        // R35: how `value` is interpreted after substitution. Omitted means `string` —
+        // the safe default; the prior "parse it and keep whatever comes back" behaviour
+        // is now the explicit `json` opt-in. A bad value is an Error, not a silent
+        // fallback to either mode, for the same reason as the other enum step fields:
+        // the runtime shape of the written node would otherwise be a guess.
+        var rawValueType = GetScalar(node, "value_type");
+        var valueType = JsonValueType.Text;
+        if (rawValueType is not null)
+        {
+            switch (rawValueType)
+            {
+                case "string":
+                    valueType = JsonValueType.Text;
+                    break;
+                case "json":
+                    valueType = JsonValueType.Json;
+                    break;
+                default:
+                    ReportBadEnumValue(
+                        id, "json_edit", "value_type", rawValueType,
+                        JsonEditValueTypeValues, loc, diagnostics);
+                    return null;
+            }
+        }
+
         ReportUnknownStepFields(node, id, "json_edit", JsonEditFields, loc, diagnostics);
-        return new InstallStep.JsonEdit(id, path, pointer, value, createIfMissing, when, onFailure);
+        return new InstallStep.JsonEdit(id, path, pointer, value, createIfMissing, when, onFailure, valueType);
     }
 
     private static InstallStep.XmlEdit? BuildXmlEdit(

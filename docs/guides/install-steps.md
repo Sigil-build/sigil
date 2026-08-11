@@ -366,6 +366,34 @@ The opt-out is per step and deliberate: it is a declaration that this particular
 
 Rejected rather than escaped: an INI file has no escape for a newline inside a value, so escaping would silently mangle what you wrote. All three are pack-time-authored, so failing puts the problem in front of the publisher. The leading-`[` rule is deliberately conservative — a `[` in a *value* cannot itself create a section — so write `value: " [1,2,3]"` or quote it differently if you need one.
 
+### `json_edit` writes a string unless you say `value_type: json`
+
+|Field|Type|Required|Default|Notes|
+|---|---|---|---|---|
+|`value_type`|enum|-|`string`|`string` writes the resolved `value` as a JSON string, always. `json` parses it and writes the resulting number, boolean, `null`, array or object.|
+
+```yaml
+- id: set-endpoint          # writes  "endpoint": "https://api.example.com"
+  type: json_edit
+  path: "{install_dir}\\appsettings.json"
+  pointer: /Api/endpoint
+  value: "${parameters.endpoint}"
+
+- id: set-worker-count      # writes  "workers": 4
+  type: json_edit
+  path: "{install_dir}\\appsettings.json"
+  pointer: /Api/workers
+  value: "4"
+  value_type: json
+```
+
+The step used to infer the type from the value: it ran every resolved `value` through a JSON parser and kept whatever came back, falling back to a string only when the parse failed. That is reasonable for a literal you typed into the manifest and wrong for everything else, because the same field also carries values resolved from a **wizard field**, a `registry_read` var or a `/P<name>=` argument — and those then chose the *shape* of the node written into your application's configuration. A value of `{"admin":true}` where you wrote and reviewed a string becomes an object your application reads as one. The encoding was never unsafe; the output is always well-formed JSON. What was unsafe is that the value's supplier picked its type.
+
+So `string` is the default and the old inference is the opt-in. Two consequences worth knowing:
+
+- **A manifest that meant a number now writes a string** until you add `value_type: json`. That is a visible, one-line fix; the reverse — a silent type change driven by user input — is not.
+- Under `value_type: json`, a value that is **not** valid JSON **fails the step** rather than quietly falling back to a string. With the intent declared, a non-parsing value is a manifest error, and the fallback would just be a second way for the supplier to pick the type.
+
 ### `xml_edit` refuses a document that declares a `<!DOCTYPE>`
 
 The XML a step edits is parsed with `XmlResolver = null` and `DtdProcessing = Prohibit`. Two separate guarantees:

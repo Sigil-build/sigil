@@ -194,6 +194,12 @@ public abstract record InstallStep(string Id, string? When, OnFailure OnFailure)
     /// <see cref="JsonPointer"/> in a JSON file (System.Text.Json DOM), creating
     /// intermediate objects as needed. Journaled for byte-exact rollback.
     /// </summary>
+    /// <param name="ValueType">
+    /// How <c>Value</c> is interpreted once every <c>${…}</c> / <c>{…}</c>
+    /// substitution has happened — see <see cref="Manifest.JsonValueType"/>.
+    /// Defaults to <see cref="Manifest.JsonValueType.Text"/> (register row R35),
+    /// which is also what an omitted <c>value_type:</c> in the manifest means.
+    /// </param>
     public sealed record JsonEdit(
         string Id,
         string Path,
@@ -201,7 +207,8 @@ public abstract record InstallStep(string Id, string? When, OnFailure OnFailure)
         string Value,
         bool CreateIfMissing,
         string? When,
-        OnFailure OnFailure)
+        OnFailure OnFailure,
+        JsonValueType ValueType = JsonValueType.Text)
         : InstallStep(Id, When, OnFailure);
 
     /// <summary>
@@ -336,4 +343,46 @@ public enum OnFailure
     Rollback,
     Continue,
     Fail,
+}
+
+/// <summary>
+/// How <c>json_edit</c> interprets its <c>value:</c> after substitution
+/// (manifest <c>value_type:</c>, register row R35).
+/// </summary>
+/// <remarks>
+/// <para>
+/// The step used to run every resolved value through <c>JsonNode.Parse</c> and keep
+/// whatever came back, documented as intentional literal inference. That is fine for
+/// a literal the publisher typed and wrong for anything else: a value sourced from a
+/// wizard field, a <c>registry_read</c> var or a <c>/P&lt;name&gt;=</c> argument could
+/// arrive as <c>{"admin":true}</c>, <c>[1,2]</c>, <c>true</c> or <c>null</c> and be
+/// written into the application's own configuration as structure where the manifest
+/// author wrote — and reviewed — a string. Encoding was never the problem; the
+/// resulting JSON is always well formed. The problem is that the shape of the written
+/// node is chosen by whoever supplies the value.
+/// </para>
+/// <para>
+/// <see cref="String"/> is therefore the default and today's behaviour is the opt-in.
+/// It is not a compatibility break in the direction that matters: a manifest that
+/// meant <c>true</c> and now gets <c>"true"</c> is a visible, correctable defect,
+/// where the reverse is a silent type-confusion channel.
+/// </para>
+/// </remarks>
+public enum JsonValueType
+{
+    /// <summary>
+    /// Manifest <c>value_type: string</c> — write the resolved value as a JSON
+    /// string, always and exactly. The default. (Spelled <c>Text</c> rather than
+    /// <c>String</c> because CA1720 forbids a type name as an identifier; the
+    /// manifest spelling is unaffected.)
+    /// </summary>
+    Text,
+
+    /// <summary>
+    /// Parse the resolved value as JSON and write the resulting node — number,
+    /// boolean, <c>null</c>, array or object. A value that is not valid JSON fails
+    /// the step rather than silently degrading to a string: with the intent declared,
+    /// a parse failure is a manifest error worth surfacing.
+    /// </summary>
+    Json,
 }

@@ -1395,14 +1395,42 @@ the operator cannot tell the two apart, which was the whole defect.
 ### R48 — The trust-line lookup blocks the wizard's UI thread
 **Component:** Installer.Host · **Effort: S** · **RELEASE-GATING**
 
-The call site is **confirmed** UI-blocking. The **stall magnitude is UNMEASURED**:
-the ~15 s figure is Windows' documented CRL timeout, not an observed number, and
-this box is online so it returns `Trusted` immediately. Needs an offline
-cold-cache first-run measurement before release.
+The call site is **confirmed** UI-blocking.
 
-Do the off-thread fix regardless of what the number turns out to be — a first-run
-wizard that appears hung is a first impression, and the measurement only decides
-how urgent it was.
+**A best-case floor was measured 2026-08-11 and it already justifies the fix.**
+`AuthenticodeVerifier.VerifyFileStatus` against an embedded-signed, DigiCert/
+GlobalSign-chained binary, on this box, **online, with a warm OS certificate
+cache**:
+
+```
+run 1:  335 ms   Trusted
+run 2:    9 ms   Trusted
+run 3:    6 ms   Trusted
+```
+
+**335 ms is the happy path** — network up, responder reachable, cache populated —
+and it is already past the ~100 ms at which a UI reads as unresponsive. Every
+condition that makes this worse (cold cache, captive portal, unreachable CRL
+distribution point) moves in one direction only.
+
+Two measurement traps, both hit while producing that number:
+
+1. **Do not measure a Windows system binary.** They are *catalog*-signed, and
+   `WinVerifyTrust` with `WTD_CHOICE_FILE` reports `NoSignature` without ever
+   reaching a revocation lookup — `notepad.exe` measures **0 ms** no matter how
+   broken the stall is. The target must carry an **embedded** signature.
+2. **A fast run is a run that was not set up.** Anything under ~200 ms means the
+   cache was warm and the network was up.
+
+**Still outstanding: the worst case.** The ~15 s figure quoted originally is
+Windows' documented CRL timeout, not an observation. That needs an offline,
+cold-cache first run on real hardware — `certutil -URLCache * delete`, then
+disable the adapter — which no agent run can produce from an online box. It is
+the human partner's measurement.
+
+**The off-thread fix does not wait for it.** 335 ms on the happy path settles
+whether the fix is worth doing; the offline number only settles how bad the
+worst case was.
 
 ### R49 — Authenticode validity is integrity, not publisher identity
 **Component:** Wrapper.Core · **Effort: M** · **POST-v1**

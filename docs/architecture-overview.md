@@ -28,7 +28,7 @@ Pack today ships working ZIP, MSIX, and **EXE-wrapper** paths. The
 EXE-wrapper produces a single self-extracting `setup.exe` with a branded
 Windows wizard, NSIS-style screen-grouped parameters, a dedicated install
 location screen with disk-space readout, and an auto-generated
-`uninstaller.exe` plus Add/Remove Programs entry. Signing and the
+`uninstall.exe` plus Add/Remove Programs entry. Signing and the
 full-package update engine (see [Updates](guides/updates.md)) both ship
 today too; `publish` and delta updates are the remaining pieces of the MVP
 timeline.
@@ -38,10 +38,12 @@ timeline.
 These are the load-bearing choices the codebase is built around. None of them
 will change without a superseding architecture decision record:
 
-- **Language: .NET 10 LTS, Native AOT.** Cold-start under 200 ms, single-file
-  binary under 15 MB. Reflection-heavy patterns are forbidden — source
-  generators are used instead (YamlDotNet, System.Text.Json, hand-rolled
-  where needed).
+- **Language: .NET 10 LTS, Native AOT.** Cold-start under 200 ms, `sigil.exe`
+  itself under 15 MB (CI-gated) — but not single-file: `sigil.exe` ships
+  beside `libSkiaSharp.dll` and `libsodium.dll`, the native halves of
+  `SigilBuild.Packaging` and `SigilBuild.Signing`. Reflection-heavy patterns
+  are forbidden — source generators are used instead (YamlDotNet,
+  System.Text.Json, hand-rolled where needed).
 - **Manifest format: YAML.** Strict-mode parsing, exhaustive JSON Schema
   validation, plus a typed install-step deserializer that catches semantic
   errors the schema can't express.
@@ -66,19 +68,29 @@ will change without a superseding architecture decision record:
 
 ## Component layout
 
+All nine shipping assemblies under `src/` (`Sigil.slnx`):
+
 ```
 src/
-├── SigilBuild.Cli/                  # Console entry point — the `sigil` binary.
-├── SigilBuild.Core/                 # Manifest parsing, schema validation, diagnostics, versioning.
-├── SigilBuild.Packaging/            # MSIX + ZIP packagers, deterministic by design.
-├── SigilBuild.Wrapper/              # The branded Windows installer wizard's runtime engine.
-├── SigilBuild.Installer.Host/       # AOT-published wizard host that the wrapper drives.
-└── SigilBuild.Installer.BrandGenerator/   # Compile-time branding asset pipeline.
+├── SigilBuild.Cli/                        # Console entry point — the `sigil` binary (validate, init, pack, sign).
+├── SigilBuild.Core/                       # Manifest parsing, schema validation, diagnostics, versioning.
+├── SigilBuild.Packaging/                  # Zip/, Msix/, ExeWrapper/ (builds the installer blob), Installer/ backends.
+├── SigilBuild.Signing/                    # Authenticode: Local/ (signtool), Azure/ (Trusted Signing), audit log.
+├── SigilBuild.Wrapper.Core/               # Shared install engine — Engine/ (InstallEngine, RollbackJournal,
+│                                           # StepFactory), Steps/ (the step catalog), Expressions/ (when-clauses).
+├── SigilBuild.Wrapper/                    # Console-only wrapper host (the `/silent` entry point).
+├── SigilBuild.Installer.Host/             # Avalonia wizard UI (Views/Screens, ViewModels), engine-driven.
+├── SigilBuild.Installer.BrandGenerator/   # Derives a light+dark palette from two manifest colors at pack time.
+└── SigilBuild.Localization.Generator/     # netstandard2.0 source generator for the wizard's string catalog.
 ```
 
-The packagers, signers, and publishers live behind small interfaces in
-`SigilBuild.Core` so a third-party signing provider or a different package
-format is a focused implementation, not a fork.
+The wizard's install engine moved out of `SigilBuild.Wrapper` and into the
+shared `SigilBuild.Wrapper.Core` during the T1–T18 installer track — both
+`SigilBuild.Wrapper` (headless `/S`) and `SigilBuild.Installer.Host` (the
+GUI) now drive the same `InstallEngine`. The packagers, signers, and
+publishers live behind small interfaces in `SigilBuild.Core` so a
+third-party signing provider or a different package format is a focused
+implementation, not a fork.
 
 ## Tech stack at a glance
 
@@ -87,25 +99,30 @@ format is a focused implementation, not a fork.
 | Language | C# 14 / .NET 10 LTS, Native AOT |
 | YAML | YamlDotNet (with source generators for AOT) |
 | JSON Schema | Hand-rolled draft-07 validator |
-| Compression | ZstdNet + native fallback (zstd 1.5+ dictionary mode) |
-| Crypto (Ed25519) | NSec.Cryptography |
+| Compression | ZstdSharp.Port — pure-managed C# zstd port, "nothing to bundle" (`Directory.Packages.props:38-43`) |
+| Crypto — ZIP manifest signing | NSec.Cryptography / Ed25519 (`SigilBuild.Signing/Local/ZipManifestSigner.cs`) |
+| Crypto — update-manifest signing | BCL `ECDsa`, P-256 — no native crypto dependency ([ADR-009](architecture/adr-009-update-manifest-signature.md)) |
 | HTTP | HttpClient + Polly |
 | MSIX | `MakeAppx.exe` + a custom `AppxManifest` builder |
 | CI | GitHub Actions |
 
+Two different signature schemes for two different jobs, on purpose — ADR-009
+records the update-manifest rationale.
+
 ## Runtime targets
 
-These numbers are quality bars enforced by CI, not aspirations:
+Of the rows below, CI actually enforces **one** size number — `sigil.exe` ≤
+15 MB, `.github/workflows/ci.yml:241` — plus the project-wide test-coverage
+floor. The rest are **targets**, not gates:
 
-| Metric | Target |
-|---|---|
-| `sigil --version` cold-start (Native AOT, win-x64) | ≤ 200 ms |
-| `sigil.exe` (AOT-published, Release, stripped) | ≤ 15 MB |
-| `sigil pack` for a 100 MB source tree | ≤ 5 s |
-| `sigil sign` round-trip via Azure Trusted Signing | ≤ 8 s p50, ≤ 20 s p99 |
-| Delta patch generation, 100 MB → 100 MB build | ≤ 30 s |
-| Test coverage in `SigilBuild.Core` | ≥ 80 % line coverage |
-| Test coverage in signing + update SDK | ≥ 85 % line coverage |
+| Metric | Target | CI-enforced? |
+|---|---|---|
+| `sigil --version` cold-start (Native AOT, win-x64) | ≤ 200 ms | No |
+| `sigil.exe` (AOT-published, Release, stripped) | ≤ 15 MB | **Yes** — `ci.yml:241` |
+| `sigil pack` for a 100 MB source tree | ≤ 5 s | No |
+| `sigil sign` round-trip via Azure Trusted Signing | ≤ 8 s p50, ≤ 20 s p99 | No |
+| Delta patch generation, 100 MB → 100 MB build | ≤ 30 s | No — metric for a deferred feature, see [ADR-010](architecture/adr-010-delta-update-deferral.md) |
+| Test coverage, project-wide union | ≥ 65 % (aspirational: Core ≥ 80 %, Signing/SDK ≥ 85 %) | **Yes** — `ci.yml`'s Python coverage gate |
 
 A red `main` build older than four hours is "stop the world" — the project's
 quality model assumes `main` is always shippable.

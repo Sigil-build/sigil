@@ -170,7 +170,7 @@ public class UninstallEngineTests
                 appId, journal, InstallScope.User,
                 secretValues: null, progress: null, installDir: installDir.Path);
 
-            var result = await new UninstallEngine().RunAsync(appId, installDir.Path, InstallScope.User);
+            var result = await new UninstallEngine().RunAsync(appId, installDir.Path, SignedDeclarations.None, InstallScope.User);
 
             result.Success.Should().BeFalse(
                 "a replay in which a record could not be reversed did not achieve what an " +
@@ -212,7 +212,7 @@ public class UninstallEngineTests
                 appId, journal, InstallScope.User,
                 secretValues: null, progress: null, installDir: installDir.Path);
 
-            var result = await new UninstallEngine().RunAsync(appId, installDir.Path, InstallScope.User);
+            var result = await new UninstallEngine().RunAsync(appId, installDir.Path, SignedDeclarations.None, InstallScope.User);
 
             result.Success.Should().BeTrue(result.Error ?? "clean replay");
             File.Exists(f).Should().BeFalse();

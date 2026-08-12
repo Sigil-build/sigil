@@ -71,7 +71,58 @@ public sealed record InstallerSection(
     RunAfterInstall? RunAfterInstall = null,
     IReadOnlyList<InstallerPrerequisite>? Prerequisites = null,
     IReadOnlyList<string>? AppMutex = null,
-    string? Language = null);
+    string? Language = null,
+    RequireSignedDownloads RequireSignedDownloads = RequireSignedDownloads.SignDeclared);
+
+/// <summary>
+/// The declared policy for whether a binary this run pulled off the network must be
+/// Authenticode-valid before it is launched — <c>installer.require_signed_downloads</c>
+/// (register row R45).
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Why this exists.</b> The gate used to read <c>SignDeclared</c> — "did this
+/// publisher configure signing for their own output" — and use it as a proxy for
+/// "should downloads be verified". Those are different questions, and a publisher who
+/// signs nothing got no verification on anything they downloaded and ran elevated. The
+/// inference was defensible; leaving it unnameable was not.
+/// </para>
+/// <para>
+/// <see cref="SignDeclared"/> is the default precisely so that adding this field
+/// changes no existing manifest's behaviour.
+/// </para>
+/// </remarks>
+public enum RequireSignedDownloads
+{
+    /// <summary>
+    /// Default, and the pre-R45 behaviour: the gate is armed if and only if this
+    /// manifest declared a <c>sign</c> block. An artifact that never claimed a signed
+    /// provenance has no standing to demand one of its successor.
+    /// </summary>
+    SignDeclared = 0,
+
+    /// <summary>
+    /// The gate is always armed, whether or not this manifest declares a <c>sign</c>
+    /// block. For a publisher who does not yet code-sign their own installer but only
+    /// ever downloads binaries that are signed.
+    /// </summary>
+    Always = 1,
+
+    /// <summary>
+    /// <see cref="Always"/>, and additionally an unestablished revocation status is a
+    /// refusal rather than a warning (register row R46).
+    /// </summary>
+    /// <remarks>
+    /// The default posture lets <c>RevocationUnavailable</c> proceed, because an
+    /// installer that cannot reach a CRL distribution point — air-gapped network,
+    /// captive portal, locked-down enterprise egress — would otherwise be unable to
+    /// install anything. The cost of that default is that anyone who can blackhole two
+    /// hostnames suppresses revocation of a stolen signing key. This value moves the
+    /// choice to the publisher, who is the only party who knows whether their audience
+    /// is reliably online. See <c>docs/architecture/adr-011-update-manifest-freshness.md</c>.
+    /// </remarks>
+    AlwaysVerifiedRevocation = 2,
+}
 
 /// <summary>
 /// A single declarative variable from <c>installer.vars</c> (P1): a name bound to

@@ -110,4 +110,41 @@ public static class DiagnosticCodes
     // for the analogous install-time bootstrap failure (the stub could not
     // resolve/download the package at that URL).
     public const string WebInstallerPackageUrlUnresolved = "SIG0322";
+
+    // SIG0323-SIG0326 — network trust on manifest-declared URLs, keys, and the
+    // downloaded-binary policy (register rows R8, R14, R30, R45). Unlike
+    // SIG0320-SIG0322 above, these fire at PACK TIME, in `ManifestParser`,
+    // against the app manifest. They are one band because they share a subject
+    // — what the update/parameter machinery may talk to and what it trusts —
+    // not because they share a call path.
+
+    // SIG0323 (R8): a `parameters.*.source.url` is not https://. The fetched
+    // values become parameter values, which are substituted into step fields
+    // (paths, registry coordinates, arguments) that execute elevated, so a
+    // cleartext origin is an injection point into a privileged run. Mirrors
+    // SIG0235's http_download stance; re-checked at install time in
+    // `HttpOptionsLoader.LoadAsync`, because a URL built from tokens is not
+    // knowable at pack time.
+    public const string ParameterSourceInsecure = "SIG0323";
+
+    // SIG0324 (R14): `updates.manifestUrl` is not https://. The schema's own
+    // description said "HTTPS URL" while constraining only `format: uri`.
+    // Code execution is still gated by the channel-manifest signature, so the
+    // impact is cleartext leakage of app-id/version/channel plus a reliable
+    // update-suppression DoS. Re-checked before the fetch at update runtime.
+    public const string UpdateManifestUrlInsecure = "SIG0324";
+
+    // SIG0325 (R30): `updates.signingKey` is not a base64-encoded X.509 SPKI
+    // DER of an ECDSA P-256 PUBLIC key. The field was passed through
+    // unvalidated, so `sigil init --template full`'s own private-key FILE PATH
+    // packed cleanly and produced an installer whose every update attempt died
+    // at SIG0321 — failing closed, but only after shipping.
+    public const string UpdateSigningKeyInvalid = "SIG0325";
+
+    // SIG0326 (R45): `installer.require_signed_downloads` is not one of the
+    // declared policy values. The policy governs whether a binary this run
+    // pulled off the network must be Authenticode-valid before it is launched
+    // elevated, so an unrecognized value is refused rather than silently
+    // falling back to the default.
+    public const string RequireSignedDownloadsInvalid = "SIG0326";
 }

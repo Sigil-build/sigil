@@ -39,7 +39,11 @@ updates:
   channel: stable
   manifestUrl: https://updates.example.com/example-app/manifest.json
   deltaTargets: 5
-  signingKey: ./keys/update-signing.ed25519
+  # Base64 X.509 SubjectPublicKeyInfo (SPKI) DER of your ECDSA P-256 PUBLIC key.
+  # NEVER a private key, and never a file path (SIG0325 refuses both at pack time).
+  # Produce it by base64-encoding ECDsa.ExportSubjectPublicKeyInfo() for your
+  # update-signing key. THIS IS A PLACEHOLDER — replace it with your own.
+  signingKey: MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEM6pwH5xM2+mhJt1IQ29ejc6kQVnvyPXhUGoX9nUttZmXAhvgbx9xTMcLoNEGpK3zdYmQRTR8h/ftYEBZuNznhw==
 
 installer:
   brand:

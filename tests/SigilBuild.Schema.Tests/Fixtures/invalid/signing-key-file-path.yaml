@@ -1,0 +1,15 @@
+# R30: `updates.signingKey` given a private-key FILE PATH — which is exactly what
+# `sigil init --template full` used to emit, and what the field's own description
+# has always said it must never be. A path fails the base64 character class.
+spec: v1.0
+app:
+  id: com.example.App
+  name: Example
+  version: 0.1.0
+  publisher: Example Inc.
+build:
+  source: ./out
+updates:
+  channel: stable
+  manifestUrl: https://updates.example.com/app/manifest.json
+  signingKey: ./keys/update-signing.ed25519

@@ -1,0 +1,14 @@
+# R14: `updates.manifestUrl` over cleartext http:// must fail the schema. The
+# schema's description has always called this an HTTPS URL while constraining
+# only `format: uri`, so this shape used to validate cleanly.
+spec: v1.0
+app:
+  id: com.example.App
+  name: Example
+  version: 0.1.0
+  publisher: Example Inc.
+build:
+  source: ./out
+updates:
+  channel: stable
+  manifestUrl: http://updates.example.com/app/manifest.json

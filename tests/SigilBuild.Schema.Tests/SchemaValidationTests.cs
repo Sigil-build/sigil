@@ -236,6 +236,49 @@ public class SchemaValidationTests
             string.Join("; ", errors.Select(e => e.ToString())));
     }
 
+    [Fact]
+    public async Task NetworkTrustFixture_IsValidAgainstSchema()
+    {
+        // Register rows R8/R14/R30/R45. Two things this fixture is load-bearing for:
+        // the new `installer.require_signed_downloads` property must actually be
+        // DECLARED (`additionalProperties: false` on the installer object turns an
+        // undeclared property into a hard rejection), and the new https/base64
+        // `pattern` constraints must accept the correct values rather than only
+        // rejecting the wrong ones — the invalid fixtures alone would be satisfied by
+        // a pattern that rejects everything.
+        var schema = await LoadSchemaAsync();
+        var json = YamlToJson(await File.ReadAllTextAsync("Fixtures/valid/network-trust.yaml"));
+        var errors = schema.Validate(json);
+
+        errors.Should().BeEmpty(
+            "the network-trust fixture must satisfy the schema; got: {0}",
+            string.Join("; ", errors.Select(e => e.ToString())));
+    }
+
+    /// <summary>
+    /// Every accepted <c>installer.require_signed_downloads</c> value, asserted
+    /// individually (R45). The valid fixture can only carry one of them, and an enum
+    /// that accidentally omitted a member would still let that fixture pass.
+    /// </summary>
+    [Theory]
+    [InlineData("sign_declared")]
+    [InlineData("always")]
+    [InlineData("always_verified_revocation")]
+    public async Task EveryDeclaredDownloadPolicy_IsAcceptedBySchema(string policy)
+    {
+        var schema = await LoadSchemaAsync();
+        var yaml =
+            "spec: v1.0\n" +
+            "app:\n  id: com.example.App\n  name: App\n  version: 0.1.0\n  publisher: P\n" +
+            "build:\n  source: ./out\n" +
+            $"installer:\n  require_signed_downloads: {policy}\n";
+        var errors = schema.Validate(YamlToJson(yaml));
+
+        errors.Should().BeEmpty(
+            "'{0}' is a declared policy value; got: {1}",
+            policy, string.Join("; ", errors.Select(e => e.ToString())));
+    }
+
     public static IEnumerable<object[]> InvalidFixturePaths() =>
         Directory.EnumerateFiles("Fixtures/invalid", "*.yaml").Select(p => new object[] { p });
 

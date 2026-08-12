@@ -189,7 +189,8 @@ internal sealed partial record WrapperBlob(
             DisplayName: s.DisplayName,
             Publisher: s.Publisher,
             Version: s.Version,
-            SignDeclared: s.SignDeclared);
+            SignDeclared: s.SignDeclared,
+            RequireSignedDownloads: s.RequireSignedDownloads);
     }
 
     /// <summary>
@@ -366,7 +367,12 @@ public sealed record InstallerBrandData(
     // T11 / decision 7: whether the artifact declared a verified `sign` block.
     // Combined with WinVerifyTrust(self) to gate the trust line (see
     // InstallerTrustLoader). Appended last to keep the record backward-compatible.
-    bool SignDeclared = false);
+    bool SignDeclared = false,
+    // R45: the declared downloaded-binary signature policy. Defaults to the pre-R45
+    // behaviour (infer from SignDeclared), so an un-stamped or older blob means
+    // exactly what it always did.
+    SigilBuild.Core.Manifest.RequireSignedDownloads RequireSignedDownloads
+        = SigilBuild.Core.Manifest.RequireSignedDownloads.SignDeclared);
 
 /// <summary>
 /// Public entry point for the host to read brand data from the stamped exe's

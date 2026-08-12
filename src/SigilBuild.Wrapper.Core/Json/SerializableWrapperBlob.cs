@@ -60,6 +60,21 @@ internal sealed record SerializableWrapperBlob
     /// </summary>
     public bool SignDeclared { get; init; }
 
+    /// <summary>
+    /// The declared downloaded-binary signature policy, <c>installer.require_signed_downloads</c>
+    /// (register row R45). Defaults to <see cref="RequireSignedDownloads.SignDeclared"/>,
+    /// which is the pre-R45 behaviour, so a blob stamped before this field existed
+    /// deserializes to exactly what it used to mean.
+    /// </summary>
+    /// <remarks>
+    /// Carried in the blob rather than recomputed at runtime because the blob is inside
+    /// the Authenticode-signed artifact: the policy governing what this installer will
+    /// run is itself covered by the signature on the installer, which is the only place
+    /// it could live without being trivially editable by whoever is attacking the
+    /// download.
+    /// </remarks>
+    public RequireSignedDownloads RequireSignedDownloads { get; init; } = RequireSignedDownloads.SignDeclared;
+
     // --- Branding (T7). Derived at pack time (Avalonia cannot color-mix at
     //     runtime), delivered inside the blob rather than a sidecar file. ---
 

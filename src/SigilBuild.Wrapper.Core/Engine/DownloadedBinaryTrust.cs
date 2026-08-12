@@ -2,6 +2,7 @@ namespace SigilBuild.Wrapper.Engine;
 
 using System;
 using System.Threading;
+using SigilBuild.Core.Manifest;
 
 /// <summary>
 /// The Authenticode gate that stands immediately in front of every
@@ -55,6 +56,50 @@ internal static class DownloadedBinaryTrust
     /// <summary>-1 unknown, 0 no, 1 yes. The self-blob read is done once per process.</summary>
     private static int _selfDeclaresSigning = -1;
 
+    /// <summary>-1 unknown, otherwise the cached <see cref="RequireSignedDownloads"/> ordinal.</summary>
+    private static int _selfPolicy = -1;
+
+    /// <summary>Test seam for the declared policy (R45), same shape as <see cref="RequirementOverride"/>.</summary>
+    private static readonly AsyncLocal<RequireSignedDownloads?> PolicyOverride = new();
+
+    /// <summary>
+    /// The declared <c>installer.require_signed_downloads</c> policy for THIS artifact
+    /// (register row R45), read from the running exe's embedded blob.
+    /// </summary>
+    internal static RequireSignedDownloads Policy => PolicyOverride.Value ?? SelfPolicy;
+
+    private static RequireSignedDownloads SelfPolicy
+    {
+        get
+        {
+            var cached = Volatile.Read(ref _selfPolicy);
+            if (cached < 0)
+            {
+                cached = (int)(WrapperBlob.LoadBrandFromSelf()?.RequireSignedDownloads
+                    ?? RequireSignedDownloads.SignDeclared);
+                Volatile.Write(ref _selfPolicy, cached);
+            }
+            return (RequireSignedDownloads)cached;
+        }
+    }
+
+    /// <summary>Test seam (internal): pin <see cref="Policy"/>. Not for production use.</summary>
+    internal static IDisposable UsePolicyForTesting(RequireSignedDownloads policy)
+    {
+        var previous = PolicyOverride.Value;
+        PolicyOverride.Value = policy;
+        return new RestorePolicy(previous);
+    }
+
+    private sealed class RestorePolicy : IDisposable
+    {
+        private readonly RequireSignedDownloads? _previous;
+
+        public RestorePolicy(RequireSignedDownloads? previous) => _previous = previous;
+
+        public void Dispose() => PolicyOverride.Value = _previous;
+    }
+
     /// <summary>
     /// Whether THIS artifact requires the binaries it downloads to be signed — i.e.
     /// whether its own manifest declared a <c>sign</c> block, read from the running
@@ -77,7 +122,19 @@ internal static class DownloadedBinaryTrust
     /// has its own per-prerequisite opt-out.
     /// </para>
     /// </remarks>
-    internal static bool RequiredForThisArtifact => RequirementOverride.Value ?? SelfDeclaresSigning;
+    /// <remarks>
+    /// <para>
+    /// <b>R45.</b> The <c>SignDeclared</c> inference above is now the DEFAULT rather than
+    /// the only answer: <c>installer.require_signed_downloads</c> lets a publisher say
+    /// what they actually mean. <see cref="RequireSignedDownloads.SignDeclared"/> keeps
+    /// the inference, so nothing that existed before this field changes behaviour.
+    /// </para>
+    /// </remarks>
+    internal static bool RequiredForThisArtifact => Policy switch
+    {
+        RequireSignedDownloads.Always or RequireSignedDownloads.AlwaysVerifiedRevocation => true,
+        _ => RequirementOverride.Value ?? SelfDeclaresSigning,
+    };
 
     /// <summary>
     /// Said out loud whenever <see cref="RequiredForThisArtifact"/> is false at a launch
@@ -131,8 +188,18 @@ internal static class DownloadedBinaryTrust
     /// <param name="status">What <c>WinVerifyTrust</c> concluded.</param>
     /// <param name="what">How to name the binary in the message, e.g. <c>prerequisite 'VC++ Redist'</c>.</param>
     /// <param name="allowUnsigned">The declared opt-out for a legitimately unsigned redistributable.</param>
+    /// <param name="policy">
+    /// The artifact's declared <c>installer.require_signed_downloads</c> policy (R45).
+    /// Only <see cref="RequireSignedDownloads.AlwaysVerifiedRevocation"/> changes any
+    /// verdict here — it turns <see cref="AuthenticodeStatus.RevocationUnavailable"/>
+    /// from a warning into a refusal (R46). Defaults to the pre-R45 behaviour so every
+    /// existing call site and test keeps its original meaning.
+    /// </param>
     internal static (string? Refusal, string? Report, bool IsError) Decide(
-        AuthenticodeStatus status, string what, bool allowUnsigned) => status switch
+        AuthenticodeStatus status,
+        string what,
+        bool allowUnsigned,
+        RequireSignedDownloads policy = RequireSignedDownloads.SignDeclared) => status switch
         {
             // Nothing was examined — off Windows, where no wrapper ships and where this
             // assembly is nonetheless built and unit-tested. Not a refusal: a verdict was
@@ -142,6 +209,19 @@ internal static class DownloadedBinaryTrust
 
             AuthenticodeStatus.Trusted =>
                 (null, $"signature: {what} is Authenticode-valid", false),
+
+            // R46: the publisher asked for revocation to be ESTABLISHED, not merely
+            // attempted. Without this, anyone who can blackhole two hostnames — a
+            // captive portal, a compromised resolver, a hostile corporate network —
+            // suppresses revocation of a stolen signing key, and the run proceeds on a
+            // warning line nobody reads. Opt-in, because refusing by default would break
+            // every legitimately air-gapped install; see ADR-011.
+            AuthenticodeStatus.RevocationUnavailable
+                when policy == RequireSignedDownloads.AlwaysVerifiedRevocation => (
+                $"{what} has a signature whose revocation status could NOT be established (no reachable " +
+                "CRL/OCSP responder), and this installer declares " +
+                "require_signed_downloads: always_verified_revocation; refusing to run it",
+                null, false),
 
             AuthenticodeStatus.RevocationUnavailable => (
                 null,
@@ -216,7 +296,7 @@ internal static class DownloadedBinaryTrust
     {
         ArgumentNullException.ThrowIfNull(report);
 
-        var (refusal, line, isError) = Decide(StatusOf(path), what, allowUnsigned);
+        var (refusal, line, isError) = Decide(StatusOf(path), what, allowUnsigned, Policy);
         if (line is not null)
         {
             report(line, isError);

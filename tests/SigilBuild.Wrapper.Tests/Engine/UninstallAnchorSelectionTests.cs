@@ -55,7 +55,7 @@ public class UninstallAnchorSelectionTests
             // Act — the uninstall resolves a DIFFERENT directory for this run (it has no
             // /D= to work from) and passes it as the fallback.
             var result = await new UninstallEngine()
-                .RunAsync(appId, somewhereElse.Path, InstallScope.User);
+                .RunAsync(appId, somewhereElse.Path, SignedDeclarations.None, InstallScope.User);
 
             // Assert
             result.Success.Should().BeTrue();
@@ -93,7 +93,7 @@ public class UninstallAnchorSelectionTests
 
             // Act
             var result = await new UninstallEngine()
-                .RunAsync(appId, installDir.Path, InstallScope.User);
+                .RunAsync(appId, installDir.Path, SignedDeclarations.None, InstallScope.User);
 
             // Assert
             result.Success.Should().BeTrue();
@@ -152,7 +152,7 @@ public class UninstallAnchorSelectionTests
 
             // Act
             var result = await new UninstallEngine()
-                .RunAsync(appId, wrongDefault.Path, InstallScope.User);
+                .RunAsync(appId, wrongDefault.Path, SignedDeclarations.None, InstallScope.User);
 
             // Assert
             result.Success.Should().BeTrue();
@@ -202,7 +202,7 @@ public class UninstallAnchorSelectionTests
 
             // Act
             var result = await new UninstallEngine()
-                .RunAsync(appId, installDir.Path, InstallScope.User);
+                .RunAsync(appId, installDir.Path, SignedDeclarations.None, InstallScope.User);
 
             // Assert
             result.Success.Should().BeTrue();
@@ -258,7 +258,7 @@ public class UninstallAnchorSelectionTests
 
             // Act
             var result = await new UninstallEngine()
-                .RunAsync(appId, installDir.Path, InstallScope.User, progress);
+                .RunAsync(appId, installDir.Path, SignedDeclarations.None, InstallScope.User, progress);
 
             // Assert
             result.Success.Should().BeTrue("a rejected anchor must not abort the uninstall");
@@ -293,7 +293,7 @@ public class UninstallAnchorSelectionTests
         // The only entry point that replays persisted state must not be callable in a
         // way that silently loses anchoring. Omitting the argument is a compile error;
         // this covers the remaining runtime hole of passing a blank one.
-        var act = async () => await new UninstallEngine().RunAsync("sigil.x", "   ");
+        var act = async () => await new UninstallEngine().RunAsync("sigil.x", "   ", SignedDeclarations.None);
         await act.Should().ThrowAsync<ArgumentException>();
     }
 

@@ -56,7 +56,7 @@ public class UninstallEngineTests
             File.Exists(UninstallStateStore.PathFor(appId, InstallScope.User)).Should().BeTrue();
 
             // Uninstall: rehydrate + UndoAsync in reverse.
-            var uninstallResult = await new UninstallEngine().RunAsync(appId, dst.Path, InstallScope.User);
+            var uninstallResult = await new UninstallEngine().RunAsync(appId, dst.Path, SignedDeclarations.None, InstallScope.User);
             uninstallResult.Success.Should().BeTrue();
 
             // Verify state is restored: copied file gone, created dir gone.
@@ -85,7 +85,7 @@ public class UninstallEngineTests
     {
         using var installDir = new TempDir();
         var result = await new UninstallEngine().RunAsync(
-            "sigil.bogus." + Guid.NewGuid().ToString("N"), installDir.Path);
+            "sigil.bogus." + Guid.NewGuid().ToString("N"), installDir.Path, SignedDeclarations.None);
         result.Success.Should().BeFalse();
         result.Error.Should().NotBeNull();
         result.Error!.Should().Contain("no uninstall state found");

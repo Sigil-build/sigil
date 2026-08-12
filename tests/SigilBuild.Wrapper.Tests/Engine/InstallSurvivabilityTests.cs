@@ -178,7 +178,7 @@ public sealed class InstallSurvivabilityTests
             var lines = new System.Collections.Generic.List<string>();
             var progress = new SyncProgress(p => { if (p.Message is not null) lines.Add(p.Message); });
 
-            var result = await new UninstallEngine().RunAsync(appId, dst.Path, InstallScope.User, progress);
+            var result = await new UninstallEngine().RunAsync(appId, dst.Path, SignedDeclarations.None, InstallScope.User, progress);
             result.Success.Should().BeTrue();
 
             // The reversal log carries a delete line for the copied file.

@@ -2,9 +2,11 @@ namespace SigilBuild.Wrapper.Engine;
 
 using System;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using Microsoft.Win32.SafeHandles;
 
 /// <summary>
 /// ACL provenance for the machine-scope install-state directory (register row R1),
@@ -38,7 +40,7 @@ using System.Security.Principal;
 /// </para>
 /// </remarks>
 [SupportedOSPlatform("windows")]
-internal static class StateDirectorySecurity
+internal static partial class StateDirectorySecurity
 {
     /// <summary>
     /// <c>NT SERVICE\TrustedInstaller</c>. No <see cref="WellKnownSidType"/> covers it,
@@ -313,6 +315,161 @@ internal static class StateDirectorySecurity
         }
 #pragma warning restore CA1031
     }
+
+    /// <summary>
+    /// <see cref="IsAdminOnlyWritable(string)"/> read from an already-open
+    /// <b>handle</b> rather than from a path (register row R50). Same trust decision,
+    /// same fail-closed behaviour; only the source of the security descriptor differs.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A path-based check answers a question about whatever the path names <em>at the
+    /// moment of the call</em>, and the caller then acts on whatever it names a moment
+    /// later. For a check that gates a <b>deletion</b>, that gap is the whole problem:
+    /// the object inspected and the object destroyed must be the same object. A kernel
+    /// handle pins identity — the descriptor read here belongs to the file object the
+    /// handle refers to, and nothing about the path can change that afterwards.
+    /// </para>
+    /// <para>
+    /// <b>This does not replace or alter <see cref="IsAdminOnlyWritable(string)"/>.</b>
+    /// That predicate is what lanes S2 and S3 gate SYSTEM-level step targets on and
+    /// what the gate-G1 attacks exercise; it is untouched. This is a sibling that
+    /// reaches the same verdict through <see cref="RawSecurityDescriptor"/> instead of
+    /// <see cref="DirectorySecurity"/>, and
+    /// <c>NativeRuntimeReclaimTests.Handle_and_path_predicates_agree</c> pins the two
+    /// against each other on real directories so they cannot drift.
+    /// </para>
+    /// </remarks>
+    public static bool IsAdminOnlyWritableHandle(SafeFileHandle handle)
+    {
+        if (handle is null || handle.IsInvalid || handle.IsClosed)
+        {
+            return false;
+        }
+
+#pragma warning disable CA1031 // Fail closed: any failure to read owner/DACL means "not admin-only".
+        try
+        {
+            var descriptor = ReadSecurityDescriptor(handle);
+            return descriptor is not null && IsTrustedRawSecurity(descriptor);
+        }
+        catch
+        {
+            return false;
+        }
+#pragma warning restore CA1031
+    }
+
+    /// <summary>
+    /// <c>GetSecurityInfo(handle, SE_KERNEL_OBJECT, OWNER | DACL)</c>, copied into a
+    /// managed <see cref="RawSecurityDescriptor"/> and the native buffer freed.
+    /// Returns <c>null</c> when the descriptor cannot be read at all.
+    /// </summary>
+    private static RawSecurityDescriptor? ReadSecurityDescriptor(SafeFileHandle handle)
+    {
+        var status = GetSecurityInfo(
+            handle,
+            SeKernelObject,
+            OwnerSecurityInformation | DaclSecurityInformation,
+            IntPtr.Zero,
+            IntPtr.Zero,
+            IntPtr.Zero,
+            IntPtr.Zero,
+            out var raw);
+
+        if (status != 0 || raw == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        try
+        {
+            var length = GetSecurityDescriptorLength(raw);
+            if (length == 0)
+            {
+                return null;
+            }
+
+            var bytes = new byte[length];
+            Marshal.Copy(raw, bytes, 0, (int)length);
+            return new RawSecurityDescriptor(bytes, 0);
+        }
+        finally
+        {
+            _ = LocalFree(raw);
+        }
+    }
+
+    /// <summary>
+    /// <see cref="IsTrustedSecurity"/> expressed over a raw descriptor: a trusted owner
+    /// AND no write-class right granted to anything else. The two must agree — the
+    /// clause-for-clause correspondence is deliberate and is asserted by test.
+    /// </summary>
+    private static bool IsTrustedRawSecurity(RawSecurityDescriptor descriptor)
+    {
+        // Owner half — identical rule to IsTrustedSecurity.
+        if (descriptor.Owner is not { } owner || !IsTrustedPrincipal(owner))
+        {
+            return false;
+        }
+
+        // A null DACL grants everyone everything. IsTrustedSecurity never sees this
+        // case (the managed API materializes an empty rule set), so it is spelled out
+        // here rather than left to the loop below, which would vacuously answer true.
+        if (descriptor.DiscretionaryAcl is not { } dacl)
+        {
+            return false;
+        }
+
+        foreach (var ace in dacl)
+        {
+            if (ace is not CommonAce common || common.AceType != AceType.AccessAllowed)
+            {
+                continue;
+            }
+
+            // Applies to children only — cannot grant anything on the container.
+            if ((common.AceFlags & AceFlags.InheritOnly) != 0)
+            {
+                continue;
+            }
+
+            var writes = (common.AccessMask & (int)WriteRights) != 0
+                || (common.AccessMask & GenericWriteBits) != 0;
+            if (!writes)
+            {
+                continue;
+            }
+
+            if (common.SecurityIdentifier is not { } sid || !IsTrustedPrincipal(sid))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private const int SeKernelObject = 6;
+    private const uint OwnerSecurityInformation = 0x00000001;
+    private const uint DaclSecurityInformation = 0x00000004;
+
+    [LibraryImport("advapi32.dll", EntryPoint = "GetSecurityInfo")]
+    private static partial uint GetSecurityInfo(
+        SafeFileHandle handle,
+        int objectType,
+        uint securityInfo,
+        IntPtr ppsidOwner,
+        IntPtr ppsidGroup,
+        IntPtr ppDacl,
+        IntPtr ppSacl,
+        out IntPtr ppSecurityDescriptor);
+
+    [LibraryImport("advapi32.dll", EntryPoint = "GetSecurityDescriptorLength")]
+    private static partial uint GetSecurityDescriptorLength(IntPtr pSecurityDescriptor);
+
+    [LibraryImport("kernel32.dll", EntryPoint = "LocalFree")]
+    private static partial IntPtr LocalFree(IntPtr hMem);
 
     /// <summary>
     /// The directory form of <see cref="IsTrustedSecurity"/>. Callers wrap it in the

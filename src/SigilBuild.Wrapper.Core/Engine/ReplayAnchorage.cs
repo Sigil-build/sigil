@@ -11,11 +11,13 @@ using SigilBuild.Core.Manifest;
 /// </summary>
 public sealed class ReplayAnchorage
 {
-    private ReplayAnchorage(string? installDir, string? appId, InstallScope? scope)
+    private ReplayAnchorage(
+        string? installDir, string? appId, InstallScope? scope, SignedDeclarations declarations)
     {
         InstallDir = installDir;
         AppId = appId;
         Scope = scope;
+        Declarations = declarations;
     }
 
     /// <summary>
@@ -30,7 +32,8 @@ public sealed class ReplayAnchorage
     /// register row R1.
     /// </para>
     /// </summary>
-    public static ReplayAnchorage InProcess { get; } = new(null, null, null);
+    public static ReplayAnchorage InProcess { get; } =
+        new(null, null, null, SignedDeclarations.None);
 
     /// <summary>
     /// The journal was rehydrated from persisted state and every record must be
@@ -39,15 +42,24 @@ public sealed class ReplayAnchorage
     /// and BOTH scopes' shortcut folders are — the widest of the two anchored forms.
     /// Prefer <see cref="ForInstall"/>, which narrows both.
     /// </summary>
+    /// <param name="installDir">The install directory every record is checked against.</param>
+    /// <param name="declarations">
+    /// What the signed blob declares (R44/R51). Required, not optional, for the same
+    /// reason <paramref name="installDir"/> is: an omitted anchoring input is an
+    /// invariant the primitive cannot enforce, and one call site forgetting it is all it
+    /// takes. Pass <see cref="SignedDeclarations.None"/> when there is genuinely no
+    /// signed artefact behind the replay — it only ever narrows.
+    /// </param>
     /// <exception cref="ArgumentException">
     /// <paramref name="installDir"/> is null or blank. Anchoring "to nothing" would be
     /// indistinguishable from <see cref="InProcess"/> at the call site, which is
     /// exactly the mistake this type exists to prevent.
     /// </exception>
-    public static ReplayAnchorage ForInstallDir(string installDir)
+    public static ReplayAnchorage ForInstallDir(string installDir, SignedDeclarations declarations)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(installDir);
-        return new ReplayAnchorage(installDir, null, null);
+        ArgumentNullException.ThrowIfNull(declarations);
+        return new ReplayAnchorage(installDir, null, null, declarations);
     }
 
     /// <summary>
@@ -68,11 +80,21 @@ public sealed class ReplayAnchorage
     ///   </item>
     /// </list>
     /// </summary>
-    public static ReplayAnchorage ForInstall(string installDir, string appId, InstallScope scope)
+    /// <param name="installDir">The install directory every record is checked against.</param>
+    /// <param name="appId">The app whose per-app state directory is allowed.</param>
+    /// <param name="scope">The scope being replayed.</param>
+    /// <param name="declarations">
+    /// What the signed blob declares (R44/R51): the out-of-tree destinations
+    /// <c>allow_outside_install_dir</c> opted out of containment, and the registry keys
+    /// the manifest's registry steps name. Required — see <see cref="ForInstallDir"/>.
+    /// </param>
+    public static ReplayAnchorage ForInstall(
+        string installDir, string appId, InstallScope scope, SignedDeclarations declarations)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(installDir);
         ArgumentException.ThrowIfNullOrWhiteSpace(appId);
-        return new ReplayAnchorage(installDir, appId, scope);
+        ArgumentNullException.ThrowIfNull(declarations);
+        return new ReplayAnchorage(installDir, appId, scope, declarations);
     }
 
     /// <summary>The install directory to anchor to, or <c>null</c> for <see cref="InProcess"/>.</summary>
@@ -89,6 +111,12 @@ public sealed class ReplayAnchorage
     /// shortcut folders are allowed.
     /// </summary>
     internal InstallScope? Scope { get; }
+
+    /// <summary>
+    /// What the SIGNED BLOB declares — never the journal. See
+    /// <see cref="SignedDeclarations"/> for why the distinction is the whole point.
+    /// </summary>
+    internal SignedDeclarations Declarations { get; }
 
     /// <summary>True when records must be checked before replay.</summary>
     internal bool IsAnchored => InstallDir is not null;

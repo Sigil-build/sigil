@@ -224,6 +224,19 @@ public sealed class RollbackJournal
         var refused = new System.Collections.Generic.List<RefusedRecord>();
         var failed = new System.Collections.Generic.List<FailedRecord>();
 
+        // R44/R51: anything the anchor could not make sense of in the manifest's OWN
+        // declarations is reported before the first record is judged, so an operator
+        // reading the log top-to-bottom sees "this destination was declared but could not
+        // be anchored" BEFORE the refusals it goes on to cause. A dropped declaration
+        // that produced no visible line is how an uninstall silently leaves files behind.
+        if (anchor is not null)
+        {
+            foreach (var notice in anchor.Notices)
+            {
+                progress?.Report(new StepProgress(0, _records.Count, notice, IsError: true));
+            }
+        }
+
         // Walk in reverse. Undo failures should not cascade — log and continue.
         var total = _records.Count;
         var completed = 0;
@@ -442,6 +455,20 @@ public enum ReplayRefusalCode
     /// directory — <c>LoadLibrary</c> plus an export call on an attacker-chosen module.
     /// </summary>
     ComDllOutsideInstallDir = 10,
+
+    /// <summary>
+    /// The key is inside the subtree an installer's rollback may operate in, but is not
+    /// one the application's SIGNED MANIFEST declares a registry step for (R51), so no
+    /// honest journal of this installation can hold a record for it.
+    /// </summary>
+    /// <remarks>
+    /// Distinct from <see cref="RegistryOutsideApplicationSpace"/> on purpose: that code
+    /// means "no installer may ever reverse this", this one means "no installer of THIS
+    /// application may". They call for different responses — the first is a planted
+    /// record or an attack, the second is very often a manifest whose registry step was
+    /// removed while an installed base still carries journal records for it.
+    /// </remarks>
+    RegistryKeyNotDeclared = 13,
 }
 
 /// <summary>

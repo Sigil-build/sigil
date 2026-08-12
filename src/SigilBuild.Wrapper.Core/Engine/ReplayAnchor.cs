@@ -168,6 +168,29 @@ internal sealed class ReplayAnchor
     private readonly string[] _excludedRoots;
 
     /// <summary>
+    /// The out-of-tree destinations the SIGNED BLOB declares with
+    /// <c>allow_outside_install_dir</c>, canonicalized and vetted by
+    /// <see cref="DeclaredRootFloor"/> (R44).
+    /// </summary>
+    /// <remarks>
+    /// Held separately from <see cref="_fileRoots"/> rather than merged into it, for two
+    /// reasons that are both load-bearing. These roots are matched with
+    /// <see cref="PathContainment.IsUnderWithoutTraversal"/> — a junction planted under a
+    /// declared root must not redirect a replayed write out of it — and they must never
+    /// leak into <see cref="OwnedByThisInstall"/>, which is what keeps a machine
+    /// <c>PATH</c> entry and a machine-wide execution mapping pinned to the install
+    /// directory no matter what a manifest declares.
+    /// </remarks>
+    private readonly string[] _declaredRoots;
+
+    /// <summary>
+    /// The registry keys the SIGNED BLOB's registry steps name, folded to the canonical
+    /// form <see cref="EffectiveRegistryPath"/> produces (R51). A registry record may
+    /// replay only at or under one of these.
+    /// </summary>
+    private readonly string[] _declaredRegistryKeys;
+
+    /// <summary>
     /// Environment values as they were BEFORE this replay began, keyed by
     /// <c>machine|user</c> + <c>expanded|literal</c> + name, filled on first read and
     /// never refreshed.
@@ -198,12 +221,34 @@ internal sealed class ReplayAnchor
     private readonly Dictionary<string, string?> _envSnapshot =
         new(StringComparer.OrdinalIgnoreCase);
 
-    private ReplayAnchor(string installDir, string[] fileRoots, string[] excludedRoots)
+    private ReplayAnchor(
+        string installDir,
+        string[] fileRoots,
+        string[] excludedRoots,
+        string[] declaredRoots,
+        string[] declaredRegistryKeys,
+        IReadOnlyList<string> notices)
     {
         _installDir = installDir;
         _fileRoots = fileRoots;
         _excludedRoots = excludedRoots;
+        _declaredRoots = declaredRoots;
+        _declaredRegistryKeys = declaredRegistryKeys;
+        Notices = notices;
     }
+
+    /// <summary>
+    /// Operator-facing lines about the DECLARATIONS themselves — a declared destination
+    /// that could not be resolved at uninstall time, or one the floor refused to anchor
+    /// with. Reported once by <see cref="RollbackJournal.UndoAsync"/> before the replay
+    /// starts.
+    /// </summary>
+    /// <remarks>
+    /// These are not record refusals and they are not failures. They exist because the
+    /// alternative — dropping a declaration silently — is how "the publisher declared it,
+    /// the anchor never saw it, the uninstall left files behind and said nothing" happens.
+    /// </remarks>
+    public IReadOnlyList<string> Notices { get; }
 
     /// <summary>
     /// Build the anchor for <paramref name="anchorage"/>, or <c>null</c> when the
@@ -263,7 +308,64 @@ internal sealed class ReplayAnchor
             }
         }
 
-        return new ReplayAnchor(installDir, roots.ToArray(), excluded.ToArray());
+        // R44 / R51: the only widening input, and it comes from the SIGNED BLOB.
+        //
+        // Resolved HERE rather than by the caller, and with `installDir` — the directory
+        // UninstallEngine chose, which is the one RECORDED at install time. A declared
+        // `{install_dir}\…` destination expanded against a recomputed default would name
+        // a directory the install never wrote to. Nothing in this block reads the
+        // journal: the anchorage carries the declarations, the journal carries records,
+        // and the two never meet except when a record is CHECKED against them.
+        var declared = anchorage.Declarations.Resolve(installDir);
+        var notices = new List<string>(declared.Notices);
+
+        var declaredRoots = new List<string>();
+        foreach (var destination in declared.Destinations)
+        {
+            var vetted = DeclaredRootFloor.Vet(destination, out var rejection);
+            if (vetted is null)
+            {
+                notices.Add(
+                    "the declared out-of-tree destination is not anchored: " + rejection +
+                    " — records naming it are refused, and anything the install wrote there " +
+                    "must be removed from an 'uninstall:' step instead");
+                continue;
+            }
+
+            if (!declaredRoots.Contains(vetted, StringComparer.OrdinalIgnoreCase))
+            {
+                declaredRoots.Add(vetted);
+            }
+        }
+
+        var declaredKeys = new List<string>();
+        foreach (var key in declared.RegistryKeys)
+        {
+            // Folded through the SAME function record keys go through, so a declaration
+            // and a record that name the same coordinate in different spellings
+            // (HKCR\Foo vs HKLM\Software\Classes\Foo, a WOW6432Node view) still match.
+            var effective = EffectiveRegistryPath(key.Hive, key.Key);
+            if (string.IsNullOrEmpty(effective))
+            {
+                notices.Add(
+                    $"the declared registry key '{key.Hive}\\{key.Key}' is not in a hive an " +
+                    "installer's rollback may reverse, so records naming it are refused");
+                continue;
+            }
+
+            if (!declaredKeys.Contains(effective, StringComparer.OrdinalIgnoreCase))
+            {
+                declaredKeys.Add(effective);
+            }
+        }
+
+        return new ReplayAnchor(
+            installDir,
+            roots.ToArray(),
+            excluded.ToArray(),
+            declaredRoots.ToArray(),
+            declaredKeys.ToArray(),
+            notices);
     }
 
     /// <summary>
@@ -550,6 +652,24 @@ internal sealed class ReplayAnchor
                 return true;
             }
         }
+
+        // R44: the destinations the signed manifest declared with
+        // `allow_outside_install_dir`. Checked LAST, so a path already inside the install
+        // directory or a scope root reaches the same verdict it did before this lane —
+        // widening the anchor cannot change an existing answer, only add new ones.
+        //
+        // The stronger predicate is deliberate. A declared root such as
+        // C:\ProgramData\MyApp typically inherits BUILTIN\Users write access, so a
+        // junction planted INSIDE it is a realistic way to redirect a replayed write out
+        // of it; IsUnderWithoutTraversal walks the chain and refuses that.
+        foreach (var declaredRoot in _declaredRoots)
+        {
+            if (PathContainment.IsUnderWithoutTraversal(declaredRoot, full))
+            {
+                return true;
+            }
+        }
+
         return false;
     }
 
@@ -608,6 +728,24 @@ internal sealed class ReplayAnchor
                 $"{type} refused: '{target}' is outside the application-configuration " +
                 "subtree an installer may reverse (HKLM/HKCU Software\\…, excluding the " +
                 "auto-run, policy and COM-activation surfaces)");
+        }
+
+        // R51: the key must be one the SIGNED MANIFEST names. This is the check that
+        // closes the class the denylist above could not: `txtfile`, `lnkfile`, `mscfile`,
+        // `Drivers32`, `App Paths`, and every key shape nobody has thought of yet are all
+        // refused by the same rule, because none of them was declared — no name of theirs
+        // appears anywhere in this file, and none has to.
+        if (!IsDeclaredRegistryKey(effective))
+        {
+            return Refuse(
+                record,
+                type,
+                target,
+                ReplayRefusalCode.RegistryKeyNotDeclared,
+                $"{type} refused: '{target}' is not a key this application's signed manifest " +
+                "declares a registry step for, so nothing in this installation can have " +
+                "created it — only the manifest's own keys may be reversed from a journal " +
+                "read off disk");
         }
 
         // The key is ordinary application space — but if its SHAPE makes it an execution
@@ -828,12 +966,20 @@ internal sealed class ReplayAnchor
     /// <c>Software\</c>.
     /// </summary>
     /// <remarks>
-    /// This is deliberately looser than "the app's own <c>Software\Publisher\App</c>
-    /// key": a <c>registry_write</c> step may name any key the manifest author chose,
-    /// and this process cannot know which of them the app owns without the manifest in
-    /// hand. Narrowing it to a true allowlist needs a manifest-declared key list
-    /// carried into the persisted journal — a wire-schema change, escalated separately,
-    /// not a change to this predicate.
+    /// <para>
+    /// This predicate is now the FLOOR, not the whole rule. It says where an installer's
+    /// rollback may operate at all; <see cref="IsDeclaredRegistryKey"/> then says which
+    /// keys inside that space this particular application declared (R51). Both must pass.
+    /// </para>
+    /// <para>
+    /// It is kept rather than deleted, and the deny list with it, as defence in depth. It
+    /// is independent of the manifest: a manifest that declares
+    /// <c>Software\Microsoft\Windows\CurrentVersion\Run</c> — by mistake, or because the
+    /// publisher's signing key was misused — still cannot get an auto-run key replayed
+    /// from a journal. One layer answers "did this application declare this?", the other
+    /// answers "may any installer's rollback touch this at all?", and the second question
+    /// does not stop being worth asking just because the first one now has an answer.
+    /// </para>
     /// </remarks>
     private static bool IsAllowedRegistryKey(string normalizedKey)
     {
@@ -855,6 +1001,46 @@ internal sealed class ReplayAnchor
             }
         }
         return true;
+    }
+
+    /// <summary>
+    /// True when <paramref name="normalizedKey"/> is at or under a key the signed
+    /// manifest's own registry steps name (R51).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>An allowlist, and the allowance comes from the blob — never the record.</strong>
+    /// The three registry steps (<c>registry_write</c>, <c>registry_delete_value</c>,
+    /// <c>registry_delete_key</c>) are the only producers of the two registry record
+    /// types, so a key no step declares is a key no honest journal can hold a record for.
+    /// A record naming one is either a planted entry or a step type that started
+    /// journaling registry records without being added to
+    /// <c>SignedDeclarations.CollectFrom</c> — and
+    /// <c>RegistryRecordProducerTests</c> fails the build for the second case.
+    /// </para>
+    /// <para>
+    /// The match is by SUBTREE, not by exact key. <c>registry_delete_key</c> with
+    /// <c>recursive: true</c> reverses into records for keys below the declared one, and
+    /// a <c>registry_write</c> creating <c>…\App\Settings</c> under a declared
+    /// <c>…\App</c> is the ordinary shape of a manifest. Exact matching would refuse both
+    /// on a perfectly healthy uninstall.
+    /// </para>
+    /// <para>
+    /// With no declarations at all, nothing matches and every registry record is refused.
+    /// That is the intended fail-closed direction: an anchored replay with no signed
+    /// artefact behind it has no way to tell an application's own key from anyone else's.
+    /// </para>
+    /// </remarks>
+    private bool IsDeclaredRegistryKey(string normalizedKey)
+    {
+        foreach (var declared in _declaredRegistryKeys)
+        {
+            if (IsUnderRegistryPrefix(normalizedKey, declared))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     /// <summary>
@@ -1441,8 +1627,9 @@ internal sealed class ReplayAnchor
     }
 
     private string OutsideText() =>
-        $"is outside the install directory '{_installDir}' and the scope roots the " +
-        "installer legitimately writes";
+        $"is outside the install directory '{_installDir}', the scope roots the " +
+        "installer legitimately writes, and the out-of-tree destinations this " +
+        "application's signed manifest declares";
 
     private static void AddRoot(List<string> roots, string? candidate)
     {

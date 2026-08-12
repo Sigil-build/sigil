@@ -1148,8 +1148,27 @@ public sealed class InstallSession
         // What would change the answer: a user-scope record type that acts OUTSIDE the
         // user's own reach. There is none today; if one is added, revisit this with the
         // row, because the reasoning above is the only thing holding it.
+        //
+        // R44/R51: the declarations come from THIS build's blob, because at a reinstall
+        // this process has no access to the blob the PRIOR version was packed with — its
+        // exe is about to be overwritten and was never a trusted input anyway.
+        //
+        // The residual is disclosed rather than hidden: if v2's manifest drops a declared
+        // out-of-tree destination (or a registry step) that v1 had, v1's records for it
+        // are refused during the reinstall cleanup and that content stays on disk. Every
+        // one of those refusals is reported per record through StateProgress into the
+        // /LOG file, and none of them aborts the reinstall — a stranded file is bad, a
+        // bricked upgrade is worse. S5's R15 work makes that guarantee structural rather
+        // than conventional: retention and the non-Ok result key on FailedRecords alone,
+        // and this call ignores the outcome entirely.
         await new UninstallEngine()
-            .RunAsync(_blob.AppId, fallback, _scope, StateProgress, ct)
+            .RunAsync(
+                _blob.AppId,
+                fallback,
+                SignedDeclarations.FromBlob(_blob, _parsed, _scope),
+                _scope,
+                StateProgress,
+                ct)
             .ConfigureAwait(false);
     }
 
@@ -1691,9 +1710,17 @@ public sealed class InstallSession
         }
 
         // R1 clause (c): ctx.InstallDir is resolved from the signed blob / manifest /
-        // command line and anchors the replay of the persisted journal.
+        // command line and anchors the replay of the persisted journal. R44/R51: the
+        // declared out-of-tree destinations and registry keys come from the same signed
+        // blob — never from the journal being replayed.
         var result = await new UninstallEngine()
-            .RunAsync(_blob.AppId, UninstallAnchorFallback(ctx), _scope, progress, ct)
+            .RunAsync(
+                _blob.AppId,
+                UninstallAnchorFallback(ctx),
+                SignedDeclarations.FromBlob(_blob, _parsed, _scope),
+                _scope,
+                progress,
+                ct)
             .ConfigureAwait(false);
         if (!result.Success)
         {
@@ -1808,9 +1835,16 @@ public sealed class InstallSession
             return new InstallOutcome(false, msg);
         }
 
-        // R1 clause (c): anchored to the install dir resolved from the signed blob.
+        // R1 clause (c): anchored to the install dir resolved from the signed blob, and
+        // (R44/R51) widened only by what that same signed blob declares.
         var result = await new UninstallEngine()
-            .RunAsync(_blob.AppId, UninstallAnchorFallback(ctx), _scope, effectiveProgress, ct)
+            .RunAsync(
+                _blob.AppId,
+                UninstallAnchorFallback(ctx),
+                SignedDeclarations.FromBlob(_blob, _parsed, _scope),
+                _scope,
+                effectiveProgress,
+                ct)
             .ConfigureAwait(false);
 
         if (result.Success)

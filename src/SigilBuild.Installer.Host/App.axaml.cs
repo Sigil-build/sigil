@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Avalonia.Threading;
 using SigilBuild.Core.Manifest;
 using SigilBuild.Installer.Host.Branding;
 using SigilBuild.Installer.Host.ViewModels;
@@ -40,6 +41,12 @@ public partial class App : Application
             // light/dark palette + base64 logo/hero, no BrandTokens.g.json sidecar.
             var tokens = LoadBrandTokens();
             BrandPalette.Apply(this, tokens);
+
+            // R48: kick the Authenticode/revocation lookup onto a thread-pool thread.
+            // Started here, before any window is constructed, so the trust line is
+            // already on its way by the time the wizard paints — and the paint no longer
+            // waits for it.
+            StartTrustLineResolution(tokens);
 
             var session = HostRuntime.Session;
 
@@ -215,7 +222,27 @@ public partial class App : Application
             // false, so an unsigned/un-stamped host does no trust work and shows no
             // line; a signed-then-tampered/re-stamped exe fails verification and also
             // shows no line. The neutral publisher name renders separately regardless.
-            TrustLine = InstallerTrustLoader.ResolveFromSelf(),
+            //
+            // R48: NOT resolved here. That call is WinVerifyTrust with whole-chain
+            // revocation checking — a network operation, measured at 335 ms on the happy
+            // path — and this runs while the first window is being constructed, so the
+            // wizard could not paint until it returned. TrustLine is left null (which
+            // renders as no line, the safe default) and filled in from a thread-pool
+            // thread by StartTrustLineResolution.
         };
     }
+
+    /// <summary>
+    /// R48 — resolve the trust line off the UI thread and let the binding fill it in.
+    /// </summary>
+    /// <remarks>
+    /// Fire-and-forget on purpose: the wizard must not wait for it, and the failure mode
+    /// is the same as an unsigned artifact — no line. The trust line is additive
+    /// assurance, so its momentary absence claims nothing.
+    /// </remarks>
+    private static void StartTrustLineResolution(BrandTokens tokens) =>
+        _ = TrustLineActivation.BeginAsync(
+            tokens,
+            InstallerTrustLoader.ResolveFromSelf,
+            action => Dispatcher.UIThread.Post(action));
 }

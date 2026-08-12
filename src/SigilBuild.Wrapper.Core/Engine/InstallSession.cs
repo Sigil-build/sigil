@@ -552,6 +552,13 @@ public sealed class InstallSession
                         if (_parsed.Launch)
                         {
                             LaunchAppUnelevated();
+                            if (LastLaunchOutcome == LaunchOutcome.SkippedDeElevationUnavailable)
+                            {
+                                // R29: /launch asked for a process and did not get one.
+                                // The install still succeeded, so the exit code is
+                                // unchanged — but the operator is told why.
+                                error.WriteLine(SkippedLaunchNotice);
+                            }
                         }
                         // P5: success-but-reboot-required → dedicated exit code 3010.
                         return _rebootRequired ? RebootRequiredExitCode : 0;
@@ -1899,15 +1906,51 @@ public sealed class InstallSession
             }
 
             _log?.WriteLine($"launch: {ctx.Redact(path)}");
-            return Launcher.LaunchUnelevated(path, args);
+            var outcome = Launcher.Launch(path, args);
+            LastLaunchOutcome = outcome;
+            if (outcome == LaunchOutcome.SkippedDeElevationUnavailable)
+            {
+                // R29: never silent. Launching from an elevated installer without
+                // de-elevation would give the application the installer's admin token
+                // for the rest of its lifetime; skipping costs the user one double-click.
+                _log?.WriteLine(SkippedLaunchNotice);
+            }
+            return outcome == LaunchOutcome.Started;
         }
         catch (Exception)
         {
+            LastLaunchOutcome = LaunchOutcome.StartFailed;
             _log?.WriteLine("launch: failed to resolve or start run_after_install target");
             return false;
         }
 #pragma warning restore CA1031
     }
+
+    /// <summary>
+    /// What the last <see cref="LaunchAppUnelevated"/> did (R29). The bool return says
+    /// only "no process exists"; this says whether that was a spawn failure or a
+    /// deliberate refusal to hand the application the installer's administrator token.
+    /// </summary>
+    public LaunchOutcome LastLaunchOutcome { get; private set; } = LaunchOutcome.NothingToLaunch;
+
+    /// <summary>
+    /// The operator-facing line for a launch skipped because de-elevation was
+    /// unavailable (R29).
+    /// </summary>
+    /// <remarks>
+    /// <strong>Why this is not a Done-screen control.</strong> The plan asked for a
+    /// notice on the Done screen; the wizard cannot host one, because
+    /// <c>InstallerViewModel.LaunchIfRequested</c> fires as the window CLOSES — by the
+    /// time the outcome is known there is no Done screen left to render it on, and
+    /// moving the launch earlier changes when the application starts relative to the
+    /// user's last click, which is a UX decision outside this row. So the notice goes
+    /// where it can actually be read: the always-on diagnostic log, the <c>/LOG</c> file,
+    /// and stderr on the silent path.
+    /// </remarks>
+    internal const string SkippedLaunchNotice =
+        "launch: SKIPPED — this installer is running elevated and could not drop to the " +
+        "desktop user's token, so starting the application now would have run it as " +
+        "administrator. Start it yourself from the Start menu or a shortcut.";
 
     /// <summary>
     /// Synchronous <see cref="IProgress{T}"/> that echoes each non-null log line

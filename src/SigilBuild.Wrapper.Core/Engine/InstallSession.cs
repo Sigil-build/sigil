@@ -1112,6 +1112,42 @@ public sealed class InstallSession
             ? Path.Combine(ScopeLayout.For(_scope).InstallRoot, _blob.AppId)
             : resolvedInstallDir;
 
+        // R53 — "should an ELEVATED process replay USER-scope state at all?" Decided:
+        // YES, it stays as it is, and here is why rather than a shrug.
+        //
+        // The question is real. R1 clause (b) stopped a MACHINE operation crossing into
+        // %LocalAppData%; this is the different shape where _scope is genuinely User and
+        // the process happens to hold an admin token, so every replayed record runs with
+        // privileges the state's author (the user) does not have. The instinct is to
+        // refuse. Three things say otherwise:
+        //
+        //  1. There is no privilege to gain. A user-scope replay reads a journal out of
+        //     the user's OWN profile and acts inside anchored roots that the user already
+        //     controls — install dir, this app's own state directory, that scope's
+        //     shortcut folders. Everything an attacker could aim it at is something they
+        //     could already write directly. The primitives that WOULD be escalations are
+        //     closed independently of scope: ReplayAnchor.OwnedByThisInstall additionally
+        //     requires an admin-only-writable target for a machine execution mapping and
+        //     for a machine PATH entry, and the state file itself passes S1's provenance
+        //     gate before any of this runs.
+        //
+        //  2. Refusing would break the case it is meant to protect. The scope here is the
+        //     scope the CURRENT run resolved, and an elevated user-scope run is ordinary:
+        //     an admin repairing an app from an elevated shell, an MDM or CI agent, a
+        //     `scope: auto` manifest whose user-scope install is launched from an already
+        //     elevated console. Refusing the reinstall cleanup for those leaves the prior
+        //     install's PATH entry, shortcuts and ARP row in place while the fresh install
+        //     adds its own — duplicated state, and the exact "unremovable" end state R15
+        //     exists to prevent, produced by the fix rather than the bug.
+        //
+        //  3. Dropping the token instead is not free. De-elevating this one call means a
+        //     second process, a second state read, and a new trust boundary between them
+        //     — more attack surface than the asymmetry it removes, for no reachable gain
+        //     under (1).
+        //
+        // What would change the answer: a user-scope record type that acts OUTSIDE the
+        // user's own reach. There is none today; if one is added, revisit this with the
+        // row, because the reasoning above is the only thing holding it.
         await new UninstallEngine()
             .RunAsync(_blob.AppId, fallback, _scope, StateProgress, ct)
             .ConfigureAwait(false);

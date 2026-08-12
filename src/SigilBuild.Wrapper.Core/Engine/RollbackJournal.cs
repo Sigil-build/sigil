@@ -40,6 +40,16 @@ public sealed class RollbackJournal
     /// <c>SerializableRollbackRecord</c> mapping), so their <c>%TEMP%</c> stash was
     /// never meant to outlive the install run. Best-effort and idempotent.
     /// </para>
+    /// <para>
+    /// <strong>R28 — the omission of <see cref="RollbackRecord.RestoreFile"/> here is
+    /// deliberate and must stay.</strong> Its <c>.sigil-bak</c> is the pre-existing
+    /// content of a file the install OVERWROTE, so it has to outlive the run: it is the
+    /// only thing that lets uninstall put the user's original file back. Discarding it
+    /// would silently drop that capability. What it was missing was a lifecycle, and that
+    /// is <see cref="RelocateCommittedStashes"/>: at commit the stash moves out of the
+    /// install directory into the per-app state directory, and uninstall consumes it
+    /// there.
+    /// </para>
     /// </summary>
     public void DiscardTransientStashes()
     {
@@ -62,6 +72,104 @@ public sealed class RollbackJournal
                     break;
             }
         }
+    }
+
+    /// <summary>
+    /// R28 — the <c>.sigil-bak</c> contract. Move every surviving <c>restore_file</c>
+    /// backup out of the install directory into <paramref name="stashRoot"/> and rewrite
+    /// the records to point at their new home, so a COMMITTED install leaves no
+    /// <c>.sigil-bak</c> beside the files it replaced.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The decision, written down.</strong> These stashes are not litter to be
+    /// deleted: each one is the pre-existing content of a file the install overwrote, and
+    /// it is what lets uninstall put that file back.
+    /// <see cref="DiscardTransientStashes"/> skipping <c>RestoreFile</c> is therefore
+    /// CORRECT, and the register's accurate framing — "retained by design, with no
+    /// lifecycle story" — is the thing to fix. Discarding them on the success path would
+    /// trade a real capability (restoring a file the publisher never shipped) for
+    /// tidiness. So they are kept, and given the lifecycle they were missing:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>during the install they stay beside their destination, where a mid-install
+    ///   rollback — which runs unanchored and in-process — restores from them;</item>
+    ///   <item>at commit they move into the per-app state directory,
+    ///   <c>&lt;StateRoot&gt;\Sigil\&lt;AppId&gt;\backups</c>: out of Program Files, and
+    ///   hardened to administrators-only in machine scope by the same S1 code that
+    ///   protects <c>uninstall.json</c>;</item>
+    ///   <item>they then live exactly as long as the install does — uninstall's
+    ///   <c>RestoreFile</c> undo copies each one back and deletes it, and whatever it
+    ///   does not consume goes with the state directory.</item>
+    /// </list>
+    /// <para>
+    /// The per-app state directory is an anchored replay root under
+    /// <see cref="ReplayAnchorage.ForInstall"/>, so a relocated stash is still a legal
+    /// content source at uninstall time — and a NARROWER one than the install tree,
+    /// because the allowance is this app's own directory alone.
+    /// </para>
+    /// <para>
+    /// Best-effort per record: a stash that will not move keeps its old home AND its
+    /// record, so the worst case is the previous behaviour for one file rather than a
+    /// lost restore.
+    /// </para>
+    /// </remarks>
+    public void RelocateCommittedStashes(string stashRoot)
+    {
+        System.ArgumentException.ThrowIfNullOrWhiteSpace(stashRoot);
+
+        for (var i = 0; i < _records.Count; i++)
+        {
+            if (_records[i] is not RollbackRecord.RestoreFile
+                {
+                    ExistedBefore: true, BackupPath: { Length: > 0 } backup
+                } record)
+            {
+                continue;
+            }
+
+#pragma warning disable CA1031 // Best-effort: a stash that will not move keeps its old home and its record.
+            try
+            {
+                if (!System.IO.File.Exists(backup))
+                {
+                    continue;
+                }
+
+                System.IO.Directory.CreateDirectory(stashRoot);
+
+                // Named from the destination so a repeated install of the same file
+                // overwrites its own stash rather than accumulating one per run, and two
+                // directories' config.ini never collide.
+                var moved = System.IO.Path.Combine(stashRoot, StashNameFor(record.Path));
+                System.IO.File.Copy(backup, moved, overwrite: true);
+                System.IO.File.Delete(backup);
+                _records[i] = record with { BackupPath = moved };
+            }
+            catch
+            {
+                // Leave the record pointing at the stash that is still there.
+            }
+#pragma warning restore CA1031
+        }
+    }
+
+    /// <summary>
+    /// A stable, collision-free stash name for <paramref name="destination"/>: the
+    /// destination's own file name, so a human can tell what it is, plus a hash of its
+    /// full path, so two directories' <c>config.ini</c> do not share one stash.
+    /// </summary>
+    private static string StashNameFor(string destination)
+    {
+        var hash = System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(destination.ToUpperInvariant()));
+        var tag = System.Convert.ToHexString(hash, 0, 8);
+        var leaf = System.IO.Path.GetFileName(destination);
+        if (string.IsNullOrEmpty(leaf))
+        {
+            leaf = "file";
+        }
+        return $"{leaf}.{tag}.sigil-bak";
     }
 
     private static void TryDeleteFile(string path)

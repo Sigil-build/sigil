@@ -53,6 +53,45 @@ public static partial class NativeRuntimeBootstrap
     /// </summary>
     private const string CompletionMarkerName = ".sigil-runtime-complete";
 
+    /// <summary>
+    /// Directory-name prefix of the per-run fallback root created when the shared cache
+    /// root cannot be established (see <see cref="EstablishAdminOnlyRoot"/>). The full
+    /// name is this plus a 32-hex-digit GUID. Both the creator and
+    /// <see cref="ReclaimAbandonedFallbacks"/> derive names from this one constant, so
+    /// the sweep can never match a directory the fallback path did not create — in
+    /// particular not the shared root <c>sigil-runtime</c> itself, and not
+    /// <c>%ProgramData%\Sigil</c>.
+    /// </summary>
+    private const string FallbackPrefix = "sigil-runtime-";
+
+    /// <summary>
+    /// File this process keeps an OPEN, delete-denying handle on for its whole lifetime
+    /// inside every per-run fallback root it creates. It is the interlock that makes
+    /// reclaiming safe — see <see cref="ReclaimAbandonedFallbacks"/>.
+    /// </summary>
+    private const string LeaseFileName = ".sigil-runtime-lease";
+
+    /// <summary>
+    /// How old a fallback directory carrying <b>no</b> lease file must be before it may
+    /// be reclaimed. Covers exactly two cases: a directory created by a build from
+    /// before the lease existed, and the sub-millisecond window in the current build
+    /// between creating a fallback root and opening its lease. An hour is far longer
+    /// than either and far shorter than "never".
+    /// </summary>
+    private static readonly TimeSpan UnleasedReclaimGrace = TimeSpan.FromHours(1);
+
+    private static readonly object LeaseGate = new();
+
+    /// <summary>
+    /// Open lease handles, one per fallback root this process created, alongside the
+    /// directories they cover. Never disposed: the point is that they stay open until
+    /// the process exits, because the native DLLs extracted beside them stay mapped
+    /// into this process for exactly that long.
+    /// </summary>
+    private static readonly List<FileStream> Leases = new();
+
+    private static readonly List<string> LeasedDirectories = new();
+
     // LOAD_LIBRARY_SEARCH_DEFAULT_DIRS = APPLICATION_DIR | SYSTEM32 | USER_DIRS.
     private const uint LoadLibrarySearchDefaultDirs = 0x00001000;
 
@@ -206,6 +245,13 @@ public static partial class NativeRuntimeBootstrap
 
         var root = Path.GetFullPath(cacheRoot);
 
+        // R50: before this run possibly adds a fallback of its own, remove the ones
+        // earlier runs left behind. Sited here rather than at process exit because the
+        // directory a run leaks is the one whose DLLs it still has mapped — it cannot
+        // clean up after itself, only after its predecessors. The sweep touches nothing
+        // it cannot prove is abandoned; see ReclaimAbandonedFallbacks.
+        _ = ReclaimAbandonedFallbacks(root, requireAdminOnlyRoot, report);
+
         if (requireAdminOnlyRoot)
         {
             if (OperatingSystem.IsWindows())
@@ -262,6 +308,306 @@ public static partial class NativeRuntimeBootstrap
 
         File.WriteAllBytes(Path.Combine(targetDir, CompletionMarkerName), Array.Empty<byte>());
         return targetDir;
+    }
+
+    /// <summary>
+    /// Delete per-run fallback roots (<c>&lt;parent&gt;\sigil-runtime-&lt;guid&gt;</c>)
+    /// left behind by runs that have ended, and report how many were reclaimed. This is
+    /// the fix for register row R50.
+    /// </summary>
+    /// <param name="cacheRoot">
+    /// The shared cache root; its <em>parent</em> is the directory swept, because that
+    /// is where <see cref="EstablishAdminOnlyRoot"/> sites its fallbacks.
+    /// </param>
+    /// <param name="requireAdminOnlyRoot">
+    /// True for an elevated run, in which case a candidate must also prove
+    /// administrator-only writability <em>through the open handle</em> before it is
+    /// touched. Unelevated there is no privilege boundary to cross, exactly as in
+    /// <see cref="IsSitedSafely"/>.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// <b>The leak.</b> When the shared root cannot be established or repaired — a
+    /// <em>file</em> at that path, an owner-pinned deny ACE — the run extracts ~18 MB
+    /// into a fresh per-run GUID directory instead. That directory was never cleaned
+    /// up, and the squat that caused it is permanent, so one <c>New-Item</c> by any
+    /// unprivileged user armed an unbounded per-install disk leak. The refusal itself
+    /// is the design and is not changed here; only the litter is.
+    /// </para>
+    /// <para>
+    /// <b>Constraint 1 — guards read from an open handle, never through the path.</b>
+    /// Every decision about a candidate is made from a handle opened with
+    /// <c>FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT</c>, so a junction
+    /// or symlink planted at the candidate's name is opened <em>as the link</em> and
+    /// refused on its <c>FILE_ATTRIBUTE_REPARSE_POINT</c> bit rather than silently
+    /// followed to whatever it targets. Attributes, creation time and the security
+    /// descriptor all come from that one handle
+    /// (<see cref="StateDirectorySecurity.IsAdminOnlyWritableHandle"/>), so they
+    /// describe one pinned kernel object rather than three successive path lookups.
+    /// </para>
+    /// <para>
+    /// <b>Why the final delete may then be by path.</b> A directory that passed the
+    /// administrator-only check cannot be swapped by a non-administrator between the
+    /// check and the delete: <c>%ProgramData%</c> grants <c>BUILTIN\Users</c>
+    /// create-child but <b>not</b> <c>DC</c>, so they cannot remove or rename ours, and
+    /// the directory's own protected DACL denies them write. A candidate that
+    /// <em>fails</em> the check is left strictly alone — never deleted — so nothing an
+    /// unprivileged user controls is ever removed by this sweep. The guard is what
+    /// licenses the path-based delete; without it the delete would not be safe.
+    /// </para>
+    /// <para>
+    /// <b>Constraint 2 — a reclaim must not race a live install.</b> Two layers, both
+    /// enforced by the kernel rather than by timing:
+    /// <list type="number">
+    ///   <item><description>
+    ///   <b>The lease.</b> A process that creates a fallback root opens
+    ///   <c>.sigil-runtime-lease</c> inside it with <c>FileShare.Read</c> — no
+    ///   <c>Delete</c>, no <c>Write</c> — and holds that handle until it exits. A
+    ///   sweeper trying to open the same file with <see cref="FileShare.None"/> gets a
+    ///   sharing violation and abandons the whole directory.
+    ///   </description></item>
+    ///   <item><description>
+    ///   <b>The probe, before anything is removed.</b> EVERY file in the candidate is
+    ///   opened <see cref="FileShare.None"/> and all the handles are held at once. If a
+    ///   single open fails the sweep releases them and deletes <em>nothing</em>. A DLL
+    ///   mapped as an image into a live installer cannot be opened that way, so a
+    ///   directory still in use by a process from before the lease existed is caught
+    ///   too. This is why the probe is a separate all-or-nothing phase rather than
+    ///   delete-and-see: <c>Directory.Delete(recursive)</c> removes files one at a time
+    ///   and would already have destroyed part of a live install before reaching the
+    ///   file that stopped it.
+    ///   </description></item>
+    /// </list>
+    /// A directory with no lease file at all is additionally required to be
+    /// <see cref="UnleasedReclaimGrace"/> old, which removes the only remaining window:
+    /// a fallback created microseconds ago whose lease is not yet open, and which is
+    /// therefore still empty and would otherwise probe clean.
+    /// </para>
+    /// <para>
+    /// <b>Failure is always "leave it alone".</b> Every unreadable, unopenable or
+    /// surprising candidate is skipped. The cost of skipping is the leak this method
+    /// exists to fix; the cost of guessing wrong in the other direction is deleting a
+    /// live installer's native DLLs mid-install.
+    /// </para>
+    /// </remarks>
+    internal static int ReclaimAbandonedFallbacks(
+        string cacheRoot, bool requireAdminOnlyRoot, Action<string, bool>? report)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(cacheRoot);
+
+        if (!OperatingSystem.IsWindows())
+        {
+            return 0;
+        }
+
+        var parent = Path.GetDirectoryName(Path.GetFullPath(cacheRoot));
+        if (string.IsNullOrEmpty(parent) || !Directory.Exists(parent))
+        {
+            return 0;
+        }
+
+        string[] candidates;
+#pragma warning disable CA1031 // An unreadable parent is a no-op sweep, never a failed install.
+        try
+        {
+            candidates = Directory.GetDirectories(parent, FallbackPrefix + "*");
+        }
+        catch
+        {
+            return 0;
+        }
+#pragma warning restore CA1031
+
+        var reclaimed = 0;
+        foreach (var candidate in candidates)
+        {
+            if (!IsFallbackDirectoryName(Path.GetFileName(candidate))
+                || IsLeasedByThisProcess(candidate))
+            {
+                continue;
+            }
+
+            if (TryReclaim(candidate, requireAdminOnlyRoot, report))
+            {
+                reclaimed++;
+            }
+        }
+
+        return reclaimed;
+    }
+
+    /// <summary>
+    /// Exactly <c>sigil-runtime-</c> followed by 32 lower-case hex digits — the shape
+    /// <see cref="EstablishAdminOnlyRoot"/> produces with <c>Guid.NewGuid():N</c>, and
+    /// nothing else. The shared root <c>sigil-runtime</c> fails this (no suffix), as
+    /// does anything a human or another component named.
+    /// </summary>
+    private static bool IsFallbackDirectoryName(string? name)
+    {
+        if (name is null || name.Length != FallbackPrefix.Length + 32)
+        {
+            return false;
+        }
+
+        if (!name.StartsWith(FallbackPrefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        for (var i = FallbackPrefix.Length; i < name.Length; i++)
+        {
+            var c = name[i];
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsLeasedByThisProcess(string directory)
+    {
+        lock (LeaseGate)
+        {
+            foreach (var leased in LeasedDirectories)
+            {
+                if (string.Equals(leased, directory, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static bool TryReclaim(
+        string candidate, bool requireAdminOnlyRoot, Action<string, bool>? report)
+    {
+#pragma warning disable CA1031 // Every failure mode here means "leave it alone"; see the remarks on ReclaimAbandonedFallbacks.
+        try
+        {
+            using (var handle = DirectoryHandle.OpenNoFollow(candidate, LeaseFileName))
+            {
+                if (handle is null)
+                {
+                    return false; // vanished, or we may not open it — either way, not ours to remove.
+                }
+
+                if (!handle.IsPlainDirectory)
+                {
+                    report?.Invoke(
+                        $"native runtime: '{candidate}' has the shape of an abandoned per-run cache but " +
+                        "is a reparse point, not a directory; refusing to follow it — nothing was deleted",
+                        true);
+                    return false;
+                }
+
+                if (requireAdminOnlyRoot
+                    && !StateDirectorySecurity.IsAdminOnlyWritableHandle(handle.Handle))
+                {
+                    return false; // not provably ours; a non-administrator may control it.
+                }
+
+                if (!handle.HasLeaseFile
+                    && DateTime.UtcNow - handle.CreationTimeUtc < UnleasedReclaimGrace)
+                {
+                    return false; // possibly a fallback being created right now by another run.
+                }
+            }
+
+            if (!IsWhollyUnused(candidate))
+            {
+                return false; // a live install is using it. Nothing has been touched.
+            }
+
+            Directory.Delete(candidate, recursive: true);
+            report?.Invoke(
+                $"native runtime: reclaimed the abandoned per-run cache directory '{candidate}' " +
+                "left by an earlier run (register row R50)",
+                false);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+#pragma warning restore CA1031
+    }
+
+    /// <summary>
+    /// True when every file under <paramref name="directory"/> can be opened with
+    /// <see cref="FileShare.None"/> <b>at the same time</b> — i.e. no other process
+    /// holds any of them open, and none is mapped as a loaded image. All-or-nothing on
+    /// purpose: see <see cref="ReclaimAbandonedFallbacks"/>'s remarks on why probing
+    /// has to complete before a single byte is deleted.
+    /// </summary>
+    private static bool IsWhollyUnused(string directory)
+    {
+        var held = new List<FileStream>();
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
+            {
+                held.Add(new FileStream(file, FileMode.Open, FileAccess.ReadWrite, FileShare.None));
+            }
+
+            return true;
+        }
+#pragma warning disable CA1031 // Any failure to prove the directory idle answers "in use".
+        catch
+        {
+            return false;
+        }
+#pragma warning restore CA1031
+        finally
+        {
+            foreach (var stream in held)
+            {
+                stream.Dispose();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Take this process's lease on a per-run fallback root: create
+    /// <see cref="LeaseFileName"/> inside it and keep the handle open, sharing read
+    /// only, for the rest of the process's life. Returns false when the lease cannot be
+    /// taken, which makes the caller abandon that fallback rather than extract into a
+    /// directory another run could reclaim underneath it.
+    /// </summary>
+    private static bool TryTakeLease(string directory, Action<string, bool>? report)
+    {
+#pragma warning disable CA1031 // Reported and turned into "do not use this directory".
+        try
+        {
+            // FileShare.Read: readers welcome, deleters not. A sweeper's FileShare.None
+            // open of this same file is what fails, and that is the interlock.
+            var lease = new FileStream(
+                Path.Combine(directory, LeaseFileName),
+                FileMode.Create,
+                FileAccess.ReadWrite,
+                FileShare.Read);
+
+            lock (LeaseGate)
+            {
+                Leases.Add(lease);
+                LeasedDirectories.Add(directory);
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            report?.Invoke(
+                $"native runtime: could not lease the private cache directory '{directory}' " +
+                $"({ex.GetType().Name}: {ex.Message}); not using it",
+                true);
+            return false;
+        }
+#pragma warning restore CA1031
     }
 
     /// <summary>The archive's SHA-256, lower-case hex — the cache directory's name.</summary>
@@ -324,14 +670,20 @@ public static partial class NativeRuntimeBootstrap
         var parent = Path.GetDirectoryName(cacheRoot);
         var perRun = Path.Combine(
             string.IsNullOrEmpty(parent) ? cacheRoot : parent,
-            $"sigil-runtime-{Guid.NewGuid():N}");
+            FallbackPrefix + Guid.NewGuid().ToString("N"));
 
         report?.Invoke(
             $"native runtime: '{cacheRoot}' could not be established as an administrator-only cache " +
             $"({failure}); extracting to the private directory '{perRun}' for this run instead",
             true);
 
-        if (TryEstablish(perRun, report, out var fallbackFailure))
+        // R50: lease it in the same breath as establishing it. The lease is what lets a
+        // LATER run tell "abandoned, reclaim it" from "in use, leave it alone", and a
+        // fallback we cannot lease is one we must not extract into — a concurrent run's
+        // sweep would be entitled to remove it out from under us once the grace period
+        // elapsed. Losing it here falls through to the same refusal as failing to
+        // establish it.
+        if (TryEstablish(perRun, report, out var fallbackFailure) && TryTakeLease(perRun, report))
         {
             return perRun;
         }

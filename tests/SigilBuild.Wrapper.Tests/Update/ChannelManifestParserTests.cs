@@ -15,12 +15,21 @@ namespace SigilBuild.Wrapper.Tests.Update;
 /// </summary>
 public class ChannelManifestParserTests
 {
+    /// <summary>
+    /// R13 made <c>issuedAt</c>/<c>expiresAt</c>/<c>sequence</c> required, so the
+    /// baseline fixture carries them. The window is far-future because these tests are
+    /// about parse/shape, not freshness — the freshness window itself is exercised by
+    /// <see cref="UpdateRunnerTests"/> against <c>UpdateRunner.EvaluateFreshness</c>.
+    /// </summary>
     private const string ValidJson = """
         {
           "schemaVersion": 1,
           "version": "2.3.0",
           "packageUrl": "https://updates.example.com/acme/2.3.0/package.zip",
           "sha256": "b1946ac92492d2347c6235b4d2611184",
+          "issuedAt": "2026-01-01T00:00:00.0000000+00:00",
+          "expiresAt": "2099-01-01T00:00:00.0000000+00:00",
+          "sequence": 7,
           "minFromVersion": "2.0.0"
         }
         """;
@@ -51,7 +60,10 @@ public class ChannelManifestParserTests
               "schemaVersion": 1,
               "version": "1.0.0",
               "packageUrl": "https://updates.example.com/pkg.zip",
-              "sha256": "abc123"
+              "sha256": "abc123",
+              "issuedAt": "2026-01-01T00:00:00.0000000+00:00",
+              "expiresAt": "2099-01-01T00:00:00.0000000+00:00",
+              "sequence": 1
             }
             """;
 

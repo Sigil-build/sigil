@@ -89,7 +89,93 @@ internal static class ChannelManifestParser
             return Malformed("missing required field 'sha256'");
         }
 
+        // R13: freshness. These are REQUIRED, not optional — an optional freshness
+        // field is defeated by replaying a correctly signed manifest that predates
+        // it, which is the exact attack. A manifest with no issuedAt is therefore
+        // malformed rather than "unbounded".
+        if (string.IsNullOrWhiteSpace(manifest.IssuedAt))
+        {
+            return Malformed(
+                "missing required field 'issuedAt' — a manifest with no issue time cannot be " +
+                "checked for freshness and is indistinguishable from a replay");
+        }
+
+        if (!TryParseTimestamp(manifest.IssuedAt, out _))
+        {
+            return Malformed($"'issuedAt' is not an ISO-8601 timestamp (got '{manifest.IssuedAt}')");
+        }
+
+        if (string.IsNullOrWhiteSpace(manifest.ExpiresAt))
+        {
+            return Malformed(
+                "missing required field 'expiresAt' — a manifest with no expiry stays actionable " +
+                "forever, which is what makes a freeze attack possible");
+        }
+
+        if (!TryParseTimestamp(manifest.ExpiresAt, out _))
+        {
+            return Malformed($"'expiresAt' is not an ISO-8601 timestamp (got '{manifest.ExpiresAt}')");
+        }
+
+        if (manifest.Sequence is null)
+        {
+            return Malformed(
+                "missing required field 'sequence' — without it a manifest inside its validity " +
+                "window can be rolled back to an earlier one");
+        }
+
+        if (manifest.Sequence < 0)
+        {
+            return Malformed($"'sequence' must be a non-negative integer (got {manifest.Sequence})");
+        }
+
         return ChannelManifestParseResult.Ok(manifest);
+    }
+
+    /// <summary>
+    /// The exact timestamp formats a channel manifest may use: ISO-8601 with an explicit
+    /// UTC <c>Z</c> or a numeric offset, with or without fractional seconds.
+    /// </summary>
+    /// <remarks>
+    /// <b>Exact formats, not <c>TryParse</c>.</b> The lenient parser accepts
+    /// <c>01/02/2026</c> and resolves it by culture convention — two different days
+    /// depending on who is reading. A validity window is a security boundary, and a
+    /// security boundary whose meaning depends on the reader's locale is not one. An
+    /// explicit offset is likewise required rather than assumed: "midnight, somewhere"
+    /// is up to 26 hours of ambiguity at each end of the window.
+    /// </remarks>
+    private static readonly string[] TimestampFormats =
+    {
+        // Explicit numeric offset — what DateTimeOffset.ToString("O") emits.
+        "yyyy-MM-ddTHH:mm:ss.FFFFFFFzzz",
+        "yyyy-MM-ddTHH:mm:sszzz",
+        // Literal Z. Note this cannot be spelled with "K", which also matches the EMPTY
+        // string and would therefore silently admit a zone-less "2026-01-01T00:00:00".
+        "yyyy-MM-ddTHH:mm:ss.FFFFFFF'Z'",
+        "yyyy-MM-ddTHH:mm:ss'Z'",
+    };
+
+    /// <summary>
+    /// Parse an ISO-8601 timestamp from a channel manifest, strictly. The result is
+    /// normalized to UTC, because the comparison the freshness gate makes is against
+    /// <see cref="System.DateTimeOffset.UtcNow"/>.
+    /// </summary>
+    internal static bool TryParseTimestamp(string? value, out DateTimeOffset parsed)
+    {
+        parsed = default;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+        return DateTimeOffset.TryParseExact(
+            value.Trim(),
+            TimestampFormats,
+            System.Globalization.CultureInfo.InvariantCulture,
+            // AssumeUniversal only bites for the literal-Z formats, which are universal by
+            // construction; the zzz formats carry their own offset and it wins.
+            System.Globalization.DateTimeStyles.AssumeUniversal
+                | System.Globalization.DateTimeStyles.AdjustToUniversal,
+            out parsed);
     }
 
     private static ChannelManifestParseResult Malformed(string detail) =>

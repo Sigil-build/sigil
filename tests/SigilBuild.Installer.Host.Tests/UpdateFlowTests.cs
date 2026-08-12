@@ -80,11 +80,40 @@ public sealed class UpdateFlowTests
         }
     }
 
+    /// <summary>
+    /// R13's replay high water mark, in memory. The production store reads and WRITES
+    /// <c>%ProgramData%\Sigil\&lt;AppId&gt;\update-sequence.txt</c>; CI runs elevated, so a
+    /// test on the default store would mutate the runner's real machine state.
+    /// </summary>
+    private sealed class InMemorySequenceStore : IUpdateSequenceStore
+    {
+        private readonly Dictionary<string, long> _seen = new(StringComparer.Ordinal);
+
+        private static string Key(string appId, InstallScope scope) => $"{appId}|{scope}";
+
+        public long? Read(string appId, InstallScope scope) =>
+            _seen.TryGetValue(Key(appId, scope), out var value) ? value : null;
+
+        public void Record(string appId, InstallScope scope, long sequence, Action<string, bool>? report)
+        {
+            var key = Key(appId, scope);
+            if (!_seen.TryGetValue(key, out var existing) || sequence > existing)
+            {
+                _seen[key] = sequence;
+            }
+        }
+    }
+
     private static (byte[] Manifest, byte[] Signature, string PublicKeyBase64) SignedManifest(string version)
     {
+        // R13: freshness fields are required — minted now, valid for a week.
+        var issued = DateTimeOffset.UtcNow;
         var json =
             "{\n" +
             "  \"schemaVersion\": 1,\n" +
+            $"  \"issuedAt\": \"{issued:O}\",\n" +
+            $"  \"expiresAt\": \"{issued.AddDays(7):O}\",\n" +
+            "  \"sequence\": 1,\n" +
             $"  \"version\": \"{version}\",\n" +
             $"  \"packageUrl\": \"https://updates.example.com/acme/{version}/Setup.exe\",\n" +
             $"  \"sha256\": \"{PackageSha256}\"\n" +
@@ -123,7 +152,7 @@ public sealed class UpdateFlowTests
     {
         vm.ConfigureRunner((report, ct) =>
         {
-            var runner = new UpdateRunner(fetcher, downloader, launcher, () => installed, report);
+            var runner = new UpdateRunner(fetcher, downloader, launcher, () => installed, report, new InMemorySequenceStore());
             var request = new UpdateRequest(
                 ManifestUrl: ManifestUrl,
                 SigningKey: signingKey,

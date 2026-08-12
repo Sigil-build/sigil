@@ -52,19 +52,27 @@ internal sealed class UpdateRunner
     private readonly IChildInstallerLauncher _launcher;
     private readonly Func<UpgradeState> _installedStateProbe;
     private readonly Action<string, bool> _report;
+    private readonly IUpdateSequenceStore _sequences;
 
+    /// <param name="sequences">
+    /// R13's replay high water mark. Defaults to the real machine-scope file store;
+    /// tests MUST pass an in-memory one, because the default reads and writes a real
+    /// <c>%ProgramData%</c> path and CI runs elevated.
+    /// </param>
     public UpdateRunner(
         IUpdateResourceFetcher fetcher,
         IUpdatePackageDownloader downloader,
         IChildInstallerLauncher launcher,
         Func<UpgradeState> installedStateProbe,
-        Action<string, bool> report)
+        Action<string, bool> report,
+        IUpdateSequenceStore? sequences = null)
     {
         _fetcher = fetcher;
         _downloader = downloader;
         _launcher = launcher;
         _installedStateProbe = installedStateProbe;
         _report = report;
+        _sequences = sequences ?? FileUpdateSequenceStore.Instance;
     }
 
     public async Task<int> RunAsync(UpdateRequest request, CancellationToken ct)
@@ -77,6 +85,20 @@ internal sealed class UpdateRunner
         {
             _report("update: this installer is not update-enabled (no updates.manifestUrl configured)", true);
             return InstallSession.UpdateNotConfiguredExitCode;
+        }
+
+        // R14: re-check the scheme before anything is fetched. SIG0324 catches this at
+        // pack time; this is the runtime half, and it is not redundant — the `.sig` URL
+        // is this string + ".sig", so a cleartext manifestUrl silently drags the
+        // signature fetch onto cleartext too, and an installer stamped before SIG0324
+        // existed is still out there.
+        if (!request.ManifestUrl!.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            _report(
+                $"update: refusing to check for updates — updates.manifestUrl must be https:// " +
+                $"(got '{request.ManifestUrl}')",
+                true);
+            return InstallSession.UpdateCheckFailedExitCode;
         }
 
         var channelLabel = string.IsNullOrWhiteSpace(request.Channel) ? "default" : request.Channel!;
@@ -101,7 +123,22 @@ internal sealed class UpdateRunner
 
         var manifestBytes = manifestFetch.Bytes;
 
-        // 3. Parse (SIG0320 on failure).
+        // 3. Verify the detached signature over the exact bytes FIRST (SIG0321). A
+        //    tampered or unsigned channel manifest is a HARD reject — never acted on,
+        //    and now never even parsed. R39: verification used to run after the parse.
+        //    Nothing parsed was consumed before verification, so that ordering was not
+        //    exploitable — but it exposed the JSON parser to unverified network input
+        //    and let whoever answered the request choose which diagnostic the user saw.
+        //    Verify-then-parse is the cheaper invariant to keep true as this grows.
+        var signatureBase64 = Encoding.UTF8.GetString(signatureFetch.Bytes).Trim();
+        var verify = ChannelManifestVerifier.Verify(manifestBytes, signatureBase64, request.SigningKey);
+        if (!verify.Success)
+        {
+            _report($"update: {verify.DiagnosticCode}: {verify.Error}", true);
+            return InstallSession.UpdateManifestRejectedExitCode;
+        }
+
+        // 4. Parse the now-authenticated bytes (SIG0320 on failure).
         var parse = ChannelManifestParser.Parse(Encoding.UTF8.GetString(manifestBytes));
         if (!parse.Success || parse.Manifest is null)
         {
@@ -110,14 +147,27 @@ internal sealed class UpdateRunner
         }
         var channel = parse.Manifest;
 
-        // 4. Verify the detached signature over the exact bytes (SIG0321). A tampered
-        //    or unsigned channel manifest is a HARD reject — never acted on.
-        var signatureBase64 = Encoding.UTF8.GetString(signatureFetch.Bytes).Trim();
-        var verify = ChannelManifestVerifier.Verify(manifestBytes, signatureBase64, request.SigningKey);
-        if (!verify.Success)
+        // 4b. R13: freshness. The signature proves WHO minted this document, not WHEN.
+        //     Without this gate an on-path attacker or compromised CDN replays a
+        //     correctly signed older manifest indefinitely — freezing updates while a
+        //     security fix exists, or steering the client onto an intermediate version
+        //     that is newer than installed and known-vulnerable.
+        var lastSequence = _sequences.Read(request.AppId, request.Scope);
+        var freshness = EvaluateFreshness(channel, lastSequence, DateTimeOffset.UtcNow);
+        if (freshness is not null)
         {
-            _report($"update: {verify.DiagnosticCode}: {verify.Error}", true);
+            _report($"update: {freshness}", true);
             return InstallSession.UpdateManifestRejectedExitCode;
+        }
+
+        // Advance the high water mark as soon as the manifest is authenticated and
+        // judged fresh — not after the install succeeds. The sequence records the newest
+        // manifest this machine has SEEN and believed, which is what a later replay has
+        // to beat; whether the package it advertised installed cleanly is a different
+        // question, and tying the two would let a failed install reopen the replay window.
+        if (channel.Sequence is { } seen)
+        {
+            _sequences.Record(request.AppId, request.Scope, seen, _report);
         }
 
         // 5. Compare the advertised version against the installed one, reusing the P3
@@ -153,13 +203,18 @@ internal sealed class UpdateRunner
             }
             else
             {
-                // T12.3 Minor: the installed version is malformed (can't be compared
-                // against MinFromVersion), so the floor is skipped rather than blocking
-                // — but that must be an OBSERVABLE decision, not a silent no-op.
+                // R37: an installed version that cannot be compared against the floor is
+                // NOT eligible. This used to log and proceed, which let anything that
+                // could make the recorded version unparseable — for a user-scope install
+                // that is a value in the user's own HKCU — skip a floor the publisher
+                // declared. Fail closed: a floor that is unenforceable is not a floor
+                // that has been satisfied.
                 _report(
-                    $"update: minFromVersion floor {channel.MinFromVersion} skipped — installed version " +
-                    $"'{installedLabel}' is malformed and cannot be compared",
-                    false);
+                    $"update: cannot update to {channel.Version} — this package declares a minimum " +
+                    $"{channel.MinFromVersion} it updates from, and the installed version " +
+                    $"'{installedLabel}' is malformed and cannot be compared against it",
+                    true);
+                return InstallSession.UpdateNotEligibleExitCode;
             }
         }
 
@@ -269,6 +324,105 @@ internal sealed class UpdateRunner
             _report($"update: setup exited with code {childCode}", childCode != 0 && childCode != InstallSession.RebootRequiredExitCode);
             return childCode;
         }
+    }
+
+    /// <summary>
+    /// Clock-skew tolerance applied to both ends of the validity window (register row
+    /// R13, ADR-011).
+    /// </summary>
+    /// <remarks>
+    /// A window with no skew allowance breaks on any misconfigured clock, and a machine
+    /// whose clock is wrong is overwhelmingly more common than one under an on-path
+    /// replay. Five minutes is the usual Kerberos-era allowance and is far below the
+    /// timescale of the attack this bounds (a freeze attack is interesting over days,
+    /// not minutes), so granting it costs the defence nothing measurable.
+    /// </remarks>
+    internal static readonly TimeSpan ClockSkewTolerance = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// Maximum age accepted from <c>issuedAt</c>, independently of <c>expiresAt</c>
+    /// (register row R13, ADR-011).
+    /// </summary>
+    /// <remarks>
+    /// <c>expiresAt</c> is publisher-chosen, so a publisher who sets it to the year 3000
+    /// — by mistake or on the advice of a "make the warnings stop" search result — opts
+    /// out of the entire defence without knowing it. This is the ceiling the client
+    /// enforces regardless: whatever the document says, a manifest older than this is not
+    /// acted on.
+    /// </remarks>
+    internal static readonly TimeSpan MaxManifestAge = TimeSpan.FromDays(30);
+
+    /// <summary>
+    /// The R13 freshness decision, pure and unit-testable: returns the refusal reason, or
+    /// <c>null</c> when <paramref name="channel"/> is fresh enough to act on.
+    /// </summary>
+    /// <param name="channel">The verified, parsed channel manifest.</param>
+    /// <param name="lastSequence">
+    /// The highest sequence this machine has previously accepted, or <c>null</c> on first
+    /// contact.
+    /// </param>
+    /// <param name="now">Current UTC time, injected so the window is testable.</param>
+    internal static string? EvaluateFreshness(ChannelManifest channel, long? lastSequence, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(channel);
+
+        // The parser has already established that all three fields are present and
+        // well-formed, so a failure to re-parse here would be a contract violation
+        // rather than hostile input — but this method is also called directly by tests,
+        // so it re-derives rather than assuming.
+        if (!ChannelManifestParser.TryParseTimestamp(channel.IssuedAt, out var issuedAt))
+        {
+            return $"channel manifest has no usable 'issuedAt' (got '{channel.IssuedAt}') — refusing to act on it";
+        }
+
+        if (!ChannelManifestParser.TryParseTimestamp(channel.ExpiresAt, out var expiresAt))
+        {
+            return $"channel manifest has no usable 'expiresAt' (got '{channel.ExpiresAt}') — refusing to act on it";
+        }
+
+        if (now > expiresAt + ClockSkewTolerance)
+        {
+            return
+                $"channel manifest is stale — it expired at {expiresAt:O} and it is now {now:O}. " +
+                "Refusing to act on a correctly signed but expired manifest (a replayed manifest is " +
+                "signed just as validly as a current one).";
+        }
+
+        if (now > issuedAt + MaxManifestAge + ClockSkewTolerance)
+        {
+            return
+                $"channel manifest is stale — it was issued at {issuedAt:O}, more than " +
+                $"{MaxManifestAge.TotalDays:0} days ago, which exceeds the maximum age this client " +
+                "accepts regardless of the expiry the manifest declares.";
+        }
+
+        if (issuedAt > now + ClockSkewTolerance)
+        {
+            return
+                $"channel manifest is not yet valid — it declares issuedAt {issuedAt:O}, which is in " +
+                $"the future relative to {now:O}. Refusing rather than guessing which clock is wrong.";
+        }
+
+        if (expiresAt < issuedAt)
+        {
+            return
+                $"channel manifest declares expiresAt {expiresAt:O} before issuedAt {issuedAt:O} — " +
+                "an empty validity window is malformed, not permissive.";
+        }
+
+        if (channel.Sequence is not { } sequence)
+        {
+            return "channel manifest has no 'sequence' — refusing to act on it";
+        }
+
+        if (lastSequence is { } previous && sequence < previous)
+        {
+            return
+                $"channel manifest sequence {sequence} is lower than {previous}, which this machine has " +
+                "already accepted — refusing a rollback to a superseded manifest.";
+        }
+
+        return null;
     }
 
     /// <summary>

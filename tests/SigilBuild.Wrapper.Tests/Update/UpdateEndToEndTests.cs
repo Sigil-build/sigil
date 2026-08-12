@@ -60,9 +60,14 @@ public sealed class UpdateEndToEndTests
         string version, string packageUrl, string sha256, string? minFromVersion = null)
     {
         var minPart = minFromVersion is null ? string.Empty : $",\n  \"minFromVersion\": \"{minFromVersion}\"";
+        // R13: freshness fields are required — minted now, valid for a week.
+        var issued = DateTimeOffset.UtcNow;
         var json =
             "{\n" +
             "  \"schemaVersion\": 1,\n" +
+            $"  \"issuedAt\": \"{issued:O}\",\n" +
+            $"  \"expiresAt\": \"{issued.AddDays(7):O}\",\n" +
+            "  \"sequence\": 1,\n" +
             $"  \"version\": \"{version}\",\n" +
             $"  \"packageUrl\": \"{packageUrl}\",\n" +
             $"  \"sha256\": \"{sha256}\"{minPart}\n" +

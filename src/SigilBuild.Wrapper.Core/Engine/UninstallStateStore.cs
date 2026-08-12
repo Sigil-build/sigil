@@ -63,6 +63,35 @@ internal static class UninstallStateStore
         Path.Combine(DirectoryFor(appId, scope), "uninstall.json");
 
     /// <summary>
+    /// Where a committed install's <c>.sigil-bak</c> stashes live (R28):
+    /// <c>&lt;StateRoot&gt;\Sigil\&lt;AppId&gt;\backups</c>. A subdirectory of the per-app
+    /// state directory, so it inherits that directory's hardened DACL in machine scope and
+    /// falls inside the same anchored replay root at uninstall time.
+    /// </summary>
+    public static string StashDirectoryFor(string appId, InstallScope scope) =>
+        Path.Combine(DirectoryFor(appId, scope), "backups");
+
+    /// <summary>
+    /// Create the per-app state directory — hardened for machine scope — without writing
+    /// state. The R28 stash relocation needs it to exist with the right DACL BEFORE it
+    /// copies a file in, rather than inheriting one afterwards.
+    /// </summary>
+    public static void EnsureDirectory(
+        string appId, InstallScope scope, IProgress<StepProgress>? progress = null)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(appId);
+        var dir = DirectoryFor(appId, scope);
+        if (scope == InstallScope.Machine && OperatingSystem.IsWindows())
+        {
+            StateDirectorySecurity.CreateHardened(dir, progress);
+        }
+        else
+        {
+            Directory.CreateDirectory(dir);
+        }
+    }
+
+    /// <summary>
     /// The state loaded from disk: the rehydrated <paramref name="Journal"/> and
     /// the <paramref name="Scope"/> the install was recorded under (which drives
     /// ARP-hive and state-dir selection on uninstall).

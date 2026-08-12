@@ -1501,6 +1501,19 @@ public sealed class InstallSession
         // where the files ACTUALLY landed (R1 clause (c)). Recomputing a default at
         // uninstall time would refuse every file record of a /D= or wizard-chosen
         // install and leave the app unremovable.
+        // R28: the install has committed, so the `<file>.sigil-bak` copies FileCopyStep
+        // and HttpDownloadStep left beside every file they overwrote have finished their
+        // mid-install job. They are NOT discarded — each one is the pre-existing content
+        // of a file this install replaced, and it is what makes uninstall able to put
+        // that file back — but they must not spend the app's whole lifetime sitting in
+        // Program Files next to the files they shadow. Move them into the per-app state
+        // directory (created hardened FIRST, so a copy lands inside the right DACL
+        // rather than inheriting one afterwards) and rewrite the records before they are
+        // persisted, so uninstall.json points at where the stashes actually are.
+        UninstallStateStore.EnsureDirectory(_blob.AppId, _scope, StateProgress);
+        journal.RelocateCommittedStashes(
+            UninstallStateStore.StashDirectoryFor(_blob.AppId, _scope));
+
         UninstallStateStore.Save(
             _blob.AppId, journal, _scope, secretValues, StateProgress, uninstallDir);
         // T10: register the REAL manifest.App.* fields + packed size threaded through

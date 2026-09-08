@@ -73,7 +73,34 @@ public static partial class Program
             && session.Mode != WrapperMode.Update)
         {
             AttachParentConsole();
-            return Elevation.RelaunchElevatedAndWait(args);
+
+            // R18: relaunch with the handoff-rewritten vector, never raw argv — a
+            // /P<secret>=<value> token would otherwise be published to every
+            // process-creation auditor on the box. Building it can refuse (the
+            // envelope could not be protected or written); refusing is the point —
+            // the alternative is elevating with the plaintext on the command line.
+            IReadOnlyList<string> relaunchArgs;
+            try
+            {
+                relaunchArgs = session.BuildElevationRelaunchArgs(args);
+            }
+            catch (UsageException ex)
+            {
+                Console.Error.WriteLine($"usage error: {ex.Message}");
+                return 64;
+            }
+
+            try
+            {
+                return Elevation.RelaunchElevatedAndWait(relaunchArgs);
+            }
+            finally
+            {
+                // The parent's best-effort cleanup for a child that died before
+                // consuming the envelope (or a declined UAC prompt); normally the
+                // child has already deleted it as it read it.
+                ElevationSecretHandoff.CleanUp(relaunchArgs);
+            }
         }
 
         // P6 (gap G17): single-instance guard. Taken AFTER the elevation branch — the

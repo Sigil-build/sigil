@@ -485,6 +485,21 @@ public sealed class InstallSession
         _scope == InstallScope.Machine && !Elevation.IsProcessElevated();
 
     /// <summary>
+    /// R18: the argument vector to hand <see cref="Elevation.RelaunchElevatedAndWait"/>,
+    /// with any secret parameter value moved off the command line into a
+    /// DPAPI-protected handoff envelope. Identical to <paramref name="originalArgs"/>
+    /// when this run carries no secret value. Both entry points MUST relaunch with
+    /// this rather than with raw argv, and hand the result to
+    /// <see cref="ElevationSecretHandoff.CleanUp"/> once the child has exited.
+    /// </summary>
+    /// <exception cref="UsageException">
+    /// The handoff envelope could not be written; the run refuses rather than
+    /// relaunching with the value on the command line.
+    /// </exception>
+    internal IReadOnlyList<string> BuildElevationRelaunchArgs(IReadOnlyList<string> originalArgs) =>
+        ElevationSecretHandoff.PrepareRelaunchArgs(originalArgs, _parsed);
+
+    /// <summary>
     /// Run to completion without any UI. Routes by mode, echoing the engine's
     /// log lines to <paramref name="output"/>. Returns the process exit code:
     /// <c>0</c> ok, <c>1</c> step failure (rolled back), <c>2</c> cancelled

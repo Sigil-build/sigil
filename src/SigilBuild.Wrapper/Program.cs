@@ -44,7 +44,21 @@ internal static class Program
                 && session.RequiresElevation
                 && session.Mode != WrapperMode.Update)
             {
-                return Elevation.RelaunchElevatedAndWait(args);
+                // R18: relaunch with the handoff-rewritten vector, never raw argv —
+                // a /P<secret>=<value> token would otherwise be published to every
+                // process-creation auditor on the box. The finally is the parent's
+                // best-effort cleanup for a child that died before consuming the
+                // envelope (or a declined UAC prompt); normally the child has already
+                // deleted it as it read it.
+                var relaunchArgs = session.BuildElevationRelaunchArgs(args);
+                try
+                {
+                    return Elevation.RelaunchElevatedAndWait(relaunchArgs);
+                }
+                finally
+                {
+                    ElevationSecretHandoff.CleanUp(relaunchArgs);
+                }
             }
 
             // P6 (gap G17): single-instance guard. Taken AFTER the elevation branch —

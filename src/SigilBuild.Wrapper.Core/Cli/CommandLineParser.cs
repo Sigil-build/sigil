@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using SigilBuild.Core.Manifest;
+using SigilBuild.Wrapper.Engine;
 
 /// <summary>
 /// Thrown when the install-time CLI receives unrecognized flags, undeclared
@@ -291,6 +292,10 @@ public sealed class ParsedCommandLine
 ///   <item><description><c>/Poption.&lt;Name&gt;=true|false</c> — override an app-defined custom
 ///   component (P10). Namespaced under <c>option.</c> so a component and a declared
 ///   parameter may share a name without ambiguity.</description></item>
+///   <item><description><c>/SecretHandoff=&lt;path&gt;</c> — <b>reserved</b>, not
+///   user-facing: the elevated relaunch's secret channel (R18). Consumed before
+///   parameter binding by <see cref="ElevationSecretHandoff"/>; see
+///   <see cref="ConsumeSecretHandoff"/>.</description></item>
 /// </list>
 /// Anything else is a <see cref="UsageException"/> — the parser is intentionally
 /// closed so silent typos never reach the step engine.
@@ -359,7 +364,15 @@ public static class CommandLineParser
         var closeApps = false;
         string? lang = null;
 
-        foreach (var rawArg in args)
+        // R18: the reserved /SecretHandoff=<path> switch is consumed BEFORE the token
+        // loop, and its decrypted pairs are seeded into `values` through the same
+        // canonical-casing binding a /P token uses. Seeding first (rather than merging
+        // after) preserves the loop's last-wins semantics: an explicit /P token later
+        // in the same vector still overrides the handoff, exactly as a second /P token
+        // overrides the first.
+        var effectiveArgs = ConsumeSecretHandoff(args, byName, values);
+
+        foreach (var rawArg in effectiveArgs)
         {
             if (string.IsNullOrEmpty(rawArg))
             {
@@ -544,6 +557,87 @@ public static class CommandLineParser
             Lang = lang,
         };
     }
+
+    /// <summary>
+    /// R18: consume every <c>/SecretHandoff=&lt;path&gt;</c> token, seeding its
+    /// decrypted name→value pairs into <paramref name="values"/> as if they had
+    /// arrived as <c>/P&lt;name&gt;</c> tokens, and return the argument vector with
+    /// those tokens removed. Returns the input list untouched (no copy) when the
+    /// switch is absent, which is every run that did not come through an elevated
+    /// relaunch.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// No collision with the closed grammar: <c>/silent</c>'s <c>/S</c> alias is
+    /// matched by <see cref="string.Equals(string, string, StringComparison)"/>, not
+    /// by prefix, and the three prefix branches (<c>/D=</c>, <c>/LOG</c>,
+    /// <c>/lang=</c>, <c>/P</c>) all key off a first character that is not
+    /// <c>S</c>. Matching is case-insensitive like every other token.
+    /// </para>
+    /// <para>
+    /// Binding goes through <paramref name="byName"/> so the stored key carries the
+    /// schema's canonical casing — the same rule <see cref="ParsePValue"/> applies —
+    /// which is what keeps <see cref="ParsedCommandLine.AuditSafeRendering"/>'s
+    /// secret-set lookup, and every downstream redaction, working on the merged
+    /// values. A name the schema does not declare is refused rather than stored: the
+    /// only writer of an envelope is Sigil's own un-elevated parent, so a mismatch
+    /// means the file is not ours.
+    /// </para>
+    /// <para>
+    /// Every failure — missing file, undecryptable blob, malformed envelope, unknown
+    /// parameter name — raises the one generic message. It names the mechanism so an
+    /// operator can act, and never a parameter value; distinguishing the cases would
+    /// hand an attacker a probing oracle for a file they cannot read.
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<string> ConsumeSecretHandoff(
+        IReadOnlyList<string> args,
+        Dictionary<string, ParameterDefinition> byName,
+        Dictionary<string, string> values)
+    {
+        List<string>? kept = null;
+
+        for (var i = 0; i < args.Count; i++)
+        {
+            var arg = args[i];
+            if (string.IsNullOrEmpty(arg)
+                || !arg.StartsWith(ElevationSecretHandoff.Switch, StringComparison.OrdinalIgnoreCase))
+            {
+                kept?.Add(arg);
+                continue;
+            }
+
+            if (kept is null)
+            {
+                kept = new List<string>(args.Count);
+                for (var j = 0; j < i; j++)
+                {
+                    kept.Add(args[j]);
+                }
+            }
+
+            var pairs = ElevationSecretHandoff.TryConsumeHandoff(
+                arg.Substring(ElevationSecretHandoff.Switch.Length));
+            if (pairs is null)
+            {
+                throw new UsageException(SecretHandoffUnreadable);
+            }
+
+            foreach (var kv in pairs)
+            {
+                if (!byName.TryGetValue(kv.Key, out var def))
+                {
+                    throw new UsageException(SecretHandoffUnreadable);
+                }
+                values[def.Name] = kv.Value;
+            }
+        }
+
+        return kept ?? args;
+    }
+
+    private const string SecretHandoffUnreadable =
+        "elevated relaunch secret handoff could not be read — re-run the installer";
 
     // P10: the namespace prefix for app-defined custom component overrides —
     // `/Poption.<name>=value`. Namespacing keeps a custom component name from

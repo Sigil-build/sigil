@@ -47,17 +47,22 @@ internal static class Program
                 // R18: relaunch with the handoff-rewritten vector, never raw argv —
                 // a /P<secret>=<value> token would otherwise be published to every
                 // process-creation auditor on the box. The finally is the parent's
-                // best-effort cleanup for a child that died before consuming the
-                // envelope (or a declined UAC prompt); normally the child has already
-                // deleted it as it read it.
+                // best-effort cleanup for a declined UAC prompt, or a child that died
+                // before consuming the envelope; normally the child has already
+                // deleted it as it read it. It is SKIPPED whenever a child may still
+                // be starting up (see the out parameter) — deleting the envelope from
+                // under it would fail the very install the handoff enables. Seeded
+                // `true` so a throw before the call assumes the unsafe case.
                 var relaunchArgs = session.BuildElevationRelaunchArgs(args);
+                var childMayStillBeRunning = true;
                 try
                 {
-                    return Elevation.RelaunchElevatedAndWait(relaunchArgs);
+                    return Elevation.RelaunchElevatedAndWait(
+                        relaunchArgs, out childMayStillBeRunning);
                 }
                 finally
                 {
-                    ElevationSecretHandoff.CleanUp(relaunchArgs);
+                    ElevationSecretHandoff.CleanUp(relaunchArgs, childMayStillBeRunning);
                 }
             }
 

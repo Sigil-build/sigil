@@ -78,7 +78,7 @@ public sealed class ElevationSecretHandoffTests
         }
         finally
         {
-            ElevationSecretHandoff.CleanUp(relaunch);
+            ElevationSecretHandoff.CleanUp(relaunch, childMayStillBeRunning: false);
         }
     }
 
@@ -109,6 +109,111 @@ public sealed class ElevationSecretHandoffTests
 
         // Act + Assert
         ElevationSecretHandoff.PrepareRelaunchArgs(args, parsed).Should().Equal(args);
+    }
+
+    // ── An inbound /SecretHandoff= token is never forwarded ───────────────────
+    //
+    // The switch is caller-reachable, and this process's own parser has ALREADY
+    // consumed and deleted whatever file it named. Copying it into the relaunch
+    // vector hands the elevated child a switch pointing at a file that no longer
+    // exists, which the child's parser correctly refuses — a caller-reachable way to
+    // turn a legitimate per-machine install into exit 64. Both paths through
+    // PrepareRelaunchArgs must drop it: the one that writes a fresh envelope and the
+    // one that has nothing to protect.
+
+    [WindowsFact("DPAPI (crypt32) and Windows file ACLs")]
+    public void PrepareRelaunchArgs_drops_an_inbound_handoff_token_when_it_writes_its_own()
+    {
+        // Arrange — the faithful shape: a caller passes a handoff token that decrypts,
+        // so the parent's own parse SUCCEEDS (and deletes the file) rather than
+        // exit-64ing early. `inbound` is a spent path by the time argv is rewritten.
+        var seed = ElevationSecretHandoff.PrepareRelaunchArgs(
+            new[] { "/Papikey=hunter2" },
+            ParseWithSchema(new[] { "/Papikey=hunter2" }, secret: new[] { "apikey" }));
+        var inbound = seed.Single(a => a.StartsWith(HandoffSwitch, StringComparison.OrdinalIgnoreCase));
+
+        var args = new[] { "/silent", inbound };
+        var parsed = ParseWithSchema(args, secret: new[] { "apikey" });
+        parsed.Values.Should().ContainKey("apikey").WhoseValue.Should().Be("hunter2");
+        File.Exists(HandoffPathOf(seed)).Should().BeFalse("the parent's parse consumed it");
+
+        // Act
+        var relaunch = ElevationSecretHandoff.PrepareRelaunchArgs(args, parsed);
+
+        try
+        {
+            // Assert — exactly one handoff token, and it is the fresh one, not the
+            // spent path the caller supplied.
+            relaunch.Should().NotContain(inbound, "a spent handoff path must never reach the child");
+            relaunch.Should().ContainSingle(a => a.StartsWith(HandoffSwitch, StringComparison.OrdinalIgnoreCase));
+            relaunch.Should().Contain("/silent");
+            File.Exists(HandoffPathOf(relaunch)).Should().BeTrue("the forwarded envelope is the fresh one");
+        }
+        finally
+        {
+            ElevationSecretHandoff.CleanUp(relaunch, childMayStillBeRunning: false);
+        }
+    }
+
+    [WindowsFact("DPAPI (crypt32) and Windows file ACLs")]
+    public void PrepareRelaunchArgs_drops_an_inbound_handoff_token_when_there_is_no_secret()
+    {
+        // Arrange — the reachable no-secret case. An envelope's names only have to be
+        // DECLARED parameters, not secret-typed ones, so a run whose schema declares
+        // no secret at all can still consume a handoff and end up with
+        // SecretKeys.Count == 0 plus a spent token in argv. Built by writing the
+        // envelope against a schema that calls "mode" secret and then reading it back
+        // against one that does not — which is exactly the shape a hand-crafted
+        // envelope takes (DPAPI machine scope is writable by any local process).
+        var seed = ElevationSecretHandoff.PrepareRelaunchArgs(
+            new[] { "/Pmode=full" },
+            ParseWithSchema(new[] { "/Pmode=full" }, secret: new[] { "mode" }));
+        var inbound = seed.Single(a => a.StartsWith(HandoffSwitch, StringComparison.OrdinalIgnoreCase));
+
+        var args = new[] { "/silent", inbound };
+        var parsed = ParseWithSchema(args, secret: Array.Empty<string>());
+        parsed.SecretKeys.Should().BeEmpty();
+        parsed.Values.Should().ContainKey("mode").WhoseValue.Should().Be("full");
+
+        // Act — nothing to protect, so no envelope is written; the spent token must
+        // still be stripped rather than ridden along by the identity path.
+        var relaunch = ElevationSecretHandoff.PrepareRelaunchArgs(args, parsed);
+
+        // Assert
+        relaunch.Should().Equal("/silent");
+        relaunch.Should().NotContain(a => a.StartsWith(HandoffSwitch, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [WindowsFact("DPAPI (crypt32) and Windows file ACLs")]
+    public void CleanUp_leaves_the_envelope_alone_while_a_child_may_still_be_running()
+    {
+        // Arrange — Elevation.RelaunchElevatedAndWait reports childMayStillBeRunning
+        // when ShellExecuteExW succeeded but handed back no handle to wait on. The
+        // parent must not race a child that is still starting up to the envelope.
+        var args = new[] { "/Papikey=hunter2" };
+        var parsed = ParseWithSchema(args, secret: new[] { "apikey" });
+        var relaunch = ElevationSecretHandoff.PrepareRelaunchArgs(args, parsed);
+        var path = HandoffPathOf(relaunch);
+
+        try
+        {
+            // Act
+            ElevationSecretHandoff.CleanUp(relaunch, childMayStillBeRunning: true);
+
+            // Assert
+            File.Exists(path).Should()
+                .BeTrue("a leaked DPAPI envelope beats deleting one the child has not read yet");
+
+            // Act — and once the parent knows no child can read it, it does go.
+            ElevationSecretHandoff.CleanUp(relaunch, childMayStillBeRunning: false);
+
+            // Assert
+            File.Exists(path).Should().BeFalse();
+        }
+        finally
+        {
+            ElevationSecretHandoff.CleanUp(relaunch, childMayStillBeRunning: false);
+        }
     }
 
     [WindowsFact("DPAPI (crypt32) and Windows file ACLs")]
@@ -184,7 +289,7 @@ public sealed class ElevationSecretHandoffTests
         }
         finally
         {
-            ElevationSecretHandoff.CleanUp(relaunch);
+            ElevationSecretHandoff.CleanUp(relaunch, childMayStillBeRunning: false);
         }
     }
 

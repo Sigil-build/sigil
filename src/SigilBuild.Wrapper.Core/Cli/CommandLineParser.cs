@@ -579,9 +579,16 @@ public static class CommandLineParser
     /// schema's canonical casing — the same rule <see cref="ParsePValue"/> applies —
     /// which is what keeps <see cref="ParsedCommandLine.AuditSafeRendering"/>'s
     /// secret-set lookup, and every downstream redaction, working on the merged
-    /// values. A name the schema does not declare is refused rather than stored: the
-    /// only writer of an envelope is Sigil's own un-elevated parent, so a mismatch
-    /// means the file is not ours.
+    /// values. A name the schema does not declare is refused rather than stored — an
+    /// undeclared parameter is refused in the <c>/P</c> form too.
+    /// </para>
+    /// <para>
+    /// This switch is exactly as caller-reachable as every other token: nothing stops
+    /// a script from typing it, or from pointing it at a file Sigil never wrote, so
+    /// what comes out of an envelope is validated rather than trusted. The elevated
+    /// relaunch never forwards an inbound one — see
+    /// <see cref="ElevationSecretHandoff.PrepareRelaunchArgs"/>, which drops it on
+    /// every path, so a spent path cannot reach the child and refuse its install.
     /// </para>
     /// <para>
     /// Every failure — missing file, undecryptable blob, malformed envelope, unknown

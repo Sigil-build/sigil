@@ -84,13 +84,27 @@ internal static partial class ElevationSecretHandoff
     private const uint ProtectFlags = CRYPTPROTECT_UI_FORBIDDEN | CRYPTPROTECT_LOCAL_MACHINE;
 
     /// <summary>
-    /// The argument vector to hand <see cref="Elevation.RelaunchElevatedAndWait"/>.
-    /// Returns <paramref name="args"/> unchanged when the run carries no secret
-    /// parameter value; otherwise returns a copy with every
-    /// <c>/P&lt;name&gt;=&lt;value&gt;</c> token whose name is in
-    /// <see cref="ParsedCommandLine.SecretKeys"/> removed and one
-    /// <see cref="Switch"/> token appended, the DPAPI envelope having been written.
+    /// The argument vector to hand <see cref="Elevation.RelaunchElevatedAndWait"/>:
+    /// <paramref name="args"/> with every <c>/P&lt;name&gt;=&lt;value&gt;</c> token
+    /// whose name is in <see cref="ParsedCommandLine.SecretKeys"/> removed, every
+    /// <em>inbound</em> <see cref="Switch"/> token removed, and — when this run
+    /// actually carries a secret value — one freshly written <see cref="Switch"/>
+    /// token appended. Returns <paramref name="args"/> itself, uncopied, when none of
+    /// that applies, which is every run with no secret and no inbound switch.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>An inbound <see cref="Switch"/> token is always dropped, on every path.</b>
+    /// The switch is caller-reachable — nothing stops a script from typing it — and
+    /// <see cref="CommandLineParser"/> consumes and <em>deletes</em> the envelope it
+    /// names while parsing this process's own argv. Forwarding that spent path to the
+    /// elevated child would hand the child a switch pointing at a file that no longer
+    /// exists, which its parser correctly refuses: a caller-reachable way to turn a
+    /// legitimate per-machine install into exit 64. The parent re-writes its own
+    /// envelope from the already-bound values, so a forwarded token could never be
+    /// the right one anyway.
+    /// </para>
+    /// </remarks>
     /// <exception cref="UsageException">
     /// The envelope could not be protected or written. Fail-closed on purpose: the
     /// alternative is relaunching with the plaintext value on the command line, which
@@ -105,15 +119,23 @@ internal static partial class ElevationSecretHandoff
 
         // Elevation itself is Windows-only (both entry points gate the relaunch on
         // OperatingSystem.IsWindows()), so off Windows this is never reached with a
-        // secret in hand — and DPAPI does not exist to protect one.
+        // secret in hand — and DPAPI does not exist to protect one. The inbound-switch
+        // scrub still applies: it is about the vector's hygiene, not about crypto.
         if (!OperatingSystem.IsWindows())
         {
-            return args;
+            return Rewrite(args, secretNames: null, handoffPath: null);
         }
 
+        return PrepareRelaunchArgsWindows(args, parsed);
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static IReadOnlyList<string> PrepareRelaunchArgsWindows(
+        IReadOnlyList<string> args, ParsedCommandLine parsed)
+    {
         if (parsed.SecretKeys.Count == 0)
         {
-            return args;
+            return Rewrite(args, secretNames: null, handoffPath: null);
         }
 
         var secretNames = new HashSet<string>(parsed.SecretKeys, StringComparer.OrdinalIgnoreCase);
@@ -128,25 +150,69 @@ internal static partial class ElevationSecretHandoff
         }
 
         // Declared secret parameters, none of them actually supplied on this run:
-        // nothing to hide, so stay the identity rather than write an empty envelope.
+        // nothing to hide, so write no envelope (but still scrub the vector).
         if (pairs.Count == 0)
+        {
+            return Rewrite(args, secretNames: null, handoffPath: null);
+        }
+
+        return Rewrite(args, secretNames, WriteEnvelope(pairs));
+    }
+
+    /// <summary>
+    /// The one place the relaunch vector is rewritten: drop every token
+    /// <see cref="IsDropped"/> rejects, then append our own <see cref="Switch"/> token
+    /// if <paramref name="handoffPath"/> is non-null. Returns
+    /// <paramref name="args"/> itself when there is nothing to drop and nothing to
+    /// append, so the no-secret case stays the identity it has always been.
+    /// </summary>
+    private static IReadOnlyList<string> Rewrite(
+        IReadOnlyList<string> args, HashSet<string>? secretNames, string? handoffPath)
+    {
+        var dropped = 0;
+        foreach (var arg in args)
+        {
+            if (IsDropped(arg, secretNames))
+            {
+                dropped++;
+            }
+        }
+
+        if (dropped == 0 && handoffPath is null)
         {
             return args;
         }
 
-        var path = WriteEnvelope(pairs);
-
-        var kept = new List<string>(args.Count + 1);
+        var kept = new List<string>(args.Count - dropped + (handoffPath is null ? 0 : 1));
         foreach (var arg in args)
         {
-            if (!IsSecretParameterToken(arg, secretNames))
+            if (!IsDropped(arg, secretNames))
             {
                 kept.Add(arg);
             }
         }
-        kept.Add(Switch + path);
+
+        if (handoffPath is not null)
+        {
+            kept.Add(Switch + handoffPath);
+        }
+
         return kept;
     }
+
+    /// <summary>
+    /// Tokens that must not reach the elevated child: an inbound
+    /// <see cref="Switch"/> (always — see <see cref="PrepareRelaunchArgs"/>'s remarks)
+    /// and, when <paramref name="secretNames"/> is supplied, a <c>/P</c> token binding
+    /// one of those names.
+    /// </summary>
+    private static bool IsDropped(string arg, HashSet<string>? secretNames) =>
+        IsHandoffToken(arg)
+        || (secretNames is not null && IsSecretParameterToken(arg, secretNames));
+
+    /// <summary>True when <paramref name="arg"/> is a <see cref="Switch"/> token.</summary>
+    private static bool IsHandoffToken(string arg) =>
+        !string.IsNullOrEmpty(arg) && arg.StartsWith(Switch, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Decrypt the envelope at <paramref name="path"/>, delete it, and return its
@@ -179,20 +245,36 @@ internal static partial class ElevationSecretHandoff
     /// Best-effort parent-side cleanup: delete the envelope named by any
     /// <see cref="Switch"/> token in <paramref name="relaunchArgs"/> if it is still
     /// there. Normally a no-op — the child deletes the file as it reads it — but a
-    /// child that died before parsing (or a declined UAC prompt) would otherwise
-    /// leave the envelope in <c>%TEMP%</c> until reboot.
+    /// declined UAC prompt, or a child that died before parsing, would otherwise leave
+    /// the envelope in <c>%TEMP%</c> until reboot.
     /// </summary>
-    internal static void CleanUp(IReadOnlyList<string>? relaunchArgs)
+    /// <param name="relaunchArgs">
+    /// The vector <see cref="PrepareRelaunchArgs"/> produced.
+    /// </param>
+    /// <param name="childMayStillBeRunning">
+    /// <c>true</c> when the relaunch may have created a child process this parent did
+    /// <em>not</em> see exit —
+    /// <see cref="Elevation.RelaunchElevatedAndWait(IReadOnlyList{string}, out bool, int)"/>
+    /// reports this. Cleanup is then <b>skipped entirely</b>: deleting the envelope
+    /// while the elevated child is still starting up would race it to the file and
+    /// fail the very install the handoff exists to enable. An envelope leaked into
+    /// <c>%TEMP%</c> is the strictly better outcome — it is DPAPI-protected, ACL'd to
+    /// this user and the administrators group, and single-use.
+    /// </param>
+    /// <remarks>
+    /// The gate is a required parameter rather than an optional one on purpose: a call
+    /// site that forgets it would silently reintroduce the race, so the compiler asks.
+    /// </remarks>
+    internal static void CleanUp(IReadOnlyList<string>? relaunchArgs, bool childMayStillBeRunning)
     {
-        if (relaunchArgs is null)
+        if (relaunchArgs is null || childMayStillBeRunning)
         {
             return;
         }
 
         foreach (var arg in relaunchArgs)
         {
-            if (!string.IsNullOrEmpty(arg)
-                && arg.StartsWith(Switch, StringComparison.OrdinalIgnoreCase))
+            if (IsHandoffToken(arg))
             {
                 TryDelete(arg.Substring(Switch.Length));
             }

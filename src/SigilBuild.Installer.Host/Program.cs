@@ -90,16 +90,20 @@ public static partial class Program
                 return 64;
             }
 
+            // Seeded `true` so a throw before the call assumes the unsafe case.
+            var childMayStillBeRunning = true;
             try
             {
-                return Elevation.RelaunchElevatedAndWait(relaunchArgs);
+                return Elevation.RelaunchElevatedAndWait(relaunchArgs, out childMayStillBeRunning);
             }
             finally
             {
-                // The parent's best-effort cleanup for a child that died before
-                // consuming the envelope (or a declined UAC prompt); normally the
-                // child has already deleted it as it read it.
-                ElevationSecretHandoff.CleanUp(relaunchArgs);
+                // The parent's best-effort cleanup for a declined UAC prompt, or a
+                // child that died before consuming the envelope; normally the child
+                // has already deleted it as it read it. SKIPPED whenever a child may
+                // still be starting up — deleting the envelope from under it would
+                // fail the very install the handoff enables.
+                ElevationSecretHandoff.CleanUp(relaunchArgs, childMayStillBeRunning);
             }
         }
 

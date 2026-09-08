@@ -79,6 +79,20 @@ with a clean, non-piped `dotnet restore Sigil.slnx --locked-mode` before
 calling SUP green — a piped run (`| tail`, etc.) reports the pipe's exit
 code, not restore's, and will falsely read as success.
 
+One `--force-evaluate` covers **both** workflows' locked restores, and that
+is now load-bearing. REL (#32) makes `SigilBuild.Cli` and
+`SigilBuild.Installer.Host` declare
+`<RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>`, so their lock
+files carry `net10.0/win-x64` and `net10.0/win-arm64` sections in addition to
+the RID-less one — and `SkiaSharp.NativeAssets.Win32`, the very package SUP
+bumps, appears in those RID sections too. Since SUP merges **after** REL, the
+regenerated files are the post-REL shape and satisfy all three locked
+restores in one go: `ci.yml`'s `build` job, `ci.yml`'s `aot-publish` job (new
+in REL, feeding a `--no-restore` publish), and `release.yml`'s `publish` job
+(same shape). If you regenerate before REL has landed, the RID sections will
+be missing and the two publish jobs will fail `--locked-mode` even though the
+`build` job passes.
+
 ## 2. Repo settings (owner-only, before G2 closes)
 
 - **Settings → Security → Private vulnerability reporting → enable.**
@@ -233,10 +247,11 @@ merges, not from a stale worktree.
   to fail partway through a run.
 - **`azure/trusted-signing-action@v2.0.0` pin.** REL (#32) pins the
   major-version-2 release (`v0.5.1` was no longer the newest tag when
-  checked via `gh api repos/azure/trusted-signing-action/tags`). It carries
-  one deprecated-but-functional input name,
-  `trusted-signing-account-name` — expect a cosmetic deprecation warning in
-  the dry-run's log, not a failure.
+  checked via `gh api repos/azure/trusted-signing-action/tags`). Its account
+  input is passed as v2's current name, `signing-account-name` — the
+  deprecated `trusted-signing-account-name` spelling was replaced in the
+  final fix wave, so the dry-run's log should carry **no** deprecation
+  warning for it. One appearing anyway means the pin moved.
 - **V1 lane runs per `08-STAGE-4-verification.md`**: walk the 60-row
   register, re-attack, re-measure (including R48's worst-case cold-cache
   number — a human-only measurement documented in that file), release
@@ -244,7 +259,12 @@ merges, not from a stale worktree.
   end, including real Trusted Signing), then a **clean-machine install of
   the downloaded artifact** — verified by actually running it, not by
   reading the workflow log (R7's sibling-DLL trap is exactly the kind of
-  failure a log-only check would miss).
+  failure a log-only check would miss). Two things to check on that clean
+  machine, both first-run-only in `release.yml`: that the zip contains
+  `runtimes/win-x64/` **and** `runtimes/win-arm64/` beside `sigil.exe`, and
+  that `sigil pack --format exe` on a sample manifest actually produces a
+  Setup.exe from it (C1 — the pre-fix workflow shipped a CLI that threw
+  `FileNotFoundException` for the product's headline format).
 
 ## 5. What this preparation did NOT verify
 
@@ -267,22 +287,18 @@ merges, not from a stale worktree.
 
 ## 6. Register-row candidates found during this preparation (orchestrator files at gate close)
 
-None of these block G2. All four were found as a side effect of Task 3's R18
-work (secrets off the elevated relaunch command line, landing in S5 #29) and
-are explicitly out of that task's scope. File them in `00-GAP_REGISTER.md`
-at the next gate-close docs pass.
+None of these block G2. (b), (c) and (d) were found as a side effect of
+Task 3's R18 work (secrets off the elevated relaunch command line, landing in
+S5 #29) and are explicitly out of that task's scope; (e) comes from the final
+whole-plan review of REL #32. File them in `00-GAP_REGISTER.md` at the next
+gate-close docs pass. Lettering is kept stable — (a) is retained as a
+pointer, not a candidate, because Section 5 cites 6(b) by letter.
 
-(a) **Redaction gap in the always-on wizard log.**
-`src/SigilBuild.Installer.Host/Program.cs:237` (as of S5's final head,
-`cf07a2c`, PR #29) logs
-`wizard started: pid=…, argv=[{string.Join(' ', args)}], cwd=…` —
-**raw, unredacted argv** — to the log that is on by default. After R18, the
-*elevated child's* argv is safe (it carries only `/SecretHandoff=<path>`),
-so this line strictly improved; but a per-user, non-elevating install
-invoked directly with `/P<secret>=<value>` still writes the plaintext
-secret value into that log file. A different channel from R18's
-process-auditing scope — found during R18 review, deliberately not folded
-into that commit. Fix is one call to `session.CommandLine.AuditSafeRendering()`.
+(a) ~~Redaction gap in the always-on wizard log.~~ **Fixed in-lane** in S5
+#29 (`Program.cs` now logs `session.CommandLine.AuditSafeRendering()` instead
+of raw argv, with tests at
+`tests/SigilBuild.Installer.Host.Tests/WizardLogRedactionTests.cs`) — no
+register row needed.
 
 (b) **`wrapper-vm-tests.yml` candidate case: cross-account UAC decrypt.**
 R18's DPAPI envelope uses `CRYPTPROTECT_LOCAL_MACHINE`, documented to let an
@@ -311,3 +327,20 @@ entropy value (on top of the DACL, delete-on-read, size cap, and buffer
 zeroing already implemented), and a reaper for stale
 `sigil-elevate-*.dpapi` files that could accumulate in `%TEMP%` from a
 parent that crashed or was killed before reaching its cleanup `finally`.
+
+(e) **Policy: Sigil re-signs the third-party redistributables it ships.**
+`release.yml`'s signing step runs with `files-folder-filter: exe,dll` and
+`files-folder-recurse: true`, so Authenticode is applied not only to
+`sigil.exe` and `SigilBuild.Installer.Host.exe` but also to the vendored
+native libraries beside them — `libSkiaSharp.dll`, `libsodium.dll`, and the
+Skia/ANGLE/HarfBuzz set staged under `runtimes/<rid>/native/`. That is a
+deliberate choice (one publisher for the whole archive, so a user's
+SmartScreen/WDAC evaluation does not see a mix of signed and unsigned DLLs),
+and REL #32 records the reasoning in a comment above the step. It is filed
+here because it is a **distribution policy**, not an implementation detail:
+it makes Sigil the signing publisher of code Sigil did not write, its only
+current statement lives in a workflow comment, and the upstream licences
+(MIT/BSD-family, tracked in `THIRD-PARTY-NOTICES.md`) permit redistribution
+but say nothing about signature attribution. Worth one register line so the
+choice is reviewable rather than inherited — with the licence review at G4
+(R41a's neighbourhood) the natural place to confirm it.

@@ -14,7 +14,7 @@ S7 [#31](https://github.com/Sigil-build/sigil/pull/31) →
 REL [#32](https://github.com/Sigil-build/sigil/pull/32) →
 SUP [#33](https://github.com/Sigil-build/sigil/pull/33) →
 DOC [#34](https://github.com/Sigil-build/sigil/pull/34) →
-runbook [#__](#) (this PR — filled in below once it exists)**.
+runbook [#35](https://github.com/Sigil-build/sigil/pull/35) (this PR)**.
 
 For each link: approve+merge → the remaining PRs' checks are invalidated →
 the orchestrator rebases the next branch onto the new RC head and pushes →

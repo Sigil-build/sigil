@@ -33,7 +33,10 @@ jobs:
         run: dotnet --info
 
       - name: restore
-        run: dotnet restore Sigil.slnx
+        # R23a: locked mode fails the build if any package resolves outside the
+        # committed packages.lock.json set — with NuGet.config pinning nuget.org
+        # as the only feed, this is what makes the restore reproducible.
+        run: dotnet restore Sigil.slnx --locked-mode
 
       - name: build
         run: dotnet build Sigil.slnx --configuration Release --no-restore

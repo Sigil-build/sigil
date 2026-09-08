@@ -17,6 +17,8 @@
     <RepositoryUrl>https://github.com/Sigil-build/sigil</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
 
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+
     <!-- R24: the ONE place the version lives. Every project inherits $(Version)
          from here (the SDK stamps it onto AssemblyInformationalVersionAttribute,
          which Program.cs reads at runtime instead of a hand-maintained const;

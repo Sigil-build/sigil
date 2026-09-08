@@ -25,13 +25,14 @@
          see SigilBuild.Cli/Program.cs). Do not add a <Version> element to any
          individual .csproj; that would silently re-fork this single source.
 
-         This value is the FALLBACK used by every build that does not override
-         it (local builds, CI's non-tag pushes, `dotnet pack`). The orchestrator
-         picks the actual release number at G3/G4 by choosing the git tag;
-         release.yml passes that tag's version to `dotnet publish` via
-         `-p:Version=<tag-without-leading-v>`, which overrides this value for
-         that one signed run. Bump this line only when you want the FALLBACK
-         (non-release) version to move too. -->
+         This value is not a fallback; it IS the version, for every build
+         (local, CI's non-tag pushes, dotnet pack) and for the signed release
+         too. release.yml passes no -p:Version= anywhere; instead it REFUSES
+         the release unless the pushed tag is exactly v<Version> as read
+         from THIS file, and ci.yml's AOT smoke test asserts that
+         the version the CLI reports agrees with it. One source of truth,
+         enforced from both ends. So: bump <Version> in this file before
+         tagging, commit it, and only then push the matching v<Version> tag. -->
     <Version>0.1.0-alpha</Version>
   </PropertyGroup>
 

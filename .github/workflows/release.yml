@@ -23,9 +23,10 @@ jobs:
         with:
           global-json-file: global.json
 
-      - name: restore (locked)
-        run: dotnet restore Sigil.slnx --locked-mode
-
+      # M1: both refusals run FIRST — before any restore, publish or signing.
+      # A release that cannot be signed, or whose tag disagrees with the one
+      # version literal, should fail in seconds rather than after two Native
+      # AOT publishes and a 45 MB host stage.
       - name: require signing secrets
         shell: pwsh
         env:
@@ -36,11 +37,46 @@ jobs:
             exit 1
           }
 
-      - name: aot publish CLI (win-x64)
-        run: dotnet publish src/SigilBuild.Cli -c Release -r win-x64 -p:PublishAot=true -o publish/win-x64
+      - name: tag matches Directory.Build.props version
+        shell: pwsh
+        run: |
+          # R24 / I5: Directory.Build.props' <Version> is the ONE source of
+          # truth. The tag does NOT inject the version (there is no
+          # -p:Version= anywhere in this workflow); it must AGREE with the
+          # committed value. Bump <Version> in Directory.Build.props, commit,
+          # then tag v<Version>.
+          $expected = "v" + (Select-Xml -Path "Directory.Build.props" -XPath "//Version").Node.InnerText.Trim()
+          $tag = "${{ github.ref_name }}"
+          if ($tag -ne $expected) { throw "tag '$tag' does not match Directory.Build.props version '$expected' (R24: one source of truth — bump <Version> in Directory.Build.props before tagging)" }
 
+      - name: restore (locked)
+        # R23a / I3: this covers the RID-specific graphs too, because
+        # SigilBuild.Cli and SigilBuild.Installer.Host declare
+        # <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers> and their
+        # packages.lock.json files now carry net10.0/win-x64 and
+        # net10.0/win-arm64 sections. Both CLI publishes below therefore run
+        # --no-restore and cannot silently resolve a package outside the
+        # committed lock set.
+        run: dotnet restore Sigil.slnx --locked-mode
+
+      - name: aot publish CLI (win-x64)
+        run: dotnet publish src/SigilBuild.Cli -c Release -r win-x64 -p:PublishAot=true --no-restore -o publish/win-x64
+
+      # I4: arm64 mirrors ci.yml's tolerance. Whether the runner image carries
+      # the "MSVC v143 C++ ARM64 build tools" component is not under our
+      # control, and a missing arm64 leg must not sink an otherwise good x64
+      # release. Every arm64 step below is gated on this step's outcome; the
+      # x64 path stays hard-failing.
       - name: aot publish CLI (win-arm64)
-        run: dotnet publish src/SigilBuild.Cli -c Release -r win-arm64 -p:PublishAot=true -o publish/win-arm64
+        id: publish-arm64
+        continue-on-error: true
+        run: dotnet publish src/SigilBuild.Cli -c Release -r win-arm64 -p:PublishAot=true --no-restore -o publish/win-arm64
+
+      - name: warn when the win-arm64 CLI did not publish
+        if: steps.publish-arm64.outcome != 'success'
+        shell: pwsh
+        run: |
+          Write-Host "::warning::win-arm64 CLI publish outcome was '${{ steps.publish-arm64.outcome }}'; this release ships win-x64 assets only. Check whether the runner image still provisions the ARM64 C++ build tools."
 
       - name: size gate (win-x64)
         shell: pwsh
@@ -50,13 +86,77 @@ jobs:
           Write-Host "sigil.exe (win-x64): $sizeMb MB"
           if ($size -gt 15MB) { throw "sigil.exe is $sizeMb MB, exceeds the 15 MB budget" }
 
-      - name: tag matches Directory.Build.props version
+      # M2: the arm64 CLI is held to the same 15 MB budget as x64 — an
+      # unbudgeted second shipping RID is how a size gate quietly stops
+      # meaning anything.
+      - name: size gate (win-arm64)
+        if: steps.publish-arm64.outcome == 'success'
         shell: pwsh
         run: |
-          $expected = "v" + (Select-Xml -Path "Directory.Build.props" -XPath "//Version").Node.InnerText.Trim()
-          $tag = "${{ github.ref_name }}"
-          if ($tag -ne $expected) { throw "tag '$tag' does not match Directory.Build.props version '$expected' (R24: one source of truth)" }
+          $size = (Get-Item publish/win-arm64/sigil.exe).Length
+          $sizeMb = [math]::Round($size / 1MB, 2)
+          Write-Host "sigil.exe (win-arm64): $sizeMb MB"
+          if ($size -gt 15MB) { throw "sigil.exe (win-arm64) is $sizeMb MB, exceeds the 15 MB budget" }
 
+      # C1 — the release zips MUST carry the installer-host runtime. `sigil
+      # pack --format exe` resolves runtimes/<rid>/SigilBuild.Installer.Host.exe
+      # relative to the CLI's own directory (WrapperRuntimeLocator.Locate) and
+      # throws FileNotFoundException otherwise, so a CLI-only zip cannot build
+      # an exe installer at all. Stage BOTH host RIDs once, outside publish/,
+      # then fan the whole runtimes/ tree into each CLI publish directory: a
+      # win-x64 sigil must be able to pack arm64 installers and vice versa.
+      # This runs before signing (so the host exes and their native deps are
+      # signed too) and before the PDB strip / archiving. Same -SizeGateMb 45
+      # gate ci.yml uses.
+      - name: aot publish + stage installer host runtimes (win-x64, win-arm64)
+        shell: pwsh
+        run: |
+          ./scripts/publish-installer-runtime.ps1 `
+            -Rids win-x64,win-arm64 `
+            -Configuration Release `
+            -DestinationRoot host-stage `
+            -SizeGateMb 45
+
+      - name: fan out installer host runtimes into the win-x64 publish
+        shell: pwsh
+        run: |
+          $stage = "host-stage/runtimes"
+          if (-not (Test-Path "$stage/win-x64/SigilBuild.Installer.Host.exe")) {
+            throw "win-x64 installer host runtime was not staged; the released sigil.exe could not pack an exe installer (C1)."
+          }
+          Copy-Item -Path $stage -Destination publish/win-x64 -Recurse -Force
+          if (-not (Test-Path "publish/win-x64/runtimes/win-x64/SigilBuild.Installer.Host.exe")) {
+            throw "runtimes/win-x64/SigilBuild.Installer.Host.exe is missing from publish/win-x64 after the fan-out (C1)."
+          }
+          if (-not (Test-Path "publish/win-x64/runtimes/win-arm64/SigilBuild.Installer.Host.exe")) {
+            Write-Host "::warning::the win-arm64 installer host runtime is absent; the win-x64 sigil in this release cannot pack arm64 exe installers."
+          }
+          Get-ChildItem publish/win-x64/runtimes -Recurse -File |
+            ForEach-Object { Write-Host "  staged $($_.FullName.Substring($PWD.Path.Length + 1))" }
+
+      - name: fan out installer host runtimes into the win-arm64 publish
+        if: steps.publish-arm64.outcome == 'success'
+        shell: pwsh
+        run: |
+          $stage = "host-stage/runtimes"
+          Copy-Item -Path $stage -Destination publish/win-arm64 -Recurse -Force
+          if (-not (Test-Path "publish/win-arm64/runtimes/win-x64/SigilBuild.Installer.Host.exe")) {
+            throw "runtimes/win-x64/SigilBuild.Installer.Host.exe is missing from publish/win-arm64 after the fan-out (C1)."
+          }
+          if (-not (Test-Path "publish/win-arm64/runtimes/win-arm64/SigilBuild.Installer.Host.exe")) {
+            Write-Host "::warning::the win-arm64 installer host runtime is absent; the win-arm64 sigil in this release cannot pack arm64 exe installers."
+          }
+
+      # M3: files-folder-filter deliberately includes `dll`, which re-signs the
+      # vendored native redistributables we ship — libSkiaSharp.dll and
+      # libsodium.dll beside sigil.exe, plus the Skia/ANGLE/HarfBuzz set under
+      # runtimes/<rid>/native/. That is intentional: everything Sigil
+      # redistributes carries Sigil's Authenticode signature, so a user's
+      # SmartScreen / WDAC evaluation sees ONE publisher for the whole zip
+      # instead of a mix of signed and unsigned third-party DLLs. Re-signing a
+      # redistributable asserts "we vouch for these exact bits", not authorship
+      # — upstream attribution stays in THIRD-PARTY-NOTICES.md, which ships in
+      # the same archive.
       - name: sign binaries (Azure Trusted Signing)
         uses: azure/trusted-signing-action@v2.0.0
         with:
@@ -64,27 +164,35 @@ jobs:
           azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
           azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
           endpoint: ${{ secrets.TRUSTED_SIGNING_ENDPOINT }}
-          trusted-signing-account-name: ${{ secrets.TRUSTED_SIGNING_ACCOUNT }}
+          # v2.0.0's name for this input; the old
+          # `trusted-signing-account-name` is accepted but deprecated.
+          signing-account-name: ${{ secrets.TRUSTED_SIGNING_ACCOUNT }}
           certificate-profile-name: ${{ secrets.TRUSTED_SIGNING_PROFILE }}
           files-folder: ${{ github.workspace }}/publish
           files-folder-filter: exe,dll
           files-folder-recurse: true
 
-      - name: package archives
+      - name: package archive (win-x64)
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
-          Get-ChildItem publish/win-x64 -Filter *.pdb | Remove-Item
-          Get-ChildItem publish/win-arm64 -Filter *.pdb | Remove-Item
+          Get-ChildItem publish/win-x64 -Filter *.pdb -Recurse -File | Remove-Item -Force
           Copy-Item THIRD-PARTY-NOTICES.md publish/win-x64/
-          Copy-Item THIRD-PARTY-NOTICES.md publish/win-arm64/
           Compress-Archive -Path publish/win-x64/* -DestinationPath "dist/sigil-${{ github.ref_name }}-win-x64.zip"
+
+      - name: package archive (win-arm64)
+        if: steps.publish-arm64.outcome == 'success'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Get-ChildItem publish/win-arm64 -Filter *.pdb -Recurse -File | Remove-Item -Force
+          Copy-Item THIRD-PARTY-NOTICES.md publish/win-arm64/
           Compress-Archive -Path publish/win-arm64/* -DestinationPath "dist/sigil-${{ github.ref_name }}-win-arm64.zip"
 
       - name: SHA256SUMS
         shell: pwsh
         run: |
-          Get-ChildItem dist | ForEach-Object {
+          Get-ChildItem dist -File | ForEach-Object {
             "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
           } | Set-Content -Path dist/SHA256SUMS -Encoding ascii
 
@@ -93,8 +201,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
+          # I2: PowerShell does NOT glob arguments for native executables, so
+          # the previous literal `dist/*` reached gh as the string "dist/*" and
+          # uploaded nothing at all. Expand the list here and splat it.
+          $assets = Get-ChildItem dist -File | ForEach-Object { $_.FullName }
+          if (@($assets).Count -lt 1) { throw "no release assets found in dist/" }
+          Write-Host "uploading $(@($assets).Count) asset(s):"
+          $assets | ForEach-Object { Write-Host "  $_" }
           gh release create "${{ github.ref_name }}" `
             --title "sigil ${{ github.ref_name }}" `
             --notes-file CHANGELOG.md `
             --prerelease `
-            dist/*
+            @assets
+          if ($LASTEXITCODE -ne 0) { throw "gh release create exited $LASTEXITCODE" }

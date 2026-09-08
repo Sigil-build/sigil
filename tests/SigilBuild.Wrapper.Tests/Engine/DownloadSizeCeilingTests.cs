@@ -238,7 +238,8 @@ public sealed class DownloadSizeCeilingTests
             () => new UpgradeState(
                 Found: true, InstalledVersion: "1.0.0", PriorInstallDir: @"C:\Acme",
                 PriorUninstallExe: @"C:\Acme\uninstall.exe", FoundScope: InstallScope.Machine),
-            (m, _) => log.Add(m));
+            (m, _) => log.Add(m),
+            new UpdateFixtures.InMemorySequenceStore());
 
         var code = await runner.RunAsync(
             new UpdateRequest(

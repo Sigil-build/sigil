@@ -20,6 +20,42 @@ internal static class UpdateFixtures
 {
     public const string ManifestUrl = "https://updates.example.com/acme/stable.json";
 
+    /// <summary>
+    /// In-memory replacement for R13's replay high water mark. Every test that drives
+    /// <see cref="UpdateRunner"/> must pass one of these: the production store reads and
+    /// WRITES <c>%ProgramData%\Sigil\&lt;AppId&gt;\update-sequence.txt</c>, and CI runs
+    /// elevated, so a test on the default store would be mutating the runner's real
+    /// machine state rather than its own fixture.
+    /// </summary>
+    public sealed class InMemorySequenceStore : IUpdateSequenceStore
+    {
+        private readonly System.Collections.Generic.Dictionary<string, long> _seen = new(StringComparer.Ordinal);
+
+        public InMemorySequenceStore(long? initial = null)
+        {
+            if (initial is { } value)
+            {
+                _seen[Key("com.acme.Studio", InstallScope.Machine)] = value;
+            }
+        }
+
+        public System.Collections.Generic.IReadOnlyDictionary<string, long> Recorded => _seen;
+
+        private static string Key(string appId, InstallScope scope) => $"{appId}|{scope}";
+
+        public long? Read(string appId, InstallScope scope) =>
+            _seen.TryGetValue(Key(appId, scope), out var value) ? value : null;
+
+        public void Record(string appId, InstallScope scope, long sequence, Action<string, bool>? report)
+        {
+            var key = Key(appId, scope);
+            if (!_seen.TryGetValue(key, out var existing) || sequence > existing)
+            {
+                _seen[key] = sequence;
+            }
+        }
+    }
+
     public static UpdateRequest Request(string signingKey, string tempDirectory) =>
         new(ManifestUrl: ManifestUrl, SigningKey: signingKey, Channel: "stable",
             Scope: InstallScope.Machine, AppId: "com.acme.Studio", TempDirectory: tempDirectory);
@@ -32,11 +68,17 @@ internal static class UpdateFixtures
     public static (byte[] Manifest, byte[] Signature, string PublicKeyBase64) SignedManifest(
         string version, string sha256)
     {
+        // R13: freshness fields are required. "Minted now, valid for a week, sequence 1"
+        // keeps every pre-R13 fixture behaving exactly as it did.
+        var issued = DateTimeOffset.UtcNow;
         var json =
             "{\n" +
             "  \"schemaVersion\": 1,\n" +
             $"  \"version\": \"{version}\",\n" +
             $"  \"packageUrl\": \"https://updates.example.com/acme/{version}/Setup.exe\",\n" +
+            $"  \"issuedAt\": \"{issued:O}\",\n" +
+            $"  \"expiresAt\": \"{issued.AddDays(7):O}\",\n" +
+            "  \"sequence\": 1,\n" +
             $"  \"sha256\": \"{sha256}\"\n" +
             "}";
         var bytes = Encoding.UTF8.GetBytes(json);

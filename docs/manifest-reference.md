@@ -104,9 +104,9 @@ Source: `schemas/sigil-schema.json` (JSON Schema, draft-07).
 | Property | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `channel` | string | - | `stable` | Free-form label naming which channel manifest this app points at (e.g. 'stable', 'beta'). Purely descriptive: Sigil does not resolve or host channels itself. |
-| `manifestUrl` | string | - | - | HTTPS URL of the signed channel manifest that `/Update` fetches to check for a newer version; its detached signature is expected at the same URL with '.sig' appended. Omit to ship an installer with no update capability. |
+| `manifestUrl` | string | - | - | HTTPS URL of the signed channel manifest that `/Update` fetches to check for a newer version; its detached signature is expected at the same URL with '.sig' appended. Must be https:// (SIG0324) -- the signature URL is this string + '.sig', so a cleartext value drags the signature fetch onto cleartext with it. Re-checked before the fetch at update runtime. Omit to ship an installer with no update capability. |
 | `deltaTargets` | integer | - | `3` | How many previous versions a future delta-patch generator would target. Parsed and schema-validated today, but not yet consumed by the update runtime -- full-package updates ship first (see the delta-update deferral ADR). |
-| `signingKey` | string | - | - | Base64-encoded X.509 SubjectPublicKeyInfo (SPKI) DER of the ECDSA P-256 PUBLIC key that verifies the detached signature (`manifestUrl` + '.sig') on the fetched channel manifest. Embedded at pack time as the update runtime's trust anchor -- never a private key, and never a file path. |
+| `signingKey` | string | - | - | Base64-encoded X.509 SubjectPublicKeyInfo (SPKI) DER of the ECDSA P-256 PUBLIC key that verifies the detached signature (`manifestUrl` + '.sig') on the fetched channel manifest. Embedded at pack time as the update runtime's trust anchor -- never a private key, and never a file path. Validated at pack time (SIG0325): the value must base64-decode AND import as a P-256 public key, so a file path or a wrong-curve key is refused here rather than failing at SIG0321 on every installed machine. |
 
 ## `installer`
 
@@ -118,6 +118,7 @@ Source: `schemas/sigil-schema.json` (JSON Schema, draft-07).
 | `install_dir` | string | - | - | Optional install-dir override; may reference {app.*} / {scope_root} tokens (T13). |
 | `license` | LocalizedText | - | - | _(undocumented)_ |
 | `language` | string | - | - | Optional fixed installer language tag (P9, gap G10) — the first link in the language-preference chain (installer.language -> /lang -> OS list -> en). An invalid tag is diagnosed (SIG0291). |
+| `require_signed_downloads` | string | - | `sign_declared` | Whether a binary this installer pulls off the network -- an update package or a web-stub payload -- must be Authenticode-valid before it is launched (register row R45). `sign_declared` (default, and the historical behaviour) arms the check only when this manifest declares a `sign` block; that infers 'should downloads be verified' from 'did the publisher configure signing for their own output', which are different questions. `always` arms it regardless. `always_verified_revocation` additionally REFUSES a binary whose revocation status could not be established (register row R46) -- by default that is a warning, because refusing it would break installs behind a captive portal, on an air-gapped network, or inside a locked-down enterprise egress; turn it on when you know your audience is reliably online. Prerequisites are not governed by this setting: they are always checked, and carry their own per-prerequisite `allow_unsigned` opt-out. An unrecognized value is SIG0326. |
 | `options` | object | - | - | Built-in configurable installer components (T8) plus app-defined custom components (P10, gap G11). |
 | `screens` | array | - | - | Declared custom wizard screens over parameters (T9). |
 | `vars` | object | - | - | Declarative variables (P1, gap G1): each entry is `name: <expression>` evaluated once at install-session start, in dependency order, and exposed as var.<name> in `when` expressions / screen-field defaults and as a {var.<name>} brace token in step paths and args. Expressions use the closed `when` grammar plus the read-only data-retrieval functions registry_read/env/file_version/installed_version; a var referencing a secret parameter inherits secretness. A reference cycle is a pack error (SIG0270). |
@@ -182,7 +183,7 @@ Source: `schemas/sigil-schema.json` (JSON Schema, draft-07).
 
 | Property | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `url` | string | yes | - | _(undocumented)_ |
+| `url` | string | yes | - | HTTPS URL fetched at install time. Must be https:// (SIG0323): the values it returns become parameter values, and parameter values are substituted into install-step fields -- paths, registry coordinates, arguments -- that execute elevated. Re-checked at install time against the substituted URL. |
 | `items_path` | string | yes | - | _(undocumented)_ |
 | `value_property` | string | yes | - | _(undocumented)_ |
 | `label_property` | string | yes | - | _(undocumented)_ |

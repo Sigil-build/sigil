@@ -73,7 +73,7 @@ public static class ManifestParser
             Package: MapPackage(GetMapping(root, "package")),
             Sign: MapSign(GetMapping(root, "sign")),
             Publish: MapPublish(GetMapping(root, "publish")),
-            Updates: MapUpdates(GetMapping(root, "updates")),
+            Updates: MapUpdates(GetMapping(root, "updates"), diagnostics, file),
             Installer: installer,
             Location: loc,
             Parameters: parameters,
@@ -148,14 +148,109 @@ public static class ManifestParser
             Draft: GetBool(gh, "draft", defaultValue: false)));
     }
 
-    private static UpdatesSection? MapUpdates(YamlMappingNode? node)
+    private static UpdatesSection? MapUpdates(
+        YamlMappingNode? node, List<Diagnostic> diagnostics, string fileName)
     {
         if (node is null) return null;
+
+        var loc = new SourceLocation(fileName, (int)node.Start.Line, (int)node.Start.Column);
+        var manifestUrl = GetScalar(node, "manifestUrl");
+        var signingKey = GetScalar(node, "signingKey");
+
+        // R14: the schema's own description called this an "HTTPS URL" while
+        // constraining only `format: uri`. The `.sig` URL is this string + ".sig"
+        // (UpdateRunner), so a cleartext manifestUrl drags the signature fetch onto
+        // cleartext with it. Re-checked before the fetch at update runtime.
+        if (!string.IsNullOrWhiteSpace(manifestUrl)
+            && !manifestUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            diagnostics.Add(new Diagnostic(
+                DiagnosticSeverity.Error,
+                DiagnosticCodes.UpdateManifestUrlInsecure,
+                $"updates.manifestUrl must be an https:// URL (got '{manifestUrl}')",
+                loc,
+                "https://docs.sigil.build/diagnostics/SIG0324"));
+        }
+
+        // R30: the field is the update runtime's trust anchor, and it was passed
+        // through unvalidated all the way to the stamped blob. Validate the shape
+        // it is documented to have — base64 X.509 SubjectPublicKeyInfo DER of an
+        // ECDSA P-256 PUBLIC key — so a private-key file path (which is what
+        // `sigil init --template full` itself used to emit) fails at pack time
+        // instead of at every update attempt on every installed machine.
+        if (!string.IsNullOrWhiteSpace(signingKey) && !IsP256SpkiBase64(signingKey))
+        {
+            diagnostics.Add(new Diagnostic(
+                DiagnosticSeverity.Error,
+                DiagnosticCodes.UpdateSigningKeyInvalid,
+                "updates.signingKey must be the base64-encoded X.509 SubjectPublicKeyInfo (SPKI) DER of an " +
+                "ECDSA P-256 PUBLIC key — never a private key, and never a file path. " +
+                "Produce it by base64-encoding ECDsa.ExportSubjectPublicKeyInfo() for your P-256 " +
+                "update-signing key; see docs/manifest-reference.md.",
+                loc,
+                "https://docs.sigil.build/diagnostics/SIG0325"));
+        }
+
         return new UpdatesSection(
             Channel: GetScalar(node, "channel") ?? "stable",
-            ManifestUrl: GetScalar(node, "manifestUrl"),
+            ManifestUrl: manifestUrl,
             DeltaTargets: GetInt(node, "deltaTargets", defaultValue: 3),
-            SigningKey: GetScalar(node, "signingKey"));
+            SigningKey: signingKey);
+    }
+
+    /// <summary>
+    /// True when <paramref name="value"/> is base64 that decodes to an X.509
+    /// SubjectPublicKeyInfo DER blob importable as an ECDSA <b>P-256</b> public key —
+    /// exactly what <c>ECDsa.ExportSubjectPublicKeyInfo()</c> produces, base64-encoded,
+    /// and exactly what <c>ChannelManifestVerifier</c> imports at update runtime.
+    /// </summary>
+    /// <remarks>
+    /// The curve is checked, not just the import: a P-384 SPKI imports fine and would
+    /// then fail every signature verification at runtime with SIG0321, which is the
+    /// same ship-then-discover failure R30 is about. Any exception from the import path
+    /// is a "no" — this is a shape check on publisher input, not a place to throw.
+    /// </remarks>
+    private static bool IsP256SpkiBase64(string value)
+    {
+        var trimmed = value.Trim();
+        byte[] der;
+        try
+        {
+            der = Convert.FromBase64String(trimmed);
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+
+        try
+        {
+            using var ecdsa = System.Security.Cryptography.ECDsa.Create();
+            ecdsa.ImportSubjectPublicKeyInfo(der, out var read);
+            if (read != der.Length)
+            {
+                return false;
+            }
+            var parameters = ecdsa.ExportParameters(includePrivateParameters: false);
+            var curve = parameters.Curve;
+            return curve.IsNamed
+                && (curve.Oid.Value == "1.2.840.10045.3.1.7"
+                    || string.Equals(curve.Oid.FriendlyName, "nistP256", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(curve.Oid.FriendlyName, "ECDSA_P256", StringComparison.OrdinalIgnoreCase));
+        }
+        catch (System.Security.Cryptography.CryptographicException)
+        {
+            return false;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch (NotSupportedException)
+        {
+            // A non-P-256 named curve the platform cannot materialize lands here.
+            return false;
+        }
     }
 
     private static InstallerSection? MapInstaller(
@@ -232,7 +327,47 @@ public static class ManifestParser
             // (schema is permissive); an invalid tag is diagnosed (SIG0291) but
             // otherwise doesn't block the parse — the resolver chain simply
             // won't match a value that fails LanguageTag.IsValid.
-            Language: ParseInstallerLanguage(node, diagnostics, fileName));
+            Language: ParseInstallerLanguage(node, diagnostics, fileName),
+            // R45: the downloaded-binary signature policy, declared rather than
+            // inferred from the presence of a `sign` block.
+            RequireSignedDownloads: ParseRequireSignedDownloads(node, diagnostics, fileName));
+    }
+
+    /// <summary>
+    /// Parse <c>installer.require_signed_downloads</c> (R45/R46). Absent or blank is
+    /// <see cref="RequireSignedDownloads.SignDeclared"/> — the pre-R45 behaviour — so
+    /// no existing manifest changes meaning. An unrecognized value is SIG0326 rather
+    /// than a silent fallback: this governs whether a downloaded binary is checked
+    /// before it runs elevated, and quietly ignoring a typo in it would be the same
+    /// class of silent-disarm the row exists to close.
+    /// </summary>
+    private static RequireSignedDownloads ParseRequireSignedDownloads(
+        YamlMappingNode node, List<Diagnostic> diagnostics, string fileName)
+    {
+        var raw = GetScalar(node, "require_signed_downloads");
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return RequireSignedDownloads.SignDeclared;
+        }
+
+        switch (raw.Trim().ToLowerInvariant())
+        {
+            case "sign_declared":
+                return RequireSignedDownloads.SignDeclared;
+            case "always":
+                return RequireSignedDownloads.Always;
+            case "always_verified_revocation":
+                return RequireSignedDownloads.AlwaysVerifiedRevocation;
+            default:
+                diagnostics.Add(new Diagnostic(
+                    DiagnosticSeverity.Error,
+                    DiagnosticCodes.RequireSignedDownloadsInvalid,
+                    $"installer.require_signed_downloads must be one of 'sign_declared', 'always', " +
+                    $"or 'always_verified_revocation' (got '{raw}')",
+                    new SourceLocation(fileName, (int)node.Start.Line, (int)node.Start.Column),
+                    "https://docs.sigil.build/diagnostics/SIG0326"));
+                return RequireSignedDownloads.SignDeclared;
+        }
     }
 
     /// <summary>
@@ -1105,6 +1240,22 @@ public static class ManifestParser
                         $"parameter '{name}' has a `source:` block missing required field(s)",
                         paramLoc,
                         "https://docs.sigil.build/diagnostics/SIG0234"));
+                }
+                else if (!url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                {
+                    // R8: this was the only HTTP consumer in the tree with no scheme
+                    // check. The fetched values become parameter values, and parameter
+                    // values are substituted into step fields — paths, registry
+                    // coordinates, arguments — that run elevated. Mirrors SIG0235.
+                    // Re-checked at install time in HttpOptionsLoader.LoadAsync, since
+                    // a URL assembled from tokens is not knowable here.
+                    diagnostics.Add(new Diagnostic(
+                        DiagnosticSeverity.Error,
+                        DiagnosticCodes.ParameterSourceInsecure,
+                        $"parameter '{name}' has a `source.url` that is not https:// (got '{url}') — " +
+                        "its fetched values are substituted into install steps that run elevated",
+                        paramLoc,
+                        "https://docs.sigil.build/diagnostics/SIG0323"));
                 }
                 else
                 {

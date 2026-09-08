@@ -1,0 +1,45 @@
+# S4: schema fixture for the network-trust constraints — register rows R8
+# (parameters.*.source.url must be https://), R14 (updates.manifestUrl must be
+# https://), R30 (updates.signingKey must be base64) and R45
+# (installer.require_signed_downloads).
+#
+# This file proves the JSON Schema shape only. Whether a signingKey actually
+# IMPORTS as a P-256 SPKI is a parser concern (SIG0325) — the schema can only
+# check the base64 character set — and is covered by
+# SigilBuild.Core.Tests/Manifest/NetworkTrustParseTests.
+#
+# `source` is declared in TWO places in the schema (the root `parameters`
+# definition and the duplicated one further down), so both a root-level
+# parameter and the installer block appear here.
+spec: v1.0
+
+app:
+  id: com.example.App
+  name: App
+  version: 0.1.0
+  publisher: P
+
+build:
+  source: ./out
+
+parameters:
+  edition:
+    type: string
+    source:
+      url: "https://config.example.com/editions.json"
+      items_path: items
+      value_property: id
+      label_property: name
+
+updates:
+  channel: stable
+  manifestUrl: https://updates.example.com/app/manifest.json
+  deltaTargets: 3
+  # Real base64 X.509 SPKI DER of an ECDSA P-256 public key. Never a file path.
+  signingKey: MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEM6pwH5xM2+mhJt1IQ29ejc6kQVnvyPXhUGoX9nUttZmXAhvgbx9xTMcLoNEGpK3zdYmQRTR8h/ftYEBZuNznhw==
+
+installer:
+  # R45: the strictest declared policy. `sign_declared` (the default) and
+  # `always` are the other two accepted values.
+  require_signed_downloads: always_verified_revocation
+  install_dir: "{scope_root}/App"

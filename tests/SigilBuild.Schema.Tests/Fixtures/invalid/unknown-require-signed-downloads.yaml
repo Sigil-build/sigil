@@ -1,0 +1,13 @@
+# R45: an unrecognized `installer.require_signed_downloads` value. This governs
+# whether a downloaded binary is Authenticode-checked before it runs elevated, so
+# an unknown value is refused rather than silently falling back to the default.
+spec: v1.0
+app:
+  id: com.example.App
+  name: Example
+  version: 0.1.0
+  publisher: Example Inc.
+build:
+  source: ./out
+installer:
+  require_signed_downloads: yes_please

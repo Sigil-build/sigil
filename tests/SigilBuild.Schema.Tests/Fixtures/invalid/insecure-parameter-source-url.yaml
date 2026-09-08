@@ -1,0 +1,19 @@
+# R8: a parameter `source.url` over cleartext http:// must fail the schema.
+# The values this endpoint returns become parameter values, and parameter values
+# are substituted into install-step fields that execute elevated.
+spec: v1.0
+app:
+  id: com.example.App
+  name: Example
+  version: 0.1.0
+  publisher: Example Inc.
+build:
+  source: ./out
+parameters:
+  edition:
+    type: string
+    source:
+      url: "http://config.example.com/editions.json"
+      items_path: items
+      value_property: id
+      label_property: name

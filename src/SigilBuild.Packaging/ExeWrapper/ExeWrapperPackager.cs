@@ -298,6 +298,11 @@ public sealed class ExeWrapperPackager : IPackager
             // full package (see BuildBlobBytes). Both artifacts get signed
             // independently by `sigil sign` after packing.
             SignDeclared = manifest.Sign is { Provider: not SignProvider.None },
+            // R45: the stub downloads and runs the real package, so it is one of the
+            // two call sites the policy governs. Carry the DECLARED value rather than
+            // letting the runtime infer it from SignDeclared.
+            RequireSignedDownloads = manifest.Installer?.RequireSignedDownloads
+                ?? RequireSignedDownloads.SignDeclared,
         };
 
         var json = System.Text.Json.JsonSerializer.Serialize(
@@ -445,6 +450,10 @@ public sealed class ExeWrapperPackager : IPackager
             // straight off SerializableWrapperBlob, not part of the in-memory
             // WrapperBlob the engine steps operate on.
             Language = manifest.Installer?.Language,
+            // R45: the declared downloaded-binary signature policy, replacing the
+            // runtime's inference from SignDeclared. Default is that same inference.
+            RequireSignedDownloads = manifest.Installer?.RequireSignedDownloads
+                ?? RequireSignedDownloads.SignDeclared,
         };
 
         var json = System.Text.Json.JsonSerializer.Serialize(

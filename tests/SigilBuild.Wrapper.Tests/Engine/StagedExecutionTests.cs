@@ -200,7 +200,8 @@ public sealed class StagedExecutionTests
         var launcher = new RecordingLauncher(0);
         var log = new List<string>();
         var runner = new UpdateRunner(
-            Fetcher(manifest, signature), downloader, launcher, () => Installed("1.0.0"), (m, _) => log.Add(m));
+            Fetcher(manifest, signature), downloader, launcher, () => Installed("1.0.0"), (m, _) => log.Add(m),
+            new UpdateFixtures.InMemorySequenceStore());
 
         var code = await runner.RunAsync(Request(key), CancellationToken.None);
 
@@ -255,7 +256,8 @@ public sealed class StagedExecutionTests
         var launcher = new RecordingLauncher(0);
         var log = new List<string>();
         var runner = new UpdateRunner(
-            Fetcher(manifest, signature), downloader, launcher, () => Installed("1.0.0"), (m, _) => log.Add(m));
+            Fetcher(manifest, signature), downloader, launcher, () => Installed("1.0.0"), (m, _) => log.Add(m),
+            new UpdateFixtures.InMemorySequenceStore());
 
         var request = new UpdateRequest(
             ManifestUrl: ManifestUrl, SigningKey: key, Channel: "stable",
@@ -283,9 +285,14 @@ public sealed class StagedExecutionTests
     private static (byte[] Manifest, byte[] Signature, string PublicKeyBase64) SignedManifest(
         string version, string sha256)
     {
+        // R13: freshness fields are required — minted now, valid for a week.
+        var issued = DateTimeOffset.UtcNow;
         var json =
             "{\n" +
             "  \"schemaVersion\": 1,\n" +
+            $"  \"issuedAt\": \"{issued:O}\",\n" +
+            $"  \"expiresAt\": \"{issued.AddDays(7):O}\",\n" +
+            "  \"sequence\": 1,\n" +
             $"  \"version\": \"{version}\",\n" +
             $"  \"packageUrl\": \"https://updates.example.com/acme/{version}/Setup.exe\",\n" +
             $"  \"sha256\": \"{sha256}\"\n" +

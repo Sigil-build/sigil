@@ -211,7 +211,8 @@ public sealed class LaunchGateOrderingTests
                 new UpdateFixtures.WritingDownloader(packageBytes),
                 launcher,
                 () => UpdateFixtures.Installed("1.0.0"),
-                (_, _) => { });
+                (_, _) => { },
+                new UpdateFixtures.InMemorySequenceStore());
 
             var code = await runner.RunAsync(UpdateFixtures.Request(key, tmp.Path), CancellationToken.None);
 

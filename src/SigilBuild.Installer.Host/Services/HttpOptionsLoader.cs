@@ -41,6 +41,20 @@ public static class HttpOptionsLoader
         string url, string itemsPath, string labelProperty, string valueProperty,
         CancellationToken ct)
     {
+        // R8: re-check the scheme HERE, not only at pack time. SIG0323 validates the
+        // URL as written in the manifest; this is the URL actually about to be
+        // requested, after token substitution — a `source.url` assembled from
+        // parameter values is not knowable at pack time, and the values this fetch
+        // returns are substituted into install steps that run elevated. Refuse before
+        // the GET rather than after, so nothing cleartext is ever put on the wire.
+        if (url is null || !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            InstallerLog.Error(
+                $"HttpOptionsLoader: refusing to fetch parameter options over a non-https URL ('{url}')");
+            throw new InvalidOperationException(
+                $"parameter source URL must be https:// (got '{url}')");
+        }
+
         InstallerLog.Info($"HttpOptionsLoader: GET {url}");
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(RequestTimeout);

@@ -51,9 +51,38 @@ namespace SigilBuild.Wrapper.Update;
 /// installed version may update to this one (e.g. a full package with no
 /// delta-from floor).
 /// </param>
+/// <param name="IssuedAt">
+/// REQUIRED. ISO-8601 timestamp of when this manifest was minted (register row
+/// R13). Together with <see cref="ExpiresAt"/> it bounds how long a correctly
+/// signed document stays actionable, which is what stops an on-path attacker
+/// replaying yesterday's manifest indefinitely.
+/// </param>
+/// <param name="ExpiresAt">
+/// REQUIRED. ISO-8601 timestamp after which this manifest must not be acted on.
+/// </param>
+/// <param name="Sequence">
+/// REQUIRED. Monotonic counter, compared against the highest value this machine
+/// has previously accepted for this app. Bounds the rollback the validity window
+/// still permits: an attacker who replays an older-but-not-yet-expired manifest
+/// — e.g. one advertising an intermediate version with a known vulnerability —
+/// is refused because its sequence has already been superseded.
+/// </param>
+/// <remarks>
+/// <b>All three freshness fields live inside the signed byte range.</b> The
+/// detached signature is computed over the exact bytes of this JSON document
+/// (<c>UpdateRunner</c> captures <c>manifestFetch.Bytes</c> once and hands the
+/// same array to both the verifier and the parser), so every field declared on
+/// this record is covered by construction — there is no sidecar, header, or
+/// out-of-band channel a freshness value could arrive on unsigned. They are
+/// <b>required</b>, not optional, for the same reason: an optional freshness
+/// field is defeated by replaying a manifest that predates it.
+/// </remarks>
 internal sealed record ChannelManifest(
     int SchemaVersion,
     string Version,
     string PackageUrl,
     string Sha256,
-    string? MinFromVersion = null);
+    string? MinFromVersion = null,
+    string? IssuedAt = null,
+    string? ExpiresAt = null,
+    long? Sequence = null);

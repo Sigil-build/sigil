@@ -230,8 +230,21 @@ jobs:
         with:
           global-json-file: global.json
 
+      # I3/R23a: this job previously had NO restore step, so the implicit
+      # restore inside "dotnet publish -r win-x64" regenerated the lock files
+      # instead of honouring them (RestorePackagesWithLockFile without
+      # RestoreLockedMode silently rewrites). SigilBuild.Cli now declares
+      # <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>, so the
+      # locked restore covers the RID-specific graph and the publish below can
+      # run --no-restore. NOTE: publish-installer-runtime.ps1 (further down)
+      # still restores on its own -- the host's PublishAot is gated on
+      # SigilAotPublish, so its ILCompiler references are absent from the
+      # RID-less lock graph and cannot be locked from here.
+      - name: restore (locked)
+        run: dotnet restore Sigil.slnx --locked-mode
+
       - name: aot publish
-        run: dotnet publish src/SigilBuild.Cli -c Release -r win-x64 -p:PublishAot=true -o publish/win-x64
+        run: dotnet publish src/SigilBuild.Cli -c Release -r win-x64 -p:PublishAot=true --no-restore -o publish/win-x64
 
       - name: smoke test
         shell: pwsh

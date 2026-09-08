@@ -17,6 +17,13 @@
          used by the /silent headless path (Program.cs). -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
+    <!-- I3/R23a: see the identical comment in SigilBuild.Cli.csproj. Declares
+         both shipping RIDs so packages.lock.json carries `net10.0/win-x64` and
+         `net10.0/win-arm64` sections and publish-installer-runtime.ps1's
+         per-RID publishes stay inside the locked package graph. Restore-only:
+         the default RID-less build is unchanged. -->
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+
     <!-- AOT — Avalonia 12 makes this clean -->
     <PublishAot Condition="'$(SigilAotPublish)' == 'true'">true</PublishAot>
     <!--

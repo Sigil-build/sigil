@@ -11,6 +11,15 @@
     <Description>Sigil — declarative desktop-software distribution CLI.</Description>
     <PackageTags>installer;packaging;codesigning;msix;delta-update</PackageTags>
 
+    <!-- I3/R23a: declare BOTH shipping RIDs so `dotnet restore` walks the
+         RID-specific package graph and records `net10.0/win-x64` +
+         `net10.0/win-arm64` sections in packages.lock.json. Without them the
+         locked restore only covers the RID-less graph and every
+         `dotnet publish -r <rid>` re-resolves packages outside the lock.
+         RuntimeIdentifiers (plural) informs RESTORE only; it does not pin a
+         RuntimeIdentifier, so the default RID-less `dotnet build` is unchanged. -->
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+
     <!-- Native AOT -->
     <PublishAot>true</PublishAot>
     <InvariantGlobalization>true</InvariantGlobalization>

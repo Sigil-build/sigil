@@ -317,6 +317,43 @@
         "contentHash": "UIDFkA5DC3en3tOJ3Mof11yBx9kUQLsaeo/oFdvN6Bbkr9E9+VCqfIadHci8cu+I51K2Sl7XYWVl2R/mA75NBQ=="
       }
     },
+    "net10.0/win-arm64": {
+      "Microsoft.DotNet.ILCompiler": {
+        "type": "Direct",
+        "requested": "[10.0.11, )",
+        "resolved": "10.0.11",
+        "contentHash": "yloFUsIQOzspIsn2cDHrbgikKaWHAZspzj0EWxnWJJpFC89IBW64OXgCECsrrnzGWQvy1iLX9r5/R4zBf7Am3g==",
+        "dependencies": {
+          "runtime.win-arm64.Microsoft.DotNet.ILCompiler": "10.0.11"
+        }
+      },
+      "libsodium": {
+        "type": "Transitive",
+        "resolved": "1.0.19",
+        "contentHash": "tupm/HViwBN6Knd/gckR+cLaJGR39GLmiU4iDMM5hp/1BoczMr8fwJhSU+3/C2V4hi9nBK/4FICRKtTLU30TCA=="
+      },
+      "runtime.win-arm64.Microsoft.DotNet.ILCompiler": {
+        "type": "Transitive",
+        "resolved": "10.0.11",
+        "contentHash": "vy/AJM7NafhIa+4EsJrh//5Ba3HW3purZh+KR0Bpt/R20w3s06ZrUsdwHywUs+5E7PfEtbXBcLlebKFusSLBkQ=="
+      },
+      "SkiaSharp.NativeAssets.macOS": {
+        "type": "Transitive",
+        "resolved": "3.119.4-preview.1.1",
+        "contentHash": "77gyFnZD0uU12ABgI6pe8Iw2GRBYGryMP4EaHFs7fniffthVT5sf4PTug4ytwNzLKkVDiLobEpIvAJAj3UXwEw=="
+      },
+      "System.Security.Cryptography.ProtectedData": {
+        "type": "Transitive",
+        "resolved": "4.5.0",
+        "contentHash": "wLBKzFnDCxP12VL9ANydSYhk59fC4cvOr9ypYQLPnAj48NQIhqnjdD2yhP8yEKyBJEjERWS9DisKL7rX5eU25Q=="
+      },
+      "SkiaSharp.NativeAssets.Win32": {
+        "type": "CentralTransitive",
+        "requested": "[3.119.4-preview.1.1, )",
+        "resolved": "3.119.4-preview.1.1",
+        "contentHash": "BYwNLG02IAYMsBPgU9lM37xJgCM3B/2X5z1FQEBR34dmn+Hxvcw8X83PInY2rzix7mlbcv7OF8UHjf7yMbsDaA=="
+      }
+    },
     "net10.0/win-x64": {
       "Microsoft.DotNet.ILCompiler": {
         "type": "Direct",

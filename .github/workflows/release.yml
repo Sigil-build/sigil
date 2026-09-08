@@ -1,0 +1,100 @@
+name: release
+
+# REL.5 (R7): tag-triggered signed release. Runs the full VM matrix first —
+# a release whose install/uninstall matrix did not run is not a release.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  vm-tests:
+    uses: ./.github/workflows/wrapper-vm-tests.yml
+
+  publish:
+    runs-on: windows-latest
+    needs: vm-tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: restore (locked)
+        run: dotnet restore Sigil.slnx --locked-mode
+
+      - name: require signing secrets
+        shell: pwsh
+        env:
+          HAS_SIGNING: ${{ secrets.AZURE_TENANT_ID != '' && secrets.TRUSTED_SIGNING_ACCOUNT != '' }}
+        run: |
+          if ($env:HAS_SIGNING -ne 'true') {
+            Write-Error "release refused: Azure Trusted Signing secrets are not configured. An unsigned release is not a release — see docs/plan/release/10-G2_G3_RUNBOOK.md for the six secrets to provision."
+            exit 1
+          }
+
+      - name: aot publish CLI (win-x64)
+        run: dotnet publish src/SigilBuild.Cli -c Release -r win-x64 -p:PublishAot=true -o publish/win-x64
+
+      - name: aot publish CLI (win-arm64)
+        run: dotnet publish src/SigilBuild.Cli -c Release -r win-arm64 -p:PublishAot=true -o publish/win-arm64
+
+      - name: size gate (win-x64)
+        shell: pwsh
+        run: |
+          $size = (Get-Item publish/win-x64/sigil.exe).Length
+          $sizeMb = [math]::Round($size / 1MB, 2)
+          Write-Host "sigil.exe (win-x64): $sizeMb MB"
+          if ($size -gt 15MB) { throw "sigil.exe is $sizeMb MB, exceeds the 15 MB budget" }
+
+      - name: tag matches Directory.Build.props version
+        shell: pwsh
+        run: |
+          $expected = "v" + (Select-Xml -Path "Directory.Build.props" -XPath "//Version").Node.InnerText.Trim()
+          $tag = "${{ github.ref_name }}"
+          if ($tag -ne $expected) { throw "tag '$tag' does not match Directory.Build.props version '$expected' (R24: one source of truth)" }
+
+      - name: sign binaries (Azure Trusted Signing)
+        uses: azure/trusted-signing-action@v2.0.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.TRUSTED_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.TRUSTED_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.TRUSTED_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}/publish
+          files-folder-filter: exe,dll
+          files-folder-recurse: true
+
+      - name: package archives
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Get-ChildItem publish/win-x64 -Filter *.pdb | Remove-Item
+          Get-ChildItem publish/win-arm64 -Filter *.pdb | Remove-Item
+          Copy-Item THIRD-PARTY-NOTICES.md publish/win-x64/
+          Copy-Item THIRD-PARTY-NOTICES.md publish/win-arm64/
+          Compress-Archive -Path publish/win-x64/* -DestinationPath "dist/sigil-${{ github.ref_name }}-win-x64.zip"
+          Compress-Archive -Path publish/win-arm64/* -DestinationPath "dist/sigil-${{ github.ref_name }}-win-arm64.zip"
+
+      - name: SHA256SUMS
+        shell: pwsh
+        run: |
+          Get-ChildItem dist | ForEach-Object {
+            "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
+          } | Set-Content -Path dist/SHA256SUMS -Encoding ascii
+
+      - name: create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          gh release create "${{ github.ref_name }}" `
+            --title "sigil ${{ github.ref_name }}" `
+            --notes-file CHANGELOG.md `
+            --prerelease `
+            dist/*

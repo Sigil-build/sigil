@@ -334,9 +334,14 @@ jobs:
           path: publish/host-stage/runtimes/win-arm64/SigilBuild.Installer.Host.exe
           if-no-files-found: warn
 
-      - name: upload binary
+      # REL.5/R7: the AOT output is NOT single-file — sigil.exe needs its
+      # sibling libSkiaSharp.dll and libsodium.dll (logo resizing, ZIP manifest
+      # signing). Uploading the bare exe hands users a DllNotFoundException.
+      - name: upload binary (full publish directory)
         uses: actions/upload-artifact@v4
         with:
           name: sigil-win-x64
-          path: publish/win-x64/sigil.exe
+          path: |
+            publish/win-x64/*
+            !publish/win-x64/*.pdb
           if-no-files-found: error

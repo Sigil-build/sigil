@@ -234,7 +234,15 @@ public static partial class Program
                 InstallerLog.Error($"AppDomain.UnhandledException (non-Exception): {e.ExceptionObject}");
         };
 
-        InstallerLog.Info($"wizard started: pid={Environment.ProcessId}, argv=[{string.Join(' ', args)}], cwd={Environment.CurrentDirectory}");
+        // I1: NEVER raw argv here. This log is always on, and a per-user install
+        // does NOT take the elevation branch above — R18's handoff never engages —
+        // so its argv still carries `/P<secret>=<value>` verbatim. Writing that
+        // would drop a licence key or password into %TEMP% in plaintext and
+        // contradict docs/guides/parameters.md, which promises a secret parameter
+        // is redacted (***) from the install log. `session` is already built by
+        // this point, so render the PARSED vector through AuditSafeRendering()
+        // instead — the same rendering InstallSession's own log header uses.
+        InstallerLog.Info(RenderWizardStartedLine(session.CommandLine));
 
         try
         {
@@ -261,6 +269,20 @@ public static partial class Program
             throw;
         }
     }
+
+    /// <summary>
+    /// Builds the always-on wizard log's first line. Takes the PARSED command
+    /// line rather than argv on purpose (I1): every declared <c>secret</c>
+    /// parameter's value is replaced by <c>***</c> by
+    /// <see cref="ParsedCommandLine.AuditSafeRendering"/>, so no licence key,
+    /// password or token can reach the log file. Separated from
+    /// <see cref="Main"/> because Main is not unit-testable ([STAThread] plus a
+    /// classic-desktop Avalonia lifetime); this is the lowest seam at which the
+    /// redaction of the started line can be asserted.
+    /// </summary>
+    public static string RenderWizardStartedLine(ParsedCommandLine commandLine) =>
+        $"wizard started: pid={Environment.ProcessId}, " +
+        $"args=[{commandLine.AuditSafeRendering()}], cwd={Environment.CurrentDirectory}";
 
     public static AppBuilder BuildAvaloniaApp() =>
         AppBuilder.Configure<App>()

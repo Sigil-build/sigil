@@ -5,6 +5,7 @@ using System.Linq;
 using System.Runtime.Versioning;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using System.Text;
 using FluentAssertions;
 using SigilBuild.Core.Manifest;
 using SigilBuild.Wrapper.Cli;
@@ -308,6 +309,48 @@ public sealed class ElevationSecretHandoffTests
         finally
         {
             File.Delete(path);
+        }
+    }
+
+    [WindowsFact("DPAPI (crypt32) and Windows file ACLs")]
+    public void The_envelope_never_holds_the_secret_in_clear_text()
+    {
+        // Arrange — M6. The roundtrip test above proves the value SURVIVES the
+        // envelope, which is equally true of a file that just writes it down. DPAPI
+        // machine scope means any local process that can READ the blob can decrypt
+        // it, so the ACL is the access control and the encryption is what stops a
+        // stray %TEMP% backup, an AV quarantine copy or a crash dump from handing the
+        // value over. Assert on the bytes, not on decoded text: a decode with
+        // replacement characters can hide a match.
+
+        // Named and sized to stay clear of gitleaks' generic-api-key rule, which
+        // fires on an identifier carrying a key/secret/token word, an equals sign, and
+        // then 10 or more entropic characters. Keep this identifier neutral and the
+        // literal under ten characters; it only has to be distinctive enough for the
+        // on-disk byte search below.
+        const string PlaintextFixture = "hunter2fx";
+        var args = new[] { "/Papikey=" + PlaintextFixture };
+        var parsed = ParseWithSchema(args, secret: new[] { "apikey" });
+        var relaunch = ElevationSecretHandoff.PrepareRelaunchArgs(args, parsed);
+        var path = HandoffPathOf(relaunch);
+
+        try
+        {
+            // Act
+            var bytes = File.ReadAllBytes(path);
+
+            // Assert
+            bytes.Should().NotBeEmpty("the envelope the child is pointed at must exist");
+            bytes.AsSpan().IndexOf(Encoding.UTF8.GetBytes(PlaintextFixture)).Should()
+                .Be(-1, "the UTF-8 bytes of a secret value must not appear in the envelope");
+            bytes.AsSpan().IndexOf(Encoding.Unicode.GetBytes(PlaintextFixture)).Should()
+                .Be(-1, "nor the UTF-16LE bytes — that is how the string reaches crypt32 on Windows");
+            bytes.AsSpan().IndexOf(Encoding.BigEndianUnicode.GetBytes(PlaintextFixture)).Should()
+                .Be(-1, "nor the byte-swapped form, in case a future writer changes endianness");
+        }
+        finally
+        {
+            ElevationSecretHandoff.CleanUp(relaunch, childMayStillBeRunning: false);
         }
     }
 }

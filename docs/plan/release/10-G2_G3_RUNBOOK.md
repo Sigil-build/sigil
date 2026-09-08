@@ -41,10 +41,12 @@ as a substitute for green CI on each PR.
 
 Two known rebase traps:
 
-**Trap 1 — S7 rides S5.** PR #31 (S7) is stacked on S5's branch. After S5
-(#29) merges, rebasing S7 onto the new RC head makes its **first 11 commits
-vanish into the base** (they are already in history via S4 + S5) — this is
-expected, not a problem. Exactly **3 commits remain**: S7's own
+**Trap 1 — S7 rides S5.** PR #31 (S7) is stacked only on S5's branch — S4,
+S5, and S6 are independent branches off the RC, and S4 is not an ancestor of
+S7. After S5 (#29) merges, rebasing S7 onto the new RC head makes its
+**first 11 commits vanish into the base** — those are S5's own lane commits,
+already landed via #29, not S4's — this is expected, not a problem. Exactly
+**3 commits remain**: S7's own
 `feat(engine): resolve replay anchoring from the signed blob` (R44, R51),
 its pinning test, and its adaptation to S5's uninstall-test shape. If the
 rebase leaves a different count, stop and diff before force-pushing.
@@ -271,7 +273,8 @@ are explicitly out of that task's scope. File them in `00-GAP_REGISTER.md`
 at the next gate-close docs pass.
 
 (a) **Redaction gap in the always-on wizard log.**
-`src/SigilBuild.Installer.Host/Program.cs:190` logs
+`src/SigilBuild.Installer.Host/Program.cs:237` (as of S5's final head,
+`cf07a2c`, PR #29) logs
 `wizard started: pid=…, argv=[{string.Join(' ', args)}], cwd=…` —
 **raw, unredacted argv** — to the log that is on by default. After R18, the
 *elevated child's* argv is safe (it carries only `/SecretHandoff=<path>`),

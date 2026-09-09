@@ -90,6 +90,8 @@ public sealed class VmFixtureManifestTests
             "deadbeefcafe", RunnerShapedRegistryPath, 9999, "[0]"),
         ["PrerequisiteInstallTests/exit-1603-not-ok"] = PrerequisiteInstallTests.BuildManifestYaml(
             "deadbeefcafe", RunnerShapedRegistryPath, 1603, "[0]"),
+        ["LocalizationEndToEndTests/localized-uk-per-run-id"] =
+            LocalizationEndToEndTests.BuildManifestYaml(LocalizationEndToEndTests.NewAppId()),
     };
 
     public static TheoryData<string> GeneratedFixtureNames()
@@ -119,6 +121,33 @@ public sealed class VmFixtureManifestTests
     public static TheoryData<string> OnDiskFixtureNames()
     {
         var data = new TheoryData<string>();
+        foreach (var name in OnDiskFixtures().Keys)
+        {
+            data.Add(name);
+        }
+        return data;
+    }
+
+    /// <summary>
+    /// Every fixture a VM leg packs — generated in-process <em>and</em> read from disk —
+    /// under one theory key, so a step-shape check written once covers both halves.
+    /// </summary>
+    /// <remarks>
+    /// The <c>from:</c> and <c>to:</c> guards below draw on this rather than on
+    /// <see cref="OnDiskFixtureNames"/>. That distinction is the whole reason the
+    /// <c>file_copy.to</c> defect survived this class's first version: the only
+    /// step-shape guard it shipped ran over the on-disk half alone, while three of the
+    /// four file-shaped destinations lived in the generated half and were never looked
+    /// at. A guard that covers a subset of the fixtures advertises coverage it does not
+    /// have — the same failure shape as R64.
+    /// </remarks>
+    public static TheoryData<string> AllFixtureNames()
+    {
+        var data = new TheoryData<string>();
+        foreach (var name in GeneratedFixtures().Keys)
+        {
+            data.Add(name);
+        }
         foreach (var name in OnDiskFixtures().Keys)
         {
             data.Add(name);
@@ -224,6 +253,11 @@ public sealed class VmFixtureManifestTests
                 PrerequisiteInstallTests.BuildManifestYaml(
                     Guid.NewGuid().ToString("N"), RunnerShapedRegistryPath, 3010, "[0, 3010]"),
                 "PrerequisiteInstallTests.AppIdFor");
+
+            await AssertValidAsync(
+                LocalizationEndToEndTests.BuildManifestYaml(
+                    LocalizationEndToEndTests.NewAppId()),
+                "LocalizationEndToEndTests.NewAppId");
         }
     }
 
@@ -258,38 +292,80 @@ public sealed class VmFixtureManifestTests
     /// source; a bare relative one never is, in a fixture that ships its own payload.
     /// </summary>
     [Theory]
-    [MemberData(nameof(OnDiskFixtureNames))]
+    [MemberData(nameof(AllFixtureNames))]
     public async Task Vm_fixture_file_copy_sources_use_the_payload_scheme(string fixtureName)
     {
         // Arrange
-        var path = OnDiskFixtures()[fixtureName];
-        var result = await ManifestLoader.LoadAsync(path, new ProcessEnvironmentReader());
-        result.Manifest.Should().NotBeNull();
-
-        var sources = new List<(string StepId, string From)>();
-        foreach (var step in AllSteps(result.Manifest!))
-        {
-            if (step is InstallStep.FileCopy copy)
-            {
-                sources.Add((copy.Id, copy.From));
-            }
-        }
+        var copies = await FileCopyStepsOfAsync(fixtureName);
 
         // Act + Assert
-        sources.Should().NotBeEmpty("every VM fixture installs at least one payload file");
-        foreach (var (stepId, from) in sources)
+        copies.Should().NotBeEmpty("every VM fixture installs at least one payload file");
+        foreach (var copy in copies)
         {
-            var acceptable = from.StartsWith("payload://", StringComparison.Ordinal)
-                || from.Contains('{', StringComparison.Ordinal)
-                || System.IO.Path.IsPathRooted(from);
+            var acceptable = copy.From.StartsWith("payload://", StringComparison.Ordinal)
+                || copy.From.Contains('{', StringComparison.Ordinal)
+                || System.IO.Path.IsPathRooted(copy.From);
             acceptable.Should().BeTrue(
-                "step '{0}' in {1} copies from '{2}': only the literal 'payload://' scheme " +
-                "is rebased onto the extracted payload (R59) — a bare relative glob like " +
-                "'payload/**' is schema-legal, resolves against the install process's " +
-                "working directory, and fails at install time with exit 1",
-                stepId,
-                path,
-                from);
+                "step '{0}' in fixture '{1}' copies from '{2}': only the literal " +
+                "'payload://' scheme is rebased onto the extracted payload (R59) — a bare " +
+                "relative glob like 'payload/**' is schema-legal, resolves against the " +
+                "install process's working directory, and fails at install time with exit 1",
+                copy.Id,
+                fixtureName,
+                copy.From);
+        }
+    }
+
+    /// <summary>
+    /// The other half of the same contract, and the defect that closed the matrix's
+    /// second real run: <b><c>file_copy.to</c> is a destination DIRECTORY, never a
+    /// destination file.</b>
+    /// </summary>
+    /// <remarks>
+    /// <para><c>FileCopyStep.ExecuteAsync</c> does <c>Directory.CreateDirectory(to)</c>
+    /// and then, for every glob match, <c>Path.Combine(to, &lt;path relative to the glob
+    /// root&gt;)</c> — there is no single-source-to-single-file branch anywhere in it. A
+    /// file-shaped destination therefore creates a <em>directory</em> of that name and
+    /// lands the payload one level too deep: <c>from: 'payload://app.txt'</c> with
+    /// <c>to: '{install_dir}\app.txt'</c> yields
+    /// <c>&lt;install_dir&gt;\app.txt\app.txt</c>. The step returns
+    /// <c>StepResult.Ok()</c>, the install exits 0, the ARP row is correct — and every
+    /// <c>File.Exists(&lt;install_dir&gt;\app.txt)</c> assertion in the matrix fails
+    /// against a directory. Three fixture builders shipped that shape, which is four of
+    /// the six failures in run <c>34368896457</c>.</para>
+    /// <para>The rule enforced here — no file extension on the destination's last
+    /// segment — is deliberately <em>tighter</em> than the runtime contract: an
+    /// extension-less file name (<c>to: '{install_dir}\LICENSE'</c>) would still slip
+    /// past it, and a legitimately dotted directory name would be rejected. Both are
+    /// acceptable for a fixture guard. An extension on the last segment is the shape
+    /// that actually bit, every corrected fixture satisfies the rule, and every broken
+    /// value violated it.</para>
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(AllFixtureNames))]
+    public async Task Vm_fixture_file_copy_destinations_are_directories(string fixtureName)
+    {
+        // Arrange
+        var copies = await FileCopyStepsOfAsync(fixtureName);
+
+        // Act + Assert
+        copies.Should().NotBeEmpty("every VM fixture installs at least one payload file");
+        foreach (var copy in copies)
+        {
+            System.IO.Path.GetExtension(LastPathSegment(copy.To)).Should().BeEmpty(
+                "step '{0}' in fixture '{1}' copies from '{2}' to '{3}': `file_copy.to` " +
+                "is a destination DIRECTORY. FileCopyStep creates it with " +
+                "Directory.CreateDirectory(to) and then writes every match to " +
+                "Path.Combine(to, <relative path>) — it has no single-source-to-single-" +
+                "file branch — so a file-shaped destination becomes a DIRECTORY of that " +
+                "name and the payload lands one level too deep " +
+                "(<install_dir>\\app.txt\\app.txt), with the step still returning Ok and " +
+                "the install still exiting 0. Write '{{install_dir}}' or " +
+                "'{{install_dir}}\\<subdir>' and let `from:` name the file",
+                copy.Id,
+                fixtureName,
+                copy.From,
+                copy.To);
         }
     }
 
@@ -329,6 +405,51 @@ public sealed class VmFixtureManifestTests
             invocationName,
             string.Join(' ', args));
     }
+
+    /// <summary>
+    /// Parse one fixture named by <see cref="AllFixtureNames"/> into the typed manifest
+    /// graph and return its <c>file_copy</c> steps. Generated fixtures go through
+    /// <c>ManifestParser.Parse</c> (the typed-graph half of what
+    /// <see cref="ManifestLoader.ValidateAsync"/> runs on the same string); on-disk ones
+    /// go through the full <see cref="ManifestLoader.LoadAsync"/> pipeline, environment
+    /// interpolation included — in both cases the same code <see cref="Sigil.PackAsync"/>
+    /// runs, so the steps inspected here are the steps the packer writes into the blob.
+    /// </summary>
+    private static async Task<InstallStep.FileCopy[]> FileCopyStepsOfAsync(string fixtureName)
+    {
+        SigilManifest? manifest;
+        if (GeneratedFixtures().TryGetValue(fixtureName, out var yaml))
+        {
+            manifest = ManifestParser.Parse(yaml, fixtureName).Manifest;
+            manifest.Should().NotBeNull(
+                "the generated fixture '{0}' must parse. YAML was:\n{1}", fixtureName, yaml);
+        }
+        else
+        {
+            var path = OnDiskFixtures()[fixtureName];
+            manifest = (await ManifestLoader.LoadAsync(path, new ProcessEnvironmentReader()))
+                .Manifest;
+            manifest.Should().NotBeNull(
+                "the on-disk fixture '{0}' ({1}) must load", fixtureName, path);
+        }
+
+        return AllSteps(manifest!).OfType<InstallStep.FileCopy>().ToArray();
+    }
+
+    /// <summary>
+    /// The last segment of a manifest path <em>template</em> — brace tokens intact, both
+    /// separators honoured, no filesystem access and no resolution of
+    /// <c>{install_dir}</c>. <c>Path.GetFileName</c> is not a substitute: the fixtures
+    /// carry <c>\</c> separators that would not split on a non-Windows test host.
+    /// </summary>
+    private static string LastPathSegment(string value)
+    {
+        var index = value.AsSpan().LastIndexOfAny(PathSeparators);
+        return index < 0 ? value : value[(index + 1)..];
+    }
+
+    private static readonly System.Buffers.SearchValues<char> PathSeparators =
+        System.Buffers.SearchValues.Create(@"\/");
 
     private static async Task AssertValidAsync(string yaml, string generatorName)
     {

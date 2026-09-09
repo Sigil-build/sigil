@@ -101,6 +101,22 @@ in REL, feeding a `--no-restore` publish), and `release.yml`'s `publish` job
 be missing and the two publish jobs will fail `--locked-mode` even though the
 `build` job passes.
 
+**Trap 3 — the SDK moved under the lock files (hit on 2026-09-09, fixed in
+REL #32 before it merged).** `global.json` used to say `10.0.100` with
+`rollForward: latestFeature`; the runner picked up the freshly released SDK
+10.0.401, whose SDK-injected `Microsoft.DotNet.ILCompiler` /
+`Microsoft.NET.ILLink.Tasks` are 10.0.12, and every locked restore failed
+with `NU1004` against lock files generated on 10.0.303 (10.0.11). REL now
+pins **`10.0.303`, `rollForward: disable`** — CI and local must use exactly
+that SDK, and a deliberate SDK bump regenerates all 21 lock files in the same
+commit (see 6(f)). If a locked restore ever fails on packages nobody
+referenced, check `dotnet --version` on the runner first.
+
+**How the chain actually went (for the record):** #28 → hotfix #36 → #29 →
+#30 → #31 → #32 (after the SDK pin) → #33 (with 21 regenerated lock files,
+23 `NU1004` before / 0 after) → #34 → #35. Every rebase was conflict-free;
+every red check had a root cause outside the lane's own diff.
+
 ## 2. Repo settings (owner-only, before G2 closes)
 
 - **Settings → Security → Private vulnerability reporting → enable.**
@@ -352,3 +368,26 @@ current statement lives in a workflow comment, and the upstream licences
 but say nothing about signature attribution. Worth one register line so the
 choice is reviewable rather than inherited — with the licence review at G4
 (R41a's neighbourhood) the natural place to confirm it.
+
+(f) **SDK bumps must regenerate the lock files in the same commit.** Found
+when the merge chain ran (2026-09-09): `global.json` rolled forward by
+feature band, CI picked up SDK 10.0.401 overnight, and its SDK-injected
+`Microsoft.DotNet.ILCompiler` / `Microsoft.NET.ILLink.Tasks` 10.0.12 no longer
+matched the lock files generated on 10.0.303 (10.0.11) — every locked restore
+failed with `NU1004`. REL #32 pins the SDK exactly (`10.0.303`,
+`rollForward: disable`), which is correct but means nothing bumps it. SUP's
+Dependabot covers `nuget` and `github-actions` only; add the `dotnet-sdk`
+ecosystem and make its PRs regenerate the lock files
+(`dotnet restore Sigil.slnx --force-evaluate`) before they can go green.
+
+(g) **The unit suite has no seam keeping the install-state root off the real
+`%ProgramData%`.** Found by #36: `CreateHardened` creates missing ancestors
+with the same admin-only DACL, so the first machine-scope call in a test run
+hardens the shared `%ProgramData%\Sigil` root on the runner, and any later
+fixture that plants under it inherits admin-only. Per-component guards exist
+(`SecureStaging.NeverStageElevatedForTesting`,
+`UpdateSequenceStore.UseDirectoryForTesting`, `InMemorySequenceStore`), but
+nothing at the `ScopeLayout` / `UninstallStateStore` level. #36 made the one
+affected fixture order-independent; the durable fix is a test-only override
+of the machine state root, so no unit test ever writes a real
+`%ProgramData%` path.

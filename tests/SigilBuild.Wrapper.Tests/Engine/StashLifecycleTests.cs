@@ -95,7 +95,7 @@ public sealed class StashLifecycleTests
             await RunInstallAsync(appId, shipped, installDir.Path);
             (await File.ReadAllTextAsync(target)).Should().Be("the publisher's defaults");
 
-            var result = await new UninstallEngine().RunAsync(appId, installDir.Path, InstallScope.User);
+            var result = await new UninstallEngine().RunAsync(appId, installDir.Path, SignedDeclarations.None, InstallScope.User);
 
             result.Success.Should().BeTrue(result.Error ?? "clean uninstall");
             File.Exists(target).Should().BeTrue(

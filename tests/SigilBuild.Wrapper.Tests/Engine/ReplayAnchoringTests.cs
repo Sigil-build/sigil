@@ -77,7 +77,7 @@ public class ReplayAnchoringTests
 
         // Act
         var outcome = await journal.UndoAsync(
-            ReplayAnchorage.ForInstallDir(installDir.Path), progress: null, ct: CancellationToken.None);
+            ReplayAnchorage.ForInstallDir(installDir.Path, SignedDeclarations.None), progress: null, ct: CancellationToken.None);
 
         // Assert — the structured shape lane S5 consumes for R15, not just the prose.
         var refusal = outcome.RefusedRecords.Should().ContainSingle().Subject;
@@ -387,7 +387,7 @@ public class ReplayAnchoringTests
 
         // Act
         var outcome = await journal.UndoAsync(
-            ReplayAnchorage.ForInstall(installDir.Path, "sigil.stash.app", InstallScope.User),
+            ReplayAnchorage.ForInstall(installDir.Path, "sigil.stash.app", InstallScope.User, SignedDeclarations.None),
             progress,
             CancellationToken.None);
 
@@ -473,7 +473,7 @@ public class ReplayAnchoringTests
 
             // Act
             var outcome = await journal.UndoAsync(
-                ReplayAnchorage.ForInstallDir(installDir.Path), progress: null, ct: CancellationToken.None);
+                ReplayAnchorage.ForInstallDir(installDir.Path, SignedDeclarations.None), progress: null, ct: CancellationToken.None);
 
             // Assert
             outcome.RefusedRecords.Should().BeEmpty(
@@ -544,8 +544,10 @@ public class ReplayAnchoringTests
         var record = new RollbackRecord.RestoreRegistryValue(
             hive, key, "Value", "default", "REG_SZ", @"C:\Users\Public\evil.exe", PreviouslyAbsent: false);
 
-        // Act
-        var verdict = Anchor(installDir.Path).Check(record);
+        // Act — the manifest DECLARES the key under test (R51), so the refusal can only
+        // come from the space and shape rules this test exists for. Declaring a
+        // dangerous coordinate must not be a way to have it replayed.
+        var verdict = AnchorDeclaring(installDir.Path, hive, key).Check(record);
 
         // Assert
         verdict.RefusalMessage.Should().NotBeNull();
@@ -563,13 +565,14 @@ public class ReplayAnchoringTests
     {
         // Arrange — the positives that keep real uninstalls working: a registry_write
         // step may name any key the manifest author chose, including the app's own
-        // progid, its own file extension, and its own ARP row.
+        // progid, its own file extension, and its own ARP row. Since R51 those keys must
+        // be DECLARED to replay — which is what the step that wrote them does.
         using var installDir = new TempDir();
         var record = new RollbackRecord.RestoreRegistryValue(
             hive, key, "Installed", "default", "REG_SZ", null, PreviouslyAbsent: true);
 
         // Act
-        var verdict = Anchor(installDir.Path).Check(record);
+        var verdict = AnchorDeclaring(installDir.Path, hive, key).Check(record);
 
         // Assert
         verdict.RefusalMessage.Should().BeNull();
@@ -594,8 +597,9 @@ public class ReplayAnchoringTests
             PriorValue: $"\"{Path.Combine(installDir.Path, "acme.exe")}\" \"%1\"",
             PreviouslyAbsent: false);
 
-        // Act
-        var verdict = Anchor(installDir.Path).Check(record);
+        // Act — declared, because the manifest's file-association step names this key.
+        var verdict = AnchorDeclaring(
+            installDir.Path, "HKCU", @"Software\Classes\Acme.Document").Check(record);
 
         // Assert
         verdict.RefusalMessage.Should().BeNull(
@@ -622,8 +626,9 @@ public class ReplayAnchoringTests
             PriorValue: $"\"{Path.Combine(installDir, "acme.exe")}\" \"%1\"",
             PreviouslyAbsent: false);
 
-        // Act
-        var verdict = Anchor(installDir).Check(record);
+        // Act — declared, as the manifest's file-association step declares it.
+        var verdict = AnchorDeclaring(
+            installDir, "HKLM", @"Software\Classes\Acme.Document").Check(record);
 
         // Assert
         verdict.RefusalMessage.Should().BeNull(
@@ -656,8 +661,11 @@ public class ReplayAnchoringTests
             PriorValue: $"\"{evil}\" \"%1\"",
             PreviouslyAbsent: false);
 
-        // Act
-        var verdict = Anchor(installDir.Path).Check(record);
+        // Act — the key is DECLARED, so R51's allowlist passes it through and the
+        // execution-mapping rule is what refuses it. This is the layering stated as a
+        // test: a manifest declaration does not buy an unowned machine-wide mapping.
+        var verdict = AnchorDeclaring(
+            installDir.Path, "HKLM", @"Software\Classes\exefile\shell\open\command").Check(record);
 
         // Assert
         verdict.RefusalMessage.Should().NotBeNull();
@@ -695,7 +703,7 @@ public class ReplayAnchoringTests
             PreviouslyAbsent: false);
 
         // Act
-        var verdict = Anchor(installDir.Path).Check(record);
+        var verdict = AnchorDeclaring(installDir.Path, "HKLM", key).Check(record);
 
         // Assert
         verdict.RefusalMessage.Should().BeNull(
@@ -720,8 +728,9 @@ public class ReplayAnchoringTests
             PriorValue: $"\"{Path.Combine(elsewhere.Path, "evil.exe")}\" \"%1\"",
             PreviouslyAbsent: false);
 
-        // Act
-        var verdict = Anchor(installDir.Path).Check(record);
+        // Act — declared, so the refusal comes from the value, not from the allowlist.
+        var verdict = AnchorDeclaring(
+            installDir.Path, "HKLM", @"Software\Classes\Acme.Document").Check(record);
 
         // Assert
         verdict.RefusalMessage.Should().NotBeNull();
@@ -731,9 +740,14 @@ public class ReplayAnchoringTests
     [WindowsFact("Windows registry semantics")]
     public void RestoreRegistryKey_obeys_the_same_rule_as_RestoreRegistryValue()
     {
-        // Arrange — the key-level record was never covered; it writes just as much.
+        // Arrange — the key-level record was never covered; it writes just as much. Both
+        // coordinates are declared, so the refusal below is the space rule's doing.
         using var installDir = new TempDir();
-        var anchor = Anchor(installDir.Path);
+        var anchor = AnchorDeclaring(
+            installDir.Path,
+            "HKLM",
+            @"SYSTEM\CurrentControlSet\Services\Spooler",
+            @"Software\Acme\App");
         var snapshots = Array.Empty<RegistryValueSnapshot>();
 
         // Act
@@ -1156,7 +1170,7 @@ public class ReplayAnchoringTests
 
         // Act
         var outcome = await journal.UndoAsync(
-            ReplayAnchorage.ForInstallDir(installDir.Path), progress: null, ct: CancellationToken.None);
+            ReplayAnchorage.ForInstallDir(installDir.Path, SignedDeclarations.None), progress: null, ct: CancellationToken.None);
 
         // Assert
         outcome.RefusedRecords.Should().BeEmpty(
@@ -1184,7 +1198,7 @@ public class ReplayAnchoringTests
 
         // Act
         var outcome = await journal.UndoAsync(
-            ReplayAnchorage.ForInstallDir(installDir.Path), progress, CancellationToken.None);
+            ReplayAnchorage.ForInstallDir(installDir.Path, SignedDeclarations.None), progress, CancellationToken.None);
 
         // Assert
         outcome.RefusedRecords.Should().ContainSingle();
@@ -1238,9 +1252,15 @@ public class ReplayAnchoringTests
         var registry = anchor.Check(new RollbackRecord.RestoreRegistryValue(
             "HKLM", @"SYSTEM\CurrentControlSet\Services\Spooler", "ImagePath", "default",
             "REG_SZ", @"C:\Users\Public\evil.exe", false));
-        var mapping = anchor.Check(new RollbackRecord.RestoreRegistryValue(
-            "HKLM", @"Software\Classes\exefile\shell\open\command", "", "default",
-            "REG_SZ", Path.Combine(elsewhere.Path, "evil.exe"), false));
+        // Declared (R51), so this record reaches the execution-mapping rule and carries
+        // that rule's code rather than the allowlist's.
+        var mapping = AnchorDeclaring(
+                installDir.Path, "HKLM", @"Software\Classes\exefile\shell\open\command")
+            .Check(new RollbackRecord.RestoreRegistryValue(
+                "HKLM", @"Software\Classes\exefile\shell\open\command", "", "default",
+                "REG_SZ", Path.Combine(elsewhere.Path, "evil.exe"), false));
+        var undeclared = anchor.Check(new RollbackRecord.RestoreRegistryValue(
+            "HKCU", @"Software\Acme\App", "Installed", "default", "REG_SZ", null, true));
         var env = anchor.Check(new RollbackRecord.RestoreEnv(
             "machine", "Path", @"C:\Users\Public\evil;" + ReadMachineEnv("Path"), false));
         var service = anchor.Check(new RollbackRecord.RemoveService(serviceName));
@@ -1261,6 +1281,11 @@ public class ReplayAnchoringTests
         mapping.Refusal.Should().NotBeNull();
         mapping.Refusal!.Target.Should().Be(@"HKLM\Software\Classes\exefile\shell\open\command");
         mapping.Refusal.Code.Should().Be(ReplayRefusalCode.ExecutionMappingNotOwned);
+
+        undeclared.Refusal.Should().NotBeNull();
+        undeclared.Refusal!.RecordType.Should().Be("restore_registry_value");
+        undeclared.Refusal.Target.Should().Be(@"HKCU\Software\Acme\App");
+        undeclared.Refusal.Code.Should().Be(ReplayRefusalCode.RegistryKeyNotDeclared);
 
         env.Refusal.Should().NotBeNull();
         env.Refusal!.RecordType.Should().Be("restore_env");
@@ -1292,7 +1317,7 @@ public class ReplayAnchoringTests
     {
         // "Anchored to nothing" would be indistinguishable from InProcess at the call
         // site, which is exactly the mistake the type exists to prevent.
-        var act = () => ReplayAnchorage.ForInstallDir("   ");
+        var act = () => ReplayAnchorage.ForInstallDir("   ", SignedDeclarations.None);
         act.Should().Throw<ArgumentException>();
     }
 
@@ -1301,10 +1326,27 @@ public class ReplayAnchoringTests
     // ---------------------------------------------------------------------------
 
     private static ReplayAnchor Anchor(string installDir) =>
-        ReplayAnchor.For(ReplayAnchorage.ForInstallDir(installDir))!;
+        ReplayAnchor.For(ReplayAnchorage.ForInstallDir(installDir, SignedDeclarations.None))!;
+
+    /// <summary>
+    /// An anchor whose signed manifest declares <paramref name="keys"/> in
+    /// <paramref name="hive"/> (R51). Every registry test that expects a record to be
+    /// judged on its SPACE or its SHAPE now has to declare the key first — otherwise the
+    /// allowlist refuses it earlier and the test would pass without exercising the rule
+    /// it was written for. Declaring a key is exactly what a manifest carrying a
+    /// <c>registry_write</c> step for it does; it is not an escape hatch, which is what
+    /// the deny-list and execution-mapping negatives below now also prove.
+    /// </summary>
+    private static ReplayAnchor AnchorDeclaring(string installDir, string hive, params string[] keys) =>
+        ReplayAnchor.For(ReplayAnchorage.ForInstallDir(
+            installDir,
+            SignedDeclarations.ForLiterals(
+                null,
+                Array.ConvertAll(keys, k => new DeclaredRegistryKey(hive, k)))))!;
 
     private static ReplayAnchor AnchorFor(string installDir, string appId, InstallScope scope) =>
-        ReplayAnchor.For(ReplayAnchorage.ForInstall(installDir, appId, scope))!;
+        ReplayAnchor.For(ReplayAnchorage.ForInstall(
+            installDir, appId, scope, SignedDeclarations.None))!;
 
     /// <summary>
     /// A real step spec of <paramref name="stepType"/> whose rollback record stashes the

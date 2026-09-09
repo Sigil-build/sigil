@@ -36,6 +36,16 @@ public sealed class UninstallEngine
     /// every file record of any install that used a wizard-chosen or <c>/D=</c>
     /// destination, because the ARP <c>UninstallString</c> carries no <c>/D=</c>.
     /// </param>
+    /// <param name="declarations">
+    /// What the SIGNED BLOB declares (R44/R51) — the out-of-tree destinations
+    /// <c>allow_outside_install_dir</c> opted out of containment, and the registry keys
+    /// the manifest's registry steps name. <strong>Required and non-optional, for exactly
+    /// the reason <paramref name="fallbackInstallDir"/> is:</strong> an anchoring input
+    /// that a caller may omit is an invariant this method cannot enforce, and it holds
+    /// only while every call site remembers it. The declarations are resolved AFTER the
+    /// anchor directory is chosen, so a declared <c>{install_dir}\…</c> destination
+    /// expands against the RECORDED directory rather than a recomputed default.
+    /// </param>
     [System.Diagnostics.CodeAnalysis.SuppressMessage(
         "Performance",
         "CA1822:Mark members as static",
@@ -43,12 +53,14 @@ public sealed class UninstallEngine
     public async Task<EngineResult> RunAsync(
         string appId,
         string fallbackInstallDir,
+        SignedDeclarations declarations,
         InstallScope preferredScope = InstallScope.User,
         IProgress<StepProgress>? progress = null,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(appId);
         ArgumentException.ThrowIfNullOrWhiteSpace(fallbackInstallDir);
+        ArgumentNullException.ThrowIfNull(declarations);
 
         // progress is threaded through so an R1 state refusal reaches the console,
         // the wizard log pane and the /LOG file instead of vanishing.
@@ -91,8 +103,19 @@ public sealed class UninstallEngine
         // to THIS app's own directory (one app's journal must not be able to delete or
         // launder another app's uninstall.json), and the scope narrows the shortcut
         // folders to the scope actually being replayed.
+        //
+        // R44/R51: `declarations` is the ONLY widening input, and every value in it comes
+        // from the running module's signed blob. Note what is NOT passed here — nothing
+        // out of `loaded`, the state that came off disk. The journal supplies records to
+        // be judged; it supplies no part of the standard they are judged against. Both
+        // rows exist because the obvious alternative — a per-record "I was declared" flag
+        // — is a record asserting its own permission, and a planted record would assert
+        // it too.
         var undo = await loaded.Journal
-            .UndoAsync(ReplayAnchorage.ForInstall(anchorDir, appId, loaded.Scope), progress, ct)
+            .UndoAsync(
+                ReplayAnchorage.ForInstall(anchorDir, appId, loaded.Scope, declarations),
+                progress,
+                ct)
             .ConfigureAwait(false);
 
         if (undo.RefusedRecords.Count > 0)

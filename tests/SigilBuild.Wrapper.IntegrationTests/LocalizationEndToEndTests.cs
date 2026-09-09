@@ -41,24 +41,18 @@ namespace SigilBuild.Wrapper.IntegrationTests;
 /// </remarks>
 public class LocalizationEndToEndTests
 {
-    private static string FindFixtureManifest(string fixtureName)
-    {
-        var dir = AppContext.BaseDirectory;
-        while (dir is not null)
-        {
-            if (File.Exists(Path.Combine(dir, "Sigil.slnx")))
-            {
-                break;
-            }
-            dir = Path.GetDirectoryName(dir);
-        }
-        if (dir is null)
-        {
-            throw new InvalidOperationException("could not locate Sigil.slnx");
-        }
-        return Path.Combine(
-            dir, "tests", "SigilBuild.Packaging.IntegrationTests", "Fixtures", fixtureName, "sigil.yaml");
-    }
+    internal static string FindFixtureManifest(string fixtureName) => Sigil.RepoPath(
+        "tests/SigilBuild.Packaging.IntegrationTests/Fixtures/" + fixtureName + "/sigil.yaml");
+
+    /// <summary>
+    /// The argv these legs install with — the single definition the always-on
+    /// <see cref="VmFixtureManifestTests"/> parses through the REAL
+    /// <c>CommandLineParser</c> so a grammar drift fails in every CI run.
+    /// </summary>
+    internal static string[] SilentInstallArgs(string? lang, string installDir, string logPath) =>
+        lang is null
+            ? new[] { "/silent", "/D=" + installDir, "/LOG=" + logPath }
+            : new[] { "/silent", "/lang=" + lang, "/D=" + installDir, "/LOG=" + logPath };
 
     private static string[] ListRelativeFiles(string root)
     {
@@ -93,8 +87,8 @@ public class LocalizationEndToEndTests
         var enLog = Path.Combine(sandbox.Root, "en.log");
         var ukLog = Path.Combine(sandbox.Root, "uk.log");
 
-        var enExit = await sandbox.RunAsync(setupExe, "/silent", $"/D={enDir}", $"/LOG={enLog}");
-        var ukExit = await sandbox.RunAsync(setupExe, "/silent", "/lang=uk", $"/D={ukDir}", $"/LOG={ukLog}");
+        var enExit = await sandbox.RunAsync(setupExe, SilentInstallArgs(null, enDir, enLog));
+        var ukExit = await sandbox.RunAsync(setupExe, SilentInstallArgs("uk", ukDir, ukLog));
 
         ukExit.Should().Be(enExit).And.Be(0);
 
@@ -176,7 +170,7 @@ public class LocalizationEndToEndTests
         var logPath = Path.Combine(sandbox.Root, "run.log");
 
         var exit = await sandbox.RunAsync(
-            setupExe, "/silent", "/lang=uk", $"/D={installDir}", $"/LOG={logPath}");
+            setupExe, SilentInstallArgs("uk", installDir, logPath));
 
         exit.Should().Be(0, "a language conflict is not a usage error (design §2.1)");
 

@@ -55,7 +55,7 @@ public sealed class ArpUninstallStringTests
     public async Task Registered_uninstall_string_completes_from_inside_the_install_dir()
     {
         using var sandbox = new VmSandbox();
-        var appId = "com.sigil.r58." + Guid.NewGuid().ToString("N");
+        var appId = NewAppId();
         var installDir = Path.Combine(sandbox.Root, "app");
         try
         {
@@ -153,23 +153,26 @@ public sealed class ArpUninstallStringTests
     }
 
     /// <summary>
-    /// A minimal self-contained fixture: one payload file copied to
-    /// <paramref name="installDir"/>. Mirrors <c>UpgradeInstallTests.PackFixtureAsync</c>
-    /// — <c>payload://</c> source and <c>{install_dir}</c> destination are the
-    /// code-verified forms.
+    /// A schema-valid unique app id for one run. R66: mirroring
+    /// <c>UpgradeInstallTests</c>, this used to be <c>"com.sigil.r58." + Guid("N")</c>,
+    /// whose trailing hex segment usually starts with a digit — which <c>app.id</c>'s
+    /// letter-led-segment pattern rejects. This test has never run on a VM (it landed
+    /// in PR #39, after the run that exposed the same defect in its siblings), so the
+    /// same rot was already baked in before its first execution.
     /// </summary>
-    private static async Task<string> PackFixtureAsync(
-        VmSandbox sandbox, string appId, string installDir)
-    {
-        var fixtureDir = Path.Combine(sandbox.Root, "fixture");
-        var payloadDir = Path.Combine(fixtureDir, "payload");
-        Directory.CreateDirectory(payloadDir);
-        await File.WriteAllTextAsync(Path.Combine(payloadDir, "app.txt"), "r58 payload\n")
-            .ConfigureAwait(false);
+    internal static string NewAppId() => "com.sigil.r58.r" + Guid.NewGuid().ToString("N");
 
-        var installDirYaml = installDir.Replace("\\", "\\\\", StringComparison.Ordinal);
+    /// <summary>
+    /// Build the fixture manifest YAML. Pure: no sandbox, no disk, no packer — so the
+    /// always-on <see cref="VmFixtureManifestTests"/> can validate the exact string
+    /// this VM leg packs without a staged runtime (register row R66).
+    /// </summary>
+    internal static string BuildManifestYaml(string appId, string installDir)
+    {
         // $$ raw string: {{...}} interpolates, single braces ({install_dir}) are literal.
-        var manifest = $$"""
+        // Sigil.YamlQuote emits a single-quoted scalar, so the install dir's backslashes
+        // need no hand-doubling — and cannot become an unknown-escape parse error (R66).
+        return $$"""
 spec: v1.0
 
 app:
@@ -187,16 +190,34 @@ package:
 
 installer:
   scope: auto
-  install_dir: "{{installDirYaml}}"
+  install_dir: {{Sigil.YamlQuote(installDir)}}
 
 install_steps:
   - id: copy-app
     type: file_copy
-    from: "payload://app.txt"
-    to: "{install_dir}\\app.txt"
+    from: 'payload://app.txt'
+    to: '{install_dir}\app.txt'
 """;
+    }
+
+    /// <summary>
+    /// A minimal self-contained fixture: one payload file copied to
+    /// <paramref name="installDir"/>. Mirrors <c>UpgradeInstallTests.PackFixtureAsync</c>
+    /// — <c>payload://</c> source and <c>{install_dir}</c> destination are the
+    /// code-verified forms.
+    /// </summary>
+    private static async Task<string> PackFixtureAsync(
+        VmSandbox sandbox, string appId, string installDir)
+    {
+        var fixtureDir = Path.Combine(sandbox.Root, "fixture");
+        var payloadDir = Path.Combine(fixtureDir, "payload");
+        Directory.CreateDirectory(payloadDir);
+        await File.WriteAllTextAsync(Path.Combine(payloadDir, "app.txt"), "r58 payload\n")
+            .ConfigureAwait(false);
+
         var manifestPath = Path.Combine(fixtureDir, "sigil.yaml");
-        await File.WriteAllTextAsync(manifestPath, manifest).ConfigureAwait(false);
+        await File.WriteAllTextAsync(manifestPath, BuildManifestYaml(appId, installDir))
+            .ConfigureAwait(false);
 
         return await Sigil.PackAsync(manifestPath, Path.Combine(fixtureDir, "out"))
             .ConfigureAwait(false);

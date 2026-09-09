@@ -130,7 +130,9 @@ Four defects were found while running checks 1, 3, 4 and 5. **R58** (below) is
 release-blocking; **R59** is fixed in this same PR; **R60** and **R61** are
 filed for a later stage. R58's fix opened as **[PR #39](https://github.com/Sigil-build/sigil/pull/39)**
 (commit `48e864f`, not yet merged) and its own work surfaced **R64** and
-**R65** — see the "Filed at gate G2" section below for all six rows.
+**R65**. The first real `wrapper-vm-tests.yml` run — the one R64 had just
+shown would be worth less than it looked — then surfaced **R66–R68**. See the
+"Filed at gate G2" section below for all nine rows.
 
 ---
 
@@ -1817,6 +1819,12 @@ R58–R61: `.superpowers/sdd/2026-09-08-g2-release-prep/g2-checks-report.md`
 (gitignored, not part of this PR). **R64 and R65** were found afterward, while
 landing R58's fix on `rc/p6-fix-uninstall-self-block`
 ([PR #39](https://github.com/Sigil-build/sigil/pull/39), commit `48e864f`).
+**R66–R68** were found later still, in the **first real run** of
+`wrapper-vm-tests.yml` (run 34361541578) — the run R64 had just established
+would be worth less than it looked. It was worth even less than that: R66 (the
+fixtures had rotted), R67 (the P11 legs assert a pre-S2 message) and R68 (the
+P12 job's build step could never run) between them account for every failure in
+that run, and none of the three is about installer behaviour.
 
 ### R58 — The ARP `UninstallString` cannot complete: the uninstaller blocks on its own pid
 **Component:** Wrapper.Core / Engine · **Effort: S** · **RELEASE BLOCKER**
@@ -1920,6 +1928,33 @@ and `docs/guides/parameters.md`; this PR fixes all five files by changing
 by the G2 check's own test manifest) and correcting `install-steps.md`'s
 prose about how `from:` is resolved. Every changed example manifest remains
 schema-valid (CI's example validation still passes).
+
+**That sweep missed five more occurrences**, all fixed with **R66** by
+[PR #41](https://github.com/Sigil-build/sigil/pull/41) (lane
+`rc/vm-fix-fixtures`):
+
+- `tests/SigilBuild.Packaging.IntegrationTests/Fixtures/localized-uk/sigil.yaml`
+- `tests/SigilBuild.Packaging.IntegrationTests/Fixtures/localized-uk-fixed/sigil.yaml`
+- `tests/SigilBuild.Packaging.IntegrationTests/Fixtures/localized-de/sigil.yaml`
+- `docs/getting-started.md` (the tutorial's copy-pasteable manifest)
+- `docs/migration/from-inno.md` (the `[Files]` → `file_copy` table, whose prose
+  also claimed "`from` is relative to the packed `payload/` directory" —
+  contradicting the corrected `docs/guides/install-steps.md`)
+
+The first sweep looked at the guides and the shipped examples; the first two
+files above are *fixtures* packed and run by the VM localization legs (which
+duly failed with exit 1 in run 34361541578), and the last two are docs the
+sweep did not reach. `tests/SigilBuild.Core.Tests/Manifest/InstallStepsSchemaTests.cs`
+keeps a bare `payload/**` **on purpose** — it asserts the schema accepts any
+string for `from:`, which is the whole reason this row cannot be caught by
+validation — and now carries a comment saying so.
+
+**How much of this is now guarded, precisely.** R66's always-on
+`VmFixtureManifestTests` refuses a `file_copy` source that omits the scheme in
+**the VM fixtures only** (the manifests those legs pack). Docs and examples were
+swept **by hand**: nothing enforces the spelling in a Markdown code fence, so a
+future doc can reintroduce it. A docs-wide grep gate would close that, and is
+not implemented here.
 
 ### R60 — The schema validator's `additionalProperties`-as-subschema form is never applied
 **Component:** Core / Configuration · **Effort: M** · **SHOULD-FIX**
@@ -2094,6 +2129,22 @@ alongside R58: the VM matrix run required at G3 (`03-RC_ORCHESTRATION.md`'s
 G3 checklist, `wrapper-vm-tests.yml` run for real) is only as meaningful as
 the toggles it actually exercises.
 
+**Update (lane `rc/vm-fix-fixtures`, with R66/R68): all five orphans REMOVED,
+none faked.** Wiring any of them would have meant inventing the test it
+advertised, which is a coverage decision, not a workflow edit — so the workflow
+now declares only the three toggles a test genuinely reads
+(`SIGIL_VM_UNINSTALL_SURVIVE`, `SIGIL_VM_UPGRADE`, `SIGIL_VM_PREREQ`) and its
+header lists the five scenarios as **uncovered** instead of advertising them.
+`SIGIL_VM_SCOPE` / `SIGIL_VM_SCOPE_MATRIX` took the two-leg
+`currentuser × allusers` job matrix with them: no test read the scope, so both
+legs ran the identical per-user suite twice — visible in run 34361541578, where
+the two legs failed the same 11 tests for the same reasons. **This row stays
+OPEN**, and its scope is now the coverage itself, not the env vars: the
+per-machine half of every leg, double-install idempotency, real
+`manifest.App.*` ARP value assertions, and the P6 `/closeapps` + setup-mutex
+legs — the last of which is still, as this row's own text notes, the surface
+R58 lived on.
+
 ### R65 — The committed lock files cover the Debug restore graph only
 **Component:** build / dependency management · **Effort: M** · **SHOULD-FIX**
 
@@ -2123,3 +2174,166 @@ configurations, or (b) generate and lock the Release graph explicitly —
 `dotnet restore Sigil.slnx -p:Configuration=Release --locked-mode` as a
 second, real CI step, not merely a local habit. Either closes the gap; filed
 here so R23a's "reproducible" claim is scoped to what was actually checked.
+
+### R66 — The VM fixtures had rotted under a suite nothing ever ran
+**Component:** tests / CI · **Effort: M** · **SHOULD-FIX**
+
+Rubric note: **SHOULD-FIX**, not RELEASE BLOCKER — nothing here ships a defect
+to a user; what it broke is the *evidence* the G3 gate rests on. It has to be
+fixed **in** the release, because the G3 "VM matrix green" checkbox cannot
+honestly be ticked until it is.
+
+> **STATUS — FIXED by [PR #41](https://github.com/Sigil-build/sigil/pull/41)**
+> (lane `rc/vm-fix-fixtures`), together with an always-on guard so it cannot
+> recur.
+
+`wrapper-vm-tests.yml` was `workflow_dispatch`-only and, until 2026-09-09, had
+never actually been dispatched. Its first real run — **run
+[34361541578](https://github.com/Sigil-build/sigil/actions/runs/34361541578)**
+on `da792fb` — failed **11 of 19** tests in
+`tests/SigilBuild.Wrapper.IntegrationTests`, and **not one** failure was about the
+behaviour under test. Every one was the fixtures having drifted away from
+surfaces that moved underneath them while the suite sat unexecuted behind
+`[VmFact]`:
+
+1. **Invalid YAML — 12 diagnostics across the two scope legs.** The fixture
+   writers interpolated Windows paths and registry keys into **double**-quoted
+   YAML scalars, where `\` is an escape character. `PrerequisiteInstallTests`
+   built `detect: "registry_exists('HKCU', 'Software\SigilPrereqTest\<id>', 'Installed')"`
+   and an `args:` entry containing `reg add HKCU\Software\…`; `\S` is not a legal
+   YAML escape, so all three prerequisite legs died in `Sigil.PackAsync` with
+   `manifest validation failed: While scanning a quoted scalar, found unknown
+   escape character.` (SIG0001), before packing anything.
+
+2. **Schema-invalid `app.id` — 6 diagnostics.** `UpgradeInstallTests` and
+   `ArpUninstallStringTests` built their per-run unique id as
+   `"com.sigil.p3." + Guid.NewGuid().ToString("N")`. `app.id`'s schema pattern
+   (`^[A-Za-z][A-Za-z0-9]*(\.[A-Za-z][A-Za-z0-9]*)+$`) requires **every** dotted
+   segment to be letter-led, and a 32-char hex GUID starts with a digit about
+   five times in eight — so the id was a coin toss the schema usually lost:
+   `app.id: string does not match pattern …` (SIG0010).
+
+3. **Command-line grammar drift — exit 64.** `MultiEditionInstallTests` ran the
+   packed Setup.exe as `/Edition=enterprise /InstallDir=<dir>` and
+   `WixClassInstallUninstallTests` as `/install_dir=<dir> /registered_user=alice`.
+   **None of those four tokens exists** in the wrapper's deliberately closed
+   grammar (`CommandLineParser`): a declared parameter is overridden with
+   `/P<name>=<value>` and the install directory with `/D=`. All three legs
+   therefore exited **64** (usage error) having installed nothing — the
+   snapshot-diff assertion the WiX-class test exists for was never reached.
+
+4. **A bare `payload/` glob in the localization fixtures — exit 1.** Exactly
+   **R59**, which was fixed in the docs and both shipped examples but **missed**
+   in `tests/SigilBuild.Packaging.IntegrationTests/Fixtures/localized-{uk,uk-fixed,de}/`,
+   which the VM localization legs pack. Only the literal `payload://` scheme is
+   rebased onto the extracted payload; a bare relative glob resolves against the
+   install process's working directory, so both legs failed with exit **1**.
+
+**Why it matters beyond the wasted run.** The G3 checklist treats "the VM matrix
+ran green" as the evidence that the shipped installer works end-to-end. A suite
+whose fixtures cannot even be parsed produces no evidence at all, and — because
+it was dispatch-only — produced no *signal* either: the rot was invisible for as
+long as nobody dispatched it. This is the **R6** vacuous-skip failure shape one
+level up: not a test that passes without asserting, but a whole matrix that never
+runs at all.
+
+**Fix (lane `rc/vm-fix-fixtures`).**
+- One shared `Sigil.YamlQuote` emits **single**-quoted YAML scalars, in which
+  there are no escapes at all (only `''` for an apostrophe), so a Windows path or
+  a registry key is safe to interpolate and no call site has to remember to
+  hand-double backslashes. Every interpolated scalar in the project uses it.
+- Every generated `app.id` gets a letter-led final segment.
+- The four rotted argv are corrected to real tokens, and each is now defined
+  **once** per test class (`SilentInstallArgs(...)`) so the leg and its guard
+  cannot drift apart.
+- The three localization fixtures get `payload://**`, and so do the two
+  remaining docs the R59 sweep missed (`docs/getting-started.md`,
+  `docs/migration/from-inno.md` — the latter's prose too). See R59 for the file
+  list and for exactly how much of that is guarded versus swept by hand.
+- **The guard: `VmFixtureManifestTests`** — a plain, always-runs xUnit class in
+  the same project, so it executes in every `ci.yml` run with no `SIGIL_VM_*`
+  toggle, no staged AOT runtime, and no Windows Sandbox. The fixture builders
+  were refactored into **pure functions returning the YAML**, which it validates
+  through the real `ManifestLoader` (the same schema + typed-parser pipeline
+  `Sigil.PackAsync` runs), parses each leg's argv through the real
+  `CommandLineParser` with the parameter set the packer writes into the blob, and
+  refuses a `file_copy` source that omits the `payload://` scheme — **in the VM
+  fixtures**, which is the whole scope of that guard. Verified to bite: against
+  the rotted fixtures it reports **11 failed / 22**, naming all four classes
+  above; against the fix, **22 passed**.
+- `wrapper-vm-tests.yml` now also runs on **push** to `main` / `release/**`,
+  which is the half that satisfies gate G3's "on a schedule or on merge, not
+  only on demand" for the release branch, plus `concurrency`
+  cancel-in-progress so back-to-back RC merges do not pile up real-install
+  jobs. The weekly `schedule` in the same file is **default-branch-only** —
+  GitHub runs `schedule` from the default branch's copy of the workflow — so it
+  gives `main` a floor once this file reaches `main` and covers `release/**`
+  not at all. A quiet release branch gets its verdict from `push` and from
+  manual dispatch, not from the cron.
+
+**Not fixed here, and not claimed:** whether the legs now *pass*. This lane
+proves their inputs parse and their invocations are accepted; the install
+behaviour is the VM matrix's own verdict and only a real run can give it. The box
+this lane was developed on cannot run the VM legs at all (no MSVC C++ workload,
+so no Native AOT installer host to stage).
+
+### R67 — The P11 VM legs target a System32 path that S2's anchoring refuses
+**Component:** tests (P11 system steps) · **Effort: S** · **SHOULD-FIX**
+
+Found in the same first real VM run (34361541578), in the `vm (p11 system steps)`
+job — a **different** failure class from R66 and a different lane's fix.
+`ComRegisterInstallTests` and `ScheduledTaskCreateInstallTests` point their steps
+at real system binaries under `%SystemRoot%\System32`, and lane **S2**'s
+containment work (register row R16 and its privileged-target siblings R3/R9) now
+refuses exactly that when the run has no resolved `install_dir`:
+
+```
+Expected string "com_register: refusing the privileged 'path' target
+'C:\Windows\system32\kernel32.dll' — this run has no resolved install_dir, so the
+target cannot be anchored. This step runs with SYSTEM-level authority; see the
+containment note in docs/guides/install-steps.md." to contain
+"self-registering COM DLL".
+```
+
+The refusal is **correct** — a `com_register` of an arbitrary System32 path under
+SYSTEM authority is precisely what S2 exists to stop. What is wrong is the test:
+it asserts on a message from before the guard existed, and it uses a system path
+as a convenient stand-in because these tests drive the step classes directly
+rather than through a packed Setup.exe, so no `install_dir` is resolved. The fix
+is to give these legs an anchored scratch target (a resolved `install_dir` in the
+`StepContext`) and assert the current message.
+
+**Fix lane:** `rc/vm-fix-p11-anchoring` — **[PR #40](https://github.com/Sigil-build/sigil/pull/40)**,
+**open, not yet merged** (a separate agent). Deliberately **not** touched by
+`rc/vm-fix-fixtures` / [PR #41](https://github.com/Sigil-build/sigil/pull/41),
+which owns R66 and R68 in the same files but leaves `ComRegisterInstallTests` /
+`ScheduledTaskCreateInstallTests` alone. **A green VM matrix at G3 needs both
+PRs**: #41 for the install-matrix and P12 jobs, #40 for the
+`vm (p11 system steps)` job.
+
+### R68 — `wrapper-vm-tests.yml`'s P12 job could never build: MSB1008
+**Component:** CI · **Effort: S** · **SHOULD-FIX**
+
+> **STATUS — FIXED by [PR #41](https://github.com/Sigil-build/sigil/pull/41)**
+> (lane `rc/vm-fix-fixtures`).
+
+The `build P12 test projects` step passed **two** csproj paths to a single
+`dotnet build`:
+
+```
+dotnet build tests/SigilBuild.Wrapper.Tests/SigilBuild.Wrapper.Tests.csproj
+  tests/SigilBuild.Packaging.Tests/SigilBuild.Packaging.Tests.csproj
+  --configuration Release
+```
+
+`dotnet build` accepts at most one project or solution, so the run ended at that
+step with `MSBUILD : error MSB1008: Only one project can be specified.` — before
+staging the AOT runtime and before either test step. The whole
+`vm (p12 update + web-installer)` job had therefore **never** executed a single
+P12 test, and could not have, on any invocation of this workflow since T12.6
+added it. Fixed by giving each project its own `dotnet build` invocation
+(`--configuration Release` unchanged, both still ahead of the `--no-build` test
+steps). Like R66, this one is a consequence of a dispatch-only workflow: a step
+that cannot even start is caught by the first run that happens, and the first run
+took until 2026-09-09 to happen — which is why R66's fix also puts this workflow
+on a merge + weekly trigger.

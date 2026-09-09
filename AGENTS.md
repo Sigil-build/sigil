@@ -71,6 +71,31 @@ xUnit + FluentAssertions, AAA (Arrange / Act / Assert) layout.
 | Architecture (engine split, packaging pipeline, AOT strategy) | An ADR in `docs/architecture/` (see `adr-avalonia-aot.md` for format). CODEOWNERS routes these to tech leads. |
 | Diagnostics | New validation errors get a `SIG0xxx` code in `src/SigilBuild.Core/Diagnostics/DiagnosticCodes.cs` — reuse the existing band ranges (e.g. SIG023x = install_steps). |
 
+### 6. CI economy — job-level gating only, never a workflow-level filter on a required check
+
+The release ruleset requires these status checks: `build`, `aot publish (win-x64)`,
+`dotnet format`, `schema / docs lockstep`, `conventional-commit PR title`, `gitleaks`.
+A workflow-level `paths:` / `paths-ignore:` filter on the *trigger* of a workflow that
+produces one of those checks means the check **never reports at all** on a PR that
+doesn't touch the filtered paths — GitHub then waits forever for a status that will
+never arrive, and the PR is wedged. This already happened once, deliberately, as a
+worked example: `docs.yml`'s `pull_request` trigger has a path filter, which is exactly
+why `docs drift check` is **not** a required context (see the G0 note in
+`docs/plan/release/03-RC_ORCHESTRATION.md`).
+
+The fix used in `ci.yml` is a job-level gate instead: a cheap first job (`changes`,
+via `dorny/paths-filter`, pinned by commit SHA) computes whether the diff is docs-only,
+and the expensive jobs (`build`, `aot-publish`, the vulnerability scan) carry
+`needs: changes` + `if: needs.changes.outputs.code == 'true'`. A job that is **skipped**
+by an `if:` still reports "skipped" for its check, which satisfies a required-status-check
+rule — unlike a job whose *workflow* never triggered. `wrapper-vm-tests.yml` is the one
+workflow where a workflow-level `paths-ignore:` is safe, precisely because it produces no
+required check.
+
+When adding or editing a workflow: if it contributes a required check (or might later),
+gate expensive jobs with `needs`/`if` on a cheap upstream job's output, not with `on.push.paths`
+or `on.pull_request.paths`.
+
 ## Repo map
 
 | Project | Role |

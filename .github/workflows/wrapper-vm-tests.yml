@@ -53,6 +53,20 @@ on:
     branches:
       - main
       - 'release/**'
+    # Unlike ci.yml/secret-scan.yml/pr-guards.yml, this workflow produces NO
+    # required status check (see the header comment above — it never runs on
+    # a PR at all), so a workflow-level path filter here cannot wedge a PR
+    # the way it would on those. Skip the real-install matrix outright on a
+    # docs-only push -- same docs-only set as ci.yml's `changes` job.
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'LICENSE*'
+      - 'SECURITY.md'
+      - 'CHANGELOG.md'
+      - 'THIRD-PARTY-NOTICES.md'
+      - '.github/CODEOWNERS'
+      - '.github/ISSUE_TEMPLATE/**'
   schedule:
     # Mondays 03:00 UTC. Default branch only — see the note above.
     - cron: '0 3 * * 1'

@@ -6,6 +6,14 @@ on:
   push:
     tags: ['v*']
 
+# Deliberately NO cancel-in-progress: this job signs and publishes a GitHub
+# release. Cancelling it mid-run could leave a half-signed or half-uploaded
+# release behind, which is far worse than a second tag push just queuing
+# behind the first. Same-ref runs (re-pushing the same tag) queue and run
+# one at a time instead of pre-empting each other.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
 permissions:
   contents: write
 

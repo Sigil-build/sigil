@@ -14,8 +14,75 @@ permissions:
   contents: read
 
 jobs:
+  # Cheap gate that decides whether the expensive jobs below need to run at
+  # all. `build`, `aot-publish` and `dotnet format` (pr-guards.yml) are
+  # REQUIRED status checks on the release ruleset — a workflow-level
+  # `paths:`/`paths-ignore:` filter on any workflow that produces one of
+  # those checks would make it never report on a filtered-out PR, which
+  # wedges the PR permanently (see docs.yml's own pull_request path filter
+  # and the G0 note in docs/plan/release/03-RC_ORCHESTRATION.md — that is
+  # exactly why `docs drift check` is deliberately NOT a required check).
+  # So: do NOT add a workflow-level path filter here. Instead this job's
+  # `code` output feeds a job-level `if:` on the expensive jobs below — a
+  # skipped job still reports "skipped", which satisfies a required check.
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read # dorny/paths-filter needs this to list PR files via the REST API
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned by commit SHA, not a mutable tag (v3.0.4 was the newest v3.x
+      # release at the time this was added; dorny/paths-filter has since
+      # cut a v4 major, deliberately not adopted here without a separate
+      # review of its breaking changes).
+      #
+      # base: ${{ github.ref }} is the action's own recipe for a "long-lived
+      # branch" push trigger (main / release/**, per this workflow's `on:`
+      # block below): it compares against the most recent commit on the SAME
+      # branch before the push. Unlike `base: ${{ github.event.before }}`,
+      # this stays correct across a force-push (the action's README
+      # explicitly calls out github.event.before-style approaches as
+      # unreliable there). This input is ignored on `pull_request` — the
+      # action instead calls the REST API to diff against the PR base.
+      - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4
+        id: filter
+        with:
+          base: ${{ github.ref }}
+          # 'some-with-excludes': `code` is 'true' when at least one changed
+          # file matches '**' (i.e. any file changed at all) and is NOT
+          # excluded by one of the negated docs-only patterns below. A
+          # filter made only of negated patterns never matches anything
+          # (see the action's README), hence the leading '**'.
+          #
+          # Docs-only set: markdown anywhere, docs/**, the root
+          # LICENSE/SECURITY/CHANGELOG/THIRD-PARTY-NOTICES files,
+          # CODEOWNERS, and issue templates. Everything else counts as
+          # code on purpose, including examples/** (aot-publish validates
+          # every example manifest below), schemas/**, packages.lock.json,
+          # global.json, NuGet.config, Directory.*.props, scripts/**, and
+          # workflow files themselves.
+          predicate-quantifier: 'some-with-excludes'
+          filters: |
+            code:
+              - '**'
+              - '!**/*.md'
+              - '!docs/**'
+              - '!LICENSE*'
+              - '!SECURITY.md'
+              - '!CHANGELOG.md'
+              - '!THIRD-PARTY-NOTICES.md'
+              - '!.github/CODEOWNERS'
+              - '!.github/ISSUE_TEMPLATE/**'
+
   build:
     name: build
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     # Sigil's MVP target is Windows-only (NSIS / WiX replacement). MSIX,
     # signtool, the EXE-wrapper runtime, registry steps, COM shortcuts and
     # the brand-aware installer.exe all only make sense on Windows. Linux
@@ -222,7 +289,15 @@ jobs:
   aot-publish:
     name: aot publish (win-x64)
     runs-on: windows-latest
-    needs: build
+    needs: [changes, build]
+    # GitHub Actions auto-prepends success() to a job's `if:` whenever the
+    # expression does not itself reference success()/always()/cancelled()/
+    # failure() — so this still requires `build` (and `changes`) to have
+    # actually SUCCEEDED, not merely completed. A skipped or failed `build`
+    # (including the docs-only skip above) skips this job automatically,
+    # exactly as the old bare `needs: build` did; the outputs.code check
+    # below is what additionally short-circuits it on a docs-only change.
+    if: needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@v4
 
@@ -375,6 +450,8 @@ jobs:
   vulnerability-scan:
     name: vulnerability scan (nuget)
     runs-on: windows-latest
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@v4
 

@@ -1,6 +1,101 @@
 # Release-candidate track — orchestration
 
-> ## Status: Stage 1 COMPLETE (2026-08-11) · Stages 2 and 3 ready to open
+> ## Status: Stage 4 IN PROGRESS (2026-09-09) · G2 closed · G3 not open
+>
+> ### Stage 4 — IN PROGRESS (2026-09-09), RC head `b07021e`
+>
+> **Done in Stage 4 so far:** **V1.4** (the honest-numbers pass) and **V1.1** (the
+> register walk plus this docs pass). V1.4 measured RC `102ea3f` locally at **1708
+> tests / 1687 passed / 0 failed / 21 skipped**, Release build 0 warnings, format
+> clean, and read CI run
+> [34362414470](https://github.com/Sigil-build/sigil/actions/runs/34362414470) for
+> **1708 / 1686 / 0 / 22**, union coverage **78.12 %**, `sigil.exe` **14.12 MB**,
+> installer-host footprint **42.82 MB** — no regression against the audit baseline
+> (see `02-READINESS_REPORT.md`). V1.1 walked **all 71 register rows** against that
+> run's `.trx` artifacts: 41 test-evidenced, 14 manual, 11 written deferrals, **2
+> claim-only** (R22, R38), **0 dropped**, and 16 closed on narrower evidence than the
+> record implied. It corrected **R41a** from "closed" to "documented open", filed
+> **R69–R73** (with **R74**, **R75** and **R76** following from the VM run and its
+> round-two lanes, below — **R76 is a RELEASE BLOCKER**), and gave
+> every row a per-row `STATUS (V1.1)` line — 49 of the 68
+> walked rows had none, which is now itself a row (**R73**).
+>
+> **Four VM/workflow rows closed since G2:** **R58** ([#39](https://github.com/Sigil-build/sigil/pull/39)),
+> **R67** ([#40](https://github.com/Sigil-build/sigil/pull/40)), **R66** and **R68**
+> ([#41](https://github.com/Sigil-build/sigil/pull/41)); **R64** stays open, narrowed
+> to the coverage itself. **R69/R70** are fixed in
+> [#42](https://github.com/Sigil-build/sigil/pull/42), open.
+>
+> **The first automatic VM run then produced two more rows.** Diagnosing the
+> `vm (install matrix)` leg's six failures on `b07021e`
+> (`.superpowers/sdd/2026-09-08-g2-release-prep/vm-install-matrix-diagnosis.md`)
+> found that **five of the six were fixture bugs #41 missed** — a `file_copy.to`
+> given a *file* path where the step contract wants a destination directory, and one
+> app id reused across two install roots — fixed by
+> [#45](https://github.com/Sigil-build/sigil/pull/45) (`rc/vm-fix-fixtures-round2` @
+> `24a0f9d`, open), along with an extension of #41's always-on guard to refuse that
+> `to:` shape. **The sixth is a product row: R74.** Because
+> `InstalledStateResolver.ScopeProbeOrder` probes HKLM only when elevated (lane S1's
+> **R2** fix, and correct), an elevated per-user install cannot see its own prior
+> per-user install: the plan says "fresh install" and the downgrade block never
+> fires, while the reinstall cleanup — which reads the state store, not ARP — still
+> tears the prior version down. **Net effect: an elevated per-user install can
+> silently downgrade.** Reproduced, not inferred. **R74 does not block G3** — the
+> guard it degrades is UX, not a trust boundary, and only in a session where the
+> user already holds the privilege. Until it lands, the two elevation-sensitive
+> upgrade assertions in that leg are **honest skips** naming R2, which leaves
+> per-user upgrade/downgrade behaviour unexercised end to end — more coverage
+> **R64** still owes. Owner: lane **S5/S1**.
+>
+> **R75**, from the P11 round-two lane: `com_register` journaled an undo for a
+> registration that never took effect, and since **R15** a failed
+> `DllUnregisterServer` means "still registered" — so with `on_failure: continue`
+> that stale record reaches `uninstall.json` and makes **every later uninstall
+> fail**, leaving the app permanently in Add/Remove Programs. Fixed in
+> [#44](https://github.com/Sigil-build/sigil/pull/44) (`3e0ba90`, a tail-only
+> `RollbackJournal.RetractLast`), open. It was found because the P11 VM test had
+> been asserting the wrong behaviour as correct — the same lesson as **R66** and
+> **R64**, one level in: a leg that never runs does not merely fail to catch bugs,
+> it canonises them.
+>
+> ### R76 — a new RELEASE BLOCKER, found by hand and not by the matrix
+>
+> Verifying #45 against the RC's own CI-built binaries **unelevated** exposed
+> **R76**: a per-user **upgrade fails outright**. `Setup.exe /S /currentuser` of v2
+> over an installed v1 exits **1** with `removing the previous version failed
+> (uninstaller exit code 5)`; exit 5 is `AlreadyRunningExitCode` — the installer holds
+> `SetupInstanceLock` (`Local\sigil-setup-<appId>-user`) and then spawns the prior
+> version's `uninstall.exe`, which derives the **same** name and bails.
+> `/force-downgrade` fails identically. **This is R58's sibling one layer over:** a
+> guard counting the installer's own child as a stranger — files-in-use there,
+> single-instance here. Latent since P3 (upgrades) met P6 (the single-instance guard,
+> G17); invisible because the matrix never ran (**R66**) *and* because on the elevated
+> runner **R2** hides the prior install so the removal is never attempted (**R74**).
+> Fix lane **`rc/p6-fix-upgrade-mutex`** (PR pending); the guard must stay
+> fail-closed for every other caller (**R34**). **Sequencing that follows from this:**
+> de-elevating the install-matrix leg is still the right call, but it will turn the
+> two upgrade tests **red, truthfully**, until R76 lands — so either fix R76 first or
+> keep two honestly red legs in between. Do not re-elevate the leg or soften the
+> assertions to get green.
+>
+> **Blocked on the owner — nothing an agent lane can move:**
+>
+> - **VM matrix green.** The first *automatic* run
+>   ([34368896457](https://github.com/Sigil-build/sigil/actions/runs/34368896457) on
+>   `b07021e`, fired by #41's new push trigger) was in flight at the time of writing.
+>   Until it is green, **R58**'s own end-to-end test has never executed.
+> - **The release dry-run** needs the **six Trusted Signing secrets**; `release.yml`
+>   refuses before any restore without them, and it has never run at all.
+> - **Clean-machine install** of the published artifact (**R7**), which needs the
+>   dry-run first.
+> - **Private vulnerability reporting** is still `{"enabled":false}` (**R23**) and
+>   **both NuGet IDs are still unreserved** (**R41a**) — two G4 owner actions.
+> - **Merging the open lane PRs.** The orchestrator cannot merge them.
+>
+> **Still to run in Stage 4:** **V1.2** (re-attack the integrated RC, not each lane
+> at its own tip) and **V1.3**.
+>
+> ### G1 / Stages 1–3 (historical)
 >
 > **Stage 1's four lanes are merged and gate G1 is closed** at RC head `c019df2`
 > — see the G1 block below for the five attacks and their refusal lines, and
@@ -626,5 +721,23 @@ check as R58.**
 | SUP | `rc/sup-supply-chain` | ☑ | [#33](https://github.com/Sigil-build/sigil/pull/33) | ☑ `4dc7820` | G2 |
 | DOC | `rc/doc-truth` | ☑ | [#34](https://github.com/Sigil-build/sigil/pull/34) | ☑ `50da43c` | G2 |
 | RUNBOOK | `rc/doc-g2-runbook` | ☑ | [#35](https://github.com/Sigil-build/sigil/pull/35) | ☑ `3ba97f6` | **G2 ⚠️ (R58 open)** |
-| DOC-G2 | `rc/doc-g2-close` | ☑ | [#37](https://github.com/Sigil-build/sigil/pull/37) | ☐ | G2 |
-| V1  | `rc/v1-verification` | ☐ | ☐ | ☐ | G3/G4 |
+| DOC-G2 | `rc/doc-g2-close` | ☑ | [#37](https://github.com/Sigil-build/sigil/pull/37) | ☑ `da792fb` | **G2 ✅** |
+| P6-FIX | `rc/p6-fix-uninstall-self-block` | ☑ | [#39](https://github.com/Sigil-build/sigil/pull/39) | ☑ `102ea3f` | G3 (R58 — e2e still unrun) |
+| VM-FIX-B | `rc/vm-fix-p11-anchoring` | ☑ | [#40](https://github.com/Sigil-build/sigil/pull/40) | ☑ `c71bd8c` | G3 (R67) |
+| VM-FIX-A | `rc/vm-fix-fixtures` | ☑ | [#41](https://github.com/Sigil-build/sigil/pull/41) | ☑ `b07021e` | G3 (R64 ⚠️, R66, R68) |
+| V1-FIX | `rc/v1-sbom-and-kiosk` | ☑ | [#42](https://github.com/Sigil-build/sigil/pull/42) | ☐ **open** | G3 (R69, R70) |
+| VM-FIX-B2 | `rc/vm-fix-p11-round2` | ☑ | [#44](https://github.com/Sigil-build/sigil/pull/44) | ☐ **open** | G3 (R75) |
+| VM-FIX-A2 | `rc/vm-fix-fixtures-round2` | ☑ | [#45](https://github.com/Sigil-build/sigil/pull/45) | ☐ **open** | G3 (install-matrix fixtures; R74 skips) |
+| P6-FIX-2 | `rc/p6-fix-upgrade-mutex` | ☐ | ☐ pending | ☐ | **G3 (R76 — RELEASE BLOCKER)** |
+| V1-DOCS | `rc/v1-register-status` | ☑ | [#43](https://github.com/Sigil-build/sigil/pull/43) | ☐ | G3 (V1.1 — R69–R76 filed) |
+| V1  | `rc/v1-verification` | ◐ V1.1 + V1.4 done | ☐ | ☐ | G3/G4 |
+
+The hotfix row (`rc/s1-fix-provenance-fixture`, [#36](https://github.com/Sigil-build/sigil/pull/36)
+→ `0c092d1`) is listed above in merge order, between S4 and S5, because that is where
+it had to land — see `10-G2_G3_RUNBOOK.md` Trap 0.
+
+Two things this table cannot show, so they are said here. **The orchestrator cannot
+merge lane PRs**; every ☐ in the "Merged" column is waiting on the repository owner.
+And every row's own disposition now lives on its register row as a
+`STATUS (V1.1, …)` line — this table is a summary, not the record. That distinction
+is **R73**.

@@ -280,14 +280,18 @@ merges, not from a stale worktree.
   (`gh workflow run wrapper-vm-tests.yml`) against non-vacuous tests, then
   add a schedule trigger (or a merge trigger) via a follow-up PR so it stops
   being on-demand-only, per the G3 checkbox. **Before that first real run
-  means anything, close R64**: four of the workflow's nine scenario toggles
-  (`SIGIL_VM_SCOPE`, `SIGIL_VM_SCOPE_MATRIX`, `SIGIL_VM_ARP_VALUES`,
-  `SIGIL_VM_CLOSEAPPS`) drive no test at all today — `SIGIL_VM_CLOSEAPPS` is
-  R58's own P6 leg, which is exactly how R58 reached the merged RC
-  undetected. Each toggle either gets a real test or gets removed; a green
-  run against toggles nobody reads proves nothing for the legs they claim.
-  `SIGIL_VM_UNINSTALL_SURVIVE` is already closed by PR #39's
-  `ArpUninstallStringTests`.
+  means anything, close R64**: ten `SIGIL_VM_*` scenario toggles are
+  declared across the workflows and only four were read by any test at the
+  RC base — five still drive no test at all today (`SIGIL_VM_SCOPE`,
+  `SIGIL_VM_SCOPE_MATRIX`, `SIGIL_VM_ARP_VALUES`, `SIGIL_VM_CLOSEAPPS`,
+  `SIGIL_VM_DOUBLE_INSTALL`) — `SIGIL_VM_CLOSEAPPS` is R58's own P6 leg,
+  which is exactly how R58 reached the merged RC undetected. Each toggle
+  either gets a real test or gets removed; a green run against toggles
+  nobody reads proves nothing for the legs they claim.
+  `SIGIL_VM_UNINSTALL_SURVIVE` is genuinely closed, not just nominally: PR
+  #39's `ArpUninstallStringTests` runs behind `wrapper-vm-tests.yml:52`'s
+  `SIGIL_VM_UNINSTALL_SURVIVE: "1"` set on both scope-matrix legs, confirmed
+  not a vacuous pass.
 - **`release.yml` will not appear in `gh workflow list` until it first
   fires.** Confirmed empirically: `gh workflow list --all` today shows only
   `ci`, `docs`, `pr-guards`, `secret-scan`, `wrapper-vm-tests` — no
@@ -378,13 +382,17 @@ more rows, filed right next to R58 in `00-GAP_REGISTER.md` because both are
 G3 prerequisites:
 
 - **R64 (release-blocker class) — `wrapper-vm-tests.yml` advertises coverage
-  no test reads.** Five of the workflow's nine scenario toggles drive no test
-  at all, including `SIGIL_VM_CLOSEAPPS` — R58's own P6 leg, and exactly why
-  R58 reached the merged RC without the VM matrix catching it. See Section 4's
-  updated V1 checklist item and `00-GAP_REGISTER.md`'s R64 for the full toggle
-  list and fix shape. **Do not treat a green `wrapper-vm-tests.yml` run as
-  proof of anything these toggles claim to cover until R64 is closed
-  alongside R58.**
+  no test reads.** Ten `SIGIL_VM_*` scenario toggles are declared and only
+  four were read by any test at the RC base — six drove no test at all,
+  including `SIGIL_VM_CLOSEAPPS` (R58's own P6 leg, and exactly why R58
+  reached the merged RC without the VM matrix catching it). The good news:
+  PR #39 genuinely closes one of the six — `wrapper-vm-tests.yml:52` sets
+  `SIGIL_VM_UNINSTALL_SURVIVE: "1"` on both scope-matrix legs, and
+  `ArpUninstallStringTests` runs behind that, not vacuously — leaving five
+  still orphaned. See Section 4's updated V1 checklist item and
+  `00-GAP_REGISTER.md`'s R64 for the full toggle list and fix shape. **Do
+  not treat a green `wrapper-vm-tests.yml` run as proof of anything these
+  toggles claim to cover until R64 is closed alongside R58.**
 - **R65 — the committed lock files cover the Debug restore graph only.**
   `EnableTrimAnalyzer`'s Release-conditioning makes a Release-configuration
   restore inject `Microsoft.NET.ILLink.Tasks` and rewrite

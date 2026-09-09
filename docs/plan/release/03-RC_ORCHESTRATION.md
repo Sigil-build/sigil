@@ -529,12 +529,15 @@ check as R58.**
 ### G3 — after Stage 4
 
 - [ ] `wrapper-vm-tests.yml` run **for real**, green, against non-vacuous tests
-      *(R58, R64 — four toggles still drive no test at all:
+      *(R58, R64 — ten `SIGIL_VM_*` toggles are declared, four are read by
+      tests at the RC base; five still drive no test at all:
       `SIGIL_VM_SCOPE`, `SIGIL_VM_SCOPE_MATRIX`, `SIGIL_VM_ARP_VALUES`,
-      `SIGIL_VM_CLOSEAPPS` — the last is R58's own P6 leg — each must either
-      drive a real test or be removed before this run can be trusted;
-      `SIGIL_VM_UNINSTALL_SURVIVE` is already fixed by PR #39's
-      `ArpUninstallStringTests`)*.
+      `SIGIL_VM_CLOSEAPPS` (R58's own P6 leg) and `SIGIL_VM_DOUBLE_INSTALL` —
+      each must either drive a real test or be removed before this run can be
+      trusted. `SIGIL_VM_UNINSTALL_SURVIVE` is genuinely fixed: PR #39's
+      `ArpUninstallStringTests` runs behind `wrapper-vm-tests.yml:52`'s
+      `SIGIL_VM_UNINSTALL_SURVIVE: "1"` on both scope-matrix legs, verified
+      not vacuous)*.
       Run URL → `______`
 - [ ] The VM matrix runs on a schedule or on merge, not only on demand
 - [ ] Release dry-run: a throwaway prerelease tag produces signed, checksummed

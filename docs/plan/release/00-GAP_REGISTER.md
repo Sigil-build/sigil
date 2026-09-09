@@ -2048,13 +2048,25 @@ unit test ever creates or hardens a path under the real `%ProgramData%`.
 ### R64 — `wrapper-vm-tests.yml` advertises coverage no test reads
 **Component:** tests / CI · **Effort: M** · **RELEASE BLOCKER class**
 
-Found while landing R58's fix (PR #39). `wrapper-vm-tests.yml` exposes nine
-scenario toggles meant to select which VM-only legs a given run exercises,
-but five of the nine are consumed by **no test at all**: `SIGIL_VM_SCOPE`,
-`SIGIL_VM_SCOPE_MATRIX`, `SIGIL_VM_ARP_VALUES`, `SIGIL_VM_CLOSEAPPS`, and —
-until PR #39 added `ArpUninstallStringTests` — `SIGIL_VM_UNINSTALL_SURVIVE`.
-Toggling any of the first four on or off changes nothing about what actually
-runs; the workflow advertises coverage that does not exist.
+Found while landing R58's fix (PR #39); the count below is the #39 reviewer's,
+verified precisely, not an estimate. Across `wrapper-vm-tests.yml` and its
+companion workflows, **ten** `SIGIL_VM_*` scenario toggles are declared, and
+at the RC base (`3ba97f6`, before #39) only **four** were read by any test —
+leaving **six** consumed by **no test at all**: `SIGIL_VM_SCOPE`,
+`SIGIL_VM_SCOPE_MATRIX`, `SIGIL_VM_ARP_VALUES`, `SIGIL_VM_CLOSEAPPS`,
+`SIGIL_VM_UNINSTALL_SURVIVE`, and `SIGIL_VM_DOUBLE_INSTALL`. Toggling any of
+them on or off changed nothing about what actually ran; the workflow
+advertised coverage that did not exist.
+
+**The good news, also verified by the #39 reviewer: PR #39 closes one of the
+six for real, not just on paper.** `wrapper-vm-tests.yml:52` sets
+`SIGIL_VM_UNINSTALL_SURVIVE: "1"` on **both** scope-matrix legs, and #39's new
+`ArpUninstallStringTests` sits behind the suite's existing "refuse to pass
+vacuously" precondition (the same shape T1's **R6** fix established) — so the
+test does not merely exist, it genuinely executes at G3 rather than silently
+no-op'ing for want of the env var. That leaves **five** still orphaned:
+`SIGIL_VM_SCOPE`, `SIGIL_VM_SCOPE_MATRIX`, `SIGIL_VM_ARP_VALUES`,
+`SIGIL_VM_CLOSEAPPS`, `SIGIL_VM_DOUBLE_INSTALL`.
 
 **Why this is the release-blocker class, not a housekeeping note:**
 `SIGIL_VM_CLOSEAPPS` is the P6 files-in-use gate's own leg — the exact
@@ -2074,12 +2086,13 @@ subject: the ARP entry points at the deployed `uninstall.exe`, not back at
 `Setup.exe`). Fixed in-lane by #39, no separate row needed for the comment
 itself; recorded here because it is the same confusion R58 exists to correct.
 
-**Fix shape:** for each of the five toggles, either wire it to a real test
-(`ArpUninstallStringTests` already closes `SIGIL_VM_UNINSTALL_SURVIVE`'s gap
-per #39) or remove it from the workflow — no toggle should exist that changes
-nothing about what runs. A G3 prerequisite alongside R58: the VM matrix run
-required at G3 (`03-RC_ORCHESTRATION.md`'s G3 checklist, `wrapper-vm-tests.yml`
-run for real) is only as meaningful as the toggles it actually exercises.
+**Fix shape:** for each of the five still-orphaned toggles, either wire it to
+a real test (as `ArpUninstallStringTests` genuinely did for
+`SIGIL_VM_UNINSTALL_SURVIVE`, per #39) or remove it from the workflow — no
+toggle should exist that changes nothing about what runs. A G3 prerequisite
+alongside R58: the VM matrix run required at G3 (`03-RC_ORCHESTRATION.md`'s
+G3 checklist, `wrapper-vm-tests.yml` run for real) is only as meaningful as
+the toggles it actually exercises.
 
 ### R65 — The committed lock files cover the Debug restore graph only
 **Component:** build / dependency management · **Effort: M** · **SHOULD-FIX**

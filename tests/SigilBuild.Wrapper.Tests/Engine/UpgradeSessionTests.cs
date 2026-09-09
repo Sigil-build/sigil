@@ -6,6 +6,7 @@ using FluentAssertions;
 using SigilBuild.Core.Manifest;
 using SigilBuild.Wrapper.Cli;
 using SigilBuild.Wrapper.Engine;
+using SigilBuild.Wrapper.Tests.Helpers;
 using Xunit;
 
 namespace SigilBuild.Wrapper.Tests.Engine;
@@ -44,6 +45,40 @@ public sealed class UpgradeSessionTests
     {
         var parsed = CommandLineParser.Parse(args, blob.Parameters);
         return InstallSession.ForTesting(blob, parsed, state);
+    }
+
+    /// <summary>
+    /// R76, the minting half: the teardown spawn carries the single-instance handoff
+    /// exactly when this process actually holds the guard the child is about to contend
+    /// with — and nothing else about the spawn changes. The child-side verification is
+    /// in <c>FilesInUseTests</c>'s R76 section.
+    /// </summary>
+    [WindowsFact]
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    public void The_prior_uninstall_spawn_carries_a_handoff_only_when_the_guard_is_held()
+    {
+        var session = Session(Blob("2.0.0"), Installed("1.0.0"), "/silent");
+        var exe = Path.Combine(PriorDir, "uninstall.exe");
+
+        var unguarded = session.BuildPriorUninstallStartInfo(exe, "/currentuser");
+        unguarded.FileName.Should().Be(exe);
+        unguarded.ArgumentList.Should().Equal("/S", "/Uninstall", "/currentuser");
+        unguarded.UseShellExecute.Should().BeFalse();
+        unguarded.Environment.ContainsKey(SetupInstanceLock.HandoffVariable)
+            .Should().BeFalse("a session holding no lock must not assert one — fail closed");
+
+        using var held = SetupInstanceLock.TryAcquire(session.AppId, session.ResolvedScope);
+        held.Should().NotBeNull();
+        session.InstanceLock = held;
+
+        SetupInstanceLock.TryGetProcessCreationTime((uint)Environment.ProcessId, out var created)
+            .Should().BeTrue();
+        session.BuildPriorUninstallStartInfo(exe, "/currentuser")
+            .Environment[SetupInstanceLock.HandoffVariable]
+            .Should().Be(
+                SetupInstanceLock.FormatHandoff((uint)Environment.ProcessId, created, held!.Name),
+                "the token names THIS process and THIS guard, so only a child of this " +
+                "process, contending with this exact name, can be admitted by it");
     }
 
     [Fact]

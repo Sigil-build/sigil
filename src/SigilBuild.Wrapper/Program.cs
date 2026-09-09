@@ -69,8 +69,14 @@ internal static class Program
             // P6 (gap G17): single-instance guard. Taken AFTER the elevation branch —
             // the un-elevated parent above never installs, so it must not hold the
             // mutex while the elevated child (which does) tries to take it.
+            //
+            // R76: the mode is passed because ONE process legitimately runs while the
+            // guard is already held — the prior version's uninstall.exe that an upgrade
+            // in this very app+scope spawned for its teardown. It is admitted only
+            // against a handoff its parent minted (SetupInstanceLock.HandoffAdmits);
+            // an ordinary second Setup.exe is refused exactly as before.
             using var instanceLock = SetupInstanceLock.TryAcquire(
-                session.AppId, session.ResolvedScope, out var lockRefusal);
+                session.AppId, session.ResolvedScope, session.Mode, out var lockRefusal);
             if (instanceLock is null)
             {
                 // R34: two different situations reach here. Say which — an operator
@@ -93,6 +99,12 @@ internal static class Program
                     "note: the single-instance guard could not be created for this run — " +
                     "a concurrent setup of the same application would not be detected.");
             }
+
+            // R76: hand the lock to the session so a P3 upgrade teardown can pass it on
+            // to the prior version's uninstaller. Only an OWNING lock mints a handoff,
+            // so setting it unconditionally is safe (an admitted or sentinel lock mints
+            // nothing).
+            session.InstanceLock = instanceLock;
 
             return await session.RunHeadlessAsync(Console.Out, Console.Error).ConfigureAwait(false);
         }

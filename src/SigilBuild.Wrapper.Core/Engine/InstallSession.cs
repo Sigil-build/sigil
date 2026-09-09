@@ -444,6 +444,18 @@ public sealed class InstallSession
     /// </summary>
     public WrapperMode Mode => _mode;
 
+    /// <summary>
+    /// R76 — the single-instance guard this process holds, set by the entry point right
+    /// after it takes the lock (both hosts). The upgrade teardown needs it so it can
+    /// hand the prior version's <c>uninstall.exe</c> a handoff naming this process as
+    /// the holder; without it that child derives the same app+scope mutex name, is
+    /// refused as a second instance, and the whole upgrade aborts with exit 5.
+    /// <c>null</c> whenever no lock is held — a unit-test session, or the
+    /// <see cref="SetupInstanceLock.SetupLockRefusal.GuardUnavailable"/> run — and the
+    /// teardown then mints nothing rather than asserting a guard it does not hold.
+    /// </summary>
+    internal SetupInstanceLock? InstanceLock { get; set; }
+
     /// <summary>True when <c>/silent</c>, <c>/S</c>, or <c>/verysilent</c> was supplied.</summary>
     public bool Silent => _parsed.Silent;
 
@@ -1245,17 +1257,7 @@ public sealed class InstallSession
         int exitCode;
         try
         {
-            var psi = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = exe,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
-            psi.ArgumentList.Add("/S");
-            psi.ArgumentList.Add("/Uninstall");
-            psi.ArgumentList.Add(scopeFlag);
-
-            using var proc = System.Diagnostics.Process.Start(psi);
+            using var proc = System.Diagnostics.Process.Start(BuildPriorUninstallStartInfo(exe, scopeFlag));
             if (proc is null)
             {
                 return new InstallOutcome(
@@ -1283,6 +1285,47 @@ public sealed class InstallSession
         }
 
         return new InstallOutcome(true, null);
+    }
+
+    /// <summary>
+    /// The spawn description for the prior version's uninstaller: the ARP
+    /// <c>UninstallString</c>'s own <c>/S /Uninstall &lt;scope&gt;</c> shape, plus the R76
+    /// single-instance handoff when this process actually holds the guard the child is
+    /// about to contend with.
+    /// </summary>
+    /// <remarks>
+    /// The handoff goes on the CHILD's environment block only — never on this process's
+    /// own environment, so nothing else this installer spawns (hooks, prerequisites)
+    /// inherits it, and the child clears it as it reads it. It carries no secret (pid,
+    /// creation time and the guard name are all public), so unlike R18's elevation
+    /// envelope there is nothing here that must be kept off a process listing; its
+    /// strength is the binding checked in <see cref="SetupInstanceLock.HandoffAdmits"/>.
+    /// When no lock is held, no token is minted and the child contends normally: the
+    /// upgrade fails exactly as it did before R76 rather than proceeding on an
+    /// unbacked claim.
+    /// </remarks>
+    internal System.Diagnostics.ProcessStartInfo BuildPriorUninstallStartInfo(string exe, string scopeFlag)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = exe,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        psi.ArgumentList.Add("/S");
+        psi.ArgumentList.Add("/Uninstall");
+        psi.ArgumentList.Add(scopeFlag);
+
+        var handoff = InstanceLock?.MintChildHandoff();
+        if (handoff is not null)
+        {
+            psi.Environment[SetupInstanceLock.HandoffVariable] = handoff;
+            _log?.WriteLine(
+                $"single-instance guard: handing '{InstanceLock!.Name}' to the previous " +
+                $"version's uninstaller (this installer is pid {Environment.ProcessId})");
+        }
+
+        return psi;
     }
 
     /// <summary>

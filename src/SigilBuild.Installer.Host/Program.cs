@@ -111,8 +111,15 @@ public static partial class Program
         // un-elevated parent above never installs, so it must not hold the mutex while
         // the elevated child (which does) tries to take it. Held for the whole run;
         // the OS releases it if the process dies, so a crash never wedges the name.
+        //
+        // R76: the mode is passed because ONE process legitimately runs while the guard
+        // is already held — the prior version's uninstall.exe that an upgrade in this
+        // very app+scope spawned for its teardown, which is this same image and derives
+        // the same name. It is admitted only against a handoff its parent minted
+        // (SetupInstanceLock.HandoffAdmits); an ordinary second Setup.exe is refused
+        // exactly as before.
         using var instanceLock = SetupInstanceLock.TryAcquire(
-            session.AppId, session.ResolvedScope, out var lockRefusal);
+            session.AppId, session.ResolvedScope, session.Mode, out var lockRefusal);
         if (lockRefusal != SetupInstanceLock.SetupLockRefusal.None)
         {
             // R34: record which branch was taken, in the always-on diagnostic log and
@@ -150,6 +157,12 @@ public static partial class Program
             }
             return InstallSession.AlreadyRunningExitCode;
         }
+
+        // R76: hand the lock to the session so a P3 upgrade teardown can pass it on to
+        // the prior version's uninstaller. Only an OWNING lock mints a handoff, so
+        // setting it unconditionally is safe (an admitted or sentinel lock mints
+        // nothing). Set before BOTH the headless and the GUI path below.
+        session.InstanceLock = instanceLock;
 
         // Headless whenever /silent or /verysilent is present (this includes the
         // ARP UninstallString's `/S /Uninstall`, and a scripted `/Update /silent`).

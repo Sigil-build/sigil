@@ -39,12 +39,36 @@ using Xunit;
 /// and runs on a real elevated <c>windows-latest</c> runner.
 /// </para>
 /// <para>
-/// Uses a uniquely-named <c>SigilItTask_*</c> task (per-run GUID suffix) and a
-/// benign, always-present program path (<c>cmd.exe</c> — never actually
-/// launched by this test, only referenced by the task definition) so repeat
-/// runs never collide and never depend on a fixture DLL. A <c>finally</c>
-/// best-effort <c>schtasks /Delete /F</c> guarantees the task doesn't survive
-/// a failed assertion mid-test.
+/// Uses a uniquely-named <c>SigilItTask_*</c> task (per-run GUID suffix) so
+/// repeat runs never collide, and a <c>finally</c> best-effort <c>schtasks
+/// /Delete /F</c> guarantees the task doesn't survive a failed assertion
+/// mid-test.
+/// </para>
+/// <para>
+/// <b>The task's <c>program</c> now lives inside a real <c>install_dir</c>
+/// (register row R67).</b> As written in P11 this leg ran against
+/// <see cref="StepContext.Empty"/> and pointed <c>/TR</c> at
+/// <c>%SystemRoot%\System32\cmd.exe</c> — "always present, never actually
+/// launched". Stage 1 lane S2 (rows R3/R9/R16) then anchored every SYSTEM-level
+/// step target to the run's resolved <c>install_dir</c>, and the matrix's first
+/// real run refused the step exactly as designed: <c>/RU SYSTEM</c> plus a target
+/// outside any install directory is the R3 attack, and a run with no resolved
+/// <c>install_dir</c> has no anchor to check against at all. So the harness now
+/// resolves a genuine machine-scope <c>install_dir</c>
+/// (<see cref="SystemStepInstallDir"/>, the same
+/// <c>/D=</c> → <see cref="InstallDirResolver"/> path <c>InstallSession</c> takes)
+/// and <b>copies</b> <c>cmd.exe</c> into it under the app-binary name the task
+/// then targets — the <c>file_copy</c>-then-privileged-step ordering
+/// <c>docs/guides/install-steps.md</c> prescribes. Every assertion below is the
+/// one P11 wrote; only the anchor and the target's location changed. The copy is
+/// still never launched: <c>onstart</c> fires at boot and the task is deleted
+/// inside this test.
+/// </para>
+/// <para>
+/// The copied path also happens to carry a space (<c>C:\Program Files\…</c>),
+/// which the original <c>C:\Windows\system32\cmd.exe</c> did not — so this leg now
+/// covers <c>BuildCreateArgs</c>' <c>/TR</c> quoting against a real
+/// <c>schtasks.exe</c> parse rather than only in unit tests.
 /// </para>
 /// </remarks>
 [SupportedOSPlatform("windows")]
@@ -54,7 +78,13 @@ public class ScheduledTaskCreateInstallTests
     public async Task Create_then_reverse_scheduled_task_round_trip()
     {
         var taskName = $"SigilItTask_{Guid.NewGuid():N}";
-        var program = Path.Combine(Environment.SystemDirectory, "cmd.exe");
+        using var installDir = SystemStepInstallDir.CreateElevated();
+
+        // The "app binary" this installer shipped: a copy of cmd.exe inside
+        // install_dir. Anchored (inside install_dir, no junction on the way down)
+        // and admin-only writable, which is what /RU SYSTEM requires of its target.
+        var program = installDir.CopyIn(
+            Path.Combine(Environment.SystemDirectory, "cmd.exe"), "SigilItHeartbeat.exe");
 
         try
         {
@@ -70,7 +100,7 @@ public class ScheduledTaskCreateInstallTests
             var journal = new RollbackJournal();
 
             var result = await new ScheduledTaskCreateStep(spec)
-                .RunAsync(StepContext.Empty, journal, default);
+                .RunAsync(installDir.Context, journal, default);
             result.Success.Should().BeTrue(result.Error ?? "schtasks /Create should succeed under elevation");
 
             var afterCreate = await SystemStepProcessRunner

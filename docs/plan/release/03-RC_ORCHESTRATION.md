@@ -529,17 +529,49 @@ check as R58.**
 ### G3 — after Stage 4
 
 - [ ] `wrapper-vm-tests.yml` run **for real**, green, against non-vacuous tests
-      *(R58, R64 — ten `SIGIL_VM_*` toggles are declared, four are read by
-      tests at the RC base; five still drive no test at all:
-      `SIGIL_VM_SCOPE`, `SIGIL_VM_SCOPE_MATRIX`, `SIGIL_VM_ARP_VALUES`,
-      `SIGIL_VM_CLOSEAPPS` (R58's own P6 leg) and `SIGIL_VM_DOUBLE_INSTALL` —
-      each must either drive a real test or be removed before this run can be
-      trusted. `SIGIL_VM_UNINSTALL_SURVIVE` is genuinely fixed: PR #39's
-      `ArpUninstallStringTests` runs behind `wrapper-vm-tests.yml:52`'s
-      `SIGIL_VM_UNINSTALL_SURVIVE: "1"` on both scope-matrix legs, verified
-      not vacuous)*.
+      *(R58, R64 — ten `SIGIL_VM_*` toggles were declared, four read by tests at
+      the RC base; five drove no test at all: `SIGIL_VM_SCOPE`,
+      `SIGIL_VM_SCOPE_MATRIX`, `SIGIL_VM_ARP_VALUES`, `SIGIL_VM_CLOSEAPPS`
+      (R58's own P6 leg) and `SIGIL_VM_DOUBLE_INSTALL` — each had to either
+      drive a real test or be removed before this run could be trusted.
+      `SIGIL_VM_UNINSTALL_SURVIVE` is genuinely fixed: PR #39's
+      `ArpUninstallStringTests` runs behind the workflow's
+      `SIGIL_VM_UNINSTALL_SURVIVE: "1"`, verified not vacuous)*.
+
+      **Resolved via the "or be removed" branch by
+      [PR #41](https://github.com/Sigil-build/sigil/pull/41) (R64, R66, R68).**
+      All five orphans are **REMOVED**, not wired: wiring any of them meant
+      inventing the test it advertised, which is a coverage decision rather
+      than a workflow edit. Consequences to read before ticking this box:
+      - the `currentuser × allusers` job matrix went with
+        `SIGIL_VM_SCOPE`/`SIGIL_VM_SCOPE_MATRIX` — no test read the scope, so
+        both legs ran the identical per-user suite twice (in run
+        `34361541578` they failed the same 11 tests for the same reasons).
+        There is now **one** leg, `vm (install matrix)`; the old check names
+        `vm (currentuser)` / `vm (allusers)` no longer exist.
+      - **machine-scope (`/allusers`) end-to-end install is UNCOVERED**, as
+        are double-install idempotency, real `manifest.App.*` ARP value
+        assertions, and the P6 `/closeapps` + setup-mutex legs. The workflow
+        header now lists them as gaps instead of advertising them.
+        **R64 stays OPEN for exactly those**, rescoped to the coverage itself
+        rather than the env vars — so a green run of this box means "every leg
+        the matrix claims, ran", not "every scope is covered".
+      - PR #41 also fixed why the first real run was worthless at all: the
+        fixtures had rotted (**R66**) and the P12 job could never build
+        (**R68**). A green run therefore also requires **R67**'s fix
+        ([PR #40](https://github.com/Sigil-build/sigil/pull/40), open) for the
+        `vm (p11 system steps)` leg.
       Run URL → `______`
 - [ ] The VM matrix runs on a schedule or on merge, not only on demand
+      *(**met on the merge half** by
+      [PR #41](https://github.com/Sigil-build/sigil/pull/41): `wrapper-vm-tests.yml`
+      now has a `push` trigger on `main` and `release/**`, so every merge into
+      the RC branch runs the matrix, plus `concurrency` cancel-in-progress. The
+      weekly `schedule` in the same file is **default-branch-only** — GitHub runs
+      `schedule` from the default branch's copy of the workflow — so it gives
+      `main` a floor once the file reaches `main` and does **not** cover
+      `release/**`. Tick this on the `push` half; do not read the cron as
+      release-branch coverage.)*
 - [ ] Release dry-run: a throwaway prerelease tag produces signed, checksummed
       artifacts with the notices attached
 - [ ] The downloaded artifact **runs on a clean machine** — verified by

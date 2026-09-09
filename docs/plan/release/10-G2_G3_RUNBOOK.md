@@ -279,7 +279,15 @@ merges, not from a stale worktree.
   and has never run** — zero runs in its history. Run it for real
   (`gh workflow run wrapper-vm-tests.yml`) against non-vacuous tests, then
   add a schedule trigger (or a merge trigger) via a follow-up PR so it stops
-  being on-demand-only, per the G3 checkbox.
+  being on-demand-only, per the G3 checkbox. **Before that first real run
+  means anything, close R64**: four of the workflow's nine scenario toggles
+  (`SIGIL_VM_SCOPE`, `SIGIL_VM_SCOPE_MATRIX`, `SIGIL_VM_ARP_VALUES`,
+  `SIGIL_VM_CLOSEAPPS`) drive no test at all today — `SIGIL_VM_CLOSEAPPS` is
+  R58's own P6 leg, which is exactly how R58 reached the merged RC
+  undetected. Each toggle either gets a real test or gets removed; a green
+  run against toggles nobody reads proves nothing for the legs they claim.
+  `SIGIL_VM_UNINSTALL_SURVIVE` is already closed by PR #39's
+  `ArpUninstallStringTests`.
 - **`release.yml` will not appear in `gh workflow list` until it first
   fires.** Confirmed empirically: `gh workflow list --all` today shows only
   `ci`, `docs`, `pr-guards`, `secret-scan`, `wrapper-vm-tests` — no
@@ -353,9 +361,40 @@ own-pid proof (`Start-Process -PassThru` captures the pid independently
 before the process reports anything itself) and a differential control
 (the same uninstall via the original `Setup.exe`, outside `install_dir`,
 succeeds). **This blocks G3** — do not treat the VM matrix as proof of a
-working uninstall path while R58 is open. **R59–R63** were filed alongside it
-from the same gate-close pass; R59 (the `payload/**` vs `payload://**` doc
-bug) is fixed in the same PR that adds these rows.
+working uninstall path while R58 is open. **R59–R65** were filed alongside it
+from the same gate-close pass and the fix that followed; R59 (the
+`payload/**` vs `payload://**` doc bug) is fixed in the same PR that adds
+these rows.
+
+**R58's fix is now open — [PR #39](https://github.com/Sigil-build/sigil/pull/39)
+(`rc/p6-fix-uninstall-self-block`, commit `48e864f`), not yet merged.** It
+excludes not just the running process but any process executing the **same
+image path** (`Environment.ProcessPath`) from the uninstaller's own
+files-in-use scan — a machine-scope `/allusers` uninstall's un-elevated
+parent (same image, blocked in `WaitForSingleObject` on its elevated child)
+is a second, distinct instance of "the uninstaller blocks on itself" that
+excluding only the launching pid would have missed. Landing it surfaced two
+more rows, filed right next to R58 in `00-GAP_REGISTER.md` because both are
+G3 prerequisites:
+
+- **R64 (release-blocker class) — `wrapper-vm-tests.yml` advertises coverage
+  no test reads.** Five of the workflow's nine scenario toggles drive no test
+  at all, including `SIGIL_VM_CLOSEAPPS` — R58's own P6 leg, and exactly why
+  R58 reached the merged RC without the VM matrix catching it. See Section 4's
+  updated V1 checklist item and `00-GAP_REGISTER.md`'s R64 for the full toggle
+  list and fix shape. **Do not treat a green `wrapper-vm-tests.yml` run as
+  proof of anything these toggles claim to cover until R64 is closed
+  alongside R58.**
+- **R65 — the committed lock files cover the Debug restore graph only.**
+  `EnableTrimAnalyzer`'s Release-conditioning makes a Release-configuration
+  restore inject `Microsoft.NET.ILLink.Tasks` and rewrite
+  `packages.lock.json`, which CI's Debug-only locked restore never exercises.
+  Not a G3 blocker on its own — filed so R23a's "reproducible" claim is scoped
+  honestly. See `00-GAP_REGISTER.md`'s R65 for the fix-shape choice.
+
+Also from PR #39: a stale comment in `WixClassInstallUninstallTests` that
+claimed `Setup.exe /Uninstall` is the ARP code path (it is not — that
+confusion is R58's whole subject) was corrected in-lane; no separate row.
 
 None of (a)–(g) below block G2. (b), (c) and (d) were found as a side effect of
 Task 3's R18 work (secrets off the elevated relaunch command line, landing in

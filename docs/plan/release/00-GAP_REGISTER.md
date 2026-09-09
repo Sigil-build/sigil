@@ -128,7 +128,9 @@ not part of this PR).
 
 Four defects were found while running checks 1, 3, 4 and 5. **R58** (below) is
 release-blocking; **R59** is fixed in this same PR; **R60** and **R61** are
-filed for a later stage.
+filed for a later stage. R58's fix opened as **[PR #39](https://github.com/Sigil-build/sigil/pull/39)**
+(commit `48e864f`, not yet merged) and its own work surfaced **R64** and
+**R65** — see the "Filed at gate G2" section below for all six rows.
 
 ---
 
@@ -1812,7 +1814,9 @@ Rows **R58–R63** were found while running the G2 manual checks (Section 3 of
 `10-G2_G3_RUNBOOK.md`) against the merged RC at `3ba97f6`, and while preparing
 this gate-close pass. Full command-level evidence for the four defects behind
 R58–R61: `.superpowers/sdd/2026-09-08-g2-release-prep/g2-checks-report.md`
-(gitignored, not part of this PR).
+(gitignored, not part of this PR). **R64 and R65** were found afterward, while
+landing R58's fix on `rc/p6-fix-uninstall-self-block`
+([PR #39](https://github.com/Sigil-build/sigil/pull/39), commit `48e864f`).
 
 ### R58 — The ARP `UninstallString` cannot complete: the uninstaller blocks on its own pid
 **Component:** Wrapper.Core / Engine · **Effort: S** · **RELEASE BLOCKER**
@@ -1864,17 +1868,26 @@ identically. The interactive (non-`/S`) `uninstall.exe` path goes through the
 same gate and was not separately exercised, but its Close-applications screen
 would be asked to close the process driving it.
 
-**Fix lane:** `rc/p6-fix-uninstall-self-block` — **PR pending** (confirmed via
-`gh pr list --head rc/p6-fix-uninstall-self-block`, no open or merged PR at
-the time this row was filed). Suggested shape: exclude the current process
-(and, for safety, its ancestors within the same relaunch chain) from
-`FilesInUse.Scan` when the blocking image is the running uninstaller itself.
-A test that installs, then runs the **registered `UninstallString` verbatim**
-(not the engine in-process, not `Setup.exe /Uninstall`) would have caught
-this — the existing uninstall tests apparently drive the engine or
-`Setup.exe`, never the deployed `uninstall.exe` in place. **Blocks G3**: the
-VM matrix must not be treated as proof of a working uninstall path while this
-is open.
+**Fix lane:** `rc/p6-fix-uninstall-self-block` — **[PR #39](https://github.com/Sigil-build/sigil/pull/39)**
+(commit `48e864f`), **open, not yet merged**. The fix excludes not only the
+running process itself but **any process executing the same image path**
+(compared via `Environment.ProcessPath`) from `FilesInUse.Scan` when the
+blocking image is the uninstaller's own. Excluding only the current pid is
+not enough: the Restart Manager reports a blocker **per loaded image**, not
+per process, so a **machine-scope `/allusers` uninstall** — where the
+un-elevated parent (the same `uninstall.exe` image) stays alive waiting in
+`WaitForSingleObject` on its elevated child — would still see its own parent
+reported as a blocking instance of that image and refuse identically, even
+with the launching pid itself excluded. A test that installs, then runs the
+**registered `UninstallString` verbatim** (not the engine in-process, not
+`Setup.exe /Uninstall`) would have caught this — the existing uninstall tests
+apparently drive the engine or `Setup.exe`, never the deployed
+`uninstall.exe` in place. **Blocks G3**: the VM matrix must not be treated as
+proof of a working uninstall path until PR #39 merges. PR #39's own work
+surfaced two more rows, filed below: **R64** (the VM matrix advertises
+scenario coverage several toggles never exercise, including the one —
+`SIGIL_VM_CLOSEAPPS` — that is this row's own P6 leg) and **R65** (the
+committed lock files cover only the Debug restore graph).
 
 ### R59 — `from: payload/**` is the wrong idiom; only `payload://` rebases onto the extracted payload
 **Component:** docs + examples · **Effort: S** · **SHOULD-FIX**
@@ -2031,3 +2044,69 @@ affected fixture throws rather than reporting a clean skip.
 **Fix (not implemented here):** a test-only override of the machine
 install-state root at the `ScopeLayout` / `UninstallStateStore` level, so no
 unit test ever creates or hardens a path under the real `%ProgramData%`.
+
+### R64 — `wrapper-vm-tests.yml` advertises coverage no test reads
+**Component:** tests / CI · **Effort: M** · **RELEASE BLOCKER class**
+
+Found while landing R58's fix (PR #39). `wrapper-vm-tests.yml` exposes nine
+scenario toggles meant to select which VM-only legs a given run exercises,
+but five of the nine are consumed by **no test at all**: `SIGIL_VM_SCOPE`,
+`SIGIL_VM_SCOPE_MATRIX`, `SIGIL_VM_ARP_VALUES`, `SIGIL_VM_CLOSEAPPS`, and —
+until PR #39 added `ArpUninstallStringTests` — `SIGIL_VM_UNINSTALL_SURVIVE`.
+Toggling any of the first four on or off changes nothing about what actually
+runs; the workflow advertises coverage that does not exist.
+
+**Why this is the release-blocker class, not a housekeeping note:**
+`SIGIL_VM_CLOSEAPPS` is the P6 files-in-use gate's own leg — the exact
+surface **R58** lives on — and it is a live, no-test toggle. That is
+mechanically *why* R58 reached the merged RC undetected: the one workflow
+whose stated job is to exercise this scenario for real never did, so nothing
+short of running the G2 manual checks against a real `Setup.exe` by hand was
+ever going to catch it. Per T1's "no vacuous skips" rule (`00-GAP_REGISTER.md`
+**R6**, `AGENTS.md`), a scenario toggle nothing reads is the same failure
+shape as a test that reports `Passed` without asserting — it makes the G3
+"VM matrix green" gate checkbox vacuous for every leg it silently covers.
+
+**Also found in the same pass:** PR #39 corrected a comment in
+`WixClassInstallUninstallTests` that falsely claimed `Setup.exe /Uninstall`
+is the ARP `UninstallString` code path — it is not (that is exactly R58's
+subject: the ARP entry points at the deployed `uninstall.exe`, not back at
+`Setup.exe`). Fixed in-lane by #39, no separate row needed for the comment
+itself; recorded here because it is the same confusion R58 exists to correct.
+
+**Fix shape:** for each of the five toggles, either wire it to a real test
+(`ArpUninstallStringTests` already closes `SIGIL_VM_UNINSTALL_SURVIVE`'s gap
+per #39) or remove it from the workflow — no toggle should exist that changes
+nothing about what runs. A G3 prerequisite alongside R58: the VM matrix run
+required at G3 (`03-RC_ORCHESTRATION.md`'s G3 checklist, `wrapper-vm-tests.yml`
+run for real) is only as meaningful as the toggles it actually exercises.
+
+### R65 — The committed lock files cover the Debug restore graph only
+**Component:** build / dependency management · **Effort: M** · **SHOULD-FIX**
+
+Found while landing R58's fix (PR #39), independently observed by two agents
+on an unmodified tree: `EnableTrimAnalyzer` is Release-conditioned in
+`Directory.Build.props`, so a **Release**-configuration restore injects
+`Microsoft.NET.ILLink.Tasks` as a dependency that a Debug restore never sees —
+and `dotnet build Sigil.slnx -c Release` on a clean tree rewrites tracked
+`packages.lock.json` files as a side effect, exactly the same class of
+drift R62's SDK-bump incident produced, but from a **configuration** axis
+CI's locked restore never walks.
+
+**Why CI stays green despite this.** `ci.yml`'s locked restore
+(`dotnet restore Sigil.slnx --locked-mode`) runs in the implicit Debug
+configuration, and every Release build/publish step in the same workflow
+passes `--no-restore`, so the Release-configuration restore graph is never
+actually validated against the committed lock files in CI — only reproduced,
+silently, by whoever's local Release build touches it next. R23a's own claim
+("a clean clone's locked restore succeeds, therefore the tree is
+reproducible") is true for Debug and unverified for Release.
+
+**Fix shape (a design choice for the orchestrator, not made here):** either
+(a) make the trim-analyzer package reference itself config-independent for
+**restore** purposes (so the dependency graph, not just static analysis,
+stays Release-conditioned only where it must) so one graph serves both
+configurations, or (b) generate and lock the Release graph explicitly —
+`dotnet restore Sigil.slnx -p:Configuration=Release --locked-mode` as a
+second, real CI step, not merely a local habit. Either closes the gap; filed
+here so R23a's "reproducible" claim is scoped to what was actually checked.

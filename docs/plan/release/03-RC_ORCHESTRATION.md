@@ -13,7 +13,7 @@
 >
 > **Stages 2 and 3's seven lanes plus hotfix #36 are merged and gate G2 is
 > closed** at RC head `3ba97f6` — see the G2 block below for all ten manual
-> checks and `00-GAP_REGISTER.md`'s new "Filed at gate G2" section for R58–R63.
+> checks and `00-GAP_REGISTER.md`'s new "Filed at gate G2" section for R58–R65.
 > All ten checks ran; eight passed cleanly, one (check 8, private
 > vulnerability reporting) is a still-open **owner action**, and one (check
 > 6, the live stale-channel-manifest replay) is unit-tested only, with the
@@ -22,8 +22,10 @@
 > `UninstallString` blocks on its own pid via the files-in-use gate, so the
 > shipped uninstall path is dead for anyone who no longer has the original
 > `Setup.exe` — the common case. Its fix (`rc/p6-fix-uninstall-self-block`) is
-> **not yet merged** (PR pending at gate-close time). **G3 must not open**
-> until that fix merges and the VM matrix runs for real against it.
+> open as **[PR #39](https://github.com/Sigil-build/sigil/pull/39)** (commit
+> `48e864f`) but **not yet merged**, and that PR's own work surfaced two more
+> rows, **R64** and **R65**. **G3 must not open** until PR #39 merges and the
+> VM matrix runs for real against it.
 >
 > ### Stage 0 (2026-07-28)
 >
@@ -517,13 +519,22 @@ tick clean, one (check 6's live half) is deferred to G3 by design, and one
 does not block the gate itself. Running the checks against a real `Setup.exe`
 surfaced four defects, filed as **R58–R61** in `00-GAP_REGISTER.md`; **R58 is
 release-blocking and its fix has not yet merged** — see the status note at the
-top of this document. **G3 must not open until R58's fix
-(`rc/p6-fix-uninstall-self-block`) merges and the VM matrix runs for real
-against the fixed uninstall path.**
+top of this document. Landing R58's fix ([PR #39](https://github.com/Sigil-build/sigil/pull/39))
+surfaced two more rows, **R64** and **R65**. **G3 must not open until R58's
+fix (PR #39, `rc/p6-fix-uninstall-self-block`) merges and the VM matrix runs
+for real against the fixed uninstall path — R64 is precisely about that
+matrix's own coverage gaps, so its fix belongs in the same G3 prerequisite
+check as R58.**
 
 ### G3 — after Stage 4
 
-- [ ] `wrapper-vm-tests.yml` run **for real**, green, against non-vacuous tests.
+- [ ] `wrapper-vm-tests.yml` run **for real**, green, against non-vacuous tests
+      *(R58, R64 — four toggles still drive no test at all:
+      `SIGIL_VM_SCOPE`, `SIGIL_VM_SCOPE_MATRIX`, `SIGIL_VM_ARP_VALUES`,
+      `SIGIL_VM_CLOSEAPPS` — the last is R58's own P6 leg — each must either
+      drive a real test or be removed before this run can be trusted;
+      `SIGIL_VM_UNINSTALL_SURVIVE` is already fixed by PR #39's
+      `ArpUninstallStringTests`)*.
       Run URL → `______`
 - [ ] The VM matrix runs on a schedule or on merge, not only on demand
 - [ ] Release dry-run: a throwaway prerelease tag produces signed, checksummed

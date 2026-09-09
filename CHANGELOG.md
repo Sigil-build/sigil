@@ -49,7 +49,7 @@ outside its own test suite. See "Known limitations" before you rely on it.
 - Manifest-driven localization of wizard chrome
   (`SigilBuild.Localization.Generator`, a source generator — no reflection).
 
-### Added — feature-parity track (P0–P13, closing the NSIS/Inno/WiX gap)
+### Added — feature-parity track (P0–P13)
 
 Each item below shipped as its own reviewed increment; the P-number and gap
 ID (`Gn`) are the track's own references, kept here for traceability against

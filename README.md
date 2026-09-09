@@ -10,11 +10,10 @@
 
 ## Why Sigil?
 
-Modern desktop installer tooling forces a choice between expensive GUI suites
-(InstallShield, Advanced Installer — \$400-\$4,500 / year) and free-but-painful
-XML / Pascal scripting (WiX, NSIS, Inno Setup). Sigil sits in the middle:
-declarative YAML, headless cloud code signing, and a signed full-package
-update engine.
+Sigil is a manifest-first tool for shipping Windows software: a readable
+`sigil.yaml` you can review in a pull request, headless code signing that
+fits CI, and a signed full-package update engine. The whole pipeline lives
+in version control next to the app it ships.
 
 > **Delta updates are not shipped.** Earlier planning material described
 > zstd dictionary-mode delta patches and a client Update SDK; both are

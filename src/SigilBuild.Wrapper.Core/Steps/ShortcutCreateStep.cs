@@ -112,7 +112,7 @@ internal sealed class ShortcutCreateStep : IStep
     /// register row R16's headline symptom, in the one path field a check on
     /// substituted output could never catch, because nothing was ever substituted.
     /// The shipped example manifest
-    /// (<c>examples/exe-wrapper/hello-wix-killer/sigil.yaml</c>) exercises this
+    /// (<c>examples/exe-wrapper/hello-desktop-app/sigil.yaml</c>) exercises this
     /// field with <c>${parameters.install_dir}\StartMenu</c>, so it was reachable
     /// by following the documentation.
     /// </para>

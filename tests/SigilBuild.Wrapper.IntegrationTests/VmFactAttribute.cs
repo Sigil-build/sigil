@@ -64,6 +64,43 @@ internal sealed class VmUpgradeFactAttribute : FactAttribute
 
 /// <summary>
 /// Reports a genuine Skipped result when the base VM preconditions are met but
+/// <c>SIGIL_VM_UNINSTALL_SURVIVE=1</c> is not set — the extra opt-in
+/// <see cref="ArpUninstallStringTests"/> requires on top of
+/// <see cref="VmFactAttribute"/>'s checks (register row R6).
+/// </summary>
+/// <remarks>
+/// R58: <c>wrapper-vm-tests.yml</c> has declared <c>SIGIL_VM_UNINSTALL_SURVIVE</c> as a
+/// T15 scenario toggle since T17 consolidated the matrix, but until now no test read it —
+/// the leg was advertised and absent, which is a large part of why the ARP uninstall path
+/// went unexercised and R58 stayed latent from P6 to the release candidate. This
+/// attribute is what finally consumes it.
+/// </remarks>
+internal sealed class VmUninstallSurviveFactAttribute : FactAttribute
+{
+    public VmUninstallSurviveFactAttribute()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Skip = "VM integration test: requires Windows";
+        }
+        else if (!TestEnvironment.IsEnabled)
+        {
+            Skip = "VM integration test: SIGIL_VM_TESTS is not set to 1";
+        }
+        else if (Environment.GetEnvironmentVariable("SIGIL_VM_UNINSTALL_SURVIVE") != "1")
+        {
+            Skip = "VM integration test: SIGIL_VM_UNINSTALL_SURVIVE is not set to 1";
+        }
+        else if (!TestEnvironment.IsRuntimeAvailable)
+        {
+            Skip = "VM integration test: staged installer-host runtime not found "
+                 + "(run scripts/publish-installer-runtime.ps1)";
+        }
+    }
+}
+
+/// <summary>
+/// Reports a genuine Skipped result when the base VM preconditions are met but
 /// <c>SIGIL_VM_PREREQ=1</c> is not set — the extra opt-in
 /// <see cref="PrerequisiteInstallTests"/> requires on top of
 /// <see cref="VmFactAttribute"/>'s checks (register row R6).

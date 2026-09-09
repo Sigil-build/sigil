@@ -8,7 +8,7 @@ Every step accepts a `when:` clause: a boolean expression evaluated against the 
 install_steps:
   - id: copy-pro-files
     type: file_copy
-    from: payload/pro/**
+    from: payload://pro/**
     to: "${parameters.install_dir}\\pro"
     when: "parameters.edition == 'professional'"
 ```
@@ -89,18 +89,18 @@ parameters:
 install_steps:
   - id: copy-base
     type: file_copy
-    from: payload/base/**
+    from: payload://base/**
     to: ${parameters.install_dir}
 
   - id: copy-pro
     type: file_copy
-    from: payload/pro/**
+    from: payload://pro/**
     to: "${parameters.install_dir}\\pro"
     when: "parameters.edition in ['professional', 'enterprise']"
 
   - id: copy-enterprise
     type: file_copy
-    from: payload/enterprise/**
+    from: payload://enterprise/**
     to: "${parameters.install_dir}\\enterprise"
     when: "parameters.edition == 'enterprise'"
 

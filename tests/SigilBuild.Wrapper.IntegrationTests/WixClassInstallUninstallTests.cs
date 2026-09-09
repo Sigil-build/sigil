@@ -163,10 +163,15 @@ public class WixClassInstallUninstallTests
         var installDiff = SnapshotDiffer.Diff(before, afterInstall);
         installDiff.Should().NotBeEmpty("install must change observable state (sanity check)");
 
-        // Uninstall via the wrapper directly — same code path the ARP UninstallString invokes.
-        // We invoke the *original* setup.exe (not a separately published uninstaller copy in
-        // install_dir) with /S /Uninstall: this scenario doesn't bootstrap a copy, it just
-        // runs the uninstall mode of the same packed exe.
+        // Uninstall via the wrapper directly. We invoke the *original* setup.exe (not the
+        // uninstaller copy T15 drops in install_dir) with /S /Uninstall: this scenario
+        // doesn't bootstrap a copy, it just runs the uninstall mode of the same packed exe.
+        //
+        // R58: this comment used to claim this was "the same code path the ARP
+        // UninstallString invokes". It is not, and the difference was a release blocker —
+        // the original setup exe lives OUTSIDE install_dir, so it never meets the P6
+        // files-in-use gate that the dropped uninstall.exe always meets from within.
+        // ArpUninstallStringTests covers the registered string itself.
         var rcUninstall = await sandbox.RunAsync(setupExe, "/S", "/Uninstall");
         rcUninstall.Should().Be(0, "uninstall must succeed");
 

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -67,27 +68,378 @@ public sealed class FilesInUseTests
 
     // ── Restart Manager sweep ────────────────────────────────────────────────
 
+    /// <summary>
+    /// R58 — the gate's positive control: a SEPARATE process holding a file open under
+    /// the install directory is still reported. The self-exclusion this file also tests
+    /// must not cost the gate its actual job.
+    /// </summary>
+    /// <remarks>
+    /// This test used to hold the file from the CURRENT process and assert that the
+    /// current process came back as a blocker — it encoded the R58 defect as the
+    /// contract. The blocker has to be an independent process for the assertion to mean
+    /// "the Restart Manager sees somebody else", so the holder is a child
+    /// <c>powershell.exe</c>: its own image lives in System32, well outside the scanned
+    /// directory, so the only thing tying it to the sweep is the open handle.
+    /// </remarks>
     [Fact]
-    public async Task RestartManager_reports_a_process_holding_a_file_in_the_install_dir()
+    public async Task RestartManager_reports_another_process_holding_a_file_in_the_install_dir()
     {
         if (!OperatingSystem.IsWindows()) return;
 
         using var tmp = new TempDir();
+        using var flags = new TempDir(); // the ready flag lives OUTSIDE the scanned dir
         var target = Path.Combine(tmp.Path, "locked.txt");
         File.WriteAllText(target, "payload");
 
-        // Hold the file open from THIS process — the Restart Manager reports the
-        // current process as a blocker just as it would any other app.
-        using (var hold = new FileStream(target, FileMode.Open, FileAccess.Read, FileShare.Read))
+        using var holder = FileHolderProcess.Start(target, Path.Combine(flags.Path, "ready"));
+        try
+        {
+            var blockers = await WaitForBlockerAsync(tmp.Path, (uint)holder.Id);
+
+            blockers.Should().Contain(
+                b => b.ProcessId == (uint)holder.Id,
+                "the Restart Manager must still report an unrelated process holding a file");
+            blockers.Select(b => b.Describe()).Should()
+                .Contain(d => d.Contains("pid", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            holder.Kill();
+        }
+    }
+
+    /// <summary>
+    /// R58 — the second positive control, and the reason the exclusion is keyed on the
+    /// image PATH rather than on "is an ancestor of mine". The Restart Manager reports a
+    /// process whose executable IMAGE merely lives under the scanned directory, even when
+    /// it holds no other handle there. That is exactly how the gate catches "the app you
+    /// are upgrading is running", and it must keep doing so.
+    /// </summary>
+    [Fact]
+    public async Task RestartManager_reports_an_app_running_from_inside_the_install_dir()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        using var tmp = new TempDir();
+        using var app = ImageInDirProcess.Start(tmp.Path, "the-app.exe");
+        try
+        {
+            var blockers = await WaitForBlockerAsync(tmp.Path, (uint)app.Id);
+
+            blockers.Should().Contain(
+                b => b.ProcessId == (uint)app.Id,
+                "a running app whose image sits in the install dir is a genuine blocker — " +
+                "the Restart Manager reports it for the loaded image alone, with no data " +
+                "file open, and the gate must keep refusing on it");
+        }
+        finally
+        {
+            app.Kill();
+        }
+    }
+
+    // ── R58: the running installer is never a blocker of itself ──────────────
+
+    /// <summary>
+    /// R58 (release blocker, found at G2 check 1) — the ARP <c>UninstallString</c> is
+    /// <c>&lt;install_dir&gt;\uninstall.exe /S /Uninstall /currentuser</c>, so T15's
+    /// dropped uninstaller runs from INSIDE the directory the P6 gate sweeps. With no
+    /// self-exclusion the Restart Manager reported the uninstaller's own image and the
+    /// run was refused with exit 4 — <c>blocked by: installer (pid N)</c>, N being its
+    /// own pid — before touching anything. <c>/closeapps</c> could not rescue it either:
+    /// the Restart Manager cannot close its own caller.
+    /// </summary>
+    /// <remarks>
+    /// The current process here plays the uninstaller: it holds a file open under the
+    /// swept directory (<c>FileShare.None</c>, the strongest case) and the sweep must
+    /// come back without it. Before the fix this failed, the Restart Manager reporting
+    /// the test host by pid — precisely the production symptom.
+    /// </remarks>
+    [Fact]
+    public async Task Scan_never_reports_the_running_process_as_its_own_blocker()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        using var tmp = new TempDir();
+        var target = Path.Combine(tmp.Path, "uninstall.exe");
+        File.WriteAllText(target, "stand-in for the running uninstaller image");
+
+        using (new FileStream(target, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
         {
             var blockers = FilesInUse.Scan(null, tmp.Path);
 
-            blockers.Should().NotBeEmpty("the Restart Manager should see this process holding the file");
-            blockers.Should().Contain(b => b.ProcessId == (uint)Environment.ProcessId);
-            blockers.Select(b => b.Describe()).Should().Contain(d => d.Contains("pid", StringComparison.OrdinalIgnoreCase));
+            blockers.Should().NotContain(
+                b => b.ProcessId == (uint)Environment.ProcessId,
+                "the process running the install/uninstall can never be a blocker of " +
+                "itself — that is what made the ARP UninstallString exit 4 with its own pid");
         }
 
         await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// R58 — self-exclusion must leave a genuinely clear directory reading clear, not
+    /// "blocked by something with pid 0": with nothing but this process holding the
+    /// install dir, the gate has nothing to refuse on.
+    /// </summary>
+    [Fact]
+    public void Scan_is_clear_when_only_the_running_process_holds_the_install_dir()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        using var tmp = new TempDir();
+        var target = Path.Combine(tmp.Path, "app.dat");
+        File.WriteAllText(target, "payload");
+
+        using var hold = new FileStream(target, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+
+        FilesInUse.Scan(null, tmp.Path).Should().BeEmpty(
+            "nothing but this process holds the directory, so the gate is clear");
+    }
+
+    /// <summary>
+    /// R58 — the T12 half. A machine-scope ARP uninstall runs
+    /// <c>&lt;install_dir&gt;\uninstall.exe /S /Uninstall /allusers</c> un-elevated;
+    /// <c>Elevation.RelaunchElevatedAndWait</c> then relaunches THE SAME IMAGE elevated
+    /// and blocks in <c>WaitForSingleObject</c> until the child exits. So while the
+    /// elevated child runs its gate, the un-elevated parent is still alive with
+    /// <c>&lt;install_dir&gt;\uninstall.exe</c> loaded as its image — which
+    /// <see cref="RestartManager_reports_an_app_running_from_inside_the_install_dir"/>
+    /// proves the Restart Manager reports. Excluding only the child's own pid would have
+    /// left <c>/allusers</c> uninstalls blocked on their own parent.
+    /// </summary>
+    /// <remarks>
+    /// The relaunch pair is simulated rather than elevated: a child process is started
+    /// from a known image path and that same path is handed in as "the running
+    /// installer's image", which is the relationship <c>ShellExecuteExW</c>'s
+    /// <c>runas</c> verb creates. The negative halves are the load-bearing ones — a
+    /// different image is not excluded, and neither is anything when the running image is
+    /// unknown.
+    /// </remarks>
+    [Fact]
+    public void A_process_running_the_installers_own_image_is_excluded_but_no_other_is()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        using var tmp = new TempDir();
+        using var app = ImageInDirProcess.Start(tmp.Path, "uninstall.exe");
+        try
+        {
+            var pid = (uint)app.Id;
+
+            FilesInUse.IsRunningInstallerProcess(pid, app.ImagePath).Should().BeTrue(
+                "a process running the very image this installer runs from is the T12 " +
+                "un-elevated relaunch parent (or this process), never a third-party app");
+
+            FilesInUse.IsRunningInstallerProcess(pid, Path.Combine(tmp.Path, "something-else.exe"))
+                .Should().BeFalse("a different image is a real blocker and must survive the sweep");
+
+            FilesInUse.IsRunningInstallerProcess(pid, null)
+                .Should().BeFalse("with no known self image there is nothing to match on");
+        }
+        finally
+        {
+            app.Kill();
+        }
+    }
+
+    /// <summary>R58 — the current process is excluded on pid alone, image path or not.</summary>
+    [Fact]
+    public void The_current_process_is_always_recognised_as_the_running_installer()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        FilesInUse.IsRunningInstallerProcess((uint)Environment.ProcessId, selfImagePath: null)
+            .Should().BeTrue("self is self regardless of what its image path resolves to");
+    }
+
+    /// <summary>
+    /// R58 review finding 1 — the same-image check must compare the image FILE, not the
+    /// two path strings. Production feeds it
+    /// <see cref="Environment.ProcessPath"/> (<c>GetModuleFileNameW(NULL)</c>, which
+    /// preserves the form the process was LAUNCHED with — 8.3 components, a substituted
+    /// drive, a junction) on one side and <c>QueryFullProcessImageNameW(…, 0)</c> (the
+    /// canonical long Win32 path) on the other. Under a string comparison those diverge,
+    /// the T12 relaunch parent stops being recognised, and a <c>/allusers</c> ARP
+    /// uninstall exits 4 again with the original R58 symptom — reachable in the field via
+    /// <c>/D=C:\PROGRA~1\Acme</c>.
+    /// </summary>
+    /// <remarks>
+    /// The process is launched normally and the ALTERNATIVE spelling is supplied as the
+    /// running installer's image, which is exactly the production asymmetry
+    /// (<c>QueryFullProcessImageNameW</c> canonicalises whatever the launch form was, so
+    /// launching through the short path would change nothing observable). The
+    /// extended-length spelling carries the assertion on every volume; the 8.3 spelling is
+    /// the realistic case but only exists where the volume generates 8.3 aliases, so it is
+    /// asserted when available and reported as not demonstrable when not — never silently
+    /// skipped into a pass.
+    /// </remarks>
+    [Fact]
+    public void The_same_image_named_a_different_way_is_still_recognised()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        using var tmp = new TempDir();
+        using var app = ImageInDirProcess.Start(tmp.Path, "uninstall.exe");
+        try
+        {
+            var pid = (uint)app.Id;
+
+            FilesInUse.IsRunningInstallerProcess(pid, PathForms.Extended(app.ImagePath))
+                .Should().BeTrue(
+                    "the extended-length spelling names the same file, so it is the same " +
+                    "image — comparing the strings would say otherwise");
+
+            var shortForm = PathForms.Short(app.ImagePath);
+            if (shortForm is not null)
+            {
+                shortForm.Should().NotBe(app.ImagePath, "the short form must actually differ to prove anything");
+                FilesInUse.IsRunningInstallerProcess(pid, shortForm).Should().BeTrue(
+                    "an 8.3 launch path is what an ARP row written from /D=C:\\PROGRA~1\\… " +
+                    "hands back, and it names the same file");
+            }
+        }
+        finally
+        {
+            app.Kill();
+        }
+    }
+
+    /// <summary>
+    /// R58 review finding 1, the other half — identity must not be confused with the file
+    /// NAME. A different file that merely shares the uninstaller's file name, in another
+    /// directory, is a stranger and stays a blocker.
+    /// </summary>
+    [Fact]
+    public void A_different_file_with_the_same_name_is_not_the_installers_image()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        using var tmp = new TempDir();
+        using var other = new TempDir();
+        using var app = ImageInDirProcess.Start(tmp.Path, "uninstall.exe");
+        try
+        {
+            // Byte-identical content, identical file name, different file on disk.
+            var impostor = Path.Combine(other.Path, "uninstall.exe");
+            File.Copy(app.ImagePath, impostor);
+
+            FilesInUse.IsRunningInstallerProcess((uint)app.Id, impostor).Should().BeFalse(
+                "same name and same bytes are not the same file — identity is the volume " +
+                "serial plus the file id, and this must never widen into a content or " +
+                "name match");
+        }
+        finally
+        {
+            app.Kill();
+        }
+    }
+
+    /// <summary>
+    /// R58 review finding 2 — the same-image branch is reached from <c>Scan</c>, not just
+    /// from its predicate. Replacing the self-image argument with <c>null</c> used to
+    /// leave every test green, so the wiring between <c>Scan</c> and the exclusion was
+    /// unpinned; this asserts both directions through <c>Scan</c>'s own output.
+    /// </summary>
+    [Fact]
+    public async Task Scan_drops_a_process_running_the_supplied_self_image_and_keeps_it_otherwise()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        using var tmp = new TempDir();
+        using var app = ImageInDirProcess.Start(tmp.Path, "uninstall.exe");
+        try
+        {
+            var pid = (uint)app.Id;
+
+            // With no self image the process is a blocker — which also proves it is
+            // genuinely visible to this sweep, so the exclusion below means something.
+            var kept = await WaitForBlockerAsync(
+                tmp.Path, pid, () => FilesInUse.Scan(null, tmp.Path, selfImagePath: null));
+            kept.Should().Contain(b => b.ProcessId == pid, "nothing is excluded without a self image");
+
+            // Same sweep, same process, with that image declared as the running
+            // installer's own: gone from the result.
+            FilesInUse.Scan(null, tmp.Path, app.ImagePath)
+                .Should().NotContain(
+                    b => b.ProcessId == pid,
+                    "Scan must actually consult the self image it is given — this is the " +
+                    "path a /allusers ARP uninstall takes past its own relaunch parent");
+        }
+        finally
+        {
+            app.Kill();
+        }
+    }
+
+    /// <summary>
+    /// R58 review finding 2 — and the value production supplies to that seam is the
+    /// running image, so a mutation to the two-argument overload cannot go unnoticed.
+    /// </summary>
+    [Fact]
+    public void The_self_image_production_scans_with_is_the_running_process_image()
+    {
+        FilesInUse.SelfImagePath().Should().Be(
+            Environment.ProcessPath,
+            "the public Scan overload passes this to the exclusion");
+    }
+
+    /// <summary>
+    /// R58 — the image-path comparison is only as good as the cross-process lookup it
+    /// rests on, so that lookup is asserted directly against a child whose path is known.
+    /// </summary>
+    [Fact]
+    public void The_image_path_of_another_process_can_be_read()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        using var tmp = new TempDir();
+        using var app = ImageInDirProcess.Start(tmp.Path, "probe.exe");
+        try
+        {
+            // BeEquivalentTo, not Be: Windows paths are case-insensitive, and so is the
+            // comparison the sweep itself makes.
+            FilesInUse.TryGetProcessImagePath((uint)app.Id)
+                .Should().BeEquivalentTo(app.ImagePath,
+                    "the sweep resolves a blocker's image in order to compare it with its own");
+        }
+        finally
+        {
+            app.Kill();
+        }
+    }
+
+    /// <summary>
+    /// Poll the sweep until <paramref name="pid"/> shows up, so a child that is still
+    /// starting cannot make the positive controls flaky. Returns the last sweep either
+    /// way; the caller asserts, so a timeout surfaces as an ordinary assertion failure
+    /// rather than a hang.
+    /// </summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static Task<IReadOnlyList<AppBlocker>> WaitForBlockerAsync(string dir, uint pid)
+        => WaitForBlockerAsync(dir, pid, () => FilesInUse.Scan(null, dir));
+
+    /// <summary>
+    /// <see cref="WaitForBlockerAsync(string, uint)"/> over an explicit sweep, so a test
+    /// can poll the self-image-injecting overload instead of the production one.
+    /// </summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static async Task<IReadOnlyList<AppBlocker>> WaitForBlockerAsync(
+        string dir, uint pid, Func<IReadOnlyList<AppBlocker>> scan)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        IReadOnlyList<AppBlocker> blockers;
+        do
+        {
+            blockers = scan();
+            if (blockers.Any(b => b.ProcessId == pid))
+            {
+                return blockers;
+            }
+            await Task.Delay(250).ConfigureAwait(false);
+        }
+        while (DateTime.UtcNow < deadline);
+        return blockers;
     }
 
     // ── Silent gate: exit 4 without /closeapps ───────────────────────────────

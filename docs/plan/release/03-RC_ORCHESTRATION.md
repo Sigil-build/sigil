@@ -15,7 +15,8 @@
 > run's `.trx` artifacts: 41 test-evidenced, 14 manual, 11 written deferrals, **2
 > claim-only** (R22, R38), **0 dropped**, and 16 closed on narrower evidence than the
 > record implied. It corrected **R41a** from "closed" to "documented open", filed
-> **R69–R73**, and gave every row a per-row `STATUS (V1.1)` line — 49 of the 68
+> **R69–R73** (with **R74** and **R75** following from the VM run, below), and gave
+> every row a per-row `STATUS (V1.1)` line — 49 of the 68
 > walked rows had none, which is now itself a row (**R73**).
 >
 > **Four VM/workflow rows closed since G2:** **R58** ([#39](https://github.com/Sigil-build/sigil/pull/39)),
@@ -23,6 +24,37 @@
 > ([#41](https://github.com/Sigil-build/sigil/pull/41)); **R64** stays open, narrowed
 > to the coverage itself. **R69/R70** are fixed in
 > [#42](https://github.com/Sigil-build/sigil/pull/42), open.
+>
+> **The first automatic VM run then produced two more rows.** Diagnosing the
+> `vm (install matrix)` leg's six failures on `b07021e`
+> (`.superpowers/sdd/2026-09-08-g2-release-prep/vm-install-matrix-diagnosis.md`)
+> found that **five of the six were fixture bugs #41 missed** — a `file_copy.to`
+> given a *file* path where the step contract wants a destination directory, and one
+> app id reused across two install roots — fixed on `rc/vm-fix-fixtures-round2` (PR
+> number pending), along with an extension of #41's always-on guard to refuse that
+> `to:` shape. **The sixth is a product row: R74.** Because
+> `InstalledStateResolver.ScopeProbeOrder` probes HKLM only when elevated (lane S1's
+> **R2** fix, and correct), an elevated per-user install cannot see its own prior
+> per-user install: the plan says "fresh install" and the downgrade block never
+> fires, while the reinstall cleanup — which reads the state store, not ARP — still
+> tears the prior version down. **Net effect: an elevated per-user install can
+> silently downgrade.** Reproduced, not inferred. **R74 does not block G3** — the
+> guard it degrades is UX, not a trust boundary, and only in a session where the
+> user already holds the privilege. Until it lands, the two elevation-sensitive
+> upgrade assertions in that leg are **honest skips** naming R2, which leaves
+> per-user upgrade/downgrade behaviour unexercised end to end — more coverage
+> **R64** still owes. Owner: lane **S5/S1**.
+>
+> **R75**, from the P11 round-two lane: `com_register` journaled an undo for a
+> registration that never took effect, and since **R15** a failed
+> `DllUnregisterServer` means "still registered" — so with `on_failure: continue`
+> that stale record reaches `uninstall.json` and makes **every later uninstall
+> fail**, leaving the app permanently in Add/Remove Programs. Fixed in
+> [#44](https://github.com/Sigil-build/sigil/pull/44) (`3e0ba90`, a tail-only
+> `RollbackJournal.RetractLast`), open. It was found because the P11 VM test had
+> been asserting the wrong behaviour as correct — the same lesson as **R66** and
+> **R64**, one level in: a leg that never runs does not merely fail to catch bugs,
+> it canonises them.
 >
 > **Blocked on the owner — nothing an agent lane can move:**
 >
@@ -672,7 +704,9 @@ check as R58.**
 | VM-FIX-B | `rc/vm-fix-p11-anchoring` | ☑ | [#40](https://github.com/Sigil-build/sigil/pull/40) | ☑ `c71bd8c` | G3 (R67) |
 | VM-FIX-A | `rc/vm-fix-fixtures` | ☑ | [#41](https://github.com/Sigil-build/sigil/pull/41) | ☑ `b07021e` | G3 (R64 ⚠️, R66, R68) |
 | V1-FIX | `rc/v1-sbom-and-kiosk` | ☑ | [#42](https://github.com/Sigil-build/sigil/pull/42) | ☐ **open** | G3 (R69, R70) |
-| V1-DOCS | `rc/v1-register-status` | ☑ | this PR | ☐ | G3 (V1.1 — R71–R73 filed) |
+| VM-FIX-B2 | `rc/vm-fix-p11-round2` | ☑ | [#44](https://github.com/Sigil-build/sigil/pull/44) | ☐ **open** | G3 (R75) |
+| VM-FIX-A2 | `rc/vm-fix-fixtures-round2` | ☑ | ☐ pending | ☐ | G3 (install-matrix fixtures; R74 skips) |
+| V1-DOCS | `rc/v1-register-status` | ☑ | [#43](https://github.com/Sigil-build/sigil/pull/43) | ☐ | G3 (V1.1 — R71–R75 filed) |
 | V1  | `rc/v1-verification` | ◐ V1.1 + V1.4 done | ☐ | ☐ | G3/G4 |
 
 The hotfix row (`rc/s1-fix-provenance-fixture`, [#36](https://github.com/Sigil-build/sigil/pull/36)

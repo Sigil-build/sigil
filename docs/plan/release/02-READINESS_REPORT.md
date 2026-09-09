@@ -385,7 +385,7 @@ failing** throwaway PR #17's `broken title`).
    "closed" to "documented open". Owner action, G4.
 7. **"Every remaining register row is either demonstrated fixed or listed in the
    release notes' known limitations."** Not yet: the known-limitations draft below
-   predates **R60–R65** and **R69–R73**. Closing this box means a pass over that
+   predates **R60–R65** and **R69–R75**. Closing this box means a pass over that
    draft, and it is the cheapest of the seven.
 
 **Security — no box here is optional**

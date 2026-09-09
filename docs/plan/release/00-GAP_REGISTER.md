@@ -2745,6 +2745,26 @@ unit test ever creates or hardens a path under the real `%ProgramData%`.
 > matrix: **the pack → `Setup.exe` → install → uninstall path has still never been
 > executed by CI**, and 16 of the 21 local skips are this one toggle on this one
 > assembly.
+>
+> **What the first automatic run on `b07021e` then showed (2026-09-09), diagnosed in
+> `.superpowers/sdd/2026-09-08-g2-release-prep/vm-install-matrix-diagnosis.md`:** the
+> `vm (install matrix)` leg failed six tests, and **five of the six were fixture
+> bugs #41 missed** — `file_copy.to` given a *file* path where the step contract
+> wants a destination **directory** (three fixture builders), and one app id reused
+> across two install roots in the localization legs, so the second install's
+> reinstall-cleanup emptied the first's directory. Both are the R59/R66 shape again:
+> schema-legal, silently wrong, latent for exactly as long as the leg never ran.
+> They are fixed on `rc/vm-fix-fixtures-round2` (PR number pending), which also
+> extends #41's always-on `VmFixtureManifestTests` guard to refuse a `file_copy`
+> `to:` that is not a directory template — the guard gap belongs to this row's
+> family: *the matrix advertises coverage a fixture silently voids.* **The sixth
+> failure is not a fixture bug: it is `R74`.** Because the install-matrix leg runs
+> **elevated** on the hosted runner, the two elevation-sensitive upgrade assertions
+> become **honest skips** in that same PR — `!Elevation.IsProcessElevated()` with a
+> reason naming **R2**, a real skip per **R6**, not a vacuous pass — and stay
+> skipped until R74 lands. Note what that costs: per-user upgrade and downgrade
+> behaviour remains unexercised end to end, which is more coverage this row still
+> owes, on top of the machine-scope gap above.
 
 Found while landing R58's fix (PR #39); the count below is the #39 reviewer's,
 verified precisely, not an estimate. Across `wrapper-vm-tests.yml` and its
@@ -3048,11 +3068,21 @@ on a merge + weekly trigger.
 
 # Filed during Stage 4 (2026-09-09)
 
-Rows **R69–R73** come out of task **V1.1**, the Stage-4 register walk (report:
+**R69–R73** come out of task **V1.1**, the Stage-4 register walk (report:
 `.superpowers/sdd/2026-09-08-g2-release-prep/v1-1-register-walk.md`, gitignored, not
 part of this PR). Two of them — **R69** and **R70** — already have a fix in flight as
 [PR #42](https://github.com/Sigil-build/sigil/pull/42) (`rc/v1-sbom-and-kiosk`,
 **open**); **R71**, **R72** and **R73** are open with a fix shape and no owner.
+
+**R74** and **R75** come from the same stage but a different source: the **first
+automatic `wrapper-vm-tests.yml` run** on `b07021e` and its diagnosis
+(`vm-install-matrix-diagnosis.md`). R74 is the one product finding among the
+install-matrix leg's six failures — the other five were fixture bugs, fixed on
+`rc/vm-fix-fixtures-round2`. R75 came out of the P11 round-two lane and is fixed in
+[PR #44](https://github.com/Sigil-build/sigil/pull/44), **open**. Both are worth
+reading next to **R64**: they are what an unrun matrix was hiding, and R75 in
+particular was found only because the test there had been *asserting the wrong
+behaviour as correct*.
 
 One walk finding was deliberately **not** filed as a new row: the live reproduction of
 the Release-configuration lock-file churn is **R65** happening again, not a new defect,
@@ -3236,6 +3266,127 @@ mis-read — and, as both examples show, mis-read in the direction of "done".
 same PR that closes it**, naming (a) the PR number and merge sha, (b) the evidence
 class — named test on a named CI run, manual ceremony, written deferral with its
 location, or claim-only — and (c) anything narrower than the row's own headline claim.
-A merge table is a summary; it is never the record. This pass backfills all 71 rows,
-but keeping it true is a per-PR obligation, and the merge gate should check it the way
-it checks the lockstep surfaces in `AGENTS.md`.
+A merge table is a summary; it is never the record. This pass backfills all 71 rows
+that existed at `b07021e` (and every row filed since carries its own), but keeping it
+true is a per-PR obligation, and the merge gate should check it the way it checks the
+lockstep surfaces in `AGENTS.md`.
+
+### R74 — An elevated process installing per-user plans the upgrade blind but cleans up sighted, so it can silently downgrade
+**Component:** Wrapper.Core / Engine · **Effort: M** · **SHOULD-FIX**
+
+> **STATUS (V1.1, 2026-09-09):** **OPEN.** Filed from the diagnosis of the first
+> automatic `wrapper-vm-tests.yml` run's `vm (install matrix)` leg on `b07021e`
+> (`.superpowers/sdd/2026-09-08-g2-release-prep/vm-install-matrix-diagnosis.md` §1.4,
+> §2.4, §2.5, §5). **Reproduced**, not inferred: the elevated probe was simulated
+> unelevated against the RC binaries. **Not a G3 blocker** — see the rubric note
+> below. Owner: lane **S5 / S1** (engine).
+
+Prior-install detection has **two independent sources at two different trust levels**,
+and under one specific combination they disagree:
+
+| Consumer | Source | Elevation-sensitive? |
+|---|---|---|
+| the upgrade plan, the downgrade block, prior-install-dir preservation | **ARP**, via `InstalledStateResolver` | **yes** — HKLM only when elevated |
+| `ExistingInstallDetected` → `PerformReinstallCleanupAsync` | the **state store** under `%LocalAppData%\Sigil\<appId>`, via `UninstallStateStore.TryLoad` (`InstallSession.cs:726-740`) | no |
+
+`InstalledStateResolver.ScopeProbeOrder` (`InstalledStateResolver.cs:89-92`) probes
+**HKLM only** when the process is elevated. That is lane S1's **R2** fix and it is
+correct: an elevated process must never act on HKCU-sourced data — least of all spawn
+an attacker-plantable `UninstallString` as administrator. The consequence, which R2
+did not have to reason about, is that **an elevated per-user install cannot see its own
+prior per-user install**:
+
+- `UpgradePlanner.Plan` short-circuits on `!state.Found` (`UpgradePlanner.cs:32`) →
+  `UpgradeAction.FreshInstall`, so `DowngradeBlocked` (`:73`) is unreachable;
+- the silent path therefore never reaches `return DowngradeBlockedExitCode;`
+  (`InstallSession.cs:552-555`) — **exit 0 where exit 3 was the contract**;
+- `priorInstallDir` is null, so the new version lands in its own manifest default
+  rather than preserving the directory the user already installed into;
+- **but the reinstall cleanup still fires.** `RunInstallCoreAsync` calls
+  `PerformReinstallCleanupAsync` (`InstallSession.cs:994`) which returns early only on
+  `!ExistingInstallDetected` (`:1111`) — and that flag comes from the state store, not
+  ARP. The previous install's recorded uninstall is replayed and its files are deleted
+  at the path the previous run used, while the plan believes this is a fresh install.
+
+**Reproduction (§1.4).** Removing the HKCU ARP row to simulate the elevated HLKM-only
+probe, then re-running the identical v1 setup over a v2 install, gives the runner's
+exact symptom — `EXIT_V1_SIM=0` — and the `/LOG` shows both halves in one place: a
+`delete …\app\uninstall.exe` from the cleanup, then a fresh `copy payload://app.txt`,
+then `result: success`, with ARP rewritten back to `1.0.0`. **A silent downgrade.**
+
+**Who hits this in the field:** anyone whose per-user installer runs from an elevated
+context — an admin double-clicking it, an elevated shell, SCCM/Intune as SYSTEM, or a
+CI runner. It is not exotic.
+
+**Rubric note — SHOULD-FIX, not a RELEASE BLOCKER.** Nothing crosses a trust boundary:
+no elevated run wrote outside its declared destination, and `install_dir`, containment,
+ARP registration and `uninstall.exe` all behaved correctly in the same diagnosis. What
+degrades is a **UX guard** (the downgrade refusal and directory preservation), and only
+in a session where the user already holds the privilege. Recorded explicitly so nobody
+re-triages it upward at the gate: **this does not block G3.**
+
+**Relationship to the rows it comes from.** **R2** is why the probe is HLKM-only and
+must stay that way — the fix is not "let the elevated process trust HKCU". **R53**
+("an elevated process replays user-scope state at all", decided *keep*, POST-v1) is the
+same split brain, but R53 is phrased as a privilege question; this row is the
+**behavioural divergence** that phrasing does not capture, which is why it is filed
+separately rather than appended to R53.
+
+**Fix shape (not implemented).** Make `_plan` and `ExistingInstallDetected` agree about
+what "installed" means for an elevated user-scope run — **either both blind or both
+sighted**, never one of each. Two viable routes: let the plan consult the same trusted
+state store the cleanup already uses, or apply R2's trust gate to the HKCU ARP row
+(verify it, then use it) instead of hiding the row entirely. Ship it with a unit test
+that runs under a **simulated elevated probe** — the seam
+`ScopeProbeOrder(tentativeScope, elevated)` already takes `elevated` as a parameter, so
+this is testable without an elevated runner, and the absence of such a test is why the
+divergence survived R2's own review. Until then, the two elevation-sensitive upgrade
+assertions in the VM install-matrix leg are **honest skips** naming R2 — see **R64**.
+
+### R75 — `com_register` journaled an undo for a registration that never took effect, so one failed step could make the app permanently unremovable
+**Component:** Wrapper.Core / steps + Engine · **Effort: S** · **SHOULD-FIX**
+
+> **STATUS (V1.1, 2026-09-09):** FIXED in
+> [#44](https://github.com/Sigil-build/sigil/pull/44) (lane `rc/vm-fix-p11-round2`,
+> commit `3e0ba90`), **open, not yet merged**.
+> **Evidence T:** two unit tests that fail with the retraction reverted. Found while
+> fixing the P11 VM legs — the test there **had been asserting the wrong behaviour as
+> correct**, which is why nothing caught it earlier.
+
+`ComRegisterStep.cs:75` appended a `RollbackRecord.UnregisterCom` record **before**
+attempting the registration — the right instinct, since a crash between "acted" and
+"journaled" would otherwise leave an unrecorded change — but it **kept** that record on
+two paths where the registration provably never happened:
+
+- `ExportMissing` (`:86-88`) — the DLL has no `DllRegisterServer` export;
+- `LoadFailed` (`:82-84`) — the DLL could not be loaded at all.
+
+Both return `StepResult.Failed` with the undo record still in the journal.
+
+**Why a stale record is worse than it sounds.** Since **R15**, a failed
+`DllUnregisterServer` is interpreted as *"still registered"* (`RollbackJournal.cs:1202`)
+— which is the correct fail-closed reading, because silently swallowing an undo failure
+is precisely what R15 was filed to stop. So the stale record is a **guaranteed
+`UndoFailedException` for a registration that never existed**. With
+`on_failure: continue`, the failed step does not abort the install, so the record
+reaches `uninstall.json` — and there R15's retain-on-failure rule (keep the state and
+the ARP row so the user can retry) means **every subsequent uninstall fails the same
+way**. The app can never leave Add/Remove Programs. One faulty or mis-pathed DLL, and
+the installer has produced exactly the "silently unremovable" outcome R44 and R51 exist
+to prevent, by a route neither of them covers.
+
+**Fix (#44, `3e0ba90`).** Journal-before-act is **kept** — the crash window it protects
+is real — and a **tail-only** `RollbackJournal.RetractLast` withdraws the record on the
+two paths where the action demonstrably did not occur (`LoadFailed`, `ExportMissing`).
+Tail-only matters: it can only ever remove the record the step itself just appended,
+so it cannot be used to rewrite journal history. `HResultFailure` **still journals, by
+design** — `DllRegisterServer` returning a failure HRESULT does not prove nothing was
+written to the registry, so the fail-closed reading is the right one there.
+
+**Follow-up worth doing once, not filed as a row:** audit every journal-before-act
+record whose action has **no OS query surface** to confirm afterwards. This class of
+bug — an undo recorded for a change that never landed, discoverable only at uninstall
+time, on a machine that no longer has the installer — is invisible to any test that
+does not actually run an uninstall. Cross-references **R15** (the retain-on-failure
+rule that makes this permanent) and **R36** (the decision to keep `com_register`'s
+in-process DLL load, which is what makes `LoadFailed` a reachable state at all).

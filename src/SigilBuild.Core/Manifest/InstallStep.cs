@@ -282,7 +282,10 @@ public abstract record InstallStep(string Id, string? When, OnFailure OnFailure)
     /// Journals a <c>RollbackRecord.UnregisterCom</c> (DLL path only) BEFORE the
     /// register so a mid-install crash and <c>setup.exe /Uninstall</c> both call
     /// <c>DllUnregisterServer</c> — mirrors <see cref="ServiceInstall"/>'s
-    /// <c>RemoveService</c> pattern.
+    /// <c>RemoveService</c> pattern — and withdraws that record again when the
+    /// register provably did not take effect (the DLL would not load, or has no
+    /// <c>DllRegisterServer</c> export), so an uninstall is never asked to remove
+    /// a registration that was never made.
     /// </summary>
     public sealed record ComRegister(
         string Id,

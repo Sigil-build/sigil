@@ -262,6 +262,14 @@ public sealed class SecretHygieneTests
         // that does not exist in it. The step is admitted, journals its inverse,
         // and then LoadLibraryEx fails, which is exactly the arrangement this test
         // has always used.
+        //
+        // What changed (the R15 follow-up): the step now WITHDRAWS its UnregisterCom
+        // when the register provably did not take effect, so this LoadFailed run
+        // persists an empty journal. That is a stronger hygiene result — the secret
+        // never reaches the file at all — but it no longer exercises the redaction
+        // machinery, so the assertion is split: this run proves the secret is absent,
+        // and a second save below proves the record a SUCCESSFUL register would have
+        // journaled persists with the secret redacted.
         var blob = BlobWith(new InstallStep.ComRegister(
             "reg", @"{install_dir}\${parameters.license_key}.dll", When: null, OnFailure: OnFailure.Continue));
         var parsed = CommandLineParser.Parse(new[] { $"/Plicense_key={Secret}" }, blob.Parameters);
@@ -282,11 +290,36 @@ public sealed class SecretHygieneTests
             UninstallStateStore.Save(appId, result.Journal, InstallScope.User, ctx.SecretValues);
             var content = File.ReadAllText(UninstallStateStore.PathFor(appId, InstallScope.User));
             content.Should().NotContain(Secret, "the persisted journal must never contain a secret value");
-            content.Should().Contain("***", "the secret occurrence in the journal must be redacted");
+            result.Journal.Records.Should().BeEmpty(
+                "LoadLibraryEx failed, so nothing was registered and the step withdrew its inverse");
         }
         finally
         {
             UninstallStateStore.Delete(appId, InstallScope.User);
+        }
+
+        // The register that DID take effect: the record the step keeps when
+        // DllRegisterServer ran. Its DllPath carries the same substituted secret, and
+        // it is the one that gets persisted for uninstall — so this is where the
+        // redaction contract actually has to hold. Arranged directly rather than
+        // through the engine because producing an Ok/HResultFailure outcome needs a
+        // real self-registering DLL (the CI-VM fixture that does not exist yet; see
+        // ComRegisterInstallTests' Skip reason).
+        var registeredAppId = "t11-2-secret-registered-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            var journal = new RollbackJournal();
+            journal.Append(new RollbackRecord.UnregisterCom(
+                ctx.ResolvePath(@"{install_dir}\${parameters.license_key}.dll")));
+
+            UninstallStateStore.Save(registeredAppId, journal, InstallScope.User, ctx.SecretValues);
+            var content = File.ReadAllText(UninstallStateStore.PathFor(registeredAppId, InstallScope.User));
+            content.Should().NotContain(Secret, "the persisted journal must never contain a secret value");
+            content.Should().Contain("***", "the secret occurrence in the journal must be redacted");
+        }
+        finally
+        {
+            UninstallStateStore.Delete(registeredAppId, InstallScope.User);
         }
     }
 

@@ -20,9 +20,11 @@ using SigilBuild.Wrapper.Steps.Win32;
 /// Records a <see cref="RollbackRecord.UnregisterCom"/> BEFORE the register so a
 /// mid-install crash and <c>setup.exe /Uninstall</c> both call
 /// <c>DllUnregisterServer</c> — mirrors <see cref="ServiceInstallStep"/>'s
-/// <c>RemoveService</c> pattern.
+/// <c>RemoveService</c> pattern — and <b>withdraws it again when the register
+/// provably did not take effect</b>.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The native load → resolve export → invoke → FreeLibrary path lives entirely
 /// in <see cref="ComRegistration"/> so the same code serves both this step and
 /// the undo record. This step's job is only to resolve the path, journal the
@@ -31,6 +33,21 @@ using SigilBuild.Wrapper.Steps.Win32;
 /// needs a real self-registering DLL plus admin and is verified on the CI VM
 /// (AGENTS.md §2); the load-failure and missing-export mappings are unit-tested
 /// locally on Windows without admin.
+/// </para>
+/// <para>
+/// <b>Journal-before is not journal-unconditionally.</b> Where
+/// <c>RemoveService</c>, <c>DeleteScheduledTask</c> and <c>DeleteFirewallRule</c>
+/// can each ask the OS at undo time whether their object exists — so an intent
+/// record for a mutation that never happened replays as a silent no-op —
+/// <see cref="RollbackRecord.UnregisterCom"/> cannot: since R15 its only probe is
+/// <c>DllUnregisterServer</c> itself, and a failure there is reported as "the
+/// registration is still in place". So when the outcome proves nothing was
+/// registered (<see cref="ComRegistration.ComExportOutcome.LoadFailed"/> — the
+/// module never mapped; <see cref="ComRegistration.ComExportOutcome.ExportMissing"/>
+/// — there is no <c>DllRegisterServer</c> to have run), the record is withdrawn
+/// via <see cref="RollbackJournal.RetractLast"/>. A failing HRESULT is not
+/// withdrawn: the export ran and may have registered part of itself.
+/// </para>
 /// </remarks>
 [SupportedOSPlatform("windows")]
 internal sealed class ComRegisterStep : IStep
@@ -72,9 +89,32 @@ internal sealed class ComRegisterStep : IStep
         // Journal the inverse (DllUnregisterServer) BEFORE registering so an
         // interrupted install and /Uninstall both unwind the COM registration.
         // Path only — no secrets.
-        journal.Append(new RollbackRecord.UnregisterCom(path));
+        var undo = new RollbackRecord.UnregisterCom(path);
+        journal.Append(undo);
 
         var result = ComRegistration.Invoke(path, "DllRegisterServer");
+
+        // A registration that PROVABLY never took effect must journal nothing.
+        // LoadFailed: the module never mapped, so DllRegisterServer never ran.
+        // ExportMissing: it mapped but has no DllRegisterServer to run — and
+        // therefore, near-certainly, no DllUnregisterServer either.
+        //
+        // Since R15 the undo no longer swallows its outcome: DllUnregisterServer
+        // is the ONLY way to probe a COM registration, so a failure there means
+        // "still registered" and fails the rollback/uninstall. Leaving the record
+        // in for these two outcomes would guarantee that failure on a DLL that
+        // registered nothing — the install fails, and then its own cleanup
+        // reports an unremovable machine-global registration that never existed.
+        // Withdraw it. HResultFailure is deliberately NOT withdrawn: the export
+        // did run and may have written part of its registration before failing,
+        // so the record stays and the undo does its best (R15's "unknown is not
+        // grounds for silence").
+        if (result.Outcome is ComRegistration.ComExportOutcome.LoadFailed
+            or ComRegistration.ComExportOutcome.ExportMissing)
+        {
+            journal.RetractLast(undo);
+        }
+
         return Task.FromResult(result.Outcome switch
         {
             ComRegistration.ComExportOutcome.Ok => StepResult.Ok(),

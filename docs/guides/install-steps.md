@@ -282,7 +282,9 @@ Self-registers a COM DLL by loading it and invoking its exported `HRESULT DllReg
 |---|---|---|---|---|
 |`path`|string|yes|-|Path to the COM DLL to register.|
 
-Journals an `UnregisterCom` record (DLL path only) **before** the register, so a mid-install crash or `setup.exe /Uninstall` both call `DllUnregisterServer` on the same path. A DLL that fails to load or has no `DllRegisterServer` export fails the step with a diagnostic message; on rollback, the same failure modes are tolerated best-effort (mirrors `service_install`'s `RemoveService` pattern).
+Journals an `UnregisterCom` record (DLL path only) **before** the register, so a mid-install crash or `setup.exe /Uninstall` both call `DllUnregisterServer` on the same path. A DLL that fails to load or has no `DllRegisterServer` export fails the step with a diagnostic message **and withdraws that record**: nothing was registered, so there is nothing for an uninstall to remove. A `DllRegisterServer` that runs and returns a failure `HRESULT` keeps its record — it may have written part of its registration before giving up.
+
+> **Your `DllUnregisterServer` has to work.** Unlike a missing service or firewall rule, a COM registration cannot be queried — calling `DllUnregisterServer` is the only way to find out — so Sigil treats anything other than `S_OK` from it as *the registration is still in place*, reports the uninstall as failed, and **keeps** `uninstall.json` and the Add/Remove Programs entry so the user can retry. Ship both exports, and make `DllUnregisterServer` return `S_OK` when there is nothing left to remove.
 
 > **What this step grants — read before you write one.** `com_register` is an explicit grant of **arbitrary code execution as administrator** to the DLL you name. Sigil loads it into the elevated installer process and calls one of its exports; it guarantees only that the DLL is the one you shipped, sitting where only administrators can have put it (the anchoring rules above). It cannot guarantee anything about what your `DllRegisterServer` then does.
 >

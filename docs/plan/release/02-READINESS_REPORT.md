@@ -107,6 +107,62 @@ register.
 For contrast, `ORCHESTRATION_PLAN.md:6` still claims "527 tests green". The
 plan docs have been outgrown by the tree; treat this register as the correction.
 
+### Measured again at Stage 4 (2026-09-09) — RC `102ea3f`
+
+Task **V1.4** measured locally (this box, SDK 10.0.303) and task **V1.1** read the
+per-test numbers out of CI run
+**[34362414470](https://github.com/Sigil-build/sigil/actions/runs/34362414470)**'s
+`test-results` artifact (12 `.trx` files) rather than off a console line.
+
+| Check | Local (`102ea3f`, SDK 10.0.303) | CI run 34362414470 (`102ea3f`) |
+|---|---|---|
+| Tests: total / passed / failed / skipped | **1708 / 1687 / 0 / 21** | **1708 / 1686 / 0 / 22** |
+| `dotnet build Sigil.slnx -c Release` | **0 warnings, 0 errors** | `build` ✅ |
+| `dotnet format --verify-no-changes` | exit 0 (clean) | `dotnet format` ✅ |
+| Coverage, project-wide union | — | **78.12 %** (floor 77) |
+| Coverage, `SigilBuild.Core` | — | **69.02 %** (floor **69** — see R71) |
+| Coverage, `SigilBuild.Packaging` | — | **86.62 %** (floor 72) |
+| Coverage, `SigilBuild.Signing` | — | **68.79 %** (floor 68) |
+| Coverage, `SigilBuild.Wrapper.Core` | — | **79.64 %** (floor 79) |
+| `sigil.exe` (win-x64 AOT) | not buildable on this box | **14.12 MB** (gate 15 MB) |
+| Installer-host full footprint | not buildable on this box | **42.82 MB** (gate 45 MB) |
+
+The one-skip delta is
+`LaunchTests.LaunchAppUnelevated_direct_spawn_produces_the_observable_side_effect`,
+which skips **because** the CI runner is elevated and runs on this unelevated box.
+Correct in both places. The 21 local skips break down as **16 VM-only** (a single
+`SIGIL_VM_TESTS` toggle on a single assembly) + **5 other** (3 live-tenant Azure
+Trusted Signing, 1 missing self-registering-DLL fixture, 1 kiosk sample) and
+**zero** runtime-staged-only — a *local environment* fact, since a staged win-x64
+host runtime happens to be present; a fresh clone on this box would put seven
+packaging skips back.
+
+**Ledger correction, recorded so the discrepancy does not resurface:** the V1.4
+entry in `progress.md` reported CI as "1704 total / 1686 passed / 18 skipped". The
+trx artifact says **1708 / 1686 / 22**. The four-test gap is
+`SigilBuild.Packaging.IntegrationTests` (1) and `SigilBuild.Signing.IntegrationTests`
+(3) — the two assemblies where *every* test skips, so `dotnet test` prints
+`Skipped! — … Total: N` instead of a `Passed!` line and a console-scraped total
+drops them. The local figure in the ledger (1708 / 1687 / 21) was exact.
+
+### Against the audit baseline — no regressions
+
+| | Audit (2026-07-28, `1be494c`) | Stage 4 (`102ea3f`) | Verdict |
+|---|---|---|---|
+| Tests | 1097 · 1096 passed · **1 skipped**, with **~24 vacuous passes** | **1708 · 1686 passed · 22 skipped**, none vacuous | **+611 tests**, and the skip count is now honest |
+| `dotnet format` | **FAILS** — 28 of 465 files | clean, and CI-enforced | fixed |
+| Coverage, union | 75.17 % (local reports) | **78.12 %** (CI, gated) | improved, now enforced |
+| Coverage, `SigilBuild.Core` | 63.89 % | **69.02 %** | improved; **80 % target still unmet** |
+| Coverage, `SigilBuild.Signing` | 68.79 % | **68.79 %** | **flat** — 85 % target unmet, no lane touched it |
+| Assemblies missing from the denominator | 3 (`Cli`, `Wrapper`, `Installer.Host`) | **3, unchanged** | tolerated loudly (R21), not fixed |
+| `sigil.exe` | 13.98 MB (stale local publish) | **14.12 MB** (CI) | ~6 % headroom left |
+| Installer-host footprint | unverified here | **42.82 MB** | ~3 MB under the 45 MB gate |
+
+**No metric regressed.** Two did not move: `SigilBuild.Signing` coverage is exactly
+where the audit found it, and the three zero-line assemblies are still zero-line.
+Both are recorded rather than fixed, which is the correct reading of **R21** — the
+gate is loud about them; nothing pretends they are covered.
+
 ---
 
 ## What I could not verify
@@ -236,6 +292,101 @@ That is a free name-squat waiting to happen.
 ## Definition of done for v1
 
 Tick every box before tagging. V1 (the verification lane) owns this list.
+
+### Where the list stands after V1.1 / V1.4 (2026-09-09, RC `102ea3f` → `b07021e`)
+
+The checkboxes below are kept **as the audit wrote them**, unticked. This block is
+the current record instead, for one reason: a checkbox cannot say "met, but on
+narrower evidence than the box's own wording implies", and several of these are
+exactly that. Evidence pointers are to CI run
+[34362414470](https://github.com/Sigil-build/sigil/actions/runs/34362414470) (`ci`,
+`102ea3f`, `success`), to the G1/G2 ceremonies recorded in
+`03-RC_ORCHESTRATION.md` and `00-GAP_REGISTER.md`, or to a register row's own
+V1.1 status line. Full working: `00-GAP_REGISTER.md`'s V1.1 section.
+
+**Met — Security.** R1 (all three boxes: `StateProvenanceTests`,
+`ReplayAnchoringTests`, `HostileStateJsonTests`, `UninstallAnchorSelectionTests`,
+`ScopeInstallSessionTests`, plus G1 hand-attacks 1–2 with quoted refusal lines) ·
+R2 (G1 attack 3, both gates probed separately) · R3 (G1 attack 4, literal refusal
+line) · R4 (G1 attack 5 at the new `%ProgramData%\sigil-runtime` path) · R5/R12
+(`SecureStagingTests`, `StagedExecutionTests`, `StagingDirTokenTests`) · R11
+(`AuthenticodeLaunchGateTests`, `DownloadedBinaryTrustTests`,
+`LaunchGateOrderingTests`) · R8/R14 (G2 checks 4 and 5 → `SIG0323`, `SIG0324`
+against a real CI-built `sigil.exe`).
+
+**Met with a stated limit.** *"Each of the above has a negative test confirmed to
+fail on the parent commit"* — true when each lane merged, and V1.1 re-sampled 14 of
+them across S1–S7: three produced **red assertions** (R33, R31, and R8/R14/R30/R45
+together), the rest fail on the parent as a *compile error naming the missing
+security API*, which is genuine but not the same ceremony. Two exceptions are
+written into their rows: **R19**'s specific claim is no longer reproducible at HEAD,
+and **R18**'s `Elevation.cs` half passes with the fix reverted (now **R72**). Read
+the register's Stage-1 negative-test claims as historical.
+
+**Met — Proof.** R6's non-zero skip count is recorded above (**21 local / 22 CI**),
+every skip carries an actionable reason, and no test soft-skips by returning early ·
+the `build` job stages the AOT runtime, so the pack→`Setup.exe` path executes on
+every push · **the VM matrix now runs on merge**, closing that box:
+[#41](https://github.com/Sigil-build/sigil/pull/41) added `push` on
+`main` / `release/**` (the weekly `schedule` in the same file is
+default-branch-only, so `release/**` gets its verdict from `push` and manual
+dispatch, not the cron).
+
+**Met — Release mechanics and docs.** R24 (one version literal; `VersionCommandTests`;
+G2 check 9) · R23's files (`SECURITY.md`, `CHANGELOG.md`,
+`THIRD-PARTY-NOTICES.md`, all four native components named — G2 check 7) · R42 (the
+vulnerability-scan job **ran and succeeded**, G2 check 10; its SBOM gap is
+**R70**, fixed in [#42](https://github.com/Sigil-build/sigil/pull/42)) · R26 (G2
+check 1 copy-pasted the documented silent line against a real `Setup.exe`, exit `0`;
+`docs/setup-exe-reference.md` documents ≥ 16 tokens, so "fifteen" is a floor) ·
+R25 · R20 (`dotnet format` clean and CI-enforced, and `pr-guards` was **watched
+failing** throwaway PR #17's `broken title`).
+
+**Partially met — do not tick these yet.**
+
+- **R13** — freshness and replay rejection are unit-proven
+  (`UpdateFreshnessTests`, `UpdateEndToEndTests`); the **live** `Setup.exe /Update`
+  replay against a hosted signed manifest is deferred to the VM matrix, and G2
+  check 6 is deliberately left unticked.
+- **R21** — per-assembly floors are enforced, but **three shipping assemblies
+  (`Cli`, `Wrapper`, `Installer.Host`) still contribute 0 lines** and are a
+  `::warning::` only. Also **R71**: `SigilBuild.Core` sits 0.02 pp above its floor.
+- **R22** — the fail-loudly guards exist (`wrapper-vm-tests.yml:86, :143, :175`)
+  but have **never been observed refusing** a marker-unset run: the first VM run
+  died on rotted fixtures (**R66**). Claim-only until a matrix run exercises them.
+- **R23a** — `dotnet restore --locked-mode` succeeds from a clean clone **in
+  Debug**; the Release restore graph is unvalidated and rewrites tracked lock files
+  (**R65**, live-reproduced by V1.1).
+- **R7's first clause** — `release.yml` produces signed, checksummed, VM-gated
+  artifacts *by construction*; the workflow has never executed.
+
+**Remaining — the actual gate list.**
+
+1. **VM matrix green, with its run URL recorded here.** The first *automatic* run,
+   [34368896457](https://github.com/Sigil-build/sigil/actions/runs/34368896457) on
+   `b07021e`, was **in progress** when this was written. The only prior run
+   (34361541578, `da792fb`) failed all four jobs for reasons that were entirely
+   fixture and workflow rot — **R66**, **R67**, **R68**, now all three closed by
+   [#40](https://github.com/Sigil-build/sigil/pull/40) and
+   [#41](https://github.com/Sigil-build/sigil/pull/41). Until a run is green,
+   **R58**'s own end-to-end test (`ArpUninstallStringTests`) has still never
+   executed, and **R64** shows machine-scope install remains uncovered even when it
+   is.
+2. **Release dry-run.** Blocked on the **six Trusted Signing secrets** — no lane can
+   supply them; `release.yml`'s own "require signing secrets" refusal fires first.
+   This is the only way to learn whether the workflow parses and runs at all.
+3. **R7 — the published artifact runs on a clean machine.** Verified by downloading
+   it, not by reading the workflow (the sibling-DLL trap). Needs (2) first.
+4. **V1.2 — the re-attack pass.** The G1 attacks re-run against the *integrated* RC,
+   not against each lane at its own tip.
+5. **R23's other half — private vulnerability reporting is still OFF**
+   (`{"enabled":false}`, re-checked 2026-09-09). Repo-owner action, G4.
+6. **NuGet IDs reserved.** Still unclaimed — **R41a**, corrected by V1.1 from
+   "closed" to "documented open". Owner action, G4.
+7. **"Every remaining register row is either demonstrated fixed or listed in the
+   release notes' known limitations."** Not yet: the known-limitations draft below
+   predates **R60–R65** and **R69–R73**. Closing this box means a pass over that
+   draft, and it is the cheapest of the seven.
 
 **Security — no box here is optional**
 

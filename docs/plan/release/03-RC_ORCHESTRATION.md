@@ -787,7 +787,7 @@ check as R58.**
 | VM-FIX-A2 | `rc/vm-fix-fixtures-round2` | ☑ | [#45](https://github.com/Sigil-build/sigil/pull/45) | ☑ `df98eba` | **G3 ✅ (install-matrix PASS; R74 honest skips confirmed live)** |
 | P6-FIX-2 | `rc/p6-fix-upgrade-mutex` | ☑ | [#46](https://github.com/Sigil-build/sigil/pull/46) | ☐ **open**, head `cdb4c4d` | **G3 (R76 — RELEASE BLOCKER; CI green, mechanism review-approved, awaiting human merge)** |
 | V1-DOCS | `rc/v1-register-status` | ☑ | [#43](https://github.com/Sigil-build/sigil/pull/43) | ☑ `e1d3f8f` | G3 (V1.1 — R69–R76 filed) |
-| DOC-G3 | `rc/doc-g3-progress` | ☑ | this PR | ☐ | G3 (first green matrix recorded; R58/R66–R70/R75 confirmed live; R76 pointed at #46) |
+| DOC-G3 | `rc/doc-g3-progress` | ☑ | [#47](https://github.com/Sigil-build/sigil/pull/47) | ☐ | G3 (first green matrix recorded; R58/R66–R70/R75 confirmed live; R76 pointed at #46) |
 | V1  | `rc/v1-verification` | ◐ V1.1 + V1.4 done | ☐ | ☐ | G3/G4 |
 
 The hotfix row (`rc/s1-fix-provenance-fixture`, [#36](https://github.com/Sigil-build/sigil/pull/36)

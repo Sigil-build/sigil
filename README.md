@@ -13,32 +13,57 @@
 Modern desktop installer tooling forces a choice between expensive GUI suites
 (InstallShield, Advanced Installer — \$400-\$4,500 / year) and free-but-painful
 XML / Pascal scripting (WiX, NSIS, Inno Setup). Sigil sits in the middle:
-declarative YAML, headless cloud code signing, and zstd dictionary-mode delta
-updates with a built-in client SDK.
+declarative YAML, headless cloud code signing, and a signed full-package
+update engine.
 
-## Install (after MVP launch)
+> **Delta updates are not shipped.** Earlier planning material described
+> zstd dictionary-mode delta patches and a client Update SDK; both are
+> explicitly deferred (`docs/architecture/adr-010-delta-update-deferral.md`),
+> and no `SigilBuild.UpdateSdk` project exists in `src/` today. `/Update`
+> always fetches and runs the complete new-version package.
 
-```bash
-# Windows
-winget install Sigil-build.sigil
+## What you get
 
-# macOS / Linux
-curl -sSL https://sigil.build/install.sh | sh
+`sigil.yaml` → `sigil pack --format exe` → a branded, self-elevating Windows
+wizard (`<App.Name>-<version>-<arch>-Setup.exe`) — or `zip` / `msix` if you
+don't need the wizard. The `exe` path ships:
 
-# .NET developers, any platform
-dotnet tool install -g SigilBuild
-```
+- a branded install wizard with wizard chrome themed from two manifest
+  colors, driven entirely by `sigil.yaml`'s `installer:` / `parameters:`
+  blocks (see [Installer wizard](docs/guides/installer-wizard.md));
+- a closed catalog of install steps (`file_copy`, registry, shortcuts,
+  services, scheduled tasks, COM registration, firewall rules, and more —
+  see [Install steps](docs/guides/install-steps.md)), each one journaled for
+  automatic rollback on a failed or cancelled install;
+- an auto-generated `uninstall.exe` and Add/Remove Programs entry, with
+  anchored journal replay so an untrusted uninstall state cannot be used to
+  drive an elevated process anywhere it shouldn't go (see
+  [Uninstaller](docs/guides/uninstaller.md));
+- silent install/uninstall/update via a documented flag set — see the
+  [setup.exe reference](docs/setup-exe-reference.md);
+- a signed, full-package update engine (`/Update`) — see
+  [Updates](docs/guides/updates.md).
 
-Today (pre-MVP) you can build from source — see `CONTRIBUTING.md`.
+**Status:** pre-MVP. The `publish` stage (hosting + release-channel
+distribution) is not built yet.
 
-## Build from source
+## Install
+
+There is no published package yet — `SigilBuild` / `SigilBuild.UpdateSdk`
+(NuGet), `winget`, and a install script are all pre-MVP roadmap items, not
+available today. Build from source:
 
 ```bash
 git clone https://github.com/Sigil-build/sigil.git
 cd sigil
-dotnet build
-dotnet test
+dotnet build Sigil.slnx -c Release
+dotnet test Sigil.slnx -c Release
 ```
+
+See [Getting started](docs/getting-started.md) for a full walkthrough
+(`init` → `validate` → `pack`). A signed GitHub Release with prebuilt
+binaries will replace this section once the release workflow ships — see
+`CHANGELOG.md`'s "Known limitations".
 
 ## Credits
 

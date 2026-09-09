@@ -1,6 +1,13 @@
-# ADR-009: Brand Token Runtime JSON vs. Compile-Time Source Generator
+# ADR-013: Brand Token Runtime JSON vs. Compile-Time Source Generator
 
 **Status:** Accepted (2026-05-12) — backfilled to document a decision already shipped in PR #4.
+
+> **Renumbered from ADR-009, moved from `sigil-docs/architecture/`
+> (register row R27).** `sigil-docs/` held a second, stale ADR tree that
+> collided with two numbers already in use under `docs/architecture/`
+> (ADR-009 = update-manifest signature, ADR-010 = delta-update deferral).
+> Content below is unchanged from the original except for this notice and
+> the number in the title.
 
 ## Context
 

@@ -1,6 +1,13 @@
-# ADR-010: Schema Validator as a Single-Class Monolith
+# ADR-014: Schema Validator as a Single-Class Monolith
 
 **Status:** Accepted (2026-05-12) — backfills a decision already shipped in PR #2.
+
+> **Renumbered from ADR-010, moved from `sigil-docs/architecture/`
+> (register row R27).** `sigil-docs/` held a second, stale ADR tree that
+> collided with two numbers already in use under `docs/architecture/`
+> (ADR-009 = update-manifest signature, ADR-010 = delta-update deferral).
+> Content below is unchanged from the original except for this notice and
+> the number in the title.
 
 ## Context
 

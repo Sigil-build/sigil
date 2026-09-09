@@ -33,11 +33,11 @@ Best for: portable apps, CI artefacts, per-user "extract anywhere" distributions
 
 ### `exe`
 
-Self-extracting `setup.exe` with Sigil's branded wizard host (D-013 / D-014). Full install-step engine, declarative parameters, auto-generated `uninstaller.exe`, ARP integration.
+Self-extracting `setup.exe` with Sigil's branded wizard host (D-013 / D-014). Full install-step engine, declarative parameters, auto-generated `uninstall.exe`, ARP integration.
 
 - All MUST-tier step types (`file_copy`, `registry_*`, `shortcut_create`, `env_set`, `run_program`, `service_install`, ...).
-- `parameters:` block surfaces in the wizard or via `/Name=Value` on silent install.
-- Signing: `setup.exe` and the embedded `uninstaller.exe` are both signed.
+- `parameters:` block surfaces in the wizard or via `/PName=Value` on silent install (`/S /D=<dir> /PName=Value`; see [setup.exe reference](../setup-exe-reference.md)).
+- Signing: `setup.exe` and the embedded `uninstall.exe` are both signed.
 
 Best for: "real" Windows installers. The intended NSIS / WiX replacement.
 

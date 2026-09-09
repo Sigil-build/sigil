@@ -19,7 +19,8 @@ using Xunit;
 /// about the real <c>schtasks.exe</c> round trip) and asserts BOTH halves of
 /// the P11 "Verify" block:
 /// <list type="bullet">
-/// <item><description>create → <c>schtasks /Query /TN &lt;name&gt;</c> finds it;</description></item>
+/// <item><description>create → <c>schtasks /Query /TN &lt;name&gt; /FO LIST</c>
+/// finds it (LIST, not the default TABLE — see <see cref="QueryTaskAsync"/>);</description></item>
 /// <item><description>reverse (the journaled <see cref="RollbackRecord.DeleteScheduledTask"/>,
 /// the same record <c>setup.exe /Uninstall</c> and a mid-install crash both
 /// invoke) → the task is gone.</description></item>
@@ -103,11 +104,12 @@ public class ScheduledTaskCreateInstallTests
                 .RunAsync(installDir.Context, journal, default);
             result.Success.Should().BeTrue(result.Error ?? "schtasks /Create should succeed under elevation");
 
-            var afterCreate = await SystemStepProcessRunner
-                .RunAsync("schtasks.exe", "/Query", "/TN", taskName);
+            var afterCreate = await QueryTaskAsync(taskName);
             afterCreate.ExitCode.Should().Be(0,
                 $"schtasks /Query must find '{taskName}' right after create. stderr: {afterCreate.Stderr}");
-            afterCreate.Stdout.Should().Contain(taskName);
+            afterCreate.Stdout.Should().Contain($@"\{taskName}",
+                "the LIST-format query prints the task's full path, so the whole 44-character " +
+                "name must appear — untruncated and folder-qualified");
 
             // Reverse via the SAME rollback record setup.exe /Uninstall and a
             // mid-install crash both invoke — proving the create+reverse pair,
@@ -117,9 +119,10 @@ public class ScheduledTaskCreateInstallTests
                 .Which.TaskName.Should().Be(taskName);
             await journal.Records[0].UndoAsync(default);
 
-            var afterUndo = await SystemStepProcessRunner
-                .RunAsync("schtasks.exe", "/Query", "/TN", taskName);
+            var afterUndo = await QueryTaskAsync(taskName);
             afterUndo.ExitCode.Should().NotBe(0, "schtasks /Query must NOT find the task after rollback");
+            afterUndo.Stdout.Should().NotContain(taskName,
+                "the same query that found the task must no longer name it at all");
         }
         finally
         {
@@ -127,4 +130,26 @@ public class ScheduledTaskCreateInstallTests
                 .BestEffortAsync("schtasks.exe", "/Delete", "/TN", taskName, "/F");
         }
     }
+
+    /// <summary>
+    /// Query one task in <b>LIST</b> format, so the assertions can match the task's
+    /// full name.
+    /// </summary>
+    /// <remarks>
+    /// <c>schtasks /Query</c>'s default TABLE format pads and <b>truncates the
+    /// TaskName column to 40 characters</b>. This test's names are
+    /// <c>SigilItTask_</c> + a 32-character GUID = 44 characters, so the table row
+    /// read <c>SigilItTask_bf6e1960d72e4a24b561db2f2c60</c> and the "does the output
+    /// contain the name" assertion failed on a task that had in fact been created
+    /// exactly as asked. LIST format prints one <c>TaskName: \&lt;name&gt;</c> line
+    /// with no column budget, so the full name survives — and it keeps the
+    /// per-run GUID that makes concurrent and repeat runs collision-free, which
+    /// shortening the name to fit the table would have cost.
+    /// <para>
+    /// Both halves of the round trip go through here: the same query that has to find
+    /// the task after create has to stop naming it after the rollback.
+    /// </para>
+    /// </remarks>
+    private static Task<SystemStepProcessRunner.Result> QueryTaskAsync(string taskName) =>
+        SystemStepProcessRunner.RunAsync("schtasks.exe", "/Query", "/TN", taskName, "/FO", "LIST");
 }

@@ -60,9 +60,19 @@ That assumption is now written where publishers read it
 4. calls `ComRegistration.Invoke(path, "DllRegisterServer")`, which is
    `LoadLibraryExW(..., LOAD_WITH_ALTERED_SEARCH_PATH)` →
    `GetProcAddress` → a call through a C# unmanaged function pointer
-   (`delegate* unmanaged[Stdcall]<int>`) → `FreeLibrary` in a `finally`.
+   (`delegate* unmanaged[Stdcall]<int>`) → `FreeLibrary` in a `finally`;
+5. **withdraws the step-3 record** (`RollbackJournal.RetractLast`) when the
+   outcome is `LoadFailed` or `ExportMissing` — the two cases where the undo's
+   own `DllUnregisterServer` cannot be *called*, so replaying it could only
+   report a registration it never managed to probe. `Ok` and `HResultFailure`
+   keep the record. Added as the R15 follow-up: R15 made a failed
+   `DllUnregisterServer` mean "the registration is still in place", which turned
+   an unconditionally-journalled record into a guaranteed uninstall failure for a
+   DLL that never registered anything. Note the bar is the undo's *feasibility*,
+   not proof that nothing was written — a load that fails may still have run
+   `DllMain`, which is why publishers are told not to register from it.
 
-Step 4 is the one this ADR is about. Steps 1–3 are unchanged by it and are
+Step 4 is the one this ADR is about. Steps 1–3 and 5 are unchanged by it and are
 load-bearing for the analysis below.
 
 ### Why the row was raised
@@ -240,3 +250,4 @@ Any one of these, and this ADR should be superseded:
 | Date | Change |
 |---|---|
 | 2026-08-11 | Initial version. Stage 2, lane S6, register row R36. |
+| 2026-09-09 | "What the step does today" gained step 5, the R15 follow-up: the step now withdraws its `UnregisterCom` record for the `LoadFailed` / `ExportMissing` outcomes, where the undo's own `DllUnregisterServer` cannot be called. No change to the in-process decision this ADR records. |

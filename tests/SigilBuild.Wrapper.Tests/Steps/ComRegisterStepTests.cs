@@ -26,12 +26,15 @@ using Xunit;
 /// self-registering COM DLL plus admin and is verified on the CI VM
 /// (AGENTS.md §2).
 /// <para>
-/// Both failure modes also pin the <b>journal</b> contract: a register that
-/// provably did not take effect leaves NO <c>UnregisterCom</c> record behind. That
-/// is the R15 follow-up — see
-/// <see cref="Step_maps_LoadFailed_to_a_failed_result_and_journals_nothing"/> for
-/// why the pre-existing "still journals the inverse first" assertion became a
-/// guaranteed uninstall failure.
+/// Both failure modes also pin the <b>journal</b> contract, in both directions —
+/// the R15 follow-up. A register whose undo cannot be called leaves NO
+/// <c>UnregisterCom</c> record behind (see
+/// <see cref="Step_maps_LoadFailed_to_a_failed_result_and_journals_nothing"/> for why
+/// the pre-existing "still journals the inverse first" assertion became a guaranteed
+/// uninstall failure); a register that ran and failed KEEPS its record (see
+/// <see cref="Step_keeps_the_journaled_undo_when_DllRegisterServer_ran_and_failed"/>,
+/// which needs <see cref="ComRegistration.ComExportInvoker"/> because that outcome
+/// is otherwise unreachable without the absent fixture DLL).
 /// </para>
 /// </summary>
 [SupportedOSPlatform("windows")]
@@ -69,8 +72,9 @@ public class ComRegisterStepTests
     }
 
     /// <summary>
-    /// A load failure means the module never mapped, so <c>DllRegisterServer</c>
-    /// never ran and nothing was registered — the journal must come out EMPTY.
+    /// A module that will not load will not load for the undo either, so the
+    /// journaled <c>DllUnregisterServer</c> could never be called — the journal must
+    /// come out EMPTY.
     /// <para>
     /// This test previously asserted the opposite ("still journals the inverse
     /// first"), on the reasoning that journal-before-act is always safe because the
@@ -78,8 +82,10 @@ public class ComRegisterStepTests
     /// this one record: <c>DllUnregisterServer</c> is the only probe a COM
     /// registration has, so a failure there is reported as "still registered" and
     /// fails the rollback and every subsequent uninstall attempt. A record kept here
-    /// is a guaranteed <c>UndoFailedException</c> about a registration that never
-    /// existed. The step now withdraws it.
+    /// is a guaranteed <c>UndoFailedException</c> issued on the strength of a probe
+    /// that never ran. The step now withdraws it. (Note the bar is the undo's
+    /// feasibility, not proof that nothing was written: <c>LoadLibraryEx</c> reports
+    /// failure when <c>DllMain</c> returns FALSE, after <c>DllMain</c> executed.)
     /// </para>
     /// </summary>
     [Fact]
@@ -104,8 +110,9 @@ public class ComRegisterStepTests
         result.Success.Should().BeFalse();
         result.Error.Should().Contain("LoadLibraryEx");
         journal.Records.Should().BeEmpty(
-            "LoadLibraryEx failed, so DllRegisterServer never ran — an UnregisterCom " +
-            "record here would fail every uninstall for a registration that was never made");
+            "LoadLibraryEx failed, so the undo's DllUnregisterServer could not be called " +
+            "either — an UnregisterCom record here would fail this rollback and every later " +
+            "uninstall on the strength of a probe that never ran");
     }
 
     /// <summary>
@@ -136,13 +143,83 @@ public class ComRegisterStepTests
     }
 
     /// <summary>
-    /// The withdrawal must not swallow the record for an outcome that only proves the
-    /// register <em>reported</em> failure: <c>DllRegisterServer</c> ran, and may have
-    /// written part of its registration before giving up, so the undo has real work to
-    /// attempt. Asserted at the journal level (an
-    /// <c>HResultFailure</c> needs a real self-registering DLL that returns non-zero,
-    /// which is the CI-VM fixture that does not exist yet) — <c>RetractLast</c> only
-    /// removes the record it is handed, and only from the tail.
+    /// The RETENTION half of the contract, and the one that needs a seam to bite.
+    /// <c>HResultFailure</c> means <c>DllRegisterServer</c> ran and reported failure:
+    /// it may have written part of its registration, and its
+    /// <c>DllUnregisterServer</c> is callable — so the undo has real work to attempt
+    /// and MUST survive.
+    /// <para>
+    /// Reaching that outcome for real needs a self-registering DLL returning non-zero
+    /// (the CI-VM fixture that does not exist yet), so without
+    /// <see cref="ComRegistration.ComExportInvoker"/> this half was unpinned: widening
+    /// the step's withdrawal to <c>or HResultFailure</c> — which would silently discard
+    /// the undo for a registration that partly happened — passed the entire suite.
+    /// With the stub it fails here.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Step_keeps_the_journaled_undo_when_DllRegisterServer_ran_and_failed()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        // E_FAIL from a DllRegisterServer that executed. Nothing is loaded or
+        // registered: the native invocation itself is stubbed out.
+        var dll = Path.Combine(Environment.SystemDirectory, "sigil-partial-registrar.dll");
+        var spec = new InstallStep.ComRegister("reg", dll, When: null, OnFailure: OnFailure.Continue);
+        var journal = new RollbackJournal();
+        var invoked = 0;
+
+        var result = await new ComRegisterStep(spec, (path, export) =>
+        {
+            invoked++;
+            path.Should().Be(dll);
+            export.Should().Be("DllRegisterServer");
+            return new ComRegistration.ComInvocationResult(
+                ComRegistration.ComExportOutcome.HResultFailure, Win32Error: 0, HResult: unchecked((int)0x80004005));
+        }).RunAsync(SystemDirContext(), journal, default);
+
+        invoked.Should().Be(1, "the step must go through the seam, not the real LoadLibraryEx");
+        result.Success.Should().BeFalse();
+        result.Error.Should().Contain("0x80004005");
+        journal.Records.Should().ContainSingle(
+            "DllRegisterServer ran and may have written part of its registration before " +
+            "failing, and its DllUnregisterServer is callable — so the undo must survive")
+            .Which.Should().BeOfType<RollbackRecord.UnregisterCom>()
+            .Which.DllPath.Should().Be(dll);
+    }
+
+    /// <summary>
+    /// A successful register obviously keeps its undo — the same seam, the same
+    /// assertion, and the outcome the fixture DLL will eventually exercise for real.
+    /// </summary>
+    [Fact]
+    public async Task Step_keeps_the_journaled_undo_when_the_register_succeeds()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var dll = Path.Combine(Environment.SystemDirectory, "sigil-good-registrar.dll");
+        var spec = new InstallStep.ComRegister("reg", dll, When: null, OnFailure: OnFailure.Continue);
+        var journal = new RollbackJournal();
+
+        var result = await new ComRegisterStep(spec, (_, _) => new ComRegistration.ComInvocationResult(
+                ComRegistration.ComExportOutcome.Ok, Win32Error: 0, HResult: 0))
+            .RunAsync(SystemDirContext(), journal, default);
+
+        result.Success.Should().BeTrue(result.Error);
+        journal.Records.Should().ContainSingle()
+            .Which.Should().BeOfType<RollbackRecord.UnregisterCom>()
+            .Which.DllPath.Should().Be(dll);
+    }
+
+    /// <summary>
+    /// <c>RetractLast</c>'s own contract: it removes only the record it is handed, and
+    /// only while that record is still the tail.
     /// </summary>
     [Fact]
     public void RetractLast_only_withdraws_the_tail_and_only_the_record_it_is_given()

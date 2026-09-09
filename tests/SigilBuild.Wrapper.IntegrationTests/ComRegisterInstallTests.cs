@@ -53,13 +53,13 @@ using Xunit;
 /// plumbing" test and drove <see cref="RollbackRecord.UnregisterCom"/>'s
 /// <c>UndoAsync</c> on that same export-less DLL, asserting the undo "must not
 /// throw". Its premise was false in both directions. A DLL with no
-/// <c>DllRegisterServer</c> registered nothing, so there is no reverse to exercise;
-/// and R15 ("uninstall must not report a success it did not achieve") made that undo
+/// <c>DllRegisterServer</c> also has no <c>DllUnregisterServer</c>, so there is no
+/// reverse to exercise; and R15 ("uninstall must not report a success it did not achieve") made that undo
 /// throw <c>UndoFailedException</c>, because <c>DllUnregisterServer</c> is the only
 /// probe a COM registration has and a failure there means "still registered". The VM
 /// run failed here for the right reason. The fix is in the STEP, not in this test: a
-/// register that provably did not take effect now journals nothing, so this leg
-/// asserts an empty journal — which is also why there is no undo left for it to
+/// register whose undo cannot be called journals nothing, so this leg asserts an
+/// empty journal — which is also why there is no undo left for it to
 /// drive. The real register→reverse round trip stays the
 /// <see cref="Live_register_then_unregister_a_real_self_registering_dll"/> Skip,
 /// whose reason now spells out the exact fixture needed.
@@ -143,7 +143,7 @@ public class ComRegisterInstallTests
         journal.Records.Should().BeEmpty(
             "the probe DLL exports neither DllRegisterServer nor DllUnregisterServer, so a " +
             "journaled UnregisterCom would fail this install's rollback AND every later " +
-            "uninstall attempt over a registration that was never made");
+            "uninstall attempt on the strength of a probe that never ran");
     }
 
     [Fact(Skip =

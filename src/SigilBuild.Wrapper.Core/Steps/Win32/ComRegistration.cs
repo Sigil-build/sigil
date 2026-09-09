@@ -60,6 +60,16 @@ internal static partial class ComRegistration
         ComExportOutcome Outcome, int Win32Error, int HResult);
 
     /// <summary>
+    /// The shape of <see cref="Invoke"/>, so <c>ComRegisterStep</c> can be handed a
+    /// stub in unit tests and its journal RETENTION behaviour pinned for the two
+    /// outcomes that need a real self-registering DLL
+    /// (<see cref="ComExportOutcome.Ok"/> / <see cref="ComExportOutcome.HResultFailure"/>).
+    /// A named, non-generic delegate over a static method — statically bound, no
+    /// reflection, no IL stub, so it changes nothing about AOT safety.
+    /// </summary>
+    internal delegate ComInvocationResult ComExportInvoker(string dllPath, string export);
+
+    /// <summary>
     /// Loads <paramref name="dllPath"/>, resolves the stdcall
     /// <c>HRESULT <paramref name="export"/>(void)</c> export, invokes it via a
     /// C# unmanaged function pointer, and always <c>FreeLibrary</c> in a

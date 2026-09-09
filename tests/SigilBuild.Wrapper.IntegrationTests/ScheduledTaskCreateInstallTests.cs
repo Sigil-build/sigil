@@ -146,6 +146,14 @@ public class ScheduledTaskCreateInstallTests
     /// per-run GUID that makes concurrent and repeat runs collision-free, which
     /// shortening the name to fit the table would have cost.
     /// <para>
+    /// <b>The assertions match the task-name VALUE, never the row label.</b>
+    /// <c>schtasks</c>' LIST field labels (<c>TaskName:</c>, <c>Status:</c>, …) are
+    /// localized, so asserting on <c>"TaskName:"</c> would pass only on an English
+    /// runner. What is matched is <c>\&lt;taskName&gt;</c> — the folder-qualified name
+    /// this test generated, which is locale-invariant, and whose leading backslash
+    /// also rules out a partial or prefix match.
+    /// </para>
+    /// <para>
     /// Both halves of the round trip go through here: the same query that has to find
     /// the task after create has to stop naming it after the rollback.
     /// </para>

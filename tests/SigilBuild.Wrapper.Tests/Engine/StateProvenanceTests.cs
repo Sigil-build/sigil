@@ -461,6 +461,32 @@ public class StateProvenanceTests
             // user, with a bare CreateDirectory, exactly as the attacker would.
             var machinePath = UninstallStateStore.PathFor(appId, InstallScope.Machine);
             Directory.CreateDirectory(machineDir);
+
+            // The ACE below is what makes the DIRECTORY half of this fixture host- AND
+            // ORDER-independent, for the same reason as the file ACE in Arrange (3).
+            // A bare CreateDirectory only yields a Users-writable container while the
+            // shared parent %ProgramData%\Sigil still carries %ProgramData%'s permissive
+            // inheritance. It need not: StateDirectorySecurity.CreateHardened creates
+            // every MISSING ancestor with the same protected admin-only DACL, so the
+            // first machine-scope write on a fresh host — from ANY of its callers, the
+            // install-state store or the update-sequence store — leaves
+            // %ProgramData%\Sigil protected, Users:ReadAndExecute. From then on a bare
+            // CreateDirectory under it inherits admin-only, and on an elevated host
+            // (GitHub's windows-latest runners are elevated) the new directory is
+            // Administrators-OWNED as well — so it reads as TRUSTED and this
+            // precondition fails, with nothing wrong with the product. Granting
+            // BUILTIN\Users FullControl puts a non-administrator write-class right on
+            // the container itself, which fails the DACL half of the check whatever an
+            // earlier test, or an earlier install on the machine, left behind.
+            var plantedDir = new DirectoryInfo(machineDir).GetAccessControl();
+            plantedDir.AddAccessRule(new FileSystemAccessRule(
+                Users,
+                FileSystemRights.FullControl,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None,
+                AccessControlType.Allow));
+            new DirectoryInfo(machineDir).SetAccessControl(plantedDir);
+
             File.WriteAllText(machinePath, payload);
             File.Exists(machinePath).Should().BeTrue(
                 "if %ProgramData% is not writable in this session the attack fixture is " +
@@ -473,7 +499,7 @@ public class StateProvenanceTests
             // in place, so the planted file keeps its owner and its explicit ACEs even
             // after an elevated installer has repaired the directory around it.
             //
-            // The ACE below is what makes this fixture host-INDEPENDENT. Unelevated, the
+            // The ACE below is what makes the FILE half host-INDEPENDENT. Unelevated, the
             // planted file is already untrusted because this user owns it. Elevated —
             // which is how GitHub's windows-latest runners execute — a file created under
             // %ProgramData% is Administrators-owned (its Users write ACE is (CI)-only and

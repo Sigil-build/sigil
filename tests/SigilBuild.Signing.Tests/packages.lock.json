@@ -252,8 +252,8 @@
       },
       "SkiaSharp.NativeAssets.macOS": {
         "type": "Transitive",
-        "resolved": "3.119.4-preview.1.1",
-        "contentHash": "77gyFnZD0uU12ABgI6pe8Iw2GRBYGryMP4EaHFs7fniffthVT5sf4PTug4ytwNzLKkVDiLobEpIvAJAj3UXwEw=="
+        "resolved": "3.119.4",
+        "contentHash": "fgBOWEqbY012x7gMfJU4ezgz6dfhJb30Z6YdW35h85Zoe39+a8YNbAAwL29ihPfWoppg5AjvyKNzD1oCvlqWwA=="
       },
       "System.ClientModel": {
         "type": "Transitive",
@@ -337,8 +337,8 @@
           "SigilBuild.Core": "[0.1.0-alpha, )",
           "SigilBuild.Installer.BrandGenerator": "[0.1.0-alpha, )",
           "SigilBuild.Wrapper.Core": "[0.1.0-alpha, )",
-          "SkiaSharp": "[3.119.4-preview.1.1, )",
-          "SkiaSharp.NativeAssets.Win32": "[3.119.4-preview.1.1, )"
+          "SkiaSharp": "[3.119.4, )",
+          "SkiaSharp.NativeAssets.Win32": "[3.119.4, )"
         }
       },
       "sigilbuild.signing": {
@@ -386,19 +386,19 @@
       },
       "SkiaSharp": {
         "type": "CentralTransitive",
-        "requested": "[3.119.4-preview.1.1, )",
-        "resolved": "3.119.4-preview.1.1",
-        "contentHash": "cyRjWksj/SwFWo7uPfpFk0sOPyUcE+FhF6ENFc3Q100sdJWHEA2nU1PcEeT7LsLFKBvDP/67q0A8vEXc4kvXnA==",
+        "requested": "[3.119.4, )",
+        "resolved": "3.119.4",
+        "contentHash": "53NOSUZ1Us+91Sm0uCkIivh/k7jOowRErZT2sIWwPFN9mLUvdxnE6rS4sWo4255+Rd2MWUSF+j0NMZHD6Cke+Q==",
         "dependencies": {
-          "SkiaSharp.NativeAssets.Win32": "3.119.4-preview.1.1",
-          "SkiaSharp.NativeAssets.macOS": "3.119.4-preview.1.1"
+          "SkiaSharp.NativeAssets.Win32": "3.119.4",
+          "SkiaSharp.NativeAssets.macOS": "3.119.4"
         }
       },
       "SkiaSharp.NativeAssets.Win32": {
         "type": "CentralTransitive",
-        "requested": "[3.119.4-preview.1.1, )",
-        "resolved": "3.119.4-preview.1.1",
-        "contentHash": "BYwNLG02IAYMsBPgU9lM37xJgCM3B/2X5z1FQEBR34dmn+Hxvcw8X83PInY2rzix7mlbcv7OF8UHjf7yMbsDaA=="
+        "requested": "[3.119.4, )",
+        "resolved": "3.119.4",
+        "contentHash": "XOpbx/4CReO2wYsq2s6rbvdauc6dntG4Zv499sHGTJ87bwZaFXszFkwql3+FIZMc8kUPeaj3Mx2ezIJmo8a1Kg=="
       },
       "YamlDotNet": {
         "type": "CentralTransitive",

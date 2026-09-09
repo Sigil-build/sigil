@@ -32,8 +32,20 @@ name: wrapper-vm-tests
 # gate G3 (docs/plan/release/03-RC_ORCHESTRATION.md) requires the matrix to run "on a
 # schedule or on merge, not only on demand": a dispatch-only workflow is one nobody
 # dispatches, which is exactly how the fixtures in this suite rotted unnoticed until
-# its first real run (register row R66). So: on merge into main or a release branch,
-# weekly regardless, and on demand as before.
+# its first real run (register row R66).
+#
+# G3 is met by `push`, which is the half that covers the release branch. Read the two
+# triggers separately, because GitHub does not treat them alike:
+#
+#   push      — fires on merge into `main` AND into any `release/**` branch. This is
+#               what gives the RC a verdict: every merge into `release/v0.1.0-alpha`
+#               runs the matrix against that branch's own tree.
+#   schedule  — GitHub runs `schedule` from the **default branch only**, and only
+#               using the workflow file as it exists on that branch. So this cron
+#               gives `main` a weekly floor once this file reaches `main`, and does
+#               NOT run on `release/**` at all. A release branch that sits quiet
+#               between merges therefore gets no scheduled verdict; its coverage
+#               comes from the `push` trigger above, plus manual dispatch.
 on:
   workflow_dispatch:
   workflow_call:
@@ -42,8 +54,7 @@ on:
       - main
       - 'release/**'
   schedule:
-    # Mondays 03:00 UTC — a weekly floor, so a quiet release branch still gets a
-    # verdict rather than going stale between merges (G3).
+    # Mondays 03:00 UTC. Default branch only — see the note above.
     - cron: '0 3 * * 1'
 
 permissions:
@@ -51,9 +62,10 @@ permissions:
 
 # Back-to-back RC merges must not pile up real-install jobs on top of each other:
 # supersede the in-flight run for the same ref. Keyed by ref so main and a release
-# branch never cancel one another.
+# branch never cancel one another, and by event_name so the weekly cron on main and
+# a push to main are separate groups rather than killing each other.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

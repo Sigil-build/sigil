@@ -170,7 +170,9 @@ parameters:
 install_steps:
   - id: copy-app
     type: file_copy
-    from: payload/**
+    from: payload://**            # the `payload://` scheme is what rebases onto the
+                                   # extracted payload; a bare `payload/**` resolves
+                                   # against the working directory and fails.
     to: "{install_dir}"           # the resolved destination — do NOT declare
                                    # a parameter named `install_dir` to mean this.
 

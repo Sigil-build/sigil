@@ -20,7 +20,7 @@ Every example on this page writes its destination as `{install_dir}`. That is th
 
 ## `file_copy`
 
-Copies one file or a glob pattern. Source paths are evaluated relative to the wrapper's extracted `payload/` directory; the destination is created if missing.
+Copies one file or a glob pattern. A `from:` (or `to:`) path that starts with the `payload://` scheme is rebased onto the wrapper's extracted payload root — `payload://**` means "everything in the payload," `payload://app/**` means "the `app/` subtree of the payload." A path that does **not** start with `payload://` is resolved relative to the installer's current working directory instead, which is almost never what you want — use `payload://` for every payload-sourced `from:`. The destination is created if missing.
 
 |Field|Type|Required|Default|Notes|
 |---|---|---|---|---|
@@ -31,7 +31,7 @@ Copies one file or a glob pattern. Source paths are evaluated relative to the wr
 ```yaml
 - id: deploy-payload
   type: file_copy
-  from: payload/**
+  from: payload://**
   to: "{install_dir}"
   overwrite: true
 ```

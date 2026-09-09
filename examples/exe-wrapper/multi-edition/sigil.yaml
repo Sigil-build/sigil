@@ -30,15 +30,15 @@ parameters:
 install_steps:
   - id: copy-base
     type: file_copy
-    from: payload/base/**
+    from: payload://base/**
     to: "{install_dir}"
   - id: copy-pro
     type: file_copy
-    from: payload/pro/**
+    from: payload://pro/**
     to: "{install_dir}\\pro"
     when: "parameters.edition in ['professional', 'enterprise']"
   - id: copy-ent
     type: file_copy
-    from: payload/ent/**
+    from: payload://ent/**
     to: "{install_dir}\\enterprise"
     when: "parameters.edition == 'enterprise'"

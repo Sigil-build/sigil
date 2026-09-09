@@ -68,6 +68,68 @@ fixed before merge: cases where a security fix refused legitimate behaviour, the
 worst being that **both shipped exe-wrapper examples aborted at their first
 `file_copy`** while CI stayed green, because the example gate is schema-only.
 
+## Stage 2/3 outcome (2026-09-09) — these numbers supersede the table above
+
+Stages 2 and 3 closed 40 rows across seven lanes plus one hotfix, merged in the
+order **S4 → hotfix #36 → S5 → S6 → S7 → REL → SUP → DOC → runbook #35**. RC
+head `3ba97f6`. **Measured on CI** — the RC push at `3ba97f6` reported success
+on every required check (`build`, `aot publish (win-x64)`, `dotnet format`,
+`schema / docs lockstep`, `conventional-commit PR title`, `gitleaks`). The
+local seven-lane pre-flight run on 2026-09-08 (before any of these PRs
+actually merged) reported **1694 total · 1674 passed · 20 skipped · 0
+failed** — evidence that the merge chain was structurally sound (zero git
+conflicts end to end), not a substitute for each PR's own CI numbers, which
+this pass does not re-tabulate.
+
+| PR | Lane | Merge | Rows closed |
+|---|---|---|---|
+| [#28](https://github.com/Sigil-build/sigil/pull/28) | S4 | `3e94b8b` | R8, R13, R14, R30, R37, R39, R45, R46, R47, R49 |
+| [#36](https://github.com/Sigil-build/sigil/pull/36) | hotfix | `0c092d1` | none — fixes the R1 test-fixture regression that put the RC red at `3e94b8b` (`CreateHardened` hardens missing ancestors; see `10-G2_G3_RUNBOOK.md` Trap 0) |
+| [#29](https://github.com/Sigil-build/sigil/pull/29) | S5 | `50e5de4` | R15, R18, R28, R29, R34, R38, R48 (fix only), R53, R56, R57 |
+| [#30](https://github.com/Sigil-build/sigil/pull/30) | S6 | `3be9187` | R33, R35, R36, R50, R52, R54 |
+| [#31](https://github.com/Sigil-build/sigil/pull/31) | S7 | `2e32c83` | R44, R51 |
+| [#32](https://github.com/Sigil-build/sigil/pull/32) | REL | `f9d3af5` | R7, R23, R23a, R24 |
+| [#33](https://github.com/Sigil-build/sigil/pull/33) | SUP | `4dc7820` | R42 |
+| [#34](https://github.com/Sigil-build/sigil/pull/34) | DOC | `50da43c` | R25, R26, R26a, R27, R41a, R43, R55 |
+| [#35](https://github.com/Sigil-build/sigil/pull/35) | runbook | `3ba97f6` | none — docs-only, the G2/G3 human runbook |
+
+### G2 check results (2026-09-09)
+
+Full command-level evidence for checks 1, 3, 4 and 5:
+`.superpowers/sdd/2026-09-08-g2-release-prep/g2-checks-report.md` (gitignored,
+not part of this PR).
+
+1. **PASS** — the corrected `docs/guides/parameters.md` silent-install line
+   installs cleanly against a real, CI-built `Setup.exe` *(R26)*.
+2. **PASS** — `dotnet restore Sigil.slnx --locked-mode` succeeds from a clean
+   clone of the post-DOC-merge RC *(R23a)*.
+3. **PASS** — `sigil init --template full-config` produces a manifest that
+   packs, exit `0` *(R30)*.
+4. **PASS** — `parameters.<name>.source.url: http://…` fails to pack —
+   `SIG0323` *(R8)*.
+5. **PASS** — `updates.manifestUrl: http://…` fails to pack — `SIG0324` (and,
+   doubly, schema `SIG0010`) *(R14)*.
+6. **Unit-tested, not live.** S4's `UpdateFreshnessTests` cover the stale/replayed
+   channel-manifest rejection in-process; a live `Setup.exe /Update` replay
+   against a hosted, signed channel manifest is deferred to the VM matrix at G3
+   *(R13)*.
+7. **PASS** — `THIRD-PARTY-NOTICES.md` names Skia, ANGLE, HarfBuzz, and
+   libsodium explicitly *(R23)*.
+8. **File present; repo setting still open.** `SECURITY.md` exists on the RC.
+   GitHub private vulnerability reporting is confirmed **OFF**
+   (`gh api repos/Sigil-build/sigil/private-vulnerability-reporting` →
+   `{"enabled":false}`) — this half is a **repo-owner action**, not something
+   any lane PR can flip *(R23)*.
+9. **PASS** — `grep -rn "0\.0\.1-alpha" --include='*.cs' --include='*.csproj' --include='*.yml' .`
+   returns nothing on a clean clone *(R24)*.
+10. **PASS** — the vulnerability-scan CI step ran (confirmed, not merely
+    assumed from a green build) and reported "no vulnerable packages" for
+    every project *(R42)*.
+
+Four defects were found while running checks 1, 3, 4 and 5. **R58** (below) is
+release-blocking; **R59** is fixed in this same PR; **R60** and **R61** are
+filed for a later stage.
+
 ---
 
 ## Severity rubric
@@ -1741,3 +1803,231 @@ review's finding, still sound.
 
 **Repo size and artifact hygiene.** `publish/` and `TestResults/` are untracked;
 the packed repo is 1.99 MiB. No build output or coverage report is committed.
+
+---
+
+# Filed at gate G2 (2026-09-09)
+
+Rows **R58–R63** were found while running the G2 manual checks (Section 3 of
+`10-G2_G3_RUNBOOK.md`) against the merged RC at `3ba97f6`, and while preparing
+this gate-close pass. Full command-level evidence for the four defects behind
+R58–R61: `.superpowers/sdd/2026-09-08-g2-release-prep/g2-checks-report.md`
+(gitignored, not part of this PR).
+
+### R58 — The ARP `UninstallString` cannot complete: the uninstaller blocks on its own pid
+**Component:** Wrapper.Core / Engine · **Effort: S** · **RELEASE BLOCKER**
+
+`uninstall.exe` ships **inside** `install_dir` (T15). Add/Remove Programs — and
+a user running the registered `UninstallString` directly — launches exactly
+that binary. `InstallSession.CheckFilesInUse` runs `FilesInUse.Scan` on the
+uninstall path, and `src/SigilBuild.Wrapper.Core/Engine/FilesInUse.cs` has
+**no self-exclusion** — no `Environment.ProcessId`, no `GetCurrentProcessId`,
+nothing. The Restart Manager reports the running uninstaller's own process as
+a blocker and the run refuses with exit `4` (`FilesInUseExitCode`) before
+anything is touched. `/closeapps`, the remedy the message itself names, cannot
+help: the Restart Manager cannot close the caller.
+
+**Evidence (own pid known independently, not inferred).** Launched via
+`Start-Process -PassThru` so the pid is known before the process reports
+anything itself:
+
+```
+uninstall.exe OWN PID = 7484   exit = 4
+[11:49:43Z] blocked by: installer (pid 7484)
+[11:49:43Z] result: blocked - these applications are using files this install
+  needs and must be closed first: installer (pid 7484) - close them and
+  retry, or re-run with /closeapps
+```
+
+Re-run with the suggested remedy — still refuses, against a fresh pid:
+
+```
+uninstall.exe /S /Uninstall /currentuser /closeapps   -> own pid = 5244, exit = 4
+[11:51:21Z] close-apps: closing 1 blocking application(s)
+[11:51:21Z] blocked by: installer (pid 5244)
+```
+
+Differential control — the same uninstall driven from the original
+`Setup.exe`, which lives **outside** `install_dir`, succeeds cleanly (exit
+`0`, full rollback of the payload, registry value, and uninstaller). That
+isolates the defect to "the uninstaller is inside the directory it scans,"
+not to the uninstall logic itself.
+
+**Pre-existing on `main`, not new to Stage 2/3.** P6 landed `FilesInUse` with
+no self-exclusion; T15 is what puts `uninstall.exe` inside `install_dir` for
+every install, so the two combine into a shipped uninstall path that is dead
+for an end user who no longer has the original `Setup.exe` — which is the
+common case. `installer.scope` is not the variable: `uninstall.exe` lives in
+`install_dir` for machine scope too (not tested here — would need elevation,
+out of scope for this check), so per-machine installs are expected to fail
+identically. The interactive (non-`/S`) `uninstall.exe` path goes through the
+same gate and was not separately exercised, but its Close-applications screen
+would be asked to close the process driving it.
+
+**Fix lane:** `rc/p6-fix-uninstall-self-block` — **PR pending** (confirmed via
+`gh pr list --head rc/p6-fix-uninstall-self-block`, no open or merged PR at
+the time this row was filed). Suggested shape: exclude the current process
+(and, for safety, its ancestors within the same relaunch chain) from
+`FilesInUse.Scan` when the blocking image is the running uninstaller itself.
+A test that installs, then runs the **registered `UninstallString` verbatim**
+(not the engine in-process, not `Setup.exe /Uninstall`) would have caught
+this — the existing uninstall tests apparently drive the engine or
+`Setup.exe`, never the deployed `uninstall.exe` in place. **Blocks G3**: the
+VM matrix must not be treated as proof of a working uninstall path while this
+is open.
+
+### R59 — `from: payload/**` is the wrong idiom; only `payload://` rebases onto the extracted payload
+**Component:** docs + examples · **Effort: S** · **SHOULD-FIX**
+
+> **STATUS — FIXED in this PR.**
+
+`StepContext.ResolvePath` (`src/SigilBuild.Wrapper.Core/Engine/StepContext.cs:734-797`)
+rebases a `from:`/`to:` path onto the extracted payload root **only** when it
+begins with the literal `payload://` scheme; anything else — including the
+plausible-looking `payload/**` — passes through unchanged and is resolved
+against the process's current working directory at install time. Static
+validation cannot catch it: `payload/**` is a schema-legal string, so CI's
+example-manifest gate stays green while the install fails:
+
+```
+error: step 'copy-app' failed: install_steps: glob root 'payload' does not exist
+rollback: reverting changes
+exit code: 1
+```
+
+(Rollback was clean — nothing left behind.) The wrong spelling appeared in
+`docs/guides/install-steps.md` (the page's own worked example, `from:
+payload/**`) and in both shipped exe-wrapper examples,
+`examples/exe-wrapper/hello-wix-killer/sigil.yaml` and
+`examples/exe-wrapper/multi-edition/sigil.yaml` — i.e. a publisher who copied
+either shipped example verbatim would ship a broken installer. The identical
+bug, found in the same pass, also appeared in `docs/guides/conditional-installs.md`
+and `docs/guides/parameters.md`; this PR fixes all five files by changing
+`from: payload/…` to `from: payload://…` (matching the working spelling used
+by the G2 check's own test manifest) and correcting `install-steps.md`'s
+prose about how `from:` is resolved. Every changed example manifest remains
+schema-valid (CI's example validation still passes).
+
+### R60 — The schema validator's `additionalProperties`-as-subschema form is never applied
+**Component:** Core / Configuration · **Effort: M** · **SHOULD-FIX**
+
+`SchemaValidator.ValidateObject` (`src/SigilBuild.Core/Configuration/SchemaValidator.cs:125-126`)
+treats `additionalProperties` purely as a boolean gate:
+
+```csharp
+var additionalAllowed = !schema.TryGetProperty("additionalProperties", out var addProp)
+    || addProp.ValueKind != JsonValueKind.False;
+```
+
+When the schema value is a **subschema object** — which is how the root
+`parameters` map is declared (`schemas/sigil-schema.json:613`) — `ValueKind`
+is `Object`, so `additionalAllowed` is `true` and the subschema is **never
+applied to any map value**. The entire `parameters.<name>` subtree is
+consequently dead schema: a manifest with a bogus field under
+`parameters.edition.source` (which declares `"additionalProperties": false`)
+validates clean —
+
+```
+> sigil validate c4-badfield.yaml     # bogus_field: 1 added under parameters.edition.source
+OK: c4-badfield.yaml
+EXIT=0
+```
+
+— and `parameters.*.source.url`'s own `"pattern": "^https://"` never fires
+`SIG0010`. Contrast `updates.manifestUrl`, declared under `properties`, where
+`SIG0010` *and* `SIG0324` both fire (see the G2 check-5 result above). G2
+checks 4 and 5 both still **pass** because the typed parser (`SIG0323`,
+`SIG0324`) enforces what matters independently of the schema layer — this row
+is about the schema silently providing less coverage than it appears to, not
+about a live bypass. Any future constraint added under `parameters` in
+`schemas/sigil-schema.json` will be silently inert until this is fixed.
+
+**Fix shape (not implemented here):** implement the subschema form of
+`additionalProperties` in `SchemaValidator.ValidateObject` — for each object
+property not matched by `properties`/`patternProperties`, validate it against
+the subschema instead of only checking presence — plus a fixture in
+`tests/SigilBuild.Schema.Tests` shaped like `c4-badfield.yaml` above, which
+would have caught this. Touches `schemas/sigil-schema.json`'s lockstep
+surfaces per `AGENTS.md` if the fix changes what schema authors can rely on.
+
+### R61 — `docs/guides/uninstaller.md` has drifted from the real ARP entry and uninstaller shape
+**Component:** docs + Wrapper.Core · **Effort: S (doc half) / M (code half)** · **SHOULD-FIX**
+
+Four drifts observed on a real installed app's ARP entry and disk footprint,
+none individually severe but compounding into a doc a publisher cannot trust:
+
+1. **`EstimatedSize = 0`.** The guide's table (line 20) says "Total install
+   footprint in KB"; the real value written is `0` regardless of actual
+   footprint (measured ~33.4 MB for the G2 check's own install).
+2. **Undocumented `/currentuser` suffix.** The real `UninstallString` is
+   `"<install_dir>\uninstall.exe" /S /Uninstall /currentuser`; the guide's
+   table shows only `/S /Uninstall`.
+3. **No `QuietUninstallString` is ever written**, though the guide (line 134)
+   explains ARP's silent-uninstall handling in terms of
+   `QuietUninstallString` semantics — the value that would make it real is
+   simply absent from the registry.
+4. **Uninstaller size.** The guide says the dropped `uninstall.exe` is "~4 MB";
+   it is actually a **full copy of `Setup.exe`** (payload and embedded runtime
+   included) — 34,145,792 bytes in the G2 check's build. Every install leaves
+   a ~33 MB uninstaller behind, not ~4 MB.
+
+A fifth, related but not a doc issue: `registry_write`'s rollback record is
+`restore_registry_value`, not a key-level record, so an uninstall deletes only
+the *value* it wrote and leaves the *key* it created behind — the G2 check's
+own install left an empty `HKCU\Software\<App>` key after a clean uninstall.
+
+**Fix:** items 1 (doc-only, correct the table's claim to match reality or fix
+`EstimatedSize`'s computation — code) and 4 (doc-only, correct "~4 MB" to
+reflect the full-copy design) can be closed by a docs pass alone. Items 2 and 3
+need a code decision (write `QuietUninstallString`, and decide whether
+`/currentuser` belongs in the documented contract or should be suppressed) and
+the registry key-cleanup gap needs a rollback-journal record shape change.
+None of the four is fixed in this PR.
+
+### R62 — SDK bumps must regenerate lock files in the same commit
+**Component:** CI / dependency management · **Effort: S** · **SHOULD-FIX**
+
+Hit for real during the merge chain (2026-09-09, not theoretical): `global.json`
+previously pinned `10.0.100` with `rollForward: latestFeature`; the CI runner
+picked up the freshly released SDK `10.0.401` overnight, whose SDK-injected
+`Microsoft.DotNet.ILCompiler` / `Microsoft.NET.ILLink.Tasks` moved to `10.0.12`
+and no longer matched any of the 21 `packages.lock.json` files, which were
+generated against `10.0.303`'s `10.0.11`. Every locked restore failed with
+`NU1004`. REL (#32) fixed the immediate break by pinning `global.json` to
+`10.0.303` with `rollForward: disable` — correct, but it also means nothing
+now bumps the SDK, so the next deliberate bump will hit the identical failure
+mode unless the lock-file regeneration is part of the same change.
+
+**Fix:** add a `dotnet-sdk` ecosystem entry to `.github/dependabot.yml`
+(SUP's Dependabot config today covers `nuget` and `github-actions` only), and
+make its PRs run `dotnet restore Sigil.slnx --force-evaluate` and commit the
+regenerated lock files before the PR can go green — mirroring the manual step
+SUP's own rebase had to perform for the SkiaSharp preview→stable bump (Trap 2
+in `10-G2_G3_RUNBOOK.md`).
+
+### R63 — The unit suite has no seam keeping the install-state root off the real `%ProgramData%`
+**Component:** Wrapper.Core / Engine + tests · **Effort: M** · **SHOULD-FIX**
+
+Found by hotfix #36 (2026-09-09): `CreateHardened` creates missing **ancestor**
+directories with the same admin-only DACL it applies to its target, so the
+first machine-scope `CreateHardened` call in a test run hardens the shared
+`%ProgramData%\Sigil` root on the runner itself — not just the directory the
+test intended to create. Any later fixture that plants state under
+`%ProgramData%\Sigil` then inherits admin-only permissions it never asked
+for, and whether a given test run trips this depends on **assembly execution
+order**, which is why the same suite passed and failed on the same runner
+image across consecutive runs. #36's fix was a single fixture made
+order-independent (grants `BUILTIN\Users` write on the planted directory,
+mirroring the file-level ACE already granted) — a targeted patch, not a
+structural one. Per-component test seams already exist elsewhere
+(`SecureStaging.NeverStageElevatedForTesting`,
+`UpdateSequenceStore.UseDirectoryForTesting`, `InMemorySequenceStore`), but
+nothing equivalent exists at the `ScopeLayout` / `UninstallStateStore` level,
+so the next test that touches machine-scope state can reintroduce the same
+class of order-dependent failure — and, on an unelevated dev box whose real
+`%ProgramData%\Sigil` is already hardened from a prior elevated run, the
+affected fixture throws rather than reporting a clean skip.
+
+**Fix (not implemented here):** a test-only override of the machine
+install-state root at the `ScopeLayout` / `UninstallStateStore` level, so no
+unit test ever creates or hardens a path under the real `%ProgramData%`.

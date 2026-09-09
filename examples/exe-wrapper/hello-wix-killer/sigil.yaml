@@ -30,7 +30,7 @@ parameters:
 install_steps:
   - id: copy-app
     type: file_copy
-    from: payload/**
+    from: payload://**
     to: "{install_dir}"
   - id: reg-displayname
     type: registry_write

@@ -9,6 +9,22 @@
 > **78.04%**. The skip count rose from 1 to 21 on purpose — that is the suite
 > starting to tell the truth, not a regression.
 >
+> ### G2 — CLOSED with R58 open (2026-09-09)
+>
+> **Stages 2 and 3's seven lanes plus hotfix #36 are merged and gate G2 is
+> closed** at RC head `3ba97f6` — see the G2 block below for all ten manual
+> checks and `00-GAP_REGISTER.md`'s new "Filed at gate G2" section for R58–R63.
+> All ten checks ran; eight passed cleanly, one (check 8, private
+> vulnerability reporting) is a still-open **owner action**, and one (check
+> 6, the live stale-channel-manifest replay) is unit-tested only, with the
+> live leg deferred to the VM matrix at G3. Running those checks against a real
+> `Setup.exe` also surfaced **R58**, a **RELEASE BLOCKER**: the ARP
+> `UninstallString` blocks on its own pid via the files-in-use gate, so the
+> shipped uninstall path is dead for anyone who no longer has the original
+> `Setup.exe` — the common case. Its fix (`rc/p6-fix-uninstall-self-block`) is
+> **not yet merged** (PR pending at gate-close time). **G3 must not open**
+> until that fix merges and the VM matrix runs for real against it.
+>
 > ### Stage 0 (2026-07-28)
 >
 > **Stage 0 (lane F0) merged as [PR #16](https://github.com/Sigil-build/sigil/pull/16)
@@ -454,7 +470,10 @@ miniature.
 
 ### G2 — after Stages 2 and 3
 
-Merge order: **S4 → S5 → S6 → S7 → REL → SUP → DOC**.
+Merge order: **S4 → hotfix #36 → S5 → S6 → S7 → REL → SUP → DOC → runbook #35**
+(hotfix #36 inserted ahead of S5 — see Trap 0 in `10-G2_G3_RUNBOOK.md`). All
+merged, RC head `3ba97f6` — shas and rows-closed per PR in
+`00-GAP_REGISTER.md`'s "Stage 2/3 outcome" table.
 
 **S7 is fourth deliberately.** It rebases onto S5's `UninstallEngine` outcome
 handling and S6's `ScopeLayout` root set, and where S5 and S7 must agree on a
@@ -462,19 +481,45 @@ shape in `ReplayAnchor`, **S7 adapts to what S5 landed**. DOC is last because
 R55, DOC.2 and the `uninstaller.md` caveat all describe behaviour the earlier
 lanes change.
 
-- [ ] Copy-paste the silent-install line from the **corrected**
+- [x] Copy-paste the silent-install line from the **corrected**
       `docs/guides/parameters.md` into a real `Setup.exe` — it succeeds *(R26)*
-- [ ] `dotnet restore --locked-mode` succeeds from a clean clone *(R23a)*
-- [ ] `sigil init --template full` produces a manifest that packs *(R30)*
-- [ ] A manifest with `source: { url: "http://…" }` **fails** to pack *(R8)*
-- [ ] A manifest with `updates: { manifestUrl: "http://…" }` **fails** to pack *(R14)*
-- [ ] A replayed stale signed channel manifest is rejected *(R13)*
-- [ ] `THIRD-PARTY-NOTICES.md` names Skia, ANGLE, HarfBuzz, and libsodium
-      explicitly *(R23)*
-- [ ] `SECURITY.md` exists and GitHub private vulnerability reporting is on *(R23)*
-- [ ] `grep -rn "0\.0\.1-alpha" --include='*.cs' --include='*.csproj' --include='*.yml' .`
-      returns **nothing** *(R24)*
-- [ ] The vulnerability scan ran; its findings are recorded as fixed or accepted *(R42)*
+      — **PASS**, CI-built `Setup.exe`, exit `0`, payload/registry/ARP all
+      landed; see check 1 in `00-GAP_REGISTER.md`. Running its cleanup step
+      (the registered `UninstallString`) is what surfaced **R58**.
+- [x] `dotnet restore --locked-mode` succeeds from a clean clone *(R23a)* —
+      **PASS** on the post-DOC-merge RC.
+- [x] `sigil init --template full` produces a manifest that packs *(R30)* —
+      **PASS**, `sigil init --template full-config` (the real flag spelling)
+      then `sigil pack` exits `0`; negative control on the pre-R30 signing-key
+      shape correctly fails `SIG0325`.
+- [x] A manifest with `source: { url: "http://…" }` **fails** to pack *(R8)* —
+      **PASS**, `SIG0323`.
+- [x] A manifest with `updates: { manifestUrl: "http://…" }` **fails** to
+      pack *(R14)* — **PASS**, `SIG0324` (doubly enforced by schema `SIG0010`).
+- [ ] A replayed stale signed channel manifest is rejected *(R13)* — unit-tested
+      by S4's `UpdateFreshnessTests` only; the live `Setup.exe /Update` replay
+      against a hosted channel manifest is **deferred to the VM matrix at G3**,
+      left unticked here on purpose.
+- [x] `THIRD-PARTY-NOTICES.md` names Skia, ANGLE, HarfBuzz, and libsodium
+      explicitly *(R23)* — **PASS**.
+- [ ] `SECURITY.md` exists and GitHub private vulnerability reporting is on
+      *(R23)* — `SECURITY.md` **present**; private vulnerability reporting
+      confirmed **OFF** via the API — **owner action still open**, left
+      unticked here on purpose.
+- [x] `grep -rn "0\.0\.1-alpha" --include='*.cs' --include='*.csproj' --include='*.yml' .`
+      returns **nothing** *(R24)* — **PASS** on a clean clone.
+- [x] The vulnerability scan ran; its findings are recorded as fixed or
+      accepted *(R42)* — **PASS**, "no vulnerable packages" for every project.
+
+**G2 CLOSED 2026-09-09** at RC head `3ba97f6`. All ten checks ran; eight
+tick clean, one (check 6's live half) is deferred to G3 by design, and one
+(check 8's private-vulnerability-reporting half) is a repo-owner action that
+does not block the gate itself. Running the checks against a real `Setup.exe`
+surfaced four defects, filed as **R58–R61** in `00-GAP_REGISTER.md`; **R58 is
+release-blocking and its fix has not yet merged** — see the status note at the
+top of this document. **G3 must not open until R58's fix
+(`rc/p6-fix-uninstall-self-block`) merges and the VM matrix runs for real
+against the fixed uninstall path.**
 
 ### G3 — after Stage 4
 
@@ -526,11 +571,14 @@ lanes change.
 | S2  | `rc/s2-path-containment` | ☑ | [#21](https://github.com/Sigil-build/sigil/pull/21) | ☑ `4505b24` | G1 |
 | S3  | `rc/s3-staged-execution` | ☑ | [#22](https://github.com/Sigil-build/sigil/pull/22) | ☑ `72d6437` | G1 |
 | T1  | `rc/t1-test-truth` | ☑ | [#23](https://github.com/Sigil-build/sigil/pull/23) | ☑ `86c2799` | **G1 ✅** |
-| S4  | `rc/s4-network-update` | ☐ | ☐ | ☐ | G2 |
-| S5  | `rc/s5-residual-engine` | ☐ | ☐ | ☐ | G2 |
-| S6  | `rc/s6-step-hardening` | ☐ | ☐ | ☐ | G2 |
-| S7  | `rc/s7-signed-anchorage` | ☐ | ☐ | ☐ | G2 |
-| REL | `rc/rel-scaffolding` | ☐ | ☐ | ☐ | G2 |
-| SUP | `rc/sup-supply-chain` | ☐ | ☐ | ☐ | G2 |
-| DOC | `rc/doc-truth` | ☐ | ☐ | ☐ | G2 |
+| S4  | `rc/s4-network-update` | ☑ | [#28](https://github.com/Sigil-build/sigil/pull/28) | ☑ `3e94b8b` | G2 |
+| HOTFIX | `rc/s1-fix-provenance-fixture` | ☑ | [#36](https://github.com/Sigil-build/sigil/pull/36) | ☑ `0c092d1` | G2 |
+| S5  | `rc/s5-residual-engine` | ☑ | [#29](https://github.com/Sigil-build/sigil/pull/29) | ☑ `50e5de4` | G2 |
+| S6  | `rc/s6-step-hardening` | ☑ | [#30](https://github.com/Sigil-build/sigil/pull/30) | ☑ `3be9187` | G2 |
+| S7  | `rc/s7-signed-anchorage` | ☑ | [#31](https://github.com/Sigil-build/sigil/pull/31) | ☑ `2e32c83` | G2 |
+| REL | `rc/rel-scaffolding` | ☑ | [#32](https://github.com/Sigil-build/sigil/pull/32) | ☑ `f9d3af5` | G2 |
+| SUP | `rc/sup-supply-chain` | ☑ | [#33](https://github.com/Sigil-build/sigil/pull/33) | ☑ `4dc7820` | G2 |
+| DOC | `rc/doc-truth` | ☑ | [#34](https://github.com/Sigil-build/sigil/pull/34) | ☑ `50da43c` | G2 |
+| RUNBOOK | `rc/doc-g2-runbook` | ☑ | [#35](https://github.com/Sigil-build/sigil/pull/35) | ☑ `3ba97f6` | **G2 ⚠️ (R58 open)** |
+| DOC-G2 | `rc/doc-g2-close` | ☑ | (this PR) | ☐ | G2 |
 | V1  | `rc/v1-verification` | ☐ | ☐ | ☐ | G3/G4 |

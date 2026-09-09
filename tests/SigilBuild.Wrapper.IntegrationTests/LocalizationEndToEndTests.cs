@@ -2,10 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.Versioning;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Microsoft.Win32;
+using SigilBuild.Core.Manifest;
+using SigilBuild.Wrapper.Engine;
 using Xunit;
 
 namespace SigilBuild.Wrapper.IntegrationTests;
@@ -54,6 +58,99 @@ public class LocalizationEndToEndTests
             ? new[] { "/silent", "/D=" + installDir, "/LOG=" + logPath }
             : new[] { "/silent", "/lang=" + lang, "/D=" + installDir, "/LOG=" + logPath };
 
+    /// <summary>
+    /// The app id declared by the on-disk <c>localized-uk</c> fixture — the one identity
+    /// two installs must NOT share. Named here so
+    /// <see cref="BuildManifestYaml"/> fails loudly if the fixture is ever re-identified.
+    /// </summary>
+    private const string DeclaredAppId = "com.example.localized";
+
+    /// <summary>
+    /// A schema-valid app id unique to one install. <c>app.id</c>'s pattern requires
+    /// every dot-separated segment to be letter-led, which a bare <c>Guid("N")</c> hex
+    /// string usually is not (R66) — hence the <c>r</c> prefix, the same convention the
+    /// sibling VM legs use.
+    /// </summary>
+    internal static string NewAppId() => DeclaredAppId + ".r" + Guid.NewGuid().ToString("N");
+
+    /// <summary>
+    /// The <c>localized-uk</c> manifest exactly as it ships, with only its
+    /// <c>app.id</c> replaced by <paramref name="appId"/> — so two installs of the same
+    /// fixture are two independent applications rather than one application installed
+    /// twice. Pure (no sandbox, no packer) apart from reading the fixture, so the
+    /// always-on <see cref="VmFixtureManifestTests"/> validates the exact string this
+    /// leg packs (register row R66).
+    /// </summary>
+    internal static string BuildManifestYaml(string appId)
+    {
+        var yaml = File.ReadAllText(FindFixtureManifest("localized-uk"));
+        var declaration = "id: " + DeclaredAppId;
+        var occurrences = yaml.Split(declaration).Length - 1;
+        if (occurrences != 1)
+        {
+            throw new InvalidOperationException(
+                $"expected exactly one '{declaration}' in the localized-uk fixture, found " +
+                $"{occurrences} — the fixture's app id changed and this rewrite is stale");
+        }
+        return yaml.Replace(declaration, "id: " + appId, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Copy the <c>localized-uk</c> fixture into the sandbox under
+    /// <paramref name="subdirectory"/>, rewrite its app id to
+    /// <paramref name="appId"/>, and pack it. The whole fixture directory is copied
+    /// because the manifest addresses <c>./payload</c> and its two <c>LICENSE*.txt</c>
+    /// files relative to itself.
+    /// </summary>
+    private static async Task<string> PackWithOwnAppIdAsync(
+        VmSandbox sandbox, string subdirectory, string appId)
+    {
+        var source = Path.GetDirectoryName(FindFixtureManifest("localized-uk"))!;
+        var fixtureDir = Path.Combine(sandbox.Root, subdirectory);
+        CopyDirectory(source, fixtureDir);
+
+        var manifestPath = Path.Combine(fixtureDir, "sigil.yaml");
+        await File.WriteAllTextAsync(manifestPath, BuildManifestYaml(appId));
+
+        return await Sigil.PackAsync(manifestPath, Path.Combine(fixtureDir, "out"));
+    }
+
+    private static void CopyDirectory(string source, string destination)
+    {
+        Directory.CreateDirectory(destination);
+        foreach (var file in Directory.GetFiles(source))
+        {
+            File.Copy(file, Path.Combine(destination, Path.GetFileName(file)), overwrite: true);
+        }
+        foreach (var directory in Directory.GetDirectories(source))
+        {
+            CopyDirectory(directory, Path.Combine(destination, Path.GetFileName(directory)));
+        }
+    }
+
+    /// <summary>
+    /// Undo what an install leaves OUTSIDE the sandbox: the HKCU ARP subtree and the
+    /// per-user state dir under <c>%LocalAppData%\Sigil\&lt;appId&gt;</c>. Neither lives
+    /// under <see cref="VmSandbox"/>'s root, so neither is removed by its disposal —
+    /// and the state dir is precisely the record whose survival makes a later install of
+    /// the same id take the re-install-cleanup path instead of a fresh one.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private static void Cleanup(string appId)
+    {
+#pragma warning disable CA1031 // best-effort test cleanup
+        try
+        {
+            Registry.CurrentUser.DeleteSubKeyTree(
+                $@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{appId}",
+                throwOnMissingSubKey: false);
+        }
+        catch { /* best-effort */ }
+        try { UninstallStateStore.Delete(appId, InstallScope.User); }
+        catch { /* best-effort */ }
+#pragma warning restore CA1031
+    }
+
     private static string[] ListRelativeFiles(string root)
     {
         if (!Directory.Exists(root))
@@ -74,56 +171,92 @@ public class LocalizationEndToEndTests
     /// because it is the support surface (someone pasting it into a ticket must
     /// not need translation).
     /// </summary>
+    /// <remarks>
+    /// <para><b>Why the two runs get different app ids.</b> This test installs the same
+    /// fixture twice, into two different <c>/D=</c> roots, and then compares the two
+    /// installed trees. Packed once under ONE app id, that is not two independent
+    /// installs: the second run finds the first run's record in the per-user state store
+    /// (<c>%LocalAppData%\Sigil\&lt;appId&gt;</c>) and takes the re-install path, whose
+    /// cleanup replays the FIRST run's recorded uninstall — deleting the files at the
+    /// path the first run used. The first root is emptied while the second is populated,
+    /// and the comparison fails with the expectation side (<c>enFiles</c>) as the empty
+    /// one:
+    /// <c>Expected root to be a collection with 0 item(s) … but {"app.txt",
+    /// "uninstall.exe"} contains 2 item(s)</c>. The <c>/LOG</c> of the second run names
+    /// it outright — <c>delete …\install-en\app.txt</c> before its own copy step.</para>
+    /// <para>Nothing about that is <c>/lang</c>-specific or elevation-specific; it is the
+    /// harness sharing one application identity between two installs that are supposed to
+    /// be independent. The invariant under test is real and stays exactly as it was — the
+    /// installed outcome must not depend on <c>/lang</c> — so the fix is to give each run
+    /// its own identity (a per-run unique app id, as the sibling VM legs already do)
+    /// rather than to reorder or weaken the assertion. The app id is stripped from the
+    /// log comparison anyway: it appears only on the <c>=== sigil install log …</c>
+    /// header line, which <see cref="StripTimestampsAndArgsHeader"/> drops.</para>
+    /// </remarks>
     [VmFact]
+    [SupportedOSPlatform("windows")]
     public async Task SilentInstall_IsUnaffectedByLang()
     {
         using var sandbox = new VmSandbox();
-        var manifestPath = FindFixtureManifest("localized-uk");
-        var outDir = Path.Combine(sandbox.Root, "out");
-        var setupExe = await Sigil.PackAsync(manifestPath, outDir);
+        var enAppId = NewAppId();
+        var ukAppId = NewAppId();
+        try
+        {
+            var enSetup = await PackWithOwnAppIdAsync(sandbox, "fixture-en", enAppId);
+            var ukSetup = await PackWithOwnAppIdAsync(sandbox, "fixture-uk", ukAppId);
 
-        var enDir = Path.Combine(sandbox.Root, "install-en");
-        var ukDir = Path.Combine(sandbox.Root, "install-uk");
-        var enLog = Path.Combine(sandbox.Root, "en.log");
-        var ukLog = Path.Combine(sandbox.Root, "uk.log");
+            var enDir = Path.Combine(sandbox.Root, "install-en");
+            var ukDir = Path.Combine(sandbox.Root, "install-uk");
+            var enLog = Path.Combine(sandbox.Root, "en.log");
+            var ukLog = Path.Combine(sandbox.Root, "uk.log");
 
-        var enExit = await sandbox.RunAsync(setupExe, SilentInstallArgs(null, enDir, enLog));
-        var ukExit = await sandbox.RunAsync(setupExe, SilentInstallArgs("uk", ukDir, ukLog));
+            var enExit = await sandbox.RunAsync(enSetup, SilentInstallArgs(null, enDir, enLog));
+            var ukExit = await sandbox.RunAsync(ukSetup, SilentInstallArgs("uk", ukDir, ukLog));
 
-        ukExit.Should().Be(enExit).And.Be(0);
+            ukExit.Should().Be(enExit).And.Be(0);
 
-        var enFiles = ListRelativeFiles(enDir);
-        var ukFiles = ListRelativeFiles(ukDir);
-        ukFiles.Should().BeEquivalentTo(enFiles, "the installed OUTCOME must not depend on /lang");
+            var enFiles = ListRelativeFiles(enDir);
+            var ukFiles = ListRelativeFiles(ukDir);
+            enFiles.Should().NotBeEmpty(
+                "the two runs must be INDEPENDENT installs — an empty first root is the " +
+                "signature of the second run's re-install cleanup replaying the first " +
+                "run's uninstall, which is what sharing one app id between them caused");
+            ukFiles.Should().BeEquivalentTo(enFiles, "the installed OUTCOME must not depend on /lang");
 
-        File.Exists(enLog).Should().BeTrue("/LOG was requested");
-        File.Exists(ukLog).Should().BeTrue("/LOG was requested");
-        var enLogText = File.ReadAllText(enLog);
-        var ukLogText = File.ReadAllText(ukLog);
+            File.Exists(enLog).Should().BeTrue("/LOG was requested");
+            File.Exists(ukLog).Should().BeTrue("/LOG was requested");
+            var enLogText = File.ReadAllText(enLog);
+            var ukLogText = File.ReadAllText(ukLog);
 
-        // A NotContain-a-Ukrainian-word check is non-discriminating here: the only
-        // Ukrainian literal the engine ever writes ("Вилучення", InstallSession.cs
-        // ~838) comes from the upgrade/downgrade-removal path, which never fires on
-        // this fixture's fresh install (no prior version). It would pass just as
-        // happily if the whole log were localized. Instead, prove the actual design
-        // promise directly: the /lang=uk run and the plain run must produce the SAME
-        // log wording. The only parts that are *expected* to differ are the
-        // timestamp on every line and the header's args=[...] echo (which legitimately
-        // reflects each run's own /D, /LOG and /lang flags) — strip exactly those and
-        // require byte-for-byte equality of everything else.
-        var enBody = StripTimestampsAndArgsHeader(enLogText);
-        var ukBody = StripTimestampsAndArgsHeader(ukLogText);
+            // A NotContain-a-Ukrainian-word check is non-discriminating here: the only
+            // Ukrainian literal the engine ever writes ("Вилучення", InstallSession.cs
+            // ~838) comes from the upgrade/downgrade-removal path, which never fires on
+            // this fixture's fresh install (no prior version). It would pass just as
+            // happily if the whole log were localized. Instead, prove the actual design
+            // promise directly: the /lang=uk run and the plain run must produce the SAME
+            // log wording. The only parts that are *expected* to differ are the
+            // timestamp on every line and the header's args=[...] echo (which
+            // legitimately reflects each run's own /D, /LOG, /lang — and now its own app
+            // id) — strip exactly those and require byte-for-byte equality of the rest.
+            var enBody = StripTimestampsAndArgsHeader(enLogText);
+            var ukBody = StripTimestampsAndArgsHeader(ukLogText);
 
-        // Sanity check the fixture actually exercises the happy path (so the
-        // comparison above isn't vacuously comparing two near-empty logs).
-        enLogText.Should().Contain("result: success", "the fresh install must complete");
-        ukLogText.Should().Contain("result: success", "the fresh install must complete");
+            // Sanity check the fixture actually exercises the happy path (so the
+            // comparison above isn't vacuously comparing two near-empty logs).
+            enLogText.Should().Contain("result: success", "the fresh install must complete");
+            ukLogText.Should().Contain("result: success", "the fresh install must complete");
 
-        ukBody.Should().Be(
-            enBody,
-            "the log wording must be identical regardless of /lang (design D2 - the log " +
-            "is the support surface and stays English) once timestamps and the args-echo " +
-            "header are stripped");
+            ukBody.Should().Be(
+                enBody,
+                "the log wording must be identical regardless of /lang (design D2 - the " +
+                "log is the support surface and stays English) once timestamps and the " +
+                "args-echo header are stripped");
+        }
+        finally
+        {
+            Cleanup(enAppId);
+            Cleanup(ukAppId);
+        }
     }
 
     private static readonly Regex TimestampPrefix = new(@"^\[[^\]]*\]\s*", RegexOptions.Compiled);
@@ -159,6 +292,7 @@ public class LocalizationEndToEndTests
     /// language is a display preference).
     /// </summary>
     [VmFact]
+    [SupportedOSPlatform("windows")]
     public async Task FixedManifestLanguage_LogsAndIgnoresLangFlag()
     {
         using var sandbox = new VmSandbox();
@@ -168,15 +302,27 @@ public class LocalizationEndToEndTests
 
         var installDir = Path.Combine(sandbox.Root, "install");
         var logPath = Path.Combine(sandbox.Root, "run.log");
+        try
+        {
+            var exit = await sandbox.RunAsync(
+                setupExe, SilentInstallArgs("uk", installDir, logPath));
 
-        var exit = await sandbox.RunAsync(
-            setupExe, SilentInstallArgs("uk", installDir, logPath));
+            exit.Should().Be(0, "a language conflict is not a usage error (design §2.1)");
 
-        exit.Should().Be(0, "a language conflict is not a usage error (design §2.1)");
-
-        File.Exists(logPath).Should().BeTrue("/LOG was requested");
-        var logText = File.ReadAllText(logPath);
-        logText.Should().Contain("manifest pin 'en' overrides /lang=uk");
+            File.Exists(logPath).Should().BeTrue("/LOG was requested");
+            var logText = File.ReadAllText(logPath);
+            logText.Should().Contain("manifest pin 'en' overrides /lang=uk");
+        }
+        finally
+        {
+            // This fixture's app id is FIXED, so without this the ARP row and the state
+            // dir outlive the run and the NEXT run of this test installs over a recorded
+            // prior install — the re-install-cleanup path, replaying a stale uninstall
+            // against a sandbox directory that no longer exists. Order- and
+            // history-independence is not optional for a leg that runs on a shared
+            // runner.
+            Cleanup("com.example.localizedukfixed");
+        }
     }
 
     [Fact]

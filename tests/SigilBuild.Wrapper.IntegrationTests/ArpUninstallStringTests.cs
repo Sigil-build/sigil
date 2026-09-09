@@ -172,6 +172,14 @@ public sealed class ArpUninstallStringTests
         // $$ raw string: {{...}} interpolates, single braces ({install_dir}) are literal.
         // Sigil.YamlQuote emits a single-quoted scalar, so the install dir's backslashes
         // need no hand-doubling — and cannot become an unknown-escape parse error (R66).
+        //
+        // `to:` is a destination DIRECTORY, never a file name — FileCopyStep does
+        // Directory.CreateDirectory(to) and then Path.Combine(to, <relative path>) per
+        // match, with no single-source-to-single-file branch. This fixture used to say
+        // `to: '{install_dir}\app.txt'`, which made app.txt a DIRECTORY holding
+        // app.txt\app.txt: exit 0, correct ARP row, and File.Exists below false against
+        // a directory. Guarded now by
+        // VmFixtureManifestTests.Vm_fixture_file_copy_destinations_are_directories.
         return $$"""
 spec: v1.0
 
@@ -196,7 +204,7 @@ install_steps:
   - id: copy-app
     type: file_copy
     from: 'payload://app.txt'
-    to: '{install_dir}\app.txt'
+    to: '{install_dir}'
 """;
     }
 

@@ -686,4 +686,307 @@ public sealed class FilesInUseTests
             "with a non-owning sentinel lets a second setup run concurrently while both " +
             "believe they hold the lock");
     }
+
+    // ── R76: the prior-version uninstaller this installer spawns ─────────────
+
+    /// <summary>
+    /// R76 — the defect: a per-user v1 → v2 upgrade holds
+    /// <c>Local\sigil-setup-&lt;appId&gt;-user</c> and then runs the PRIOR version's
+    /// <c>uninstall.exe /S /Uninstall /currentuser</c> for the teardown. That child
+    /// derives the SAME name, saw <c>ERROR_ALREADY_EXISTS</c>, and exited 5 — so every
+    /// unelevated upgrade and forced downgrade died with "removing the previous version
+    /// failed (uninstaller exit code 5)" and installed nothing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The shape here is the production shape with one honest substitution: the token
+    /// names THIS process's real parent (the test host) as the guard holder, while the
+    /// lock is actually held by this process. That is precisely what the child sees —
+    /// "the token names my parent, and the name is taken" — and it is the strongest
+    /// in-process approximation available, because a genuine child would have to be a
+    /// separate process. The end-to-end arbiter is
+    /// <c>UpgradeInstallTests.Upgrade_replaces_older_version_…</c> in the VM matrix
+    /// (PR #45), which is what actually runs Setup.exe v2 over an installed v1.
+    /// </para>
+    /// <para>
+    /// The negative half of the contract is in the tests below: nothing but a token
+    /// naming a live real parent, for this exact guard name, on an uninstall run, is
+    /// admitted.
+    /// </para>
+    /// </remarks>
+    [WindowsFact]
+    public void The_spawned_prior_uninstaller_is_admitted_under_the_installers_own_lock()
+    {
+        var appId = "com.acme.p6handoff-" + Guid.NewGuid().ToString("N");
+        var name = SetupInstanceLock.NameFor(appId, InstallScope.User);
+
+        // The "installer": holds the guard for the whole teardown.
+        using var installer = SetupInstanceLock.TryAcquire(appId, InstallScope.User);
+        installer.Should().NotBeNull();
+
+        Environment.SetEnvironmentVariable(SetupInstanceLock.HandoffVariable, RealParentHandoff(name));
+        try
+        {
+            var child = AcquireAsChild(appId, WrapperMode.Uninstall, out var refusal);
+
+            child.Should().NotBeNull(
+                "the installer's own teardown child must not be refused as a stranger — " +
+                "it runs inside the parent's critical section, which is still exclusive");
+            refusal.Should().Be(SetupInstanceLock.SetupLockRefusal.AdmittedByParentInstaller);
+            Environment.GetEnvironmentVariable(SetupInstanceLock.HandoffVariable)
+                .Should().BeNull("the token is consumed, so nothing further down the tree inherits it");
+            child!.Dispose();
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(SetupInstanceLock.HandoffVariable, null);
+        }
+    }
+
+    /// <summary>
+    /// R76 — the guard itself is unchanged for everyone else: with no handoff, a second
+    /// instance is refused exactly as before, uninstall mode included (an ARP uninstall
+    /// launched by hand while an install of the same app runs).
+    /// </summary>
+    [WindowsFact]
+    public void Without_a_handoff_an_uninstall_is_still_refused_while_a_setup_holds_the_guard()
+    {
+        var appId = "com.acme.p6nohandoff-" + Guid.NewGuid().ToString("N");
+
+        using var installer = SetupInstanceLock.TryAcquire(appId, InstallScope.User);
+        installer.Should().NotBeNull();
+
+        var child = AcquireAsChild(appId, WrapperMode.Uninstall, out var refusal);
+
+        child.Should().BeNull();
+        refusal.Should().Be(SetupInstanceLock.SetupLockRefusal.AnotherInstanceRunning);
+    }
+
+    /// <summary>
+    /// R76 — the forgery cases, each isolating one binding. A handoff is only ever a
+    /// claim; every field of it is checked against something the OS answers.
+    /// </summary>
+    [WindowsFact]
+    public void A_forged_or_stale_handoff_is_refused()
+    {
+        var appId = "com.acme.p6forged-" + Guid.NewGuid().ToString("N");
+        var name = SetupInstanceLock.NameFor(appId, InstallScope.User);
+
+        SetupInstanceLock.TryGetParentProcessId(out var ppid).Should().BeTrue();
+        SetupInstanceLock.TryGetProcessCreationTime(ppid, out var parentCreated).Should().BeTrue();
+        var self = (uint)Environment.ProcessId;
+        SetupInstanceLock.TryGetProcessCreationTime(self, out var selfCreated).Should().BeTrue();
+
+        // (1) A DIFFERENT app's guard. The binding that stops a planted token from
+        //     reaching any install but the one its minter named.
+        var otherName = SetupInstanceLock.NameFor(appId + ".other", InstallScope.User);
+        SetupInstanceLock.HandoffAdmits(
+            SetupInstanceLock.FormatHandoff(ppid, parentCreated, otherName), name)
+            .Should().BeFalse("a token minted for another app+scope must not admit this one");
+
+        // (2) A live process that is NOT our parent — here this very process, whose pid
+        //     and creation time are both genuine. Proves the pid is read from the OS and
+        //     not believed from the token.
+        SetupInstanceLock.HandoffAdmits(
+            SetupInstanceLock.FormatHandoff(self, selfCreated, name), name)
+            .Should().BeFalse("only the process that actually spawned us may hand over its lock");
+
+        // (3) The real parent's pid with the WRONG creation time: the pid-reuse case, a
+        //     stale token whose parent has exited and whose number now belongs to
+        //     someone else.
+        SetupInstanceLock.HandoffAdmits(
+            SetupInstanceLock.FormatHandoff(ppid, parentCreated + 1, name), name)
+            .Should().BeFalse("the token must name the same process INSTANCE, not just the number");
+
+        // (4) A pid that is genuinely dead. Its creation time was real while it lived.
+        var (deadPid, deadCreated) = ShortLivedProcess();
+        SetupInstanceLock.HandoffAdmits(
+            SetupInstanceLock.FormatHandoff(deadPid, deadCreated, name), name)
+            .Should().BeFalse("a dead minter cannot be inside any critical section");
+
+        // (5) Malformed / wrong wire version / empty.
+        foreach (var junk in new[]
+                 {
+                     null, string.Empty, "garbage",
+                     $"2|{ppid}|{parentCreated}|{name}",     // unknown version
+                     $"1|{ppid}|{parentCreated}",            // truncated
+                     $"1|-1|{parentCreated}|{name}",         // not a pid
+                     $"1|{ppid}|0|{name}",                   // no creation time
+                 })
+        {
+            SetupInstanceLock.HandoffAdmits(junk, name)
+                .Should().BeFalse($"'{junk ?? "<null>"}' is not a well-formed handoff");
+        }
+    }
+
+    /// <summary>
+    /// R76 — the payoff ceiling. The handoff is honoured for the uninstall teardown and
+    /// nothing else, so no token, however obtained, can put a second CONCURRENT INSTALL
+    /// of an application onto the same state.
+    /// </summary>
+    [WindowsFact]
+    public void A_handoff_never_admits_a_second_install()
+    {
+        var appId = "com.acme.p6installmode-" + Guid.NewGuid().ToString("N");
+        var name = SetupInstanceLock.NameFor(appId, InstallScope.User);
+
+        using var installer = SetupInstanceLock.TryAcquire(appId, InstallScope.User);
+        installer.Should().NotBeNull();
+
+        Environment.SetEnvironmentVariable(SetupInstanceLock.HandoffVariable, RealParentHandoff(name));
+        try
+        {
+            var second = AcquireAsChild(appId, WrapperMode.Install, out var refusal);
+
+            second.Should().BeNull("an install is never the teardown child");
+            refusal.Should().Be(SetupInstanceLock.SetupLockRefusal.AnotherInstanceRunning);
+            Environment.GetEnvironmentVariable(SetupInstanceLock.HandoffVariable)
+                .Should().BeNull("the token is consumed on every path, admitted or not");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(SetupInstanceLock.HandoffVariable, null);
+        }
+    }
+
+    /// <summary>
+    /// R76 must not reopen R34: when the guard's name is occupied by something that is
+    /// not our mutex, no exclusivity was ever established, so there is no critical
+    /// section to be admitted into. A valid handoff does not rescue that branch.
+    /// </summary>
+    [WindowsFact]
+    public void A_squatted_guard_name_is_not_rescued_by_a_valid_handoff()
+    {
+        var appId = "com.acme.p6squathandoff-" + Guid.NewGuid().ToString("N");
+        var name = SetupInstanceLock.NameFor(appId, InstallScope.User);
+
+        using var squatter = new Semaphore(1, 1, name, out var createdNew);
+        createdNew.Should().BeTrue();
+
+        Environment.SetEnvironmentVariable(SetupInstanceLock.HandoffVariable, RealParentHandoff(name));
+        try
+        {
+            var child = AcquireAsChild(appId, WrapperMode.Uninstall, out var refusal);
+
+            child.Should().BeNull("R34's fail-closed branch stays closed");
+            refusal.Should().Be(SetupInstanceLock.SetupLockRefusal.NameNotAvailable);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(SetupInstanceLock.HandoffVariable, null);
+        }
+    }
+
+    /// <summary>
+    /// R76 — the admission is one level deep. An admitted child does not own the guard,
+    /// so it cannot mint a handoff of its own: no chain of processes can walk the
+    /// exemption outwards.
+    /// </summary>
+    [WindowsFact]
+    public void An_admitted_child_cannot_mint_a_further_handoff()
+    {
+        var appId = "com.acme.p6chain-" + Guid.NewGuid().ToString("N");
+        var name = SetupInstanceLock.NameFor(appId, InstallScope.User);
+
+        using var installer = SetupInstanceLock.TryAcquire(appId, InstallScope.User);
+        installer!.MintChildHandoff().Should().NotBeNull("the owner is the one that may hand over");
+
+        Environment.SetEnvironmentVariable(SetupInstanceLock.HandoffVariable, RealParentHandoff(name));
+        try
+        {
+            using var child = AcquireAsChild(appId, WrapperMode.Uninstall, out _);
+
+            child.Should().NotBeNull();
+            child!.OwnsTheGuard.Should().BeFalse();
+            child.MintChildHandoff().Should().BeNull("only the guard's owner may hand it over");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(SetupInstanceLock.HandoffVariable, null);
+        }
+    }
+
+    /// <summary>
+    /// R76 — the guard name carries the scope, so a token minted for one scope must not
+    /// admit the other. This is what makes "machine scope is the same code with a
+    /// <c>Global\</c> name" a tested claim rather than an inspected one: the elevated
+    /// shape reaches the identical check, and a per-user token cannot cross into it.
+    /// </summary>
+    /// <remarks>
+    /// Pure verification — no mutex is created, so the machine-scope half needs no
+    /// elevation and no <c>Global\</c> name (creating one needs
+    /// <c>SeCreateGlobalPrivilege</c>; deriving one needs nothing). Both directions are
+    /// asserted, each against its own positive control, so a refusal cannot be passing
+    /// for the wrong reason.
+    /// </remarks>
+    [WindowsFact]
+    public void A_handoff_is_bound_to_the_scope_it_was_minted_for()
+    {
+        var appId = "com.acme.p6scope-" + Guid.NewGuid().ToString("N");
+        var userName = SetupInstanceLock.NameFor(appId, InstallScope.User);
+        var machineName = SetupInstanceLock.NameFor(appId, InstallScope.Machine);
+        machineName.Should().StartWith("Global\\").And.NotBe(userName);
+
+        SetupInstanceLock.TryGetParentProcessId(out var ppid).Should().BeTrue();
+        SetupInstanceLock.TryGetProcessCreationTime(ppid, out var created).Should().BeTrue();
+
+        var userToken = SetupInstanceLock.FormatHandoff(ppid, created, userName);
+        var machineToken = SetupInstanceLock.FormatHandoff(ppid, created, machineName);
+
+        SetupInstanceLock.HandoffAdmits(userToken, userName)
+            .Should().BeTrue("control: the user-scope token admits its own guard");
+        SetupInstanceLock.HandoffAdmits(machineToken, machineName)
+            .Should().BeTrue("control: the machine-scope token admits its own guard");
+
+        SetupInstanceLock.HandoffAdmits(userToken, machineName)
+            .Should().BeFalse("a per-user handoff must not admit an elevated machine-scope run");
+        SetupInstanceLock.HandoffAdmits(machineToken, userName)
+            .Should().BeFalse("a machine-scope handoff must not admit a per-user run");
+    }
+
+    /// <summary>
+    /// What a spawned child actually does: consume the token its parent left on the
+    /// environment, then take the guard with it. The consume happens at the top of
+    /// <c>Main</c> in production (before the elevation branch); the ordering relative to
+    /// the acquisition is what these tests reproduce.
+    /// </summary>
+    private static SetupInstanceLock? AcquireAsChild(
+        string appId, WrapperMode mode, out SetupInstanceLock.SetupLockRefusal refusal)
+        => SetupInstanceLock.TryAcquire(
+            appId, InstallScope.User, mode, SetupInstanceLock.ConsumeHandoffToken(), out refusal);
+
+    /// <summary>
+    /// A handoff naming this process's REAL parent — the shape a spawned child sees,
+    /// with the test standing in for the installer that holds the lock.
+    /// </summary>
+    private static string RealParentHandoff(string lockName)
+    {
+        SetupInstanceLock.TryGetParentProcessId(out var ppid)
+            .Should().BeTrue("the parent pid is what the handoff is checked against");
+        SetupInstanceLock.TryGetProcessCreationTime(ppid, out var created)
+            .Should().BeTrue("the parent must be live and readable");
+        return SetupInstanceLock.FormatHandoff(ppid, created, lockName);
+    }
+
+    /// <summary>
+    /// A pid whose process has exited, with the creation time it really had while it
+    /// lived. The <see cref="Process"/> handle is released before returning, so the
+    /// kernel object goes away with it.
+    /// </summary>
+    private static (uint Pid, long CreationTime) ShortLivedProcess()
+    {
+        var psi = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"))
+        {
+            Arguments = "/c exit 0",
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        using var p = Process.Start(psi);
+        p.Should().NotBeNull();
+        var pid = (uint)p!.Id;
+        SetupInstanceLock.TryGetProcessCreationTime(pid, out var created).Should().BeTrue();
+        p.WaitForExit();
+        p.Dispose();
+        return (pid, created);
+    }
 }

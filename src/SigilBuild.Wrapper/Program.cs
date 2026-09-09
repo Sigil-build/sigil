@@ -36,6 +36,13 @@ internal static class Program
             // additionally write it to.
             session.ResolveSessionLanguage();
 
+            // R76: read the single-instance handoff and CLEAR it here — before the
+            // elevation branch below, which is the first thing this process can spawn.
+            // The guard is taken further down (after that branch, P6's rule), and the
+            // token is handed to it then. Read once, at the top, so no child of this
+            // process can ever inherit an admission it was not given.
+            var lockHandoff = SetupInstanceLock.ConsumeHandoffToken();
+
             // T12 — self-elevation. A resolved per-machine scope from a
             // non-elevated process relaunches self with the `runas` verb,
             // forwarding all args, and propagates the elevated child's exit code.
@@ -69,8 +76,14 @@ internal static class Program
             // P6 (gap G17): single-instance guard. Taken AFTER the elevation branch —
             // the un-elevated parent above never installs, so it must not hold the
             // mutex while the elevated child (which does) tries to take it.
+            //
+            // R76: the mode is passed because ONE process legitimately runs while the
+            // guard is already held — the prior version's uninstall.exe that an upgrade
+            // in this very app+scope spawned for its teardown. It is admitted only
+            // against a handoff its parent minted (SetupInstanceLock.HandoffAdmits);
+            // an ordinary second Setup.exe is refused exactly as before.
             using var instanceLock = SetupInstanceLock.TryAcquire(
-                session.AppId, session.ResolvedScope, out var lockRefusal);
+                session.AppId, session.ResolvedScope, session.Mode, lockHandoff, out var lockRefusal);
             if (instanceLock is null)
             {
                 // R34: two different situations reach here. Say which — an operator
@@ -93,6 +106,25 @@ internal static class Program
                     "note: the single-instance guard could not be created for this run — " +
                     "a concurrent setup of the same application would not be detected.");
             }
+
+            if (lockRefusal == SetupInstanceLock.SetupLockRefusal.AdmittedByParentInstaller)
+            {
+                // R76: say the exception out loud, as the Avalonia host records it in its
+                // always-on diagnostic log (InstallerLog). This console shell has no such
+                // log — the /LOG sink is not open until RunHeadlessAsync — so stderr is
+                // where an operator reading the transcript of an upgrade can see WHY a
+                // second process for this app+scope was allowed to run.
+                Console.Error.WriteLine(
+                    $"note: single-instance guard: {lockRefusal} — the guard for this " +
+                    "application is held by another process, and this uninstall was " +
+                    "admitted on the handoff from the process that spawned it.");
+            }
+
+            // R76: hand the lock to the session so a P3 upgrade teardown can pass it on
+            // to the prior version's uninstaller. Only an OWNING lock mints a handoff,
+            // so setting it unconditionally is safe (an admitted or sentinel lock mints
+            // nothing).
+            session.InstanceLock = instanceLock;
 
             return await session.RunHeadlessAsync(Console.Out, Console.Error).ConfigureAwait(false);
         }

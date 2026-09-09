@@ -27,6 +27,7 @@ name: wrapper-vm-tests
 # so this must never run on every push/PR.
 on:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read

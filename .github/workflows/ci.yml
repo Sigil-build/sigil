@@ -33,7 +33,10 @@ jobs:
         run: dotnet --info
 
       - name: restore
-        run: dotnet restore Sigil.slnx
+        # R23a: locked mode fails the build if any package resolves outside the
+        # committed packages.lock.json set — with NuGet.config pinning nuget.org
+        # as the only feed, this is what makes the restore reproducible.
+        run: dotnet restore Sigil.slnx --locked-mode
 
       - name: build
         run: dotnet build Sigil.slnx --configuration Release --no-restore
@@ -227,8 +230,21 @@ jobs:
         with:
           global-json-file: global.json
 
+      # I3/R23a: this job previously had NO restore step, so the implicit
+      # restore inside "dotnet publish -r win-x64" regenerated the lock files
+      # instead of honouring them (RestorePackagesWithLockFile without
+      # RestoreLockedMode silently rewrites). SigilBuild.Cli now declares
+      # <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>, so the
+      # locked restore covers the RID-specific graph and the publish below can
+      # run --no-restore. NOTE: publish-installer-runtime.ps1 (further down)
+      # still restores on its own -- the host's PublishAot is gated on
+      # SigilAotPublish, so its ILCompiler references are absent from the
+      # RID-less lock graph and cannot be locked from here.
+      - name: restore (locked)
+        run: dotnet restore Sigil.slnx --locked-mode
+
       - name: aot publish
-        run: dotnet publish src/SigilBuild.Cli -c Release -r win-x64 -p:PublishAot=true -o publish/win-x64
+        run: dotnet publish src/SigilBuild.Cli -c Release -r win-x64 -p:PublishAot=true --no-restore -o publish/win-x64
 
       - name: smoke test
         shell: pwsh
@@ -241,7 +257,14 @@ jobs:
           if ($size -gt 15MB) { throw "sigil.exe is $sizeMb MB, exceeds 15 MB budget" }
           $output = & $exe --version
           if ($LASTEXITCODE -ne 0) { throw "sigil --version exited $LASTEXITCODE" }
-          if ($output.Trim() -ne "0.0.1-alpha") { throw "expected '0.0.1-alpha', got '$output'" }
+          # R24: there is exactly one source of truth for the version now --
+          # Directory.Build.props' <Version> element -- so assert agreement
+          # with THAT, not a literal that would silently drift the moment
+          # someone bumps the version and forgets this line (the original
+          # R24 bug, one level up).
+          $expectedVersion = (Select-Xml -Path "Directory.Build.props" -XPath "//Version").Node.InnerText.Trim()
+          if ([string]::IsNullOrWhiteSpace($expectedVersion)) { throw "could not read <Version> from Directory.Build.props" }
+          if ($output.Trim() -ne $expectedVersion) { throw "expected '$expectedVersion' (from Directory.Build.props), got '$output'" }
 
       - name: aot smoke - validate
         shell: pwsh
@@ -324,9 +347,14 @@ jobs:
           path: publish/host-stage/runtimes/win-arm64/SigilBuild.Installer.Host.exe
           if-no-files-found: warn
 
-      - name: upload binary
+      # REL.5/R7: the AOT output is NOT single-file — sigil.exe needs its
+      # sibling libSkiaSharp.dll and libsodium.dll (logo resizing, ZIP manifest
+      # signing). Uploading the bare exe hands users a DllNotFoundException.
+      - name: upload binary (full publish directory)
         uses: actions/upload-artifact@v4
         with:
           name: sigil-win-x64
-          path: publish/win-x64/sigil.exe
+          path: |
+            publish/win-x64/*
+            !publish/win-x64/*.pdb
           if-no-files-found: error

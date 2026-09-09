@@ -1,6 +1,7 @@
 using System.CommandLine;
 using System.CommandLine.Builder;
 using System.CommandLine.Parsing;
+using System.Reflection;
 using System.Threading.Tasks;
 using SigilBuild.Cli.Commands;
 
@@ -8,7 +9,16 @@ namespace SigilBuild.Cli;
 
 public static class Program
 {
-    public const string Version = "0.0.1-alpha";
+    // R24: single source of truth is Directory.Build.props' <Version> element.
+    // The SDK stamps it onto AssemblyInformationalVersionAttribute (plus a
+    // "+<git-sha>" source-revision suffix); strip that suffix so `sigil
+    // --version` reports the clean semver the build declared rather than a
+    // value that changes on every commit.
+    public static readonly string Version =
+        typeof(Program).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()!
+            .InformationalVersion
+            .Split('+')[0];
 
     public static int Main(string[] args) => MainAsync(args).GetAwaiter().GetResult();
 

@@ -16,7 +16,7 @@ dotnet test Sigil.slnx -c Release
 dotnet format Sigil.slnx --verify-no-changes   # CI-enforced
 ```
 
-.NET SDK is pinned by `global.json` (10.0.100+). CI runs on `windows-latest` only.
+.NET SDK is pinned EXACTLY by `global.json` (10.0.303, `rollForward: disable`): the locked restore (R23a) pins the SDK-injected `Microsoft.DotNet.ILCompiler` / `Microsoft.NET.ILLink.Tasks` packages, so a rolled-forward SDK fails with NU1004. Bump the SDK and regenerate the lock files together. CI runs on `windows-latest` only.
 
 ## Hard rules (CI will reject violations)
 

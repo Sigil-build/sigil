@@ -16,6 +16,24 @@
     <PackageProjectUrl>https://sigil.build</PackageProjectUrl>
     <RepositoryUrl>https://github.com/Sigil-build/sigil</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+
+    <!-- R24: the ONE place the version lives. Every project inherits $(Version)
+         from here (the SDK stamps it onto AssemblyInformationalVersionAttribute,
+         which Program.cs reads at runtime instead of a hand-maintained const;
+         see SigilBuild.Cli/Program.cs). Do not add a <Version> element to any
+         individual .csproj; that would silently re-fork this single source.
+
+         This value is not a fallback; it IS the version, for every build
+         (local, CI's non-tag pushes, dotnet pack) and for the signed release
+         too. release.yml passes no -p:Version= anywhere; instead it REFUSES
+         the release unless the pushed tag is exactly v<Version> as read
+         from THIS file, and ci.yml's AOT smoke test asserts that
+         the version the CLI reports agrees with it. One source of truth,
+         enforced from both ends. So: bump <Version> in this file before
+         tagging, commit it, and only then push the matching v<Version> tag. -->
+    <Version>0.1.0-alpha</Version>
   </PropertyGroup>
 
   <!-- Static graph restore is required so that ProjectReference metadata

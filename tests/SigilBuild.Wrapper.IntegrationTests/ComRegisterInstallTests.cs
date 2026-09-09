@@ -37,16 +37,32 @@ using Xunit;
 /// </para>
 /// <para>
 /// What CAN be verified live, and is verified below in
-/// <see cref="ComRegisterStep_runs_the_full_register_journal_reverse_plumbing_under_elevation"/>:
-/// the step's real end-to-end plumbing — resolve path, clear the privileged-target
-/// anchor, journal the inverse BEFORE the native call, invoke
-/// <c>LoadLibraryEx</c>/<c>GetProcAddress</c> through the AOT-safe function
-/// pointer, map the outcome to a <see cref="StepResult"/>, and run the journaled
-/// <see cref="RollbackRecord.UnregisterCom"/> undo — genuinely elevated, on
-/// the CI VM, rather than only unit-tested unelevated (as
-/// <c>ComRegisterStepTests</c> already does locally). The DLL it names has no
-/// <c>DllRegisterServer</c> export, so it never touches real HKCR state, while
-/// still proving elevation doesn't change the step's failure-path behavior.
+/// <see cref="ComRegisterStep_refuses_an_export_less_dll_under_elevation_and_journals_no_undo"/>:
+/// the step's real end-to-end plumbing up to the register — resolve path, clear the
+/// privileged-target anchor, invoke <c>LoadLibraryEx</c>/<c>GetProcAddress</c>
+/// through the AOT-safe function pointer, and map the outcome to a
+/// <see cref="StepResult"/> — genuinely elevated, on the CI VM, rather than only
+/// unit-tested unelevated (as <c>ComRegisterStepTests</c> already does locally). The
+/// DLL it names has no <c>DllRegisterServer</c> export, so it never touches real
+/// HKCR state, while still proving elevation doesn't change the step's failure-path
+/// behavior.
+/// </para>
+/// <para>
+/// <b>What it deliberately no longer claims (register row: the R15 follow-up).</b>
+/// As written this leg called itself the "full register → journal → reverse
+/// plumbing" test and drove <see cref="RollbackRecord.UnregisterCom"/>'s
+/// <c>UndoAsync</c> on that same export-less DLL, asserting the undo "must not
+/// throw". Its premise was false in both directions. A DLL with no
+/// <c>DllRegisterServer</c> also has no <c>DllUnregisterServer</c>, so there is no
+/// reverse to exercise; and R15 ("uninstall must not report a success it did not achieve") made that undo
+/// throw <c>UndoFailedException</c>, because <c>DllUnregisterServer</c> is the only
+/// probe a COM registration has and a failure there means "still registered". The VM
+/// run failed here for the right reason. The fix is in the STEP, not in this test: a
+/// register whose undo cannot be called journals nothing, so this leg asserts an
+/// empty journal — which is also why there is no undo left for it to
+/// drive. The real register→reverse round trip stays the
+/// <see cref="Live_register_then_unregister_a_real_self_registering_dll"/> Skip,
+/// whose reason now spells out the exact fixture needed.
 /// </para>
 /// <para>
 /// <b>The DLL now lives inside a real <c>install_dir</c> (register row R67).</b>
@@ -92,7 +108,7 @@ using Xunit;
 public class ComRegisterInstallTests
 {
     [VmSystemStepsFact]
-    public async Task ComRegisterStep_runs_the_full_register_journal_reverse_plumbing_under_elevation()
+    public async Task ComRegisterStep_refuses_an_export_less_dll_under_elevation_and_journals_no_undo()
     {
         using var installDir = SystemStepInstallDir.CreateElevated();
 
@@ -117,20 +133,34 @@ public class ComRegisterInstallTests
             "the DLL must have loaded for real from install_dir — a load failure would mean this " +
             "leg never reached GetProcAddress and so proved nothing about the plumbing");
 
-        journal.Records.Should().ContainSingle()
-            .Which.Should().BeOfType<RollbackRecord.UnregisterCom>()
-            .Which.DllPath.Should().Be(dll);
-
-        // The undo is best-effort and must not throw even when there was
-        // nothing to unregister — the same tolerance RemoveService and
-        // DeleteFirewallRule's undo apply to a target that was never created.
-        var undo = () => journal.Records[0].UndoAsync(default);
-        await undo.Should().NotThrowAsync();
+        // Nothing was registered, so there must be nothing to unregister. This is
+        // the assertion the VM run earned: it previously expected the opposite
+        // (ContainSingle, then "the undo is best-effort and must not throw"), and
+        // R15 made that undo throw — correctly. The product answer is that the
+        // record should never have been there, so the honest assertion is that the
+        // journal is EMPTY, which also means there is no undo left to drive here.
+        // See ComRegisterStepTests for the unit-level version of this contract.
+        journal.Records.Should().BeEmpty(
+            "the probe DLL exports neither DllRegisterServer nor DllUnregisterServer, so a " +
+            "journaled UnregisterCom would fail this install's rollback AND every later " +
+            "uninstall attempt on the strength of a probe that never ran");
     }
 
     [Fact(Skip =
         "com_register's live register->assert HKCR\\CLSID->unregister leg needs a bundled, " +
         "purpose-built self-registering test DLL that does not yet exist in this repo (follow-up). " +
+        "THE FIXTURE, PRECISELY: a native DLL exporting BOTH DllRegisterServer and " +
+        "DllUnregisterServer as stdcall HRESULT(void), which write and remove ONLY one " +
+        "test-specific CLSID under HKCR (e.g. HKCR\\CLSID\\{sigil-test GUID}) and touch nothing " +
+        "else, with DllUnregisterServer returning S_OK when the key is already absent (idempotent, " +
+        "so a re-run and a double rollback both stay clean). Buildable inside this repo as a tiny " +
+        "Native AOT class library whose two entry points are " +
+        "[UnmanagedCallersOnly(EntryPoint = \"DllRegisterServer\")] / \"DllUnregisterServer\" — no " +
+        "C++ project needed, which matters because it must be CI-built: the maintainer box that " +
+        "wrote this cannot AOT-publish (no MSVC C++ workload), so the DLL has to be produced by the " +
+        "windows-latest job and staged for the VM leg rather than checked in as a binary. With that " +
+        "in hand the leg asserts: register -> the CLSID key EXISTS -> replay the journaled " +
+        "UnregisterCom -> the key is GONE and the undo did not throw (R15). " +
         "A real system self-registering DLL was deliberately NOT substituted: its CLSID is already " +
         "registered by the OS before this test runs (so 'register -> assert present' proves nothing) " +
         "and unregistering a real system COM DLL is exactly the fragile-fixture risk the brief calls " +

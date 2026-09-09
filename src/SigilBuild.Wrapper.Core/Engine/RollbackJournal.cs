@@ -24,6 +24,68 @@ public sealed class RollbackJournal
     }
 
     /// <summary>
+    /// Withdraw the record a step appended moments ago, having since learned that
+    /// <em>the record's undo cannot possibly succeed</em> and that keeping it would
+    /// therefore manufacture a false failure report. Removes
+    /// <paramref name="record"/> only when it is still the tail of the journal, and
+    /// reports whether it did.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Why this exists (the R15 follow-up).</strong> Steps journal the inverse
+    /// <em>before</em> they mutate, so an interrupted install still unwinds. That is
+    /// correct, but it is an intent record, and for most steps the undo can later ask the
+    /// system whether the object exists — <c>schtasks /Query</c>, <c>netsh show rule</c>,
+    /// <c>sc query</c> — so an intent that never became a mutation replays as a silent
+    /// no-op. <see cref="RollbackRecord.UnregisterCom"/> has no such query: COM
+    /// registration can only be probed by calling <c>DllUnregisterServer</c>, whose
+    /// failure R15 (rightly) treats as "the registration is still in place". A record
+    /// whose <c>DllUnregisterServer</c> <em>cannot be called at all</em> — the module
+    /// will not load, or exports no such function — therefore turns into a guaranteed
+    /// <see cref="UndoFailedException"/> at rollback and uninstall: the install failed
+    /// AND its cleanup now reports an unremovable machine-global registration on the
+    /// strength of a probe that never ran.
+    /// </para>
+    /// <para>
+    /// <strong>The bar is the undo's feasibility, not the mutation's absence.</strong>
+    /// The tempting phrasing — "withdraw when the mutation provably did not happen" —
+    /// overclaims: a module that fails to load may still have run <c>DllMain</c> first
+    /// (<c>LoadLibraryEx</c> returns NULL when <c>DllMain</c> returns FALSE, after it
+    /// executed), and a module with no <c>DllRegisterServer</c> export mapped
+    /// successfully and ran <c>DllMain</c> as administrator. Sigil cannot prove those
+    /// wrote nothing. What it can establish is that the undo it holds has no way to
+    /// undo anything and no way to report honestly, which is the actual reason to drop
+    /// it. (Publishers are told not to register from <c>DllMain</c> —
+    /// <c>docs/guides/install-steps.md</c>.)
+    /// </para>
+    /// <para>
+    /// Only the tail is withdrawable, which keeps the contract narrow and auditable:
+    /// append, act, and — if and only if nothing else was appended in between —
+    /// withdraw what you just appended. "Unknown whether the undo would work" is NOT
+    /// grounds to withdraw; the record stays and the undo does its best, per R15.
+    /// </para>
+    /// <para>
+    /// <strong><c>internal</c>, deliberately.</strong> The engine is the wrapper
+    /// runtime's private contract (see the <c>InternalsVisibleTo</c> block in
+    /// <c>SigilBuild.Wrapper.Core.csproj</c>), and an API that <em>removes</em> rollback
+    /// records is the last one that should be reachable from outside it.
+    /// <see cref="Append"/> is public because the packager and host build journals;
+    /// nothing outside the runtime has any business un-building one.
+    /// </para>
+    /// </remarks>
+    internal bool RetractLast(RollbackRecord record)
+    {
+        System.ArgumentNullException.ThrowIfNull(record);
+        if (_records.Count == 0 || !Equals(_records[^1], record))
+        {
+            return false;
+        }
+
+        _records.RemoveAt(_records.Count - 1);
+        return true;
+    }
+
+    /// <summary>
     /// Delete the transient install-time <em>stash</em> artefacts once the install
     /// has COMMITTED successfully. A <c>file_delete</c> / <c>directory_delete</c>
     /// step copies its target to a <c>%TEMP%</c> stash (<c>sigil-fd-*</c> /

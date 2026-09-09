@@ -18,14 +18,17 @@ using System.Runtime.Versioning;
 /// </summary>
 /// <remarks>
 /// A single native path serves both callers: the <c>com_register</c> install
-/// step (which maps each outcome to a <c>StepResult</c>) and the best-effort
-/// undo (<c>RollbackRecord.UnregisterCom</c>, which ignores the outcome — a
-/// missing export or non-zero HRESULT on unregister is tolerated, like
-/// <c>RemoveService</c> tolerates a missing service). Because both the load
-/// failure and the missing-export cases are normal, expected results rather
-/// than exceptional ones, they are surfaced via <see cref="ComInvocationResult"/>
-/// instead of thrown exceptions. <c>FreeLibrary</c> always runs in a
-/// <c>finally</c>.
+/// step (which maps each outcome to a <c>StepResult</c>, and withdraws its
+/// journaled undo when the outcome proves nothing was registered) and the undo
+/// itself (<c>RollbackRecord.UnregisterCom</c>). <b>The undo no longer ignores
+/// the outcome (R15):</b> <c>DllUnregisterServer</c> is the only probe a COM
+/// registration has, so anything other than <see cref="ComExportOutcome.Ok"/>
+/// there is reported as "the registration is still in place" rather than
+/// tolerated the way <c>RemoveService</c> tolerates a missing service. Because
+/// both the load failure and the missing-export cases are normal, expected
+/// results rather than exceptional ones, they are surfaced via
+/// <see cref="ComInvocationResult"/> instead of thrown exceptions.
+/// <c>FreeLibrary</c> always runs in a <c>finally</c>.
 /// </remarks>
 [SupportedOSPlatform("windows")]
 internal static partial class ComRegistration
@@ -55,6 +58,16 @@ internal static partial class ComRegistration
 
     internal readonly record struct ComInvocationResult(
         ComExportOutcome Outcome, int Win32Error, int HResult);
+
+    /// <summary>
+    /// The shape of <see cref="Invoke"/>, so <c>ComRegisterStep</c> can be handed a
+    /// stub in unit tests and its journal RETENTION behaviour pinned for the two
+    /// outcomes that need a real self-registering DLL
+    /// (<see cref="ComExportOutcome.Ok"/> / <see cref="ComExportOutcome.HResultFailure"/>).
+    /// A named, non-generic delegate over a static method — statically bound, no
+    /// reflection, no IL stub, so it changes nothing about AOT safety.
+    /// </summary>
+    internal delegate ComInvocationResult ComExportInvoker(string dllPath, string export);
 
     /// <summary>
     /// Loads <paramref name="dllPath"/>, resolves the stdcall

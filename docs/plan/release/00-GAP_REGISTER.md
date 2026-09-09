@@ -3500,21 +3500,31 @@ in-process DLL load, which is what makes `LoadFailed` a reachable state at all).
 > **`rc/p6-fix-upgrade-mutex`** (PR pending). Not found by the matrix; found by
 > driving the shipped binaries.
 >
-> **STILL OPEN (2026-09-09) — fix in
-> [PR #46](https://github.com/Sigil-build/sigil/pull/46) (`rc/p6-fix-upgrade-mutex`,
-> head `cdb4c4d`), awaiting the human merge.** The parent installer that holds the
-> guard mints a one-time handoff token (real parent pid, read via a toolhelp
-> snapshot and never trusted from the token itself, plus the parent's process
-> creation time, the guard name, and `Uninstall` mode) onto the environment block of
-> the one child it spawns to run the prior version's `uninstall.exe`; the admitted
-> child holds the lock **non-owning**, so it cannot mint a further handoff, and
-> **R34**'s `NameNotAvailable` branch stays deliberately unrescuable by any handoff.
-> CI is green including `aot publish (win-x64)`, and security review **approved the
-> mechanism** — the one named residual is that a process holding no lock at all can
-> still mint a token for its own child while a different process holds the name,
-> which grants nothing beyond what a same-user process already has; a final wording
-> round tightened two doc comments that had overclaimed the guarantee and moved
-> token consumption ahead of the elevation branch in both hosts.
+> **CLOSED — merged 2026-09-09.** [PR #46](https://github.com/Sigil-build/sigil/pull/46)
+> (`rc/p6-fix-upgrade-mutex`) landed on the RC as `6842a8c`. The parent installer
+> that holds the guard mints a one-time handoff token (real parent pid, read via a
+> toolhelp snapshot and never trusted from the token itself, plus the parent's
+> process creation time, the guard name, and `Uninstall` mode) onto the environment
+> block of the one child it spawns to run the prior version's `uninstall.exe`; the
+> admitted child holds the lock **non-owning**, so it cannot mint a further handoff,
+> and **R34**'s `NameNotAvailable` branch stays deliberately unrescuable by any
+> handoff. CI was green including `aot publish (win-x64)`, and security review
+> **approved the mechanism** — the one named residual is that a process holding no
+> lock at all can still mint a token for its own child while a different process
+> holds the name, which grants nothing beyond what a same-user process already has;
+> a final wording round tightened two doc comments that had overclaimed the
+> guarantee and moved token consumption ahead of the elevation branch in both hosts.
+>
+> **Proven live, not just merged.** The VM matrix auto-ran on `6842a8c` — run
+> [34383631266](https://github.com/Sigil-build/sigil/actions/runs/34383631266),
+> **success**, all three legs green — the **first green matrix run against the
+> fix**. The two elevation-blind upgrade assertions
+> (`Upgrade_replaces_older_version_preserving_install_dir_and_single_arp_row`,
+> `Silent_downgrade_is_blocked_with_exit_code_3`) remain honest skips on this
+> **elevated** hosted runner, per **R64**/**R74** — they execute only on an
+> *unelevated* runner, which this workflow does not provide, so R76's fix is proven
+> by the two-process harness in `r76-fix-report.md` §3 and by CI's unit suite, not
+> yet by an end-to-end VM assertion of the upgrade path itself.
 >
 > **Sequencing note.** Both halves — the minting parent, the admitting child — must
 > ship in the **same** build: upgrading *from* an installer built before this fix

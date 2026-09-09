@@ -100,10 +100,25 @@
 > wording round landed — **awaiting the human merge**. Nothing below matters for
 > a release until it merges (see `02-READINESS_REPORT.md`'s DoD block, item 0).
 >
+> ### G3 update (2026-09-09, continued) — R76 merged, and proven post-fix
+>
+> [PR #46](https://github.com/Sigil-build/sigil/pull/46) **merged** → RC
+> `6842a8c`, the current RC head. The VM matrix auto-ran on it —
+> [34383631266](https://github.com/Sigil-build/sigil/actions/runs/34383631266),
+> **success**, all three legs green, the **first post-fix green matrix**. The two
+> elevation-blind upgrade assertions remain honest skips on this **elevated**
+> hosted runner (**R64**/**R74**); they execute only on an unelevated runner,
+> which this workflow does not provide. **Every register row R1–R76 is now
+> either closed with a merge sha or explicitly deferred** — R1–R73 by
+> [#43](https://github.com/Sigil-build/sigil/pull/43)'s V1.1 pass, R74 open by
+> design (deferred, not a G3 blocker), R75 closed by #44 (`8f1c306`), R76 closed
+> by #46 (`6842a8c`). What's left is owner-only: the release dry-run (six
+> Trusted Signing secrets, none exist), the clean-machine install that needs
+> its artifact, V1.2's re-attack, the known-limitations sweep, and the two G4
+> actions below.
+>
 > **Blocked on the owner — nothing an agent lane can move:**
 >
-> - **R76's merge.** [PR #46](https://github.com/Sigil-build/sigil/pull/46) is
->   green and reviewed; there is no further agent-side work on it.
 > - **The release dry-run** needs the **six Trusted Signing secrets — none exist
 >   yet**; `release.yml` refuses before any restore without them, and it has
 >   never run at all.
@@ -111,16 +126,16 @@
 >   dry-run's artifact first.
 > - **V1.2** — the re-attack pass against the *integrated* RC, not each lane at
 >   its own tip — has not run.
-> - **"Every register row demonstrated fixed or deferred."** Done for **R1–R76**
->   by [#43](https://github.com/Sigil-build/sigil/pull/43) (V1.1's per-row status
->   lines) plus this docs PR (R58, R64, R66–R70, R75 confirmed live; R76 pointed
->   at #46). Not yet swept against the known-limitations draft in
->   `02-READINESS_REPORT.md` — that box stays open.
+> - **The known-limitations sweep.** Every register row is now closed or
+>   deferred (above), but the known-limitations draft in
+>   `02-READINESS_REPORT.md` predates **R60–R65** and **R69–R76** — closing
+>   that box means a pass over the draft, not filing more rows.
 > - **`02-READINESS_REPORT.md`'s Definition of Done** is not fully ticked — see
 >   its own dated block.
 > - **Private vulnerability reporting** is still `{"enabled":false}` (**R23**) and
 >   **both NuGet IDs are still unreserved** (**R41a**) — two G4 owner actions.
-> - **Merging the open lane PRs.** The orchestrator cannot merge them.
+> - **Merging the open lane PRs**, if any remain. The orchestrator cannot merge
+>   them.
 >
 > **Still to run in Stage 4:** **V1.2** (re-attack the integrated RC, not each lane
 > at its own tip) and **V1.3**.
@@ -707,12 +722,18 @@ check as R58.**
       (p12 …)` green, the other two still red) →
       [34374943524](https://github.com/Sigil-build/sigil/actions/runs/34374943524)
       (`8f1c306` — `vm (p11 …)` also green, with #44) →
-      **[34379757534](https://github.com/Sigil-build/sigil/actions/runs/34379757534)
-      (`df98eba` — all three green, with #45).** First green matrix in the
-      project's history. **Caveat, unresolved by this run:** machine-scope
-      end-to-end install is still **UNCOVERED** (**R64**), and because the
-      install-matrix leg runs elevated, the two skipped upgrade/downgrade
-      assertions are not proven end to end here.
+      [34379757534](https://github.com/Sigil-build/sigil/actions/runs/34379757534)
+      (`df98eba` — all three green, with #45) — **first green matrix in the
+      project's history** — →
+      **[34383631266](https://github.com/Sigil-build/sigil/actions/runs/34383631266)
+      (`6842a8c` — all three green, with [#46](https://github.com/Sigil-build/sigil/pull/46)'s
+      R76 fix; the first post-fix green run).** **Caveat, unresolved by any of
+      these runs:** machine-scope end-to-end install is still **UNCOVERED**
+      (**R64**), and because the install-matrix leg runs elevated, the two
+      skipped upgrade/downgrade assertions (now genuinely fixed by R76, per its
+      own two-process harness and unit suite — see `00-GAP_REGISTER.md`) still
+      are not proven end to end **by this workflow** — that needs an unelevated
+      leg, which nothing currently provides (**R64**/**R74** territory).
 - [x] The VM matrix runs on a schedule or on merge, not only on demand
       *(**met on the merge half** by
       [PR #41](https://github.com/Sigil-build/sigil/pull/41): `wrapper-vm-tests.yml`
@@ -785,9 +806,9 @@ check as R58.**
 | V1-FIX | `rc/v1-sbom-and-kiosk` | ☑ | [#42](https://github.com/Sigil-build/sigil/pull/42) | ☑ `81584de` | G3 (R69, R70) |
 | VM-FIX-B2 | `rc/vm-fix-p11-round2` | ☑ | [#44](https://github.com/Sigil-build/sigil/pull/44) | ☑ `8f1c306` | **G3 ✅ (R75; `vm (p11)` PASS in run 34379757534)** |
 | VM-FIX-A2 | `rc/vm-fix-fixtures-round2` | ☑ | [#45](https://github.com/Sigil-build/sigil/pull/45) | ☑ `df98eba` | **G3 ✅ (install-matrix PASS; R74 honest skips confirmed live)** |
-| P6-FIX-2 | `rc/p6-fix-upgrade-mutex` | ☑ | [#46](https://github.com/Sigil-build/sigil/pull/46) | ☐ **open**, head `cdb4c4d` | **G3 (R76 — RELEASE BLOCKER; CI green, mechanism review-approved, awaiting human merge)** |
+| P6-FIX-2 | `rc/p6-fix-upgrade-mutex` | ☑ | [#46](https://github.com/Sigil-build/sigil/pull/46) | ☑ `6842a8c` | **G3 ✅ (R76 CLOSED — matrix green post-fix in run 34383631266)** |
 | V1-DOCS | `rc/v1-register-status` | ☑ | [#43](https://github.com/Sigil-build/sigil/pull/43) | ☑ `e1d3f8f` | G3 (V1.1 — R69–R76 filed) |
-| DOC-G3 | `rc/doc-g3-progress` | ☑ | [#47](https://github.com/Sigil-build/sigil/pull/47) | ☐ | G3 (first green matrix recorded; R58/R66–R70/R75 confirmed live; R76 pointed at #46) |
+| DOC-G3 | `rc/doc-g3-progress` | ☑ | [#47](https://github.com/Sigil-build/sigil/pull/47) | ☐ | **G3 ✅ (first green matrix recorded; R58/R66–R70/R75 confirmed live; R76 CLOSED — #46 merged `6842a8c`, matrix green post-fix)** |
 | V1  | `rc/v1-verification` | ◐ V1.1 + V1.4 done | ☐ | ☐ | G3/G4 |
 
 The hotfix row (`rc/s1-fix-provenance-fixture`, [#36](https://github.com/Sigil-build/sigil/pull/36)

@@ -21,26 +21,26 @@ namespace SigilBuild.Wrapper.IntegrationTests;
 /// </remarks>
 public class MultiEditionInstallTests
 {
-    private const string ManifestRel = "examples/exe-wrapper/multi-edition/sigil.yaml";
+    internal const string ManifestRel = "examples/exe-wrapper/multi-edition/sigil.yaml";
 
-    private static string FindManifest()
-    {
-        // Walk up from AppContext.BaseDirectory to find the repo root by Sigil.slnx.
-        var dir = System.AppContext.BaseDirectory;
-        while (dir is not null)
-        {
-            if (File.Exists(Path.Combine(dir, "Sigil.slnx")))
-            {
-                break;
-            }
-            dir = Path.GetDirectoryName(dir);
-        }
-        if (dir is null)
-        {
-            throw new System.InvalidOperationException("could not locate Sigil.slnx");
-        }
-        return Path.Combine(dir, ManifestRel.Replace('/', Path.DirectorySeparatorChar));
-    }
+    internal static string FindManifest() => Sigil.RepoPath(ManifestRel);
+
+    /// <summary>
+    /// The argv this leg runs the packed Setup.exe with — the single definition the
+    /// always-on <see cref="VmFixtureManifestTests"/> parses through the REAL
+    /// <c>CommandLineParser</c>, so a grammar drift fails in every CI run instead of
+    /// only on a dispatched VM run.
+    /// </summary>
+    /// <remarks>
+    /// R66: this used to be <c>/Edition=enterprise /InstallDir=&lt;dir&gt;</c>. Neither
+    /// token exists in the wrapper's closed grammar — a declared parameter is overridden
+    /// with <c>/P&lt;name&gt;=&lt;value&gt;</c> and the install dir with <c>/D=</c> — so
+    /// both legs died with a <c>UsageException</c> (exit <b>64</b>) on the first real VM
+    /// run, before any install happened. The example declares the parameter as
+    /// <c>edition</c> (lower case; the parser matches case-insensitively).
+    /// </remarks>
+    internal static string[] SilentInstallArgs(string edition, string installDir) =>
+        new[] { "/S", "/Pedition=" + edition, "/D=" + installDir };
 
     [VmFact]
     public async Task Pack_install_uninstall_roundtrip_for_enterprise_edition()
@@ -51,10 +51,7 @@ public class MultiEditionInstallTests
         var setupExe = await Sigil.PackAsync(manifestPath, outDir);
 
         var rc = await sandbox.RunAsync(
-            setupExe,
-            "/S",
-            "/Edition=enterprise",
-            $"/InstallDir={sandbox.AppDir}");
+            setupExe, SilentInstallArgs("enterprise", sandbox.AppDir));
         rc.Should().Be(0);
 
         File.Exists(Path.Combine(sandbox.AppDir, "app.txt")).Should().BeTrue();
@@ -71,10 +68,7 @@ public class MultiEditionInstallTests
         var setupExe = await Sigil.PackAsync(manifestPath, outDir);
 
         var rc = await sandbox.RunAsync(
-            setupExe,
-            "/S",
-            "/Edition=community",
-            $"/InstallDir={sandbox.AppDir}");
+            setupExe, SilentInstallArgs("community", sandbox.AppDir));
         rc.Should().Be(0);
 
         File.Exists(Path.Combine(sandbox.AppDir, "app.txt")).Should().BeTrue();

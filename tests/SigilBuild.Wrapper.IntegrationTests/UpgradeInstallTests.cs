@@ -36,7 +36,7 @@ public sealed class UpgradeInstallTests
     public async Task Upgrade_replaces_older_version_preserving_install_dir_and_single_arp_row()
     {
         using var sandbox = new VmSandbox();
-        var appId = "com.sigil.p3." + Guid.NewGuid().ToString("N");
+        var appId = NewAppId();
         // v1 installs into dir A; v2's manifest default is a DIFFERENT dir B. The
         // upgrade must land in A (prior dir wins) — proving install_dir preservation.
         var dirA = Path.Combine(sandbox.Root, "A");
@@ -67,7 +67,7 @@ public sealed class UpgradeInstallTests
     public async Task Silent_downgrade_is_blocked_with_exit_code_3()
     {
         using var sandbox = new VmSandbox();
-        var appId = "com.sigil.p3." + Guid.NewGuid().ToString("N");
+        var appId = NewAppId();
         var dir = Path.Combine(sandbox.Root, "app");
         try
         {
@@ -91,7 +91,7 @@ public sealed class UpgradeInstallTests
     public async Task Force_downgrade_replaces_the_newer_version()
     {
         using var sandbox = new VmSandbox();
-        var appId = "com.sigil.p3." + Guid.NewGuid().ToString("N");
+        var appId = NewAppId();
         var dir = Path.Combine(sandbox.Root, "app");
         try
         {
@@ -111,22 +111,27 @@ public sealed class UpgradeInstallTests
     }
 
     /// <summary>
-    /// Write a minimal self-contained fixture (a single payload file + a manifest
-    /// targeting <paramref name="installDir"/> via <c>installer.install_dir</c>) and
-    /// pack it into a Setup.exe. The <c>payload://</c> source and <c>{install_dir}</c>
-    /// destination are the code-verified forms.
+    /// A schema-valid unique app id for one run. R66: the id used to be
+    /// <c>"com.sigil.p3." + Guid("N")</c>, whose last segment is a 32-char hex string
+    /// that usually starts with a digit — and <c>app.id</c>'s schema pattern
+    /// (<c>^[A-Za-z][A-Za-z0-9]*(\.[A-Za-z][A-Za-z0-9]*)+$</c>) requires every segment
+    /// to be letter-led. That rejected the manifest before packing on the first real
+    /// VM run. The <c>r</c> prefix makes the segment letter-led; hex digits are
+    /// otherwise all pattern-legal.
     /// </summary>
-    private static async Task<string> PackFixtureAsync(
-        VmSandbox sandbox, string appId, string version, string installDir)
-    {
-        var fixtureDir = Path.Combine(sandbox.Root, "fixture-" + version);
-        var payloadDir = Path.Combine(fixtureDir, "payload");
-        Directory.CreateDirectory(payloadDir);
-        File.WriteAllText(Path.Combine(payloadDir, "app.txt"), $"version {version}\n");
+    internal static string NewAppId() => "com.sigil.p3.r" + Guid.NewGuid().ToString("N");
 
-        var installDirYaml = installDir.Replace("\\", "\\\\");
+    /// <summary>
+    /// Build the fixture manifest YAML. Pure: no sandbox, no disk, no packer — so the
+    /// always-on <see cref="VmFixtureManifestTests"/> can validate the exact string
+    /// this VM leg packs without a staged runtime (register row R66).
+    /// </summary>
+    internal static string BuildManifestYaml(string appId, string version, string installDir)
+    {
         // $$ raw string: {{...}} interpolates, single braces ({install_dir}) are literal.
-        var manifest = $$"""
+        // Every interpolated path goes through Sigil.YamlQuote — single-quoted YAML, the
+        // only style in which a Windows path needs no escaping (R66).
+        return $$"""
 spec: v1.0
 
 app:
@@ -144,16 +149,33 @@ package:
 
 installer:
   scope: auto
-  install_dir: "{{installDirYaml}}"
+  install_dir: {{Sigil.YamlQuote(installDir)}}
 
 install_steps:
   - id: copy-app
     type: file_copy
-    from: "payload://app.txt"
-    to: "{install_dir}\\app.txt"
+    from: 'payload://app.txt'
+    to: '{install_dir}\app.txt'
 """;
+    }
+
+    /// <summary>
+    /// Write a minimal self-contained fixture (a single payload file + a manifest
+    /// targeting <paramref name="installDir"/> via <c>installer.install_dir</c>) and
+    /// pack it into a Setup.exe. The <c>payload://</c> source and <c>{install_dir}</c>
+    /// destination are the code-verified forms.
+    /// </summary>
+    private static async Task<string> PackFixtureAsync(
+        VmSandbox sandbox, string appId, string version, string installDir)
+    {
+        var fixtureDir = Path.Combine(sandbox.Root, "fixture-" + version);
+        var payloadDir = Path.Combine(fixtureDir, "payload");
+        Directory.CreateDirectory(payloadDir);
+        File.WriteAllText(Path.Combine(payloadDir, "app.txt"), $"version {version}\n");
+
         var manifestPath = Path.Combine(fixtureDir, "sigil.yaml");
-        await File.WriteAllTextAsync(manifestPath, manifest).ConfigureAwait(false);
+        await File.WriteAllTextAsync(manifestPath, BuildManifestYaml(appId, version, installDir))
+            .ConfigureAwait(false);
 
         var outDir = Path.Combine(fixtureDir, "out");
         return await Sigil.PackAsync(manifestPath, outDir).ConfigureAwait(false);

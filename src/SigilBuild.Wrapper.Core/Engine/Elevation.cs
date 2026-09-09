@@ -79,9 +79,40 @@ public static partial class Elevation
     /// </remarks>
     [SupportedOSPlatform("windows")]
     public static int RelaunchElevatedAndWait(
-        System.Collections.Generic.IReadOnlyList<string> args, int cancelledExitCode = 2)
+        System.Collections.Generic.IReadOnlyList<string> args, int cancelledExitCode = 2) =>
+        RelaunchElevatedAndWait(args, out _, cancelledExitCode);
+
+    /// <summary>
+    /// <see cref="RelaunchElevatedAndWait(System.Collections.Generic.IReadOnlyList{string}, int)"/>,
+    /// additionally reporting whether an elevated child may have outlived this call.
+    /// </summary>
+    /// <param name="args">The arguments to forward to the elevated child.</param>
+    /// <param name="childMayStillBeRunning">
+    /// <c>false</c> only when this call is <em>certain</em> no elevated child can still
+    /// be running: either none was created (the process path was unavailable, the shell
+    /// refused, or the user declined the UAC prompt), or one was created and
+    /// <c>WaitForSingleObject</c> observed it exit. <c>true</c> for the two cases in
+    /// between — <c>ShellExecuteExW</c> reported success but handed back no process
+    /// handle to wait on, or the wait itself failed. Both return
+    /// <paramref name="cancelledExitCode"/>, so the return value alone cannot tell them
+    /// apart from a genuine refusal.
+    /// </param>
+    /// <param name="cancelledExitCode">Exit code reported when the relaunch did not run.</param>
+    /// <remarks>
+    /// R18: a caller that cleans up a resource the elevated child is meant to consume —
+    /// the secret handoff envelope — MUST skip that cleanup while this is <c>true</c>,
+    /// or it races a child that is still starting up and fails the install it was
+    /// enabling. See <see cref="ElevationSecretHandoff.CleanUp"/>.
+    /// </remarks>
+    [SupportedOSPlatform("windows")]
+    public static int RelaunchElevatedAndWait(
+        System.Collections.Generic.IReadOnlyList<string> args,
+        out bool childMayStillBeRunning,
+        int cancelledExitCode = 2)
     {
         ArgumentNullException.ThrowIfNull(args);
+
+        childMayStillBeRunning = false;
 
         var exe = Environment.ProcessPath;
         if (string.IsNullOrEmpty(exe))
@@ -108,17 +139,31 @@ public static partial class Elevation
                 nShow = SW_SHOWNORMAL,
             };
 
-            if (!ShellExecuteExW(ref info) || info.hProcess == IntPtr.Zero)
+            if (!ShellExecuteExW(ref info))
             {
                 // ERROR_CANCELLED (1223) => user declined the UAC prompt. Any other
                 // failure also surfaces as "cancelled": we could not run elevated,
-                // so the machine install did not proceed.
+                // so the machine install did not proceed. No process was created.
+                return cancelledExitCode;
+            }
+
+            if (info.hProcess == IntPtr.Zero)
+            {
+                // SEE_MASK_NOCLOSEPROCESS was requested, so a successful call should
+                // have handed back a handle. It did not, so there is nothing to wait
+                // on — yet the shell reported success, which means a child MAY have
+                // been created and may still be starting. Surfacing that is the whole
+                // point of the out parameter: the caller must not tidy up behind a
+                // process it cannot see.
+                childMayStillBeRunning = true;
                 return cancelledExitCode;
             }
 
             try
             {
-                WaitForSingleObject(info.hProcess, INFINITE);
+                // A failed wait leaves the child's state unknown — it was created and
+                // this call cannot vouch that it has exited.
+                childMayStillBeRunning = WaitForSingleObject(info.hProcess, INFINITE) != WAIT_OBJECT_0;
                 return GetExitCodeProcess(info.hProcess, out uint code) ? (int)code : cancelledExitCode;
             }
             finally
@@ -200,6 +245,7 @@ public static partial class Elevation
     private const uint SEE_MASK_NOCLOSEPROCESS = 0x00000040;
     private const int SW_SHOWNORMAL = 1;
     private const uint INFINITE = 0xFFFFFFFF;
+    private const uint WAIT_OBJECT_0 = 0x00000000;
 
     // Fully blittable: the string fields are hand-marshalled IntPtrs so the
     // LibraryImport source generator can pass this by ref with no runtime

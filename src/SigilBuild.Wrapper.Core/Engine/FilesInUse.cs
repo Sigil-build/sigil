@@ -205,9 +205,18 @@ public static partial class FilesInUse
     [SupportedOSPlatform("windows")]
     private static bool TryStartSession(out uint session)
     {
-        // strSessionKey must be a CCH_RM_SESSION_KEY+1 buffer the API fills in.
-        var key = new string('\0', CCH_RM_SESSION_KEY + 1);
-        return RmStartSession(out session, 0, key) == 0;
+        // R38: strSessionKey is an OUT buffer — RmStartSession writes
+        // CCH_RM_SESSION_KEY chars plus a NUL into it. This used to hand it a managed
+        // `string`, which [LibraryImport]'s UTF-16 marshalling pins in place, so the API
+        // wrote through the string's own buffer. The size was exact and
+        // `new string(char, count)` is never interned, so nothing overflowed and nothing
+        // shared was corrupted today — but one refactor to a literal or a cached
+        // constant would have silently mutated an INTERNED string, and the signature was
+        // advertising "in" for a parameter the API treats as "out". A char[] behind a
+        // `ref char` signature says what actually happens and cannot be aliased.
+        var key = new char[CCH_RM_SESSION_KEY + 1];
+        var buffer = MemoryMarshal.Cast<char, ushort>(key.AsSpan());
+        return RmStartSession(out session, 0, ref buffer[0]) == 0;
     }
 
     [SupportedOSPlatform("windows")]
@@ -339,8 +348,13 @@ public static partial class FilesInUse
     }
 
     [SupportedOSPlatform("windows")]
-    [LibraryImport("rstrtmgr.dll", EntryPoint = "RmStartSession", StringMarshalling = StringMarshalling.Utf16)]
-    private static partial int RmStartSession(out uint pSessionHandle, uint dwSessionFlags, string strSessionKey);
+    // R38: a `ref` into a caller-allocated char[CCH_RM_SESSION_KEY + 1], not a managed
+    // string. strSessionKey is an OUT parameter and must never alias anything the
+    // runtime may share. Declared as `ref ushort` (the blittable view of the UTF-16
+    // buffer) because a `ref char` would demand DisableRuntimeMarshalling on the whole
+    // assembly; the call site casts with MemoryMarshal and keeps the char[] typing.
+    [LibraryImport("rstrtmgr.dll", EntryPoint = "RmStartSession")]
+    private static partial int RmStartSession(out uint pSessionHandle, uint dwSessionFlags, ref ushort strSessionKey);
 
     [SupportedOSPlatform("windows")]
     [LibraryImport("rstrtmgr.dll", EntryPoint = "RmEndSession")]

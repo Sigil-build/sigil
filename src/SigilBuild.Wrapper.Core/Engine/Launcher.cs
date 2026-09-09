@@ -28,24 +28,67 @@ public static partial class Launcher
     /// Returns true when the process was started. Never throws.
     /// </summary>
     public static bool LaunchUnelevated(string path, IReadOnlyList<string>? args)
+        => Launch(path, args) == LaunchOutcome.Started;
+
+    /// <summary>
+    /// As <see cref="LaunchUnelevated"/>, reporting <em>why</em> nothing started so the
+    /// caller can log a de-elevation refusal rather than an anonymous <c>false</c> (R29).
+    /// </summary>
+    public static LaunchOutcome Launch(string path, IReadOnlyList<string>? args)
+        => LaunchCore(
+            path,
+            args,
+            () => OperatingSystem.IsWindows() && Elevation.IsProcessElevated(),
+            static (p, a) => TryLaunchViaShellTokenOnWindows(p, a),
+            TryLaunchDirect);
+
+    /// <summary>
+    /// The launch decision, with its three effects injected so the elevated branch is
+    /// testable off an elevated runner. The production entry point is
+    /// <see cref="Launch"/>.
+    /// </summary>
+    /// <remarks>
+    /// <strong>R29 — there is no fall-through from the elevated branch, and there must
+    /// not be one.</strong> This used to try the de-elevated launch and, on any failure,
+    /// call <see cref="TryLaunchDirect"/> anyway — which hands the launched application
+    /// the INSTALLER'S ADMIN TOKEN, with no log line and no user-visible signal. That is
+    /// the exact bug class this whole class exists to prevent, and it silently undid
+    /// P2's own acceptance criterion ("launch checkbox starts the app unelevated"). The
+    /// user losing a convenience launch is a smaller harm than the user's editor, browser
+    /// or game silently inheriting administrator rights for the rest of its lifetime, so
+    /// the launch is skipped and reported.
+    /// </remarks>
+    internal static LaunchOutcome LaunchCore(
+        string path,
+        IReadOnlyList<string>? args,
+        Func<bool> isElevated,
+        Func<string, IReadOnlyList<string>?, bool> deElevatedLaunch,
+        Func<string, IReadOnlyList<string>?, bool> directLaunch)
     {
+        ArgumentNullException.ThrowIfNull(isElevated);
+        ArgumentNullException.ThrowIfNull(deElevatedLaunch);
+        ArgumentNullException.ThrowIfNull(directLaunch);
+
         if (string.IsNullOrWhiteSpace(path))
         {
-            return false;
+            return LaunchOutcome.NothingToLaunch;
         }
 
-        if (OperatingSystem.IsWindows() && Elevation.IsProcessElevated())
+        if (isElevated())
         {
-            if (TryLaunchViaShellToken(path, args))
-            {
-                return true;
-            }
-            // De-elevation failed (no shell / privilege) — fall through to a plain
-            // spawn so the user still gets their app, accepting the inherited token.
+            // Explorer's medium-integrity primary token via CreateProcessWithTokenW.
+            // Succeed here or do not launch at all.
+            return deElevatedLaunch(path, args)
+                ? LaunchOutcome.Started
+                : LaunchOutcome.SkippedDeElevationUnavailable;
         }
 
-        return TryLaunchDirect(path, args);
+        // Not elevated: a plain spawn already runs at the user's own integrity level.
+        return directLaunch(path, args) ? LaunchOutcome.Started : LaunchOutcome.StartFailed;
     }
+
+    private static bool TryLaunchViaShellTokenOnWindows(string path, IReadOnlyList<string>? args)
+        => OperatingSystem.IsWindows() && TryLaunchViaShellToken(path, args);
 
     private static bool TryLaunchDirect(string path, IReadOnlyList<string>? args)
     {
@@ -249,4 +292,27 @@ public static partial class Launcher
     [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool CloseHandle(IntPtr handle);
+}
+
+/// <summary>
+/// What <see cref="Launcher.Launch"/> did (R29). <see cref="Started"/> is the only value
+/// that means a process exists.
+/// </summary>
+public enum LaunchOutcome
+{
+    /// <summary>The process was started, at the user's own integrity level.</summary>
+    Started = 0,
+
+    /// <summary>No <c>run_after_install</c> target was configured.</summary>
+    NothingToLaunch = 1,
+
+    /// <summary>An unelevated spawn was attempted and the process would not start.</summary>
+    StartFailed = 2,
+
+    /// <summary>
+    /// The installer is elevated and de-elevation was unavailable — no desktop shell, or
+    /// its token could not be duplicated. The launch was SKIPPED. Launching anyway would
+    /// have handed the application the installer's administrator token.
+    /// </summary>
+    SkippedDeElevationUnavailable = 3,
 }

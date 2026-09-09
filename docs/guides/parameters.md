@@ -83,6 +83,13 @@ setup.exe /S /install_dir="C:\Apps\MyApp" /edition=professional
 - Undeclared names are rejected (`UsageException`) - silent typos can't reach the step engine.
 - The wizard's silent-install child process uses the same syntax to forward the user's edits.
 
+## Secrets
+
+A `secret` parameter is masked in the wizard and redacted (`***`) from the install log, the audit rendering of the command line, and the persisted uninstall state. Two further guarantees, and one limit worth reading before you design around it:
+
+- **The elevated relaunch does not carry secrets.** A per-machine install started from a non-elevated process relaunches itself under UAC. It used to forward `/PName=Value` verbatim, which published the value to every process-creation auditor on the machine (Sysmon, EDR agents, WMI `Win32_Process`, the Task Manager command-line column). Secret values now cross that boundary in a DPAPI-protected, ACL-restricted, delete-after-read handoff file instead; the relaunch command line carries only a path to it.
+- **`run_program` arguments are not a secret channel.** If your manifest interpolates `${parameters.<secret>}` into a `run_program` step's `args`, the resolved value necessarily lands on *that child process's* command line, where the same auditing sees it. Sigil cannot redact a command line it hands to another program. Pass secrets to a child through a file it reads and deletes, an environment variable, or stdin — not through `args`.
+
 ## Dynamic dropdowns
 
 For a closed but server-provided set of options, declare a `source:` block:

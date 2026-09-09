@@ -108,6 +108,49 @@ public sealed class UninstallEngine
                 IsError: true));
         }
 
+        if (undo.FailedRecords.Count > 0)
+        {
+            progress?.Report(new StepProgress(
+                0,
+                0,
+                $"{undo.FailedRecords.Count} rollback record(s) could NOT be reversed — " +
+                "see the lines above; the uninstall continued with the remaining records",
+                IsError: true));
+        }
+
+        // R15. Everything below this line destroys the operator's ability to try again:
+        // the ARP row is the only entry point a user has to re-run the uninstaller, and
+        // uninstall.json is the only description of what is left to remove. Removing
+        // them after a replay that did not achieve what it set out to is how a failed
+        // uninstall became a PERMANENTLY installed app with no way to remove it — the
+        // end state four separate Stage 1 defects each arrived at. So when a record's
+        // undo RAN AND DID NOT WORK, keep both and say so.
+        //
+        // Failures only — REFUSALS deliberately do not land here, and the difference is
+        // not a technicality:
+        //   • A failure is a record that was ours to replay and did not work: a locked
+        //     file, a denied ACL, a service that would not delete. It is usually
+        //     transient. Close the app, reboot, re-run the uninstaller from Add/Remove
+        //     Programs, and the retained journal replays the REMAINDER. Retention is
+        //     what makes that retry possible, which is the whole point of the row.
+        //   • A refusal is anchoring rejecting the record as not ours (R1). A retry
+        //     refuses identically, so retaining state would never clear — it would
+        //     convert one planted record into an app that can never leave Add/Remove
+        //     Programs. S1 decided refusals are logged loudly and the uninstall
+        //     continues (see UninstallAnchorSelectionTests), and that ruling still
+        //     holds: aborting on a refusal is the over-refusal, not the fix.
+        if (undo.FailedRecords.Count > 0)
+        {
+            return EngineResult.Failed(
+                loaded.Journal,
+                $"the uninstall of '{appId}' did not complete: " +
+                $"{undo.FailedRecords.Count} record(s) could not be reversed. The " +
+                "application is still registered and its uninstall state has been KEPT " +
+                "so the removal can be retried — re-run the uninstaller after closing the " +
+                "application or restarting. Nothing has been reported as removed that " +
+                "was not.");
+        }
+
         // Remove the ARP entry we wrote on install, from the recorded scope's hive.
         // Best-effort: if the user already cleaned it manually, keep going.
         if (OperatingSystem.IsWindows())

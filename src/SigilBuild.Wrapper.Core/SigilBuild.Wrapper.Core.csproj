@@ -48,7 +48,14 @@
          private contract, not a third-party extension surface. Consumers that
          drive them directly need InternalsVisibleTo. -->
     <InternalsVisibleTo Include="SigilBuild.Wrapper" />
-    <InternalsVisibleTo Include="SigilBuild.Installer.Host" />
+    <!-- `installer` is the Avalonia host's real <AssemblyName> (the stamped
+         Setup.exe's inner name); InternalsVisibleTo matches the assembly, never the
+         project. R18: the host needs this grant for
+         InstallSession.BuildElevationRelaunchArgs and ElevationSecretHandoff on the
+         elevated-relaunch path. A dead `SigilBuild.Installer.Host` entry used to sit
+         here looking live; renaming the assembly now breaks the host's compile
+         loudly, which is the outcome we want. -->
+    <InternalsVisibleTo Include="installer" />
     <!-- The packager builds the SIGIL_BLOB_V1 JSON via the same internal
          DTOs + source-generated context the wrapper uses to read it back. -->
     <InternalsVisibleTo Include="SigilBuild.Packaging" />

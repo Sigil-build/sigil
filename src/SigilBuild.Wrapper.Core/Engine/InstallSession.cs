@@ -485,6 +485,21 @@ public sealed class InstallSession
         _scope == InstallScope.Machine && !Elevation.IsProcessElevated();
 
     /// <summary>
+    /// R18: the argument vector to hand <see cref="Elevation.RelaunchElevatedAndWait"/>,
+    /// with any secret parameter value moved off the command line into a
+    /// DPAPI-protected handoff envelope. Identical to <paramref name="originalArgs"/>
+    /// when this run carries no secret value. Both entry points MUST relaunch with
+    /// this rather than with raw argv, and hand the result to
+    /// <see cref="ElevationSecretHandoff.CleanUp"/> once the child has exited.
+    /// </summary>
+    /// <exception cref="UsageException">
+    /// The handoff envelope could not be written; the run refuses rather than
+    /// relaunching with the value on the command line.
+    /// </exception>
+    internal IReadOnlyList<string> BuildElevationRelaunchArgs(IReadOnlyList<string> originalArgs) =>
+        ElevationSecretHandoff.PrepareRelaunchArgs(originalArgs, _parsed);
+
+    /// <summary>
     /// Run to completion without any UI. Routes by mode, echoing the engine's
     /// log lines to <paramref name="output"/>. Returns the process exit code:
     /// <c>0</c> ok, <c>1</c> step failure (rolled back), <c>2</c> cancelled
@@ -552,6 +567,13 @@ public sealed class InstallSession
                         if (_parsed.Launch)
                         {
                             LaunchAppUnelevated();
+                            if (LastLaunchOutcome == LaunchOutcome.SkippedDeElevationUnavailable)
+                            {
+                                // R29: /launch asked for a process and did not get one.
+                                // The install still succeeded, so the exit code is
+                                // unchanged — but the operator is told why.
+                                error.WriteLine(SkippedLaunchNotice);
+                            }
                         }
                         // P5: success-but-reboot-required → dedicated exit code 3010.
                         return _rebootRequired ? RebootRequiredExitCode : 0;
@@ -1105,6 +1127,42 @@ public sealed class InstallSession
             ? Path.Combine(ScopeLayout.For(_scope).InstallRoot, _blob.AppId)
             : resolvedInstallDir;
 
+        // R53 — "should an ELEVATED process replay USER-scope state at all?" Decided:
+        // YES, it stays as it is, and here is why rather than a shrug.
+        //
+        // The question is real. R1 clause (b) stopped a MACHINE operation crossing into
+        // %LocalAppData%; this is the different shape where _scope is genuinely User and
+        // the process happens to hold an admin token, so every replayed record runs with
+        // privileges the state's author (the user) does not have. The instinct is to
+        // refuse. Three things say otherwise:
+        //
+        //  1. There is no privilege to gain. A user-scope replay reads a journal out of
+        //     the user's OWN profile and acts inside anchored roots that the user already
+        //     controls — install dir, this app's own state directory, that scope's
+        //     shortcut folders. Everything an attacker could aim it at is something they
+        //     could already write directly. The primitives that WOULD be escalations are
+        //     closed independently of scope: ReplayAnchor.OwnedByThisInstall additionally
+        //     requires an admin-only-writable target for a machine execution mapping and
+        //     for a machine PATH entry, and the state file itself passes S1's provenance
+        //     gate before any of this runs.
+        //
+        //  2. Refusing would break the case it is meant to protect. The scope here is the
+        //     scope the CURRENT run resolved, and an elevated user-scope run is ordinary:
+        //     an admin repairing an app from an elevated shell, an MDM or CI agent, a
+        //     `scope: auto` manifest whose user-scope install is launched from an already
+        //     elevated console. Refusing the reinstall cleanup for those leaves the prior
+        //     install's PATH entry, shortcuts and ARP row in place while the fresh install
+        //     adds its own — duplicated state, and the exact "unremovable" end state R15
+        //     exists to prevent, produced by the fix rather than the bug.
+        //
+        //  3. Dropping the token instead is not free. De-elevating this one call means a
+        //     second process, a second state read, and a new trust boundary between them
+        //     — more attack surface than the asymmetry it removes, for no reachable gain
+        //     under (1).
+        //
+        // What would change the answer: a user-scope record type that acts OUTSIDE the
+        // user's own reach. There is none today; if one is added, revisit this with the
+        // row, because the reasoning above is the only thing holding it.
         await new UninstallEngine()
             .RunAsync(_blob.AppId, fallback, _scope, StateProgress, ct)
             .ConfigureAwait(false);
@@ -1494,6 +1552,19 @@ public sealed class InstallSession
         // where the files ACTUALLY landed (R1 clause (c)). Recomputing a default at
         // uninstall time would refuse every file record of a /D= or wizard-chosen
         // install and leave the app unremovable.
+        // R28: the install has committed, so the `<file>.sigil-bak` copies FileCopyStep
+        // and HttpDownloadStep left beside every file they overwrote have finished their
+        // mid-install job. They are NOT discarded — each one is the pre-existing content
+        // of a file this install replaced, and it is what makes uninstall able to put
+        // that file back — but they must not spend the app's whole lifetime sitting in
+        // Program Files next to the files they shadow. Move them into the per-app state
+        // directory (created hardened FIRST, so a copy lands inside the right DACL
+        // rather than inheriting one afterwards) and rewrite the records before they are
+        // persisted, so uninstall.json points at where the stashes actually are.
+        UninstallStateStore.EnsureDirectory(_blob.AppId, _scope, StateProgress);
+        journal.RelocateCommittedStashes(
+            UninstallStateStore.StashDirectoryFor(_blob.AppId, _scope));
+
         UninstallStateStore.Save(
             _blob.AppId, journal, _scope, secretValues, StateProgress, uninstallDir);
         // T10: register the REAL manifest.App.* fields + packed size threaded through
@@ -1899,15 +1970,51 @@ public sealed class InstallSession
             }
 
             _log?.WriteLine($"launch: {ctx.Redact(path)}");
-            return Launcher.LaunchUnelevated(path, args);
+            var outcome = Launcher.Launch(path, args);
+            LastLaunchOutcome = outcome;
+            if (outcome == LaunchOutcome.SkippedDeElevationUnavailable)
+            {
+                // R29: never silent. Launching from an elevated installer without
+                // de-elevation would give the application the installer's admin token
+                // for the rest of its lifetime; skipping costs the user one double-click.
+                _log?.WriteLine(SkippedLaunchNotice);
+            }
+            return outcome == LaunchOutcome.Started;
         }
         catch (Exception)
         {
+            LastLaunchOutcome = LaunchOutcome.StartFailed;
             _log?.WriteLine("launch: failed to resolve or start run_after_install target");
             return false;
         }
 #pragma warning restore CA1031
     }
+
+    /// <summary>
+    /// What the last <see cref="LaunchAppUnelevated"/> did (R29). The bool return says
+    /// only "no process exists"; this says whether that was a spawn failure or a
+    /// deliberate refusal to hand the application the installer's administrator token.
+    /// </summary>
+    public LaunchOutcome LastLaunchOutcome { get; private set; } = LaunchOutcome.NothingToLaunch;
+
+    /// <summary>
+    /// The operator-facing line for a launch skipped because de-elevation was
+    /// unavailable (R29).
+    /// </summary>
+    /// <remarks>
+    /// <strong>Why this is not a Done-screen control.</strong> The plan asked for a
+    /// notice on the Done screen; the wizard cannot host one, because
+    /// <c>InstallerViewModel.LaunchIfRequested</c> fires as the window CLOSES — by the
+    /// time the outcome is known there is no Done screen left to render it on, and
+    /// moving the launch earlier changes when the application starts relative to the
+    /// user's last click, which is a UX decision outside this row. So the notice goes
+    /// where it can actually be read: the always-on diagnostic log, the <c>/LOG</c> file,
+    /// and stderr on the silent path.
+    /// </remarks>
+    internal const string SkippedLaunchNotice =
+        "launch: SKIPPED — this installer is running elevated and could not drop to the " +
+        "desktop user's token, so starting the application now would have run it as " +
+        "administrator. Start it yourself from the Start menu or a shortcut.";
 
     /// <summary>
     /// Synchronous <see cref="IProgress{T}"/> that echoes each non-null log line

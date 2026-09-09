@@ -73,21 +73,68 @@ public static partial class Program
             && session.Mode != WrapperMode.Update)
         {
             AttachParentConsole();
-            return Elevation.RelaunchElevatedAndWait(args);
+
+            // R18: relaunch with the handoff-rewritten vector, never raw argv — a
+            // /P<secret>=<value> token would otherwise be published to every
+            // process-creation auditor on the box. Building it can refuse (the
+            // envelope could not be protected or written); refusing is the point —
+            // the alternative is elevating with the plaintext on the command line.
+            IReadOnlyList<string> relaunchArgs;
+            try
+            {
+                relaunchArgs = session.BuildElevationRelaunchArgs(args);
+            }
+            catch (UsageException ex)
+            {
+                Console.Error.WriteLine($"usage error: {ex.Message}");
+                return 64;
+            }
+
+            // Seeded `true` so a throw before the call assumes the unsafe case.
+            var childMayStillBeRunning = true;
+            try
+            {
+                return Elevation.RelaunchElevatedAndWait(relaunchArgs, out childMayStillBeRunning);
+            }
+            finally
+            {
+                // The parent's best-effort cleanup for a declined UAC prompt, or a
+                // child that died before consuming the envelope; normally the child
+                // has already deleted it as it read it. SKIPPED whenever a child may
+                // still be starting up — deleting the envelope from under it would
+                // fail the very install the handoff enables.
+                ElevationSecretHandoff.CleanUp(relaunchArgs, childMayStillBeRunning);
+            }
         }
 
         // P6 (gap G17): single-instance guard. Taken AFTER the elevation branch — the
         // un-elevated parent above never installs, so it must not hold the mutex while
         // the elevated child (which does) tries to take it. Held for the whole run;
         // the OS releases it if the process dies, so a crash never wedges the name.
-        using var instanceLock = SetupInstanceLock.TryAcquire(session.AppId, session.ResolvedScope);
+        using var instanceLock = SetupInstanceLock.TryAcquire(
+            session.AppId, session.ResolvedScope, out var lockRefusal);
+        if (lockRefusal != SetupInstanceLock.SetupLockRefusal.None)
+        {
+            // R34: record which branch was taken, in the always-on diagnostic log and
+            // the /LOG file. The headed MessageBox keeps the catalog string — adding a
+            // localized string for a squatted mutex name would be a lockstep change for
+            // a case no ordinary user meets — but an operator reading the log must be
+            // able to tell "someone else is installing" from "the guard's name is
+            // occupied by something else" from "we could not create the guard at all".
+            InstallerLog.Info($"single-instance guard: {lockRefusal}");
+        }
+
         if (instanceLock is null)
         {
             if (session.Silent)
             {
                 AttachParentConsole();
                 Console.Error.WriteLine(
-                    "another setup for this application is already running — close it and try again.");
+                    lockRefusal == SetupInstanceLock.SetupLockRefusal.NameNotAvailable
+                        ? "the single-instance guard for this application could not be taken: its " +
+                          "name is already occupied by another object. Another setup may be " +
+                          "running, or the name has been squatted. Nothing was installed."
+                        : "another setup for this application is already running — close it and try again.");
             }
             else if (OperatingSystem.IsWindows())
             {
@@ -187,7 +234,15 @@ public static partial class Program
                 InstallerLog.Error($"AppDomain.UnhandledException (non-Exception): {e.ExceptionObject}");
         };
 
-        InstallerLog.Info($"wizard started: pid={Environment.ProcessId}, argv=[{string.Join(' ', args)}], cwd={Environment.CurrentDirectory}");
+        // I1: NEVER raw argv here. This log is always on, and a per-user install
+        // does NOT take the elevation branch above — R18's handoff never engages —
+        // so its argv still carries `/P<secret>=<value>` verbatim. Writing that
+        // would drop a licence key or password into %TEMP% in plaintext and
+        // contradict docs/guides/parameters.md, which promises a secret parameter
+        // is redacted (***) from the install log. `session` is already built by
+        // this point, so render the PARSED vector through AuditSafeRendering()
+        // instead — the same rendering InstallSession's own log header uses.
+        InstallerLog.Info(RenderWizardStartedLine(session.CommandLine));
 
         try
         {
@@ -214,6 +269,20 @@ public static partial class Program
             throw;
         }
     }
+
+    /// <summary>
+    /// Builds the always-on wizard log's first line. Takes the PARSED command
+    /// line rather than argv on purpose (I1): every declared <c>secret</c>
+    /// parameter's value is replaced by <c>***</c> by
+    /// <see cref="ParsedCommandLine.AuditSafeRendering"/>, so no licence key,
+    /// password or token can reach the log file. Separated from
+    /// <see cref="Main"/> because Main is not unit-testable ([STAThread] plus a
+    /// classic-desktop Avalonia lifetime); this is the lowest seam at which the
+    /// redaction of the started line can be asserted.
+    /// </summary>
+    public static string RenderWizardStartedLine(ParsedCommandLine commandLine) =>
+        $"wizard started: pid={Environment.ProcessId}, " +
+        $"args=[{commandLine.AuditSafeRendering()}], cwd={Environment.CurrentDirectory}";
 
     public static AppBuilder BuildAvaloniaApp() =>
         AppBuilder.Configure<App>()

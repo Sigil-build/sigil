@@ -44,18 +44,54 @@ internal static class Program
                 && session.RequiresElevation
                 && session.Mode != WrapperMode.Update)
             {
-                return Elevation.RelaunchElevatedAndWait(args);
+                // R18: relaunch with the handoff-rewritten vector, never raw argv —
+                // a /P<secret>=<value> token would otherwise be published to every
+                // process-creation auditor on the box. The finally is the parent's
+                // best-effort cleanup for a declined UAC prompt, or a child that died
+                // before consuming the envelope; normally the child has already
+                // deleted it as it read it. It is SKIPPED whenever a child may still
+                // be starting up (see the out parameter) — deleting the envelope from
+                // under it would fail the very install the handoff enables. Seeded
+                // `true` so a throw before the call assumes the unsafe case.
+                var relaunchArgs = session.BuildElevationRelaunchArgs(args);
+                var childMayStillBeRunning = true;
+                try
+                {
+                    return Elevation.RelaunchElevatedAndWait(
+                        relaunchArgs, out childMayStillBeRunning);
+                }
+                finally
+                {
+                    ElevationSecretHandoff.CleanUp(relaunchArgs, childMayStillBeRunning);
+                }
             }
 
             // P6 (gap G17): single-instance guard. Taken AFTER the elevation branch —
             // the un-elevated parent above never installs, so it must not hold the
             // mutex while the elevated child (which does) tries to take it.
-            using var instanceLock = SetupInstanceLock.TryAcquire(session.AppId, session.ResolvedScope);
+            using var instanceLock = SetupInstanceLock.TryAcquire(
+                session.AppId, session.ResolvedScope, out var lockRefusal);
             if (instanceLock is null)
             {
+                // R34: two different situations reach here. Say which — an operator
+                // chasing "already running" with nothing running needs to know the name
+                // was occupied rather than held.
                 Console.Error.WriteLine(
-                    "another setup for this application is already running — close it and try again.");
+                    lockRefusal == SetupInstanceLock.SetupLockRefusal.NameNotAvailable
+                        ? "the single-instance guard for this application could not be taken: its " +
+                          "name is already occupied by another object. Another setup may be " +
+                          "running, or the name has been squatted. Nothing was installed."
+                        : "another setup for this application is already running — close it and try again.");
                 return InstallSession.AlreadyRunningExitCode;
+            }
+
+            if (lockRefusal == SetupInstanceLock.SetupLockRefusal.GuardUnavailable)
+            {
+                // R34: proceeding WITHOUT the guard, out loud. This branch used to return
+                // a sentinel indistinguishable from a real lock and say nothing.
+                Console.Error.WriteLine(
+                    "note: the single-instance guard could not be created for this run — " +
+                    "a concurrent setup of the same application would not be detected.");
             }
 
             return await session.RunHeadlessAsync(Console.Out, Console.Error).ConfigureAwait(false);

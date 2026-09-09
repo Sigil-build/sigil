@@ -20,11 +20,36 @@ internal sealed class KioskSetupFactAttribute : FactAttribute
     {
         if (!File.Exists(SetupPath))
         {
-            Skip = "Kiosk sample test: " + SetupPath + " not found (build the tests/kiosk sample first)";
+            Skip = "Kiosk sample test: " + SetupPath +
+                " not found (this is a separate, out-of-band sample build — " +
+                "run the tests/kiosk packing steps to produce that Setup.exe first)";
         }
     }
 
-    private static string SetupPath => Path.GetFullPath(Path.Combine(
-        AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..",
-        "tests", "kiosk", "dist", "Embed.Infinity.Kiosk-1.0.0-x64-Setup.exe"));
+    /// <summary>
+    /// The kiosk sample's packed installer. Resolved by walking UP from the test
+    /// assembly's output directory until a repo marker (<c>Sigil.slnx</c>) is found,
+    /// then appending the sample's known repo-relative path — rather than a fixed
+    /// count of <c>".."</c> segments, which silently drifts (and previously walked one
+    /// directory too far, landing outside the repository entirely: register row R6)
+    /// whenever the assembly's own output path depth changes (TFM bump, build
+    /// configuration, etc.).
+    /// </summary>
+    internal static string SetupPath => Path.Combine(
+        FindRepoRoot(AppContext.BaseDirectory),
+        "tests", "kiosk", "dist", "Embed.Infinity.Kiosk-1.0.0-x64-Setup.exe");
+
+    private static string FindRepoRoot(string startDirectory)
+    {
+        for (var dir = new DirectoryInfo(startDirectory); dir is not null; dir = dir.Parent)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "Sigil.slnx")))
+            {
+                return dir.FullName;
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"could not locate the Sigil repo root (no Sigil.slnx found) walking up from '{startDirectory}'");
+    }
 }

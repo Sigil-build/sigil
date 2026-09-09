@@ -92,9 +92,10 @@ public class IconResourceWriterTests
     [KioskSetupFact]
     public void Kiosk_Setup_HasEmbeddedUninstaller()
     {
-        var setup = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..",
-            "tests", "kiosk", "dist", "Embed.Infinity.Kiosk-1.0.0-x64-Setup.exe"));
+        // Reuse the attribute's own path resolution rather than recomputing it here —
+        // a second, independently-drifting copy of the same logic is exactly how this
+        // test and its [KioskSetupFact] precondition disagreed before (register row R6).
+        var setup = KioskSetupFactAttribute.SetupPath;
         var bytes = ResourceReader.Read(setup, "SIGIL_UNINSTALLER_V1");
         bytes.Length.Should().BeGreaterThan(1_000_000,
             "the embedded uninstaller is a ~3.7 MB stamped wrapper copy");

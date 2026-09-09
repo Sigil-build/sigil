@@ -215,8 +215,14 @@ jobs:
           # .json extension would already select JSON under the default
           # Auto format, but `-F Json` is explicit and doesn't rely on that
           # inference.
+          #
+          # -dpr/--disable-package-restore: the "restore (locked)" step above
+          # already ran `dotnet restore Sigil.slnx --locked-mode` (R23a). By
+          # default CycloneDX does its own internal restore, which is NOT
+          # locked and would silently re-resolve the graph the SBOM describes
+          # outside that guarantee. Skip it and reuse the locked restore.
           $sbom = "dist/sigil-${{ github.ref_name }}.sbom.json"
-          dotnet CycloneDX Sigil.slnx -o dist -fn "sigil-${{ github.ref_name }}.sbom.json" -F Json
+          dotnet CycloneDX Sigil.slnx -o dist -fn "sigil-${{ github.ref_name }}.sbom.json" -F Json -dpr
           if (-not (Test-Path $sbom)) { throw "SBOM not generated at $sbom" }
           Write-Host "generated $sbom"
 

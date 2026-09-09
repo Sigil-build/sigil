@@ -14,8 +14,117 @@ permissions:
   contents: read
 
 jobs:
+  # Cheap gate that decides whether the expensive jobs below need to run at
+  # all. `build`, `aot-publish` and `dotnet format` (pr-guards.yml) are
+  # REQUIRED status checks on the release ruleset — a workflow-level
+  # `paths:`/`paths-ignore:` filter on any workflow that produces one of
+  # those checks would make it never report on a filtered-out PR, which
+  # wedges the PR permanently (see docs.yml's own pull_request path filter
+  # and the G0 note in docs/plan/release/03-RC_ORCHESTRATION.md — that is
+  # exactly why `docs drift check` is deliberately NOT a required check).
+  # So: do NOT add a workflow-level path filter here. Instead this job's
+  # `code`/`docs_only` outputs feed a job-level `if:` on the expensive jobs
+  # below — a skipped job still reports "skipped", which satisfies a
+  # required check.
+  #
+  # FAIL CLOSED: the gate below only ever SKIPS the expensive jobs on a
+  # POSITIVE, successfully-computed docs-only verdict. If this job errors,
+  # is cancelled, or its output is anything other than exactly 'true', the
+  # downstream `if:` conditions default to running the full build — see the
+  # three-way truth table on each gated job below. A previous version of
+  # this gate used `predicate-quantifier: 'some-with-excludes'`, which does
+  # not exist on the pinned v3.0.4 (only v4 has it) — the `changes` job
+  # errored outright on every run, and because the downstream jobs' `if:`
+  # conditions at the time only checked the output value (not the job
+  # result), a hard error in this job was indistinguishable from a genuine
+  # docs-only verdict: build/aot-publish/vulnerability-scan all silently
+  # SKIPPED (satisfying their required checks) on every PR, docs-only or
+  # not. The `if:` conditions below close that hole.
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read # dorny/paths-filter needs this to list PR files via the REST API
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+      docs_only: ${{ steps.filter.outputs.code == 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned by commit SHA, not a mutable tag (v3.0.4 was the newest v3.x
+      # release at the time this was added; dorny/paths-filter has since
+      # cut a v4 major, deliberately not adopted here without a separate
+      # review of its breaking changes).
+      #
+      # base: ${{ github.ref }} is the action's own recipe for a "long-lived
+      # branch" push trigger (main / release/**, per this workflow's `on:`
+      # block below): it compares against the most recent commit on the SAME
+      # branch before the push. Unlike `base: ${{ github.event.before }}`,
+      # this stays correct across a force-push (the action's README
+      # explicitly calls out github.event.before-style approaches as
+      # unreliable there). This input is ignored on `pull_request` — the
+      # action instead calls the REST API to diff against the PR base.
+      - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4
+        id: filter
+        with:
+          base: ${{ github.ref }}
+          # v3.0.4 (the pinned tag) supports only 'some' (default) and
+          # 'every' — verified against the README at that exact tag
+          # (`gh api repos/dorny/paths-filter/contents/README.md?ref=v3.0.4`,
+          # not the default-branch README, which already advertises v4's
+          # 'some-with-excludes' and is what produced the invalid-input
+          # error the first time around) AND against the actual matcher in
+          # v3.0.4's dist/index.js (Filter.isMatch): the quantifier only
+          # changes how ONE file is tested against the pattern list within
+          # a filter (AND all patterns for 'every', OR them for 'some') —
+          # it does NOT change how multiple changed files aggregate, which
+          # is always "at least one matching file" regardless of quantifier
+          # (exportResults: `value = files.length > 0`). So 'every' cannot
+          # directly express "every changed file is docs-only" as its own
+          # filter; what it CAN express — and does here — is exactly what
+          # 'some-with-excludes' would have: a file counts toward `code`
+          # when it matches '**' (always) AND matches none of the negated
+          # docs-only patterns below (this is the action's own documented
+          # "match a folder but exclude some extensions" recipe). `code` is
+          # then 'true' iff at least one changed file is NOT docs-only,
+          # which is exactly the previous (broken) semantics, just spelled
+          # with a quantifier that exists on this pin. `docs_only` above is
+          # `code`'s negation: "every changed file is docs-only" is
+          # logically "no changed file is code" (De Morgan), which needs no
+          # separate filter.
+          #
+          # Docs-only set: markdown anywhere, docs/**, the root
+          # LICENSE/SECURITY/CHANGELOG/THIRD-PARTY-NOTICES files,
+          # CODEOWNERS, and issue templates. Everything else counts as
+          # code on purpose, including examples/** (aot-publish validates
+          # every example manifest below), schemas/**, packages.lock.json,
+          # global.json, NuGet.config, Directory.*.props, scripts/**, and
+          # workflow files themselves.
+          predicate-quantifier: 'every'
+          filters: |
+            code:
+              - '**'
+              - '!**/*.md'
+              - '!docs/**'
+              - '!LICENSE*'
+              - '!SECURITY.md'
+              - '!CHANGELOG.md'
+              - '!THIRD-PARTY-NOTICES.md'
+              - '!.github/CODEOWNERS'
+              - '!.github/ISSUE_TEMPLATE/**'
+
   build:
     name: build
+    needs: changes
+    # Fail-closed three-way truth table (see the `changes` job's header
+    # comment): `changes` errored/cancelled -> needs.changes.result != 'success'
+    # -> run. `changes` succeeded and proved docs-only -> docs_only == 'true'
+    # -> skip. `changes` succeeded and found real code changes -> run.
+    # !cancelled() (rather than always()) so a cancelled workflow run does
+    # not spuriously start this job — always() ignores cancellation,
+    # !cancelled() does not (see the paths-filter/Actions expressions docs).
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.docs_only != 'true') }}
     # Sigil's MVP target is Windows-only. MSIX,
     # signtool, the EXE-wrapper runtime, registry steps, COM shortcuts and
     # the brand-aware installer.exe all only make sense on Windows. Linux
@@ -222,7 +331,20 @@ jobs:
   aot-publish:
     name: aot publish (win-x64)
     runs-on: windows-latest
-    needs: build
+    needs: [changes, build]
+    # Same fail-closed shape as `build`, plus an explicit `needs.build.result
+    # == 'success'` clause (an `if:` that references a status function like
+    # !cancelled() loses GitHub's automatic "all needs succeeded" check, so
+    # it has to be written back in by hand here):
+    #   build genuinely failed (real compile/test error, not a docs-only
+    #     skip)            -> needs.build.result == 'success' is false -> skip
+    #   build was skipped (docs-only)  -> result is 'skipped', not 'success'
+    #                                   -> skip (cascades correctly)
+    #   build ran and succeeded, AND the gate did not prove docs-only
+    #     (includes: `changes` itself failed/cancelled)      -> run
+    #   build ran and succeeded, AND the gate proved docs-only -> can't
+    #     happen: `build`'s own `if:` would have skipped it in that case
+    if: ${{ !cancelled() && needs.build.result == 'success' && (needs.changes.result != 'success' || needs.changes.outputs.docs_only != 'true') }}
     steps:
       - uses: actions/checkout@v4
 
@@ -375,6 +497,9 @@ jobs:
   vulnerability-scan:
     name: vulnerability scan (nuget)
     runs-on: windows-latest
+    needs: changes
+    # Same fail-closed three-way truth table as `build` above.
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.docs_only != 'true') }}
     steps:
       - uses: actions/checkout@v4
 

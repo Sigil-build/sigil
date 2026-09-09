@@ -189,6 +189,37 @@ jobs:
           Copy-Item THIRD-PARTY-NOTICES.md publish/win-arm64/
           Compress-Archive -Path publish/win-arm64/* -DestinationPath "dist/sigil-${{ github.ref_name }}-win-arm64.zip"
 
+      # R42 / SUP.3 handoff (docs/plan/release/sup-sbom-handoff.md): the SBOM
+      # must describe exactly what got signed and released, so it runs after
+      # signing + packaging (dist/ already exists by this point, created by
+      # the win-x64 archive step above) and before SHA256SUMS / the release
+      # asset upload, so the SBOM itself gets checksummed and attached like
+      # every other dist/* asset. No continue-on-error: an SBOM that silently
+      # failed to generate is a release-integrity gap, not a warning.
+      - name: install CycloneDX SBOM tool
+        shell: pwsh
+        run: |
+          dotnet tool install --global CycloneDX --version 6.2.0
+          # `dotnet tool install --global` updates the user PATH via the
+          # registry, which a *new* shell picks up -- not necessarily this
+          # job's remaining steps. Append explicitly via GITHUB_PATH rather
+          # than assume the runner image already carries ~/.dotnet/tools.
+          Add-Content -Path $env:GITHUB_PATH -Value "$env:USERPROFILE\.dotnet\tools"
+
+      - name: generate CycloneDX SBOM
+        shell: pwsh
+        run: |
+          # The handoff doc's `--json` flag does not exist on this tool's
+          # actual CLI (checked against CycloneDX/cyclonedx-dotnet's --help
+          # at pin time): the real flag is `-F/--output-format`. `-fn`'s
+          # .json extension would already select JSON under the default
+          # Auto format, but `-F Json` is explicit and doesn't rely on that
+          # inference.
+          $sbom = "dist/sigil-${{ github.ref_name }}.sbom.json"
+          dotnet CycloneDX Sigil.slnx -o dist -fn "sigil-${{ github.ref_name }}.sbom.json" -F Json
+          if (-not (Test-Path $sbom)) { throw "SBOM not generated at $sbom" }
+          Write-Host "generated $sbom"
+
       - name: SHA256SUMS
         shell: pwsh
         run: |

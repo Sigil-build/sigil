@@ -129,6 +129,15 @@ public sealed class PrerequisiteInstallTests
         // Sigil.YamlQuote emits single-quoted scalars, which have no escapes at all
         // (it doubles the apostrophes the detect expression itself contains).
         // $$ raw string: {{...}} interpolates, single braces ({install_dir}) are literal.
+        //
+        // `to:` is a destination DIRECTORY, never a file name — FileCopyStep does
+        // Directory.CreateDirectory(to) and then Path.Combine(to, <relative path>) per
+        // match, with no single-source-to-single-file branch. This fixture used to say
+        // `to: '{install_dir}\app.txt'`, which made app.txt a DIRECTORY holding
+        // app.txt\app.txt, so the two legs asserting File.Exists(app.txt) failed against
+        // a directory while the install itself exited 0 / 3010 exactly as designed — and
+        // the third leg, which asserts File.Exists is FALSE, passed vacuously. Guarded
+        // now by VmFixtureManifestTests.Vm_fixture_file_copy_destinations_are_directories.
         return $$"""
 spec: v1.0
 
@@ -158,7 +167,7 @@ install_steps:
   - id: copy-app
     type: file_copy
     from: 'payload://app.txt'
-    to: '{install_dir}\app.txt'
+    to: '{install_dir}'
 """;
     }
 

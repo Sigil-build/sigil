@@ -81,6 +81,19 @@ internal static class StateDirectorySecurity
     /// </summary>
     /// <remarks>
     /// <para>
+    /// <b>Missing ancestors are created hardened too.</b>
+    /// <c>FileSystemAclExtensions.CreateDirectory</c> applies the supplied security
+    /// descriptor to <em>every</em> path component it has to create, not only to the
+    /// leaf. The first machine-scope call for <c>%ProgramData%\Sigil\&lt;AppId&gt;</c> on
+    /// a fresh machine therefore leaves the shared <c>%ProgramData%\Sigil</c> parent
+    /// protected and admin-only as well — which is the right outcome (nothing
+    /// unprivileged should be able to plant a sibling app id there), but it means a
+    /// later bare <see cref="Directory.CreateDirectory(string)"/> under that parent
+    /// inherits admin-only rather than <c>%ProgramData%</c>'s permissive DACL. Test
+    /// fixtures that need a genuinely user-writable directory under it must stamp an
+    /// explicit <c>BUILTIN\Users</c> ACE rather than rely on inheritance.
+    /// </para>
+    /// <para>
     /// When the directory already exists and does <em>not</em> pass
     /// <see cref="IsTrusted"/>, this <b>repairs</b> it: the protected admin-only DACL
     /// is re-applied over whatever was there, discarding inherited ACEs, and the

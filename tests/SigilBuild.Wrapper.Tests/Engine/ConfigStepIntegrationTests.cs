@@ -122,6 +122,13 @@ public sealed class ConfigStepIntegrationTests
                         { AllowOutsideInstallDir = true },
                     new InstallStep.JsonEdit("j", json, "/a", "2", false, null, OnFailure.Fail)
                         { AllowOutsideInstallDir = true },
+                    // R35: `value_type` must survive the blob wire, not only the
+                    // in-process editor. This step lands as a NUMBER only if the flag
+                    // reached the runtime; "j" above lands as a STRING because the
+                    // default is now `string`.
+                    new InstallStep.JsonEdit(
+                        "j2", json, "/b", "7", false, null, OnFailure.Fail, JsonValueType.Json)
+                        { AllowOutsideInstallDir = true },
                     new InstallStep.XmlEdit("x", xml, "/root/a", null, "new", false, null, OnFailure.Fail)
                         { AllowOutsideInstallDir = true },
                 },
@@ -135,7 +142,10 @@ public sealed class ConfigStepIntegrationTests
 
             code.Should().Be(0);
             File.ReadAllText(ini).Should().Contain("x=9");
-            File.ReadAllText(json).Should().Contain("\"a\": 2");
+            File.ReadAllText(json).Should().Contain("\"a\": \"2\"",
+                "value_type defaults to string (R35)");
+            File.ReadAllText(json).Should().Contain("\"b\": 7",
+                "value_type: json must round-trip through the signed blob (R35)");
             File.ReadAllText(xml).Should().Contain("<a>new</a>");
         }
         finally

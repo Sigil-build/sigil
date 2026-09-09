@@ -129,7 +129,7 @@ Writes a `.lnk` to a named anchor or an explicit directory. The journal records 
 |Field|Notes|
 |---|---|
 |`target`|Path to the program.|
-|`location`|`start_menu`, `desktop`, or any explicit directory path.|
+|`location`|`start_menu`, `desktop`, or an explicit directory path — see the containment note below.|
 |`name`|Display name; `.lnk` is appended automatically.|
 |`args`|List of CLI args appended to the target.|
 |`working_dir`|Optional.|
@@ -144,6 +144,10 @@ Writes a `.lnk` to a named anchor or an explicit directory. The journal records 
   name: MyApp
   description: "Launch MyApp"
 ```
+
+> **`location` is anchored, but not to `install_dir`.** The whole point of `desktop` and `start_menu` is to write outside the installed application, so the [`install_dir` containment](#every-step-destination-is-contained-to-install_dir) that governs `file_copy` and the config editors cannot apply here. A wider anchor does: the resolved directory must sit under `install_dir`, under a **Start Menu** folder, or under a **Desktop** folder — either scope's — with no directory junction on the way down. Everything an installer normally does is inside that: a vendor subfolder such as `location: "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Contoso"`, a Startup shortcut, a `{install_dir}\\Tools` folder.
+>
+> Anything else **fails the step**, with the directory not created and the `.lnk` not written. There is no `allow_outside_install_dir` opt-out on this step. Before this rule, an explicit `location` was checked by nothing at all: an elevated install would `mkdir -p` a tree anywhere on the volume and journal a `DeleteShortcut` that unlinks that exact path at rollback or uninstall, whether or not this installer created it — which matters as soon as `location` carries a `${parameters.…}` or `{var.…}` value sourced from a wizard field or a `registry_read`.
 
 ## `env_set`
 
@@ -280,6 +284,12 @@ Self-registers a COM DLL by loading it and invoking its exported `HRESULT DllReg
 
 Journals an `UnregisterCom` record (DLL path only) **before** the register, so a mid-install crash or `setup.exe /Uninstall` both call `DllUnregisterServer` on the same path. A DLL that fails to load or has no `DllRegisterServer` export fails the step with a diagnostic message; on rollback, the same failure modes are tolerated best-effort (mirrors `service_install`'s `RemoveService` pattern).
 
+> **What this step grants — read before you write one.** `com_register` is an explicit grant of **arbitrary code execution as administrator** to the DLL you name. Sigil loads it into the elevated installer process and calls one of its exports; it guarantees only that the DLL is the one you shipped, sitting where only administrators can have put it (the anchoring rules above). It cannot guarantee anything about what your `DllRegisterServer` then does.
+>
+> Two practical consequences. A DLL that **faults** takes the installer down with it — the journal is already on disk, so `setup.exe /Uninstall` or a re-run still unwinds the install, but the run itself is lost — and there is **no timeout**, so a `DllRegisterServer` that hangs wedges the install. Keep self-registration code short and defensive, and prefer failing with a non-zero `HRESULT` over throwing.
+>
+> This is deliberate, not an oversight. Running the DLL in a `regsvr32.exe` child would not lower its privileges — a child inherits the installer's elevated token, and machine-global COM registration is what the step is *for* — so it would buy crash isolation at the cost of bitness guesswork, unusable exit codes, and a heavily EDR-flagged process launch in every installer. The reasoning is recorded in [ADR-012](../architecture/adr-012-com-registration-isolation.md).
+
 ```yaml
 - id: register-shell-extension
   type: com_register
@@ -361,6 +371,43 @@ The opt-out is per step and deliberate: it is a declaration that this particular
 `section`, `key` and `value` are substituted and then concatenated into a single `key=value` line, so a value of `9\n[admin]\nenabled=true` used to write entries into an entirely different section — which matters as soon as the value comes from a wizard field or a `registry_read` var rather than a literal. All three fields now **reject a carriage return, a line feed, or a leading `[`** (how a section header begins), and the step fails with the file untouched.
 
 Rejected rather than escaped: an INI file has no escape for a newline inside a value, so escaping would silently mangle what you wrote. All three are pack-time-authored, so failing puts the problem in front of the publisher. The leading-`[` rule is deliberately conservative — a `[` in a *value* cannot itself create a section — so write `value: " [1,2,3]"` or quote it differently if you need one.
+
+### `json_edit` writes a string unless you say `value_type: json`
+
+|Field|Type|Required|Default|Notes|
+|---|---|---|---|---|
+|`value_type`|enum|-|`string`|`string` writes the resolved `value` as a JSON string, always. `json` parses it and writes the resulting number, boolean, `null`, array or object.|
+
+```yaml
+- id: set-endpoint          # writes  "endpoint": "https://api.example.com"
+  type: json_edit
+  path: "{install_dir}\\appsettings.json"
+  pointer: /Api/endpoint
+  value: "${parameters.endpoint}"
+
+- id: set-worker-count      # writes  "workers": 4
+  type: json_edit
+  path: "{install_dir}\\appsettings.json"
+  pointer: /Api/workers
+  value: "4"
+  value_type: json
+```
+
+The step used to infer the type from the value: it ran every resolved `value` through a JSON parser and kept whatever came back, falling back to a string only when the parse failed. That is reasonable for a literal you typed into the manifest and wrong for everything else, because the same field also carries values resolved from a **wizard field**, a `registry_read` var or a `/P<name>=` argument — and those then chose the *shape* of the node written into your application's configuration. A value of `{"admin":true}` where you wrote and reviewed a string becomes an object your application reads as one. The encoding was never unsafe; the output is always well-formed JSON. What was unsafe is that the value's supplier picked its type.
+
+So `string` is the default and the old inference is the opt-in. Two consequences worth knowing:
+
+- **A manifest that meant a number now writes a string** until you add `value_type: json`. That is a visible, one-line fix; the reverse — a silent type change driven by user input — is not.
+- Under `value_type: json`, a value that is **not** valid JSON **fails the step** rather than quietly falling back to a string. With the intent declared, a non-parsing value is a manifest error, and the fallback would just be a second way for the supplier to pick the type.
+
+### `xml_edit` refuses a document that declares a `<!DOCTYPE>`
+
+The XML a step edits is parsed with `XmlResolver = null` and `DtdProcessing = Prohibit`. Two separate guarantees:
+
+- **No external entity is ever dereferenced.** A `<!ENTITY x SYSTEM "file:///C:/…">` or `SYSTEM "http://…"` in the target file cannot make the elevated installer read a local file or reach the network on the document's behalf. .NET already defaults to this; Sigil sets it explicitly so that a future framework default, `AppContext` switch or runtimeconfig knob cannot revoke the guarantee without this assignment also changing.
+- **No DTD is parsed at all**, including a purely internal subset with no external references. This is the half the resolver default never covered: an internal subset can define nested entities whose expansion is exponential (the "billion laughs" shape), and — per the containment note above — the file being edited can sit somewhere an attacker is able to write.
+
+A document that declares a `<!DOCTYPE>` therefore **fails the step with the file untouched** rather than being edited, whether or not the doctype is expensive. If you must edit such a file, strip the doctype at pack time, or do the edit from a `run_program` step that owns its own parsing policy. Declarations, comments, processing instructions and whitespace all still survive an ordinary edit.
 
 ### An unresolved token in a path fails the step
 

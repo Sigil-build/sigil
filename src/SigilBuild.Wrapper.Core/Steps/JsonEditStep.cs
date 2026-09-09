@@ -29,7 +29,7 @@ internal sealed class JsonEditStep : IStep
 
         var result = ConfigFileEditor.Edit(
             ctx, journal, _spec.Path, _spec.CreateIfMissing,
-            current => JsonEditor.Set(current, pointer, value),
+            current => JsonEditor.Set(current, pointer, value, _spec.ValueType),
             "json_edit", _spec.AllowOutsideInstallDir);
 
         return Task.FromResult(result);
@@ -40,7 +40,9 @@ internal static class JsonEditor
 {
     private static readonly JsonSerializerOptions WriteOptions = new() { WriteIndented = true };
 
-    public static string Set(string? content, string pointer, string value)
+    public static string Set(
+        string? content, string pointer, string value,
+        JsonValueType valueType = JsonValueType.Text)
     {
         JsonNode root = string.IsNullOrWhiteSpace(content)
             ? new JsonObject()
@@ -57,7 +59,7 @@ internal static class JsonEditor
         {
             node = Descend(node, tokens[i], tokens[i + 1]);
         }
-        SetFinal(node, tokens[^1], ToJsonNode(value));
+        SetFinal(node, tokens[^1], ToJsonNode(value, valueType));
 
         return root.ToJsonString(WriteOptions);
     }
@@ -156,17 +158,49 @@ internal static class JsonEditor
         token == "-" ||
         int.TryParse(token, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out _);
 
-    // Interpret the resolved value as a JSON literal (number / bool / null / quoted
-    // string / array / object) when it parses, else as a plain string.
-    private static JsonNode? ToJsonNode(string value)
+    /// <summary>
+    /// Turn the resolved <c>value</c> into the node to write, as declared by
+    /// <c>value_type</c> (register row R35).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>What changed and why.</b> This used to be unconditional literal inference:
+    /// try <see cref="JsonNode.Parse(string, JsonNodeOptions?, JsonDocumentOptions)"/>,
+    /// keep whatever came back, fall back to a string only when the parse failed. That
+    /// is defensible for a literal the publisher typed into the manifest and wrong for
+    /// everything else. The same field also carries values resolved from a wizard field,
+    /// a <c>registry_read</c> var or a <c>/P&lt;name&gt;=</c> argument, and those decide
+    /// the SHAPE of the node written into the application's own configuration: supply
+    /// <c>{"admin":true}</c> where the author wrote and reviewed a string, and the
+    /// application reads an object. Encoding was never the flaw — the output is always
+    /// well-formed JSON — the flaw is that the value's supplier picks the type.
+    /// </para>
+    /// <para>
+    /// <b>String is the default</b>, so the inference is now opt-in. A manifest that
+    /// genuinely means a number or a boolean says <c>value_type: json</c>, and gets a
+    /// hard failure if the value does not parse — with the intent declared, a
+    /// non-parsing value is a manifest error rather than a silent downgrade to a
+    /// string, which would be a second way for the supplier to pick the type.
+    /// </para>
+    /// </remarks>
+    private static JsonNode? ToJsonNode(string value, JsonValueType valueType)
     {
+        if (valueType != JsonValueType.Json)
+        {
+            return JsonValue.Create(value);
+        }
+
         try
         {
             return JsonNode.Parse(value);
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
-            return JsonValue.Create(value);
+            throw new InvalidOperationException(
+                $"json_edit: value_type is 'json' but the resolved value is not valid JSON " +
+                $"({ex.Message}). Write 'value_type: string' if it is meant to be written " +
+                $"as a string.",
+                ex);
         }
     }
 }

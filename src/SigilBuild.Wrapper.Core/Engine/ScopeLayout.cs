@@ -1,6 +1,7 @@
 namespace SigilBuild.Wrapper.Engine;
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using SigilBuild.Core.Manifest;
 
@@ -63,6 +64,50 @@ public sealed class ScopeLayout
         : Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Programs");
+
+    /// <summary>
+    /// Every root an <c>install_dir</c> for this scope may legitimately sit under —
+    /// the <em>permitted</em> destinations, of which <see cref="InstallRoot"/> is the
+    /// <em>default</em> one and always the first entry. <c>InstallDirResolver</c>'s
+    /// containment check (register row R3) is derived from this list, so the two
+    /// cannot drift apart (register row R52).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Machine scope</b> anchors on the Program Files roots. <c>{install_dir}</c>
+    /// feeds <c>scheduled_task_create.program</c> and <c>service_install.binary_path</c>,
+    /// which run as SYSTEM, so the destination must not be a directory an unprivileged
+    /// user can write. <b>Both</b> <c>%ProgramFiles%</c> and <c>%ProgramFiles(x86)%</c>
+    /// belong here: both are admin-only and TrustedInstaller-owned, so accepting the
+    /// x86 root loses nothing, while refusing it would break the standard 32-bit
+    /// install shape on 64-bit Windows.
+    /// </para>
+    /// <para>
+    /// <b>User scope</b> crosses no privilege boundary, so the whole user profile is a
+    /// permitted root — a user writing inside their own profile is not an escalation —
+    /// alongside <see cref="InstallRoot"/> itself, because <c>%LocalAppData%</c> can be
+    /// redirected off the profile (folder redirection) and the DEFAULT install must not
+    /// be refused on such machines. The list is still a list rather than "anywhere":
+    /// an unanchored user-scope install would let a manifest write anywhere the user can.
+    /// </para>
+    /// <para>
+    /// A blank entry is possible (<c>%ProgramFiles(x86)%</c> on a 32-bit-only OS) and is
+    /// harmless — every consumer rejects a blank root. Entries are returned in
+    /// most-specific-first order for message readability, never de-duplicated here.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<string> InstallRoots => IsMachine
+        ? new[]
+        {
+            InstallRoot,
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+        }
+        : new[]
+        {
+            InstallRoot,
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        };
 
     /// <summary>
     /// The state / rollback-journal root: <c>%ProgramData%</c> for machine scope,

@@ -113,6 +113,13 @@ internal sealed record SerializableInstallStep
     public string? IniValue { get; init; }
     public string? Pointer { get; init; }
     public string? JsonEditValue { get; init; }
+
+    /// <summary>
+    /// <c>json_edit.value_type</c> (register row R35): <c>"string"</c> or <c>"json"</c>.
+    /// Absent means <c>"string"</c> — the safe default — so a blob written before this
+    /// field existed decodes to the guarded behaviour rather than the old inferring one.
+    /// </summary>
+    public string? JsonEditValueType { get; init; }
     public string? Xpath { get; init; }
     public string? Attribute { get; init; }
     public string? XmlValue { get; init; }
@@ -287,7 +294,8 @@ internal static class SerializableInstallStepConverter
                 s.JsonEditValue ?? string.Empty,
                 s.CreateIfMissing ?? false,
                 s.When,
-                onFailure),
+                onFailure,
+                ParseJsonValueType(s.JsonEditValueType)),
 
             "xml_edit" => new InstallStep.XmlEdit(
                 s.Id,
@@ -516,6 +524,7 @@ internal static class SerializableInstallStepConverter
                 Path = x.Path,
                 Pointer = x.JsonPointer,
                 JsonEditValue = x.Value,
+                JsonEditValueType = FormatJsonValueType(x.ValueType),
                 CreateIfMissing = x.CreateIfMissing,
             },
 
@@ -594,6 +603,25 @@ internal static class SerializableInstallStepConverter
         "continue" => OnFailure.Continue,
         "fail" => OnFailure.Fail,
         _ => OnFailure.Fail,
+    };
+
+    /// <summary>
+    /// Register row R35. An absent or unrecognized value decodes to
+    /// <see cref="JsonValueType.Text"/>: the safe direction, and the one a blob
+    /// written before the field existed must take. Unlike the parser, this cannot
+    /// report a diagnostic — the manifest is long gone by blob-decode time — so it
+    /// falls back rather than throwing, exactly as <see cref="ParseOnFailure"/> does.
+    /// </summary>
+    private static JsonValueType ParseJsonValueType(string? raw) => raw switch
+    {
+        "json" => JsonValueType.Json,
+        _ => JsonValueType.Text,
+    };
+
+    private static string FormatJsonValueType(JsonValueType value) => value switch
+    {
+        JsonValueType.Json => "json",
+        _ => "string",
     };
 
     private static string FormatOnFailure(OnFailure value) => value switch

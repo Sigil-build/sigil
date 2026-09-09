@@ -68,7 +68,7 @@ Step arguments support `${parameters.<name>}` and the `app.*` namespace (`${app.
 install_steps:
   - id: copy-app
     type: file_copy
-    from: payload/**
+    from: payload://**
     to: "{install_dir}"
   - id: stamp-registry
     type: registry_write

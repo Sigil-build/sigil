@@ -3,7 +3,7 @@
 Canonical context file for AI coding agents (Claude Code, Codex, Cursor, Copilot, …).
 `CLAUDE.md` imports this file; keep this one as the single source of truth.
 
-Sigil is an open-source .NET 10 / Native AOT CLI that replaces NSIS / Inno Setup / WiX:
+Sigil is an open-source .NET 10 / Native AOT CLI for declarative Windows-software distribution:
 pack → sign → publish → update, driven by one `sigil.yaml`. **Status: pre-MVP, Windows-first.**
 The publish stage and delta-update SDK are not built yet.
 
@@ -70,6 +70,48 @@ xUnit + FluentAssertions, AAA (Arrange / Act / Assert) layout.
 | Install-step catalog | Full chain: Core model → parser → schema → blob serializer → runtime step → StepFactory → wizard (if UI-visible) → tests → docs. Use the `add-install-step` skill in `.claude/skills/`. |
 | Architecture (engine split, packaging pipeline, AOT strategy) | An ADR in `docs/architecture/` (see `adr-avalonia-aot.md` for format). CODEOWNERS routes these to tech leads. |
 | Diagnostics | New validation errors get a `SIG0xxx` code in `src/SigilBuild.Core/Diagnostics/DiagnosticCodes.cs` — reuse the existing band ranges (e.g. SIG023x = install_steps). |
+
+### 6. CI economy — job-level gating only, never a workflow-level filter on a required check
+
+The release ruleset requires these status checks: `build`, `aot publish (win-x64)`,
+`dotnet format`, `schema / docs lockstep`, `conventional-commit PR title`, `gitleaks`.
+A workflow-level `paths:` / `paths-ignore:` filter on the *trigger* of a workflow that
+produces one of those checks means the check **never reports at all** on a PR that
+doesn't touch the filtered paths — GitHub then waits forever for a status that will
+never arrive, and the PR is wedged. This already happened once, deliberately, as a
+worked example: `docs.yml`'s `pull_request` trigger has a path filter, which is exactly
+why `docs drift check` is **not** a required context (see the G0 note in
+`docs/plan/release/03-RC_ORCHESTRATION.md`).
+
+The fix used in `ci.yml` is a job-level gate instead: a cheap first job (`changes`,
+via `dorny/paths-filter`, pinned by commit SHA) computes whether the diff is docs-only,
+and the expensive jobs (`build`, `aot-publish`, the vulnerability scan) carry
+`needs: changes` plus an `if:` on its `docs_only`/`code` outputs. A job that is
+**skipped** by an `if:` still reports "skipped" for its check, which satisfies a
+required-status-check rule — unlike a job whose *workflow* never triggered.
+`wrapper-vm-tests.yml` is the one workflow where a workflow-level `paths-ignore:` is
+safe, precisely because it produces no required check.
+
+**The gate is fail-closed: a failed `changes` job runs the full build; only a
+positive docs-only verdict skips it.** A gate that skips whenever it *cannot prove*
+code changed is exactly backwards — a `changes` job that errors, is cancelled, or
+whose output isn't the literal string `'true'` must never be treated the same as a
+job that positively proved the diff is docs-only. This is not hypothetical: the
+first version of this gate used a `predicate-quantifier` value that doesn't exist on
+the pinned `dorny/paths-filter` release, so `changes` errored on every run, and the
+downstream jobs' `if:` conditions checked only the output value — an errored gate
+produced the same empty/falsy output as nothing having run, so `build`,
+`aot-publish` and the vulnerability scan silently reported "skipped" (satisfying
+their required checks) on every PR, code changes included. The fix checks
+`needs.changes.result` explicitly (`!cancelled() && (needs.changes.result !=
+'success' || needs.changes.outputs.docs_only != 'true')`), not just the output
+value — see `ci.yml` for the full three-way truth table and why `!cancelled()` is
+used instead of `always()`.
+
+When adding or editing a workflow: if it contributes a required check (or might
+later), gate expensive jobs with `needs`/`if` on a cheap upstream job's output, not
+with `on.push.paths` or `on.pull_request.paths` — and make sure that gate fails
+closed (runs the expensive job) whenever it cannot positively prove a skip is safe.
 
 ## Repo map
 

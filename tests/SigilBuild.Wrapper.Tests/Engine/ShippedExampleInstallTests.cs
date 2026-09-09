@@ -46,7 +46,7 @@ public sealed class ShippedExampleInstallTests
 {
     public static TheoryData<string> Examples() => new()
     {
-        "examples/exe-wrapper/hello-wix-killer/sigil.yaml",
+        "examples/exe-wrapper/hello-desktop-app/sigil.yaml",
         "examples/exe-wrapper/multi-edition/sigil.yaml",
     };
 
@@ -85,14 +85,14 @@ public sealed class ShippedExampleInstallTests
     }
 
     [WindowsFact("Windows path semantics")]
-    public async Task Hello_wix_killer_copies_its_payload_into_the_resolved_install_dir()
+    public async Task Hello_desktop_app_copies_its_payload_into_the_resolved_install_dir()
     {
         // The end-to-end leg for the step that used to abort. `to` is taken
         // verbatim from the shipped manifest — it is the field under test. `from`
         // is rebased onto a temp payload because the manifest's 'payload/**' is
         // relative to the packaging working directory, which a unit test has no
         // business changing (it is process-global and this suite runs in parallel).
-        var manifest = ParseOrFail("examples/exe-wrapper/hello-wix-killer/sigil.yaml");
+        var manifest = ParseOrFail("examples/exe-wrapper/hello-desktop-app/sigil.yaml");
         var copy = AllSteps(manifest).OfType<InstallStep.FileCopy>().First(s => s.Id == "copy-app");
 
         using var payload = new TempDir();

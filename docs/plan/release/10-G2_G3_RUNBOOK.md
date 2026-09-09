@@ -404,7 +404,7 @@ Also from PR #39: a stale comment in `WixClassInstallUninstallTests` that
 claimed `Setup.exe /Uninstall` is the ARP code path (it is not — that
 confusion is R58's whole subject) was corrected in-lane; no separate row.
 
-**Filed in Stage 4, 2026-09-09 — R69–R75.** The V1.1 register walk added
+**Filed in Stage 4, 2026-09-09 — R69–R76.** The V1.1 register walk added
 **R69** (a skip whose stated precondition was not the real one, inside R6's own
 fix), **R70** (R42's CycloneDX SBOM step orphaned by the REL-before-SUP merge
 order), **R71** (`SigilBuild.Core` 0.02 pp above its coverage floor), **R72**
@@ -429,11 +429,11 @@ came out of the **first automatic `wrapper-vm-tests.yml` run** on `b07021e`:
   and `ExistingInstallDetected` agree (both blind or both sighted), with a unit
   test under a simulated elevated probe. Cross-references R2 and R53. Until it
   lands, the two elevation-sensitive upgrade assertions in the install-matrix leg
-  are **honest skips** naming R2 (branch `rc/vm-fix-fixtures-round2`, PR number
-  pending) — the leg runs **elevated** on the hosted runner, and five of that
-  run's six failures were fixture bugs (`file_copy.to` given a file path where the
-  contract wants a directory; one app id reused across two install roots), fixed
-  in the same PR.
+  are **honest skips** naming R2 ([PR #45](https://github.com/Sigil-build/sigil/pull/45),
+  `rc/vm-fix-fixtures-round2` @ `24a0f9d`, open) — the leg runs **elevated** on the
+  hosted runner, and five of that run's six failures were fixture bugs
+  (`file_copy.to` given a file path where the contract wants a directory; one app
+  id reused across two install roots), fixed in the same PR.
 - **R75 — `com_register` journaled an undo for a registration that never took
   effect.** `ComRegisterStep.cs:75` appended `RollbackRecord.UnregisterCom` before
   acting and kept it on `LoadFailed` (`:82-84`) and `ExportMissing` (`:86-88`).
@@ -449,6 +449,27 @@ came out of the **first automatic `wrapper-vm-tests.yml` run** on `b07021e`:
   appetite:** audit every journal-before-act record whose action has no OS query
   surface — this class of bug is invisible to any test that does not actually run
   an uninstall.
+- **R76 (RELEASE BLOCKER) — a per-user upgrade fails: the installer's
+  single-instance guard rejects the prior-version uninstaller it spawns itself.**
+  Found by driving the RC's own CI-built binaries **unelevated** while verifying
+  #45, not by the matrix (`vm-fix2-report.md` §5). `Setup.exe /S /currentuser` of
+  v2 over an installed v1 exits **1** — `removing the previous version failed
+  (uninstaller exit code 5)`; exit 5 is `AlreadyRunningExitCode`, because the
+  installer holds `SetupInstanceLock` (`Local\sigil-setup-<appId>-user`) and then
+  spawns the prior version's `uninstall.exe`, which derives the same name and
+  bails. `/force-downgrade` fails identically. **R58's sibling one layer over** — a
+  guard counting the installer's own child as a stranger. Latent since P3 met P6
+  (G17); invisible because the matrix never ran (**R66**) and because on the
+  elevated runner **R2** hides the prior install so the removal is never attempted
+  (**R74**). Fix lane **`rc/p6-fix-upgrade-mutex`** (PR pending); the exemption
+  must be by process identity and the guard must stay **fail-closed** for every
+  other caller (**R34** exists because this mutex once failed *open*).
+  **Consequence for the G3 checklist:** de-elevating the install-matrix leg is
+  still correct, but it turns
+  `Upgrade_replaces_older_version_preserving_install_dir_and_single_arp_row` and
+  `Force_downgrade_replaces_the_newer_version` **red, truthfully**, until R76
+  lands. Do not re-elevate the leg or soften those assertions to get a green
+  matrix — fix R76, or record the two red legs as expected and known.
 
 None of (a)–(g) below block G2. (b), (c) and (d) were found as a side effect of
 Task 3's R18 work (secrets off the elevated relaunch command line, landing in

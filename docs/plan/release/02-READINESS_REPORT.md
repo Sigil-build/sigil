@@ -362,6 +362,14 @@ failing** throwaway PR #17's `broken title`).
 
 **Remaining — the actual gate list.**
 
+0. **R76 — a per-user upgrade fails outright, and it is a RELEASE BLOCKER.** Filed
+   after this block's other items and listed first because it outranks them: v2 over
+   an installed v1, `/S /currentuser`, unelevated, exits **1** and installs nothing —
+   the installer's own single-instance lock rejects the prior-version `uninstall.exe`
+   it spawns itself (exit 5, `AlreadyRunningExitCode`). Reproduced against the RC's
+   CI-built binaries by hand. Fix lane `rc/p6-fix-upgrade-mutex` (PR pending). Nothing
+   below this line matters for a release until it is fixed: upgrading is what users do
+   second, and right now they cannot.
 1. **VM matrix green, with its run URL recorded here.** The first *automatic* run,
    [34368896457](https://github.com/Sigil-build/sigil/actions/runs/34368896457) on
    `b07021e`, was **in progress** when this was written. The only prior run
@@ -385,7 +393,7 @@ failing** throwaway PR #17's `broken title`).
    "closed" to "documented open". Owner action, G4.
 7. **"Every remaining register row is either demonstrated fixed or listed in the
    release notes' known limitations."** Not yet: the known-limitations draft below
-   predates **R60–R65** and **R69–R75**. Closing this box means a pass over that
+   predates **R60–R65** and **R69–R76**. Closing this box means a pass over that
    draft, and it is the cheapest of the seven.
 
 **Security — no box here is optional**

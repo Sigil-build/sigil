@@ -15,7 +15,8 @@
 > run's `.trx` artifacts: 41 test-evidenced, 14 manual, 11 written deferrals, **2
 > claim-only** (R22, R38), **0 dropped**, and 16 closed on narrower evidence than the
 > record implied. It corrected **R41a** from "closed" to "documented open", filed
-> **R69–R73** (with **R74** and **R75** following from the VM run, below), and gave
+> **R69–R73** (with **R74**, **R75** and **R76** following from the VM run and its
+> round-two lanes, below — **R76 is a RELEASE BLOCKER**), and gave
 > every row a per-row `STATUS (V1.1)` line — 49 of the 68
 > walked rows had none, which is now itself a row (**R73**).
 >
@@ -30,8 +31,9 @@
 > (`.superpowers/sdd/2026-09-08-g2-release-prep/vm-install-matrix-diagnosis.md`)
 > found that **five of the six were fixture bugs #41 missed** — a `file_copy.to`
 > given a *file* path where the step contract wants a destination directory, and one
-> app id reused across two install roots — fixed on `rc/vm-fix-fixtures-round2` (PR
-> number pending), along with an extension of #41's always-on guard to refuse that
+> app id reused across two install roots — fixed by
+> [#45](https://github.com/Sigil-build/sigil/pull/45) (`rc/vm-fix-fixtures-round2` @
+> `24a0f9d`, open), along with an extension of #41's always-on guard to refuse that
 > `to:` shape. **The sixth is a product row: R74.** Because
 > `InstalledStateResolver.ScopeProbeOrder` probes HKLM only when elevated (lane S1's
 > **R2** fix, and correct), an elevated per-user install cannot see its own prior
@@ -55,6 +57,26 @@
 > been asserting the wrong behaviour as correct — the same lesson as **R66** and
 > **R64**, one level in: a leg that never runs does not merely fail to catch bugs,
 > it canonises them.
+>
+> ### R76 — a new RELEASE BLOCKER, found by hand and not by the matrix
+>
+> Verifying #45 against the RC's own CI-built binaries **unelevated** exposed
+> **R76**: a per-user **upgrade fails outright**. `Setup.exe /S /currentuser` of v2
+> over an installed v1 exits **1** with `removing the previous version failed
+> (uninstaller exit code 5)`; exit 5 is `AlreadyRunningExitCode` — the installer holds
+> `SetupInstanceLock` (`Local\sigil-setup-<appId>-user`) and then spawns the prior
+> version's `uninstall.exe`, which derives the **same** name and bails.
+> `/force-downgrade` fails identically. **This is R58's sibling one layer over:** a
+> guard counting the installer's own child as a stranger — files-in-use there,
+> single-instance here. Latent since P3 (upgrades) met P6 (the single-instance guard,
+> G17); invisible because the matrix never ran (**R66**) *and* because on the elevated
+> runner **R2** hides the prior install so the removal is never attempted (**R74**).
+> Fix lane **`rc/p6-fix-upgrade-mutex`** (PR pending); the guard must stay
+> fail-closed for every other caller (**R34**). **Sequencing that follows from this:**
+> de-elevating the install-matrix leg is still the right call, but it will turn the
+> two upgrade tests **red, truthfully**, until R76 lands — so either fix R76 first or
+> keep two honestly red legs in between. Do not re-elevate the leg or soften the
+> assertions to get green.
 >
 > **Blocked on the owner — nothing an agent lane can move:**
 >
@@ -705,8 +727,9 @@ check as R58.**
 | VM-FIX-A | `rc/vm-fix-fixtures` | ☑ | [#41](https://github.com/Sigil-build/sigil/pull/41) | ☑ `b07021e` | G3 (R64 ⚠️, R66, R68) |
 | V1-FIX | `rc/v1-sbom-and-kiosk` | ☑ | [#42](https://github.com/Sigil-build/sigil/pull/42) | ☐ **open** | G3 (R69, R70) |
 | VM-FIX-B2 | `rc/vm-fix-p11-round2` | ☑ | [#44](https://github.com/Sigil-build/sigil/pull/44) | ☐ **open** | G3 (R75) |
-| VM-FIX-A2 | `rc/vm-fix-fixtures-round2` | ☑ | ☐ pending | ☐ | G3 (install-matrix fixtures; R74 skips) |
-| V1-DOCS | `rc/v1-register-status` | ☑ | [#43](https://github.com/Sigil-build/sigil/pull/43) | ☐ | G3 (V1.1 — R71–R75 filed) |
+| VM-FIX-A2 | `rc/vm-fix-fixtures-round2` | ☑ | [#45](https://github.com/Sigil-build/sigil/pull/45) | ☐ **open** | G3 (install-matrix fixtures; R74 skips) |
+| P6-FIX-2 | `rc/p6-fix-upgrade-mutex` | ☐ | ☐ pending | ☐ | **G3 (R76 — RELEASE BLOCKER)** |
+| V1-DOCS | `rc/v1-register-status` | ☑ | [#43](https://github.com/Sigil-build/sigil/pull/43) | ☐ | G3 (V1.1 — R69–R76 filed) |
 | V1  | `rc/v1-verification` | ◐ V1.1 + V1.4 done | ☐ | ☐ | G3/G4 |
 
 The hotfix row (`rc/s1-fix-provenance-fixture`, [#36](https://github.com/Sigil-build/sigil/pull/36)

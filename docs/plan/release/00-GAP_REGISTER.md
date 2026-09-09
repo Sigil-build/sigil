@@ -2754,17 +2754,27 @@ unit test ever creates or hardens a path under the real `%ProgramData%`.
 > across two install roots in the localization legs, so the second install's
 > reinstall-cleanup emptied the first's directory. Both are the R59/R66 shape again:
 > schema-legal, silently wrong, latent for exactly as long as the leg never ran.
-> They are fixed on `rc/vm-fix-fixtures-round2` (PR number pending), which also
-> extends #41's always-on `VmFixtureManifestTests` guard to refuse a `file_copy`
-> `to:` that is not a directory template — the guard gap belongs to this row's
-> family: *the matrix advertises coverage a fixture silently voids.* **The sixth
-> failure is not a fixture bug: it is `R74`.** Because the install-matrix leg runs
-> **elevated** on the hosted runner, the two elevation-sensitive upgrade assertions
-> become **honest skips** in that same PR — `!Elevation.IsProcessElevated()` with a
-> reason naming **R2**, a real skip per **R6**, not a vacuous pass — and stay
-> skipped until R74 lands. Note what that costs: per-user upgrade and downgrade
-> behaviour remains unexercised end to end, which is more coverage this row still
-> owes, on top of the machine-scope gap above.
+> They are fixed by [#45](https://github.com/Sigil-build/sigil/pull/45)
+> (`rc/vm-fix-fixtures-round2` @ `24a0f9d`, open), which also extends #41's always-on
+> `VmFixtureManifestTests` guard to refuse a `file_copy` `to:` that is not a directory
+> template — the guard gap belongs to this row's family: *the matrix advertises
+> coverage a fixture silently voids.* **The sixth failure is not a fixture bug: it is
+> `R74`.** Because the install-matrix leg runs **elevated** on the hosted runner, the
+> two elevation-sensitive upgrade assertions become **honest skips** in that same PR —
+> `!Elevation.IsProcessElevated()` with a reason naming **R2**, a real skip per
+> **R6**, not a vacuous pass — and stay skipped until R74 lands. Note what that
+> costs: per-user upgrade and downgrade behaviour remains unexercised end to end,
+> which is more coverage this row still owes, on top of the machine-scope gap above.
+>
+> **And de-elevating that leg — the right fix, and the diagnosis's own preference —
+> will turn those two upgrade tests RED, truthfully, until R76 lands.**
+> `Upgrade_replaces_older_version_preserving_install_dir_and_single_arp_row` and
+> `Force_downgrade_replaces_the_newer_version` both fail in a normal unelevated
+> session against the RC binaries, because the per-user upgrade removal path is
+> broken (**R76**, a RELEASE BLOCKER). So this row's coverage debt cannot be paid
+> down by de-elevation alone: doing it correctly makes the matrix red first, and that
+> redness is the point. Sequencing for whoever schedules this: **R76 before
+> de-elevation**, or expect — and keep — two red legs in between.
 
 Found while landing R58's fix (PR #39); the count below is the #39 reviewer's,
 verified precisely, not an estimate. Across `wrapper-vm-tests.yml` and its
@@ -3074,15 +3084,18 @@ part of this PR). Two of them — **R69** and **R70** — already have a fix in 
 [PR #42](https://github.com/Sigil-build/sigil/pull/42) (`rc/v1-sbom-and-kiosk`,
 **open**); **R71**, **R72** and **R73** are open with a fix shape and no owner.
 
-**R74** and **R75** come from the same stage but a different source: the **first
-automatic `wrapper-vm-tests.yml` run** on `b07021e` and its diagnosis
-(`vm-install-matrix-diagnosis.md`). R74 is the one product finding among the
-install-matrix leg's six failures — the other five were fixture bugs, fixed on
-`rc/vm-fix-fixtures-round2`. R75 came out of the P11 round-two lane and is fixed in
-[PR #44](https://github.com/Sigil-build/sigil/pull/44), **open**. Both are worth
-reading next to **R64**: they are what an unrun matrix was hiding, and R75 in
-particular was found only because the test there had been *asserting the wrong
-behaviour as correct*.
+**R74**, **R75** and **R76** come from the same stage but a different source: the
+**first automatic `wrapper-vm-tests.yml` run** on `b07021e`, its diagnosis
+(`vm-install-matrix-diagnosis.md`), and the round-two lanes that fixed it. R74 is the
+one product finding among the install-matrix leg's six failures — the other five were
+fixture bugs, fixed by [PR #45](https://github.com/Sigil-build/sigil/pull/45). R75 came
+out of the P11 round-two lane and is fixed in
+[PR #44](https://github.com/Sigil-build/sigil/pull/44), **open**. **R76 is a RELEASE
+BLOCKER** and was found not by the matrix but by driving the RC's own CI-built binaries
+by hand while verifying #45 (`vm-fix2-report.md` §5). All three are worth reading next
+to **R64**: they are what an unrun matrix was hiding — and R75 and R76 were each found
+only because someone finally exercised the path, R75 because the test there had been
+*asserting the wrong behaviour as correct*, R76 because no test asserted it at all.
 
 One walk finding was deliberately **not** filed as a new row: the live reproduction of
 the Release-configuration lock-file churn is **R65** happening again, not a new defect,
@@ -3390,3 +3403,74 @@ time, on a machine that no longer has the installer — is invisible to any test
 does not actually run an uninstall. Cross-references **R15** (the retain-on-failure
 rule that makes this permanent) and **R36** (the decision to keep `com_register`'s
 in-process DLL load, which is what makes `LoadFailed` a reachable state at all).
+
+### R76 — A per-user upgrade fails: the installer's single-instance guard rejects the prior-version uninstaller it spawns itself
+**Component:** Wrapper.Core / Engine · **Effort: S** · **RELEASE BLOCKER**
+
+> **STATUS (V1.1, 2026-09-09):** **OPEN — RELEASE BLOCKER.** Reproduced by hand
+> against the RC's own CI-built binaries, **unelevated**, while verifying
+> [#45](https://github.com/Sigil-build/sigil/pull/45) — evidence in
+> `.superpowers/sdd/2026-09-08-g2-release-prep/vm-fix2-report.md` §5. Fix lane:
+> **`rc/p6-fix-upgrade-mutex`** (PR pending). Not found by the matrix; found by
+> driving the shipped binaries.
+
+**A shipped v1 → v2 per-user upgrade, run from a normal user session, fails and
+installs nothing:**
+
+```
+$ SigilP3Fixture-1.0.0-…-Setup.exe /S /currentuser      -> EXIT 0   (v1 installed)
+$ SigilP3Fixture-2.0.0-…-Setup.exe /S /currentuser
+Removing previous version 1.0.0.
+cannot upgrade: removing the previous version failed (uninstaller exit code 5).
+No changes were made.
+                                                        -> EXIT 1
+```
+
+`/force-downgrade` fails identically ("Removing newer version 2.0.0." → exit 1).
+
+**Mechanism.** Exit **5** is `InstallSession.AlreadyRunningExitCode`, returned from
+exactly two places, both the single-instance guard (`SigilBuild.Wrapper/Program.cs:85`
+and `SigilBuild.Installer.Host/Program.cs:151`). The running installer holds
+`SetupInstanceLock`, whose name is `NameFor(appId, scope)` =
+`Local\sigil-setup-<appId>-user` (`SetupInstanceLock.cs`) — and then **spawns the prior
+version's `uninstall.exe`**, which derives the **same** app+scope name, sees
+`ERROR_ALREADY_EXISTS`, and bails. The parent installer correctly reports that the
+removal failed and rolls back, so nothing is half-installed; the upgrade simply cannot
+proceed.
+
+**This is R58's sibling, one layer over.** R58 was the *files-in-use* gate counting the
+running uninstaller as a blocker; this is the *single-instance* guard counting the
+running installer when the installer is the very thing that spawned the uninstaller.
+Both are the same mistake in two different guards: **a guard that treats the
+installer's own child as a stranger.** Worth checking whether there is a third.
+
+**Latent since P3 met P6.** Upgrades (P3) and the single-instance guard (P6, gate G17)
+are individually correct and were individually tested; the defect lives only in their
+composition, and **nothing ever composed them** — because the VM matrix never ran
+(**R66**), and because on the elevated hosted runner **R2** hides the prior install
+entirely, so the plan is `FreshInstall` and the removal is never even attempted
+(**R74**). The install-matrix diagnosis did exercise the *downgrade-blocked* direction
+unelevated (exit 3, correct) but not the upgrade or forced-downgrade directions, so it
+did not surface there either. Three separate reasons this stayed invisible, none of
+them "the code looked fine".
+
+**Why RELEASE BLOCKER and not SHOULD-FIX.** Per-user upgrade is the single most
+common thing a publisher's users will do after the first install, it fails for every
+app on the default (unelevated) path, and the failure is total — exit 1, nothing
+installed. This is the "broken promise" half of the rubric, and unlike **R74** it is
+not confined to elevated sessions.
+
+**Effect on the VM matrix, and the sequencing that follows.** De-elevating the
+install-matrix leg — the diagnosis's preferred fix for its sixth failure, and still the
+right call — **will turn `Upgrade_replaces_older_version_preserving_install_dir_and_single_arp_row`
+and `Force_downgrade_replaces_the_newer_version` red. That redness is true**, and must
+not be worked around by re-elevating the leg or by relaxing the assertions. Fix R76
+first, or accept two honestly red legs until it lands. See **R64**.
+
+**Fix shape (not implemented here).** The spawned uninstaller must not contend with its
+own parent installer for the app+scope lock — the same exemption **R58** made for the
+files-in-use sweep, and it should be made the same way: by *identity*, not by name or
+by a bare "skip the check" flag. **The guard must stay fail-closed** for every other
+caller — that is **R34**, which exists because this mutex once failed *open* on its
+`NULL` branch, and a fix that widens the hole is worse than the bug. Cross-references
+**R34**, **R58** and **R74**.

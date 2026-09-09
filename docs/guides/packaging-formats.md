@@ -39,7 +39,7 @@ Self-extracting `setup.exe` with Sigil's branded wizard host (D-013 / D-014). Fu
 - `parameters:` block surfaces in the wizard or via `/PName=Value` on silent install (`/S /D=<dir> /PName=Value`; see [setup.exe reference](../setup-exe-reference.md)).
 - Signing: `setup.exe` and the embedded `uninstall.exe` are both signed.
 
-Best for: "real" Windows installers. The intended NSIS / WiX replacement.
+Best for: full Windows installers with a wizard, install steps, and an uninstaller.
 
 ## Decision matrix
 
@@ -70,7 +70,7 @@ yields `setup-x64.exe`, `setup-arm64.exe`, `app-x64.zip`, `app-arm64.zip`.
 
 ## Migrating from WiX or NSIS
 
-If you're replacing WiX, you want `exe`. If you're replacing NSIS, you want `exe`. The migration guides cover the command-by-command mapping:
+Coming from WiX or NSIS, `exe` is the format you want. The migration guides cover the construct-by-construct mapping:
 
 - [Migrating from WiX](../migration/from-wix.md)
 - [Migrating from NSIS](../migration/from-nsis.md)

@@ -90,8 +90,13 @@ this pass does not re-tabulate.
 | [#31](https://github.com/Sigil-build/sigil/pull/31) | S7 | `2e32c83` | R44, R51 |
 | [#32](https://github.com/Sigil-build/sigil/pull/32) | REL | `f9d3af5` | R7, R23, R23a, R24 |
 | [#33](https://github.com/Sigil-build/sigil/pull/33) | SUP | `4dc7820` | R42 |
-| [#34](https://github.com/Sigil-build/sigil/pull/34) | DOC | `50da43c` | R25, R26, R26a, R27, R41a, R43, R55 |
+| [#34](https://github.com/Sigil-build/sigil/pull/34) | DOC | `50da43c` | R25, R26, R26a, R27, R41a †, R43, R55 |
 | [#35](https://github.com/Sigil-build/sigil/pull/35) | runbook | `3ba97f6` | none — docs-only, the G2/G3 human runbook |
+
+† **R41a is listed here but was not actually closed.** #34 documented it; the two
+NuGet IDs remain unreserved, which is an owner action on the G4 checklist. Corrected
+by the V1.1 walk — see R41a's own status line. This is exactly the failure mode a
+merge table has and a per-row status line does not, which is why **R73** now exists.
 
 ### G2 check results (2026-09-09)
 
@@ -134,6 +139,60 @@ filed for a later stage. R58's fix opened as **[PR #39](https://github.com/Sigil
 shown would be worth less than it looked — then surfaced **R66–R68**. See the
 "Filed at gate G2" section below for all nine rows.
 
+## V1.1 register walk (2026-09-09) — how to read the per-row STATUS lines
+
+Task **V1.1** (Stage 4, lane V1) walked **all 71 rows** of this register against the
+tree at `102ea3f` and against the authoritative CI run
+**[34362414470](https://github.com/Sigil-build/sigil/actions/runs/34362414470)**
+(`ci`, push, `102ea3f`, conclusion `success`). Per-test outcomes were read out of that
+run's `test-results` artifact — 12 `.trx` files — **not out of PR bodies**. Full
+report: `.superpowers/sdd/2026-09-08-g2-release-prep/v1-1-register-walk.md`
+(gitignored, not part of this PR).
+
+**Every row now carries a `> **STATUS (V1.1, 2026-09-09):**` line.** Until this pass,
+**49 of the 68 walked rows had no per-row status at all** — 40 of them rows closed by
+Stages 2 and 3, whose closure existed only as a cell in the merge table above. That
+gap is itself filed, as **R73**. Where a row already carried an older `STATUS —`
+note, the V1.1 line sits **above** it: the V1.1 line is the current disposition, the
+older note is the history.
+
+How to read one:
+
+- **Evidence T** — a named test that exists in the tree **and** reported `Passed` on
+  run `34362414470`. The count in parentheses is that test class's `Passed` count on
+  that run.
+- **Evidence M** — no test: a command re-run during the walk with its output, or a
+  G1/G2 ceremony result.
+- **Evidence D** — an explicit **written** deferral (a register note, a code
+  `<remarks>`, or an ADR). Naming *where* the justification is written is part of the
+  status; a decision that exists only in someone's head is not closed.
+- **Evidence C — claim-only.** The closure rests on nothing beyond a PR body. Two
+  rows are in this state: **R22** and **R38**.
+- **"Narrower than recorded"** flags the 16 rows the walk found closed on less
+  evidence than the record implies. None is a fabrication; each is a place where
+  "closed" was doing more work than the evidence. That set is the part of this
+  register a gate should read first: R1, R7, R13, R16, R17/R46, R19, R21, R22, R23,
+  R23a, R28/R56, R38, R41a, R42, R53, R58.
+
+Two scope limits on the walk itself, stated so nobody reads more into these lines
+than they say. **No `Setup.exe` was built or attacked** — the walk box cannot
+Native-AOT-publish (no MSVC C++ workload), so every "T" is unit/CI-level plus the
+G1/G2 ceremonies already recorded by others. And the register's **Stage-1
+negative-test claims are historical**: reverting `src/` to a Stage-1 parent now
+yields a compile error naming the missing security API rather than an observed
+assertion failure, because the tests those lanes shipped assert against APIs the
+fixes introduced. That is still genuine fail-on-parent evidence, but it is not
+re-auditable the way the original per-lane ceremony was. Where a **red assertion**
+was obtainable — R8/R14/R30/R45, R31, R33 — the status line says so.
+
+Rows merged **after** `102ea3f` (**R64**, **R66**, **R67**, **R68**) cannot cite run
+`34362414470`; their lines name their own PR's CI instead. The first *automatic*
+`wrapper-vm-tests.yml` run —
+[34368896457](https://github.com/Sigil-build/sigil/actions/runs/34368896457) on
+`b07021e`, fired by the push trigger [#41](https://github.com/Sigil-build/sigil/pull/41)
+added — was still in flight when this pass was written, so **no row claims a VM
+verdict**.
+
 ---
 
 ## Severity rubric
@@ -151,6 +210,21 @@ Effort: **S** ≤ 1 day · **M** 1–3 days · **L** ≈ 1 week.
 
 ### R1 — Elevated replay of unauthenticated, user-writable install state
 **Component:** Wrapper.Core / Engine · **Effort: L**
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane S1,
+> [#19](https://github.com/Sigil-build/sigil/pull/19) `31ae3a3` (primitives) and
+> [#20](https://github.com/Sigil-build/sigil/pull/20) `5b65712` (main body); the
+> plant fixture was later made host- and order-independent by
+> [#36](https://github.com/Sigil-build/sigil/pull/36) `0c092d1`. **Evidence T + M:**
+> `StateProvenanceTests` (21), `ReplayAnchoringTests` (115), `HostileStateJsonTests`
+> (10), `UninstallAnchorSelectionTests` (6), `ScopeInstallSessionTests` (9) — all
+> `Passed` on run `34362414470`; plus G1 hand-attacks 1–2 with their quoted refusal
+> lines (`03-RC_ORCHESTRATION.md`). **Narrower than recorded:** the "forcing the
+> anchoring predicate to `Allow` fails 51 tests" claim in the note below is a
+> mutation experiment the V1.1 walk did **not** reproduce. What it could
+> re-establish is weaker but still sound: `StateDirectorySecurity.cs` and
+> `ReplayAnchor.cs` did not exist at the S1 parent (`8ad077d`) at all, so the
+> provenance primitive and its replay anchor are demonstrably this fix's.
 
 > **STATUS — FIXED in Stage 1** (lane S1; primitives `31ae3a3` / PR #19, main body
 > `5b65712` / PR #20). Both negative tests were confirmed failing at the parent
@@ -216,6 +290,14 @@ free-form path.
 ### R2 — Elevated installer spawns an executable path taken from HKCU
 **Component:** Wrapper.Core / upgrade · **Effort: M**
 
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane S1,
+> [#20](https://github.com/Sigil-build/sigil/pull/20) `5b65712`. **Evidence T + M:**
+> `InstalledStateResolverTests` (7), `PriorUninstallerTrustTests` (20) — `Passed` on
+> run `34362414470`; G1 attack 3, with both gates probed independently rather than
+> as one composite. Negative-test re-check: reverting `InstalledStateResolver.cs` to
+> the S1 parent fails to compile against `ScopeProbeOrder` — the asymmetric probe
+> order this fix introduced did not exist there.
+
 > **STATUS — FIXED in Stage 1** (lane S1, `5b65712` / PR #20). The probe order is
 > now asymmetric by design — see `InstalledStateResolver.ScopeProbeOrder`, and do
 > not "restore the symmetry". This fix is what broke a **pre-existing** test on CI
@@ -260,6 +342,14 @@ or to live under an admin-only directory before spawning.
 
 ### R3 — `/D=` is unvalidated and privileged step targets are unanchored → SYSTEM binary in a user-writable directory
 **Component:** Wrapper.Core / steps + install-dir resolution · **Effort: M**
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane S2,
+> [#21](https://github.com/Sigil-build/sigil/pull/21) `4505b24`. **Evidence T + M:**
+> `InstallDirContainmentTests` (24), `InstallDirContractTests` (8),
+> `InstallDirResolverTests` (10), `PrivilegedStepContainmentTests` (16) — `Passed`
+> on run `34362414470`; G1 attack 4 with its literal refusal line. Negative-test
+> re-check: `InstallDirResolver.GrandfatheredPriorDir` and `ScopeDefault` are absent
+> at the parent (`4505b24~1`), so the containment surface is this fix's.
 
 > **STATUS — FIXED in Stage 1** (lane S2, `4505b24` / PR #21). 6 of the 8 negative
 > tests fail at the parent, and the 2 that pass are exactly the positive controls.
@@ -324,6 +414,14 @@ non-administrators.
 ### R4 — Elevated process loads native DLLs from a per-user cache gated only by a marker file
 **Component:** Wrapper.Core / native bootstrap · **Effort: M**
 
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane S3,
+> [#22](https://github.com/Sigil-build/sigil/pull/22) `72d6437`. **Evidence T + M:**
+> `NativeRuntimeCacheTrustTests` (9), `NativeRuntimeReclaimTests` (10) — `Passed` on
+> run `34362414470`; G1 attack 5 re-run at the **new** `%ProgramData%\sigil-runtime`
+> path, not the old per-user one. Negative-test re-check:
+> `NativeRuntimeBootstrap.PrepareCacheDirectory` is absent at the parent (6 call
+> sites fail to compile).
+
 > **STATUS — FIXED in Stage 1** (lane S3, `72d6437` / PR #22). The marker is now a
 > fast path consulted only *alongside* an ACL check and a full content comparison,
 > never instead of them. Note the elevated cache root moved to
@@ -369,6 +467,11 @@ marker file.
 ### R5 — Web-installer stub verifies, then executes, a predictably-named `%TEMP%` file
 **Component:** Packaging / ExeWrapper · **Effort: M**
 
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane S3,
+> [#22](https://github.com/Sigil-build/sigil/pull/22) `72d6437`. **Evidence T:**
+> `WebInstallerStubEndToEndTests` (2), `SecureStagingTests` (20),
+> `StagingDirTokenTests` (8) — all `Passed` on run `34362414470`.
+
 > **STATUS — FIXED in Stage 1** (lane S3, `72d6437` / PR #22). Confirmed failing at
 > the parent: the swapped binary really was launched, and exited 0.
 
@@ -403,6 +506,19 @@ open with sharing that denies write/delete across the launch.
 
 ### R6 — VM-gated and runtime-gated tests soft-skip by returning early, so they report **Passed**
 **Component:** tests / CI · **Effort: S** (the fix; the consequence is large)
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane T1,
+> [#23](https://github.com/Sigil-build/sigil/pull/23) `86c2799`. **Evidence T + M:**
+> 22 skips on run `34362414470`, **every one carrying a reason string** (full
+> inventory, classified, in the walk report's Step 4: 16 VM-only, 5 other, 1
+> elevated-only); `grep -rn "// soft-skip" tests/` and `grep -rn '"SKIP:' tests/`
+> return only doc-comments describing the old pattern, no live soft-skips.
+> **Narrower than recorded:** one skip's *stated* precondition was still wrong —
+> `KioskSetupFactAttribute.SetupPath` pointed one directory outside the repo, so its
+> test could not execute on any machine and its message told the reader to do
+> something that would not help. That is this row's own failure class surviving
+> inside its fix. Filed as **R69**, fixed by
+> [#42](https://github.com/Sigil-build/sigil/pull/42).
 
 > **STATUS — FIXED in Stage 1** (lane T1, `86c2799` / PR #23). Every gate is now an
 > attribute that sets xunit's `Skip`, naming the missing precondition. The measured
@@ -466,6 +582,19 @@ pre-flight assertion to the other two VM jobs.
 ### R7 — No release pipeline, no artifact publication, no signed output; README promises install channels that do not exist
 **Component:** CI / repo · **Effort: M**
 
+> **STATUS (V1.1, 2026-09-09):** CLOSED IN STRUCTURE, **claim-only for the execution
+> half** — lane REL, [#32](https://github.com/Sigil-build/sigil/pull/32) `f9d3af5`.
+> **Evidence M:** `.github/workflows/release.yml` re-read during the walk — the
+> `publish` job carries `needs: vm-tests` (calling `wrapper-vm-tests.yml`), a
+> "require signing secrets" refusal **before** any restore, Azure Trusted Signing
+> `@v2.0.0`, and a `SHA256SUMS` step. **Evidence C:** the workflow has **never
+> run** — it is tag-triggered on a non-default branch, so its structure was read,
+> not exercised. The DoD clause "the published artifact **runs on a clean
+> machine**" therefore remains an unticked G3 item, and the release dry-run is
+> blocked on the six Trusted Signing secrets. The SBOM step this workflow should
+> also carry was orphaned between two merged lanes — see **R70** and
+> [#42](https://github.com/Sigil-build/sigil/pull/42).
+
 - `git ls-files .github/workflows` → exactly four: `ci.yml`, `docs.yml`,
   `secret-scan.yml`, `wrapper-vm-tests.yml`. **No tag trigger anywhere, no
   `release.yml`.**
@@ -506,6 +635,15 @@ Release, and generates the notices file; correct the README install section to
 ### R8 — Parameter `source.url` accepts `http://` end to end; its values feed elevated install steps
 **Component:** Core / parser + Installer.Host · **Effort: S**
 
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane S4,
+> [#28](https://github.com/Sigil-build/sigil/pull/28) `3e94b8b`. **Evidence T + M:**
+> `NetworkTrustParseTests.Parameter_source_url_must_be_https` (3 cases) `Passed` on
+> run `34362414470`; G2 check 4 → `SIG0323` against a real CI-built `sigil.exe`.
+> Negative-test re-check — one of the walk's three **red assertions**: reverting
+> `Configuration/ManifestParser.cs` to `3e94b8b~1` fails 14 of 23
+> `NetworkTrustParseTests` (9 pass as positive controls), covering this row plus
+> **R14**, **R30** and **R45** in one experiment.
+
 `schemas/sigil-schema.json:51` (and again at `:624`) declares
 `"url": { "type": "string" }` with no scheme constraint;
 `Configuration/ManifestParser.cs:1092-1107` checks presence only; and
@@ -527,6 +665,14 @@ SIG0235) and re-check the substituted URL in `HttpOptionsLoader.LoadAsync`.
 
 ### R9 — `/P<name>=` values flow unvalidated into privileged step fields
 **Component:** Wrapper.Core / steps · **Effort: M**
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane S2,
+> [#21](https://github.com/Sigil-build/sigil/pull/21) `4505b24`. **Evidence T:**
+> `PrivilegedTargetGuardTests` (8), `SecretHygieneTests` (6),
+> `PrivilegedStepContainmentTests` (16) — `Passed` on run `34362414470`. The row's
+> own text is wrong about `payload://`, and the Stage-1 note below says so in
+> writing; the walk confirms the **note**, not the row body. Read them in that
+> order.
 
 > **STATUS — CLOSED in Stage 1, but NOT "fixed as written"** (lane S2, `4505b24` /
 > PR #21). Privileged targets now require containment **and**
@@ -555,6 +701,14 @@ to declare a parameter in a privileged field.
 ### R10 — No size cap on any download; the channel manifest is fully buffered before its signature is checked
 **Component:** Wrapper.Core / net · **Effort: S**
 
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane S3,
+> [#22](https://github.com/Sigil-build/sigil/pull/22) `72d6437`. **Evidence T:**
+> `DownloadSizeCeilingTests` (7) `Passed` on run `34362414470`. Negative-test
+> re-check: `SigilDownloader.DefaultMaxBytes` is absent at the parent at **three**
+> call sites — `PrerequisiteRunner.cs:314`, `Steps/HttpDownloadStep.cs:91`,
+> `Update/UpdateSeams.cs:185` — which is also the evidence that the cap is enforced
+> on every download path, not one.
+
 > **STATUS — FIXED in Stage 1** (lane S3, `72d6437` / PR #22). `maxBytes` rejects up
 > front on `Content-Length` **and** aborts mid-stream on a server that lies about
 > it; the pre-authentication manifest buffer is capped.
@@ -580,6 +734,14 @@ fetch at a few hundred KB.
 ### R11 — Nothing downloaded is Authenticode-verified before elevated execution
 **Component:** Wrapper.Core · **Effort: S**
 
+> **STATUS (V1.1, 2026-09-09):** CLOSED with two written limitations — lane S3,
+> [#22](https://github.com/Sigil-build/sigil/pull/22) `72d6437`. **Evidence T + D:**
+> `AuthenticodeLaunchGateTests` (2), `DownloadedBinaryTrustTests` (35),
+> `LaunchGateOrderingTests` (3) — `Passed` on run `34362414470`. The two residuals
+> were **filed as rows rather than claimed done**: **R45** (the policy is inferred,
+> not declared) and **R49** (integrity is not publisher identity). That is the
+> honest shape, and the walk found no gap between the row and the code.
+
 > **STATUS — FIXED in Stage 1** (lane S3, `72d6437` / PR #22), with a documented
 > per-prerequisite opt-out that fails closed. Two limitations are filed rather than
 > claimed done: the policy is *inferred* from `SignDeclared` rather than declared
@@ -604,6 +766,11 @@ unsigned redistributables.
 
 ### R12 — Prerequisite and update binaries: verify→launch gap, default ACLs, no handle held
 **Component:** Wrapper.Core · **Effort: M**
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane S3,
+> [#22](https://github.com/Sigil-build/sigil/pull/22) `72d6437`. **Evidence T:**
+> `StagedExecutionTests` (5), `SecureStagingTests` (20), `StagingDirTokenTests` (8)
+> — all `Passed` on run `34362414470`.
 
 > **STATUS — FIXED in Stage 1** (lane S3, `72d6437` / PR #22). `SecureStaging` gives
 > a private per-run directory; `OpenVerified` re-hashes **from the open handle** and
@@ -633,6 +800,15 @@ open handle denying write/delete from hash verification through process launch.
 ### R13 — No freshness or replay protection on the signed channel manifest
 **Component:** Wrapper.Core / update · **Effort: M**
 
+> **STATUS (V1.1, 2026-09-09):** CLOSED in-process; the **live replay is deferred in
+> writing** — lane S4, [#28](https://github.com/Sigil-build/sigil/pull/28)
+> `3e94b8b`. **Evidence T + D:** `UpdateFreshnessTests` (17),
+> `UpdateEndToEndTests` (4), `ChannelManifestParserTests` (15) — `Passed` on run
+> `34362414470`. **Deferral, and the honest form of one:** G2 check 6 is left
+> **unticked on purpose** — a live `Setup.exe /Update` replay against a hosted,
+> signed channel manifest is a G3 / VM-matrix item (see the G2 check results above
+> and `10-G2_G3_RUNBOOK.md`). Nobody ticked a box the evidence did not support.
+
 `Update/ChannelManifest.cs:54-59` carries no timestamp, expiry, nonce, or
 sequence field, and the only monotonicity check is against the *locally
 installed* version (`Update/UpdateRunner.cs:130`). No "highest version ever
@@ -654,6 +830,12 @@ treat a decreasing sequence as SIG0321.
 ### R14 — `updates.manifestUrl` is never required to be HTTPS
 **Component:** Core / parser + update · **Effort: S**
 
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane S4,
+> [#28](https://github.com/Sigil-build/sigil/pull/28) `3e94b8b`. **Evidence T + M:**
+> `NetworkTrustParseTests.Updates_manifestUrl_must_be_https` (2 cases) `Passed` on
+> run `34362414470`; G2 check 5 → `SIG0324`, and doubly so via schema `SIG0010`.
+> Red assertion on the parent, shared with **R8** (14 failed / 9 passed).
+
 `schemas/sigil-schema.json:457-461` constrains only `"format": "uri"` despite
 its own description saying "HTTPS URL"; `Configuration/ManifestParser.cs:156`
 passes it through unvalidated; `Update/UpdateSeams.cs:71-72` fetches it verbatim
@@ -668,6 +850,12 @@ DoS (which R13 makes worse).
 
 ### R15 — Uninstall swallows undo failures, reports success, then deletes the state that would allow a retry
 **Component:** Wrapper.Core / engine · **Effort: S**
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane S5,
+> [#29](https://github.com/Sigil-build/sigil/pull/29) `50e5de4`. **Evidence T:**
+> `UninstallEngineTests` (6) and `ReplayAnchoringTests` (115) — the `UndoFailureCode`
+> path and the state-and-ARP retention on a failed undo — `Passed` on run
+> `34362414470`.
 
 ```
 src/SigilBuild.Wrapper.Core/Engine/RollbackJournal.cs:111   catch { /* Best-effort; swallow individual undo failures. */ }
@@ -688,6 +876,17 @@ and retain the state file when any record failed.
 
 ### R16 — No path containment on any step destination; config edits follow junctions and inherit attacker DACLs
 **Component:** Wrapper.Core / steps · **Effort: M**
+
+> **STATUS (V1.1, 2026-09-09):** **PARTIALLY CLOSED**, and the remainder is written —
+> lane S2, [#21](https://github.com/Sigil-build/sigil/pull/21) `4505b24`.
+> **Evidence T + D:** `PathContainmentTests` (25),
+> `StepDestinationContainmentTests` (13), `StepDestinationGuardTests` (6),
+> `UnresolvedPathTokenTests` (25), `AllowOutsideInstallDirParseTests` (20) — all
+> `Passed` on run `34362414470`. **Narrower than recorded — clause 3 is
+> unimplemented**, re-verified during the walk: `grep -rn
+> "ResetDacl\|SetAccessControl"` across `src/SigilBuild.Wrapper.Core/Steps/` and
+> `StepContext.cs` returns **zero hits**. Do not read this row as "fixed as
+> written"; the Stage-1 note below scopes it correctly.
 
 > **STATUS — PARTIALLY FIXED in Stage 1** (lane S2, `4505b24` / PR #21). Clauses 1
 > and 2 are done: destinations are contained with a documented per-step opt-out
@@ -724,6 +923,17 @@ on files the installer creates in machine scope.
 ### R17 — `AuthenticodeVerifier` disables revocation checking
 **Component:** Wrapper.Core · **Effort: S**
 
+> **STATUS (V1.1, 2026-09-09):** CLOSED with a written limitation — lane S3,
+> [#22](https://github.com/Sigil-build/sigil/pull/22) `72d6437`. **Evidence T + D:**
+> `DownloadedBinaryTrustTests` (35), `AuthenticodeVerifierTests` (2) — `Passed` on
+> run `34362414470`. Negative-test re-check: `AuthenticodeStatus` — the tri-state
+> (`trusted` / `unavailable` / `forged`) that is the whole point of this fix — is
+> absent at the parent. **Narrower than recorded:** no revocation behaviour has
+> real-fixture proof, and the `0x80092010..14` error band is mapped against
+> **documented semantics only**, never against an observed API response. That is
+> written here, in **R46**, and in ADR-011 — three places, which is why the walk
+> counts it as a limitation rather than a gap.
+
 > **STATUS — FIXED in Stage 1** (lane S3, `72d6437` / PR #22). Whole-chain revocation,
 > with "unavailable" rendered as a state **distinct** from both trusted and forged.
 > The lane widened the scope on its own initiative and found two more defects in the
@@ -748,6 +958,19 @@ render a distinct state when revocation status is unavailable.
 ### R18 — Secret parameter values travel on process command lines
 **Component:** Wrapper.Core · **Effort: M**
 
+> **STATUS (V1.1, 2026-09-09):** CLOSED for its mechanism; **one half ships
+> untested** — lane S5, [#29](https://github.com/Sigil-build/sigil/pull/29)
+> `50e5de4`. **Evidence T:** `ElevationSecretHandoffTests` (11),
+> `WizardLogRedactionTests` (2) — `Passed` on run `34362414470`. Negative-test
+> re-check, and the walk's one negative result: the log-leak half is proven absent
+> at the parent (`Program.RenderWizardStartedLine` does not exist there), **but all
+> 11 handoff tests still pass with `Elevation.cs` reverted to its pre-R18 form** —
+> they exercise `ElevationSecretHandoff.cs` in isolation, so the
+> `childMayStillBeRunning` relaunch/cleanup gating and the two hosts' relaunch
+> wiring are pinned by nothing. That does **not** reopen this row — the DPAPI
+> envelope replacing the command line is demonstrably this fix's — but it is filed
+> as **R72**.
+
 Logs, journal, and state are correctly redacted (`StepContext.cs:91-107`,
 `InstallLog.cs:100`, `UninstallStateStore.cs:100-115`), but the UAC relaunch
 re-emits `/P<secret>=<value>` on the child's command line
@@ -765,6 +988,17 @@ secret channel.
 
 ### R19 — Hostile `uninstall.json` crashes the elevated process; unbounded read
 **Component:** Wrapper.Core · **Effort: S**
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane S1,
+> [#20](https://github.com/Sigil-build/sigil/pull/20) `5b65712`. **Evidence T:**
+> `HostileStateJsonTests` (10) `Passed` on run `34362414470`. **Narrower than
+> recorded:** the note below claims that "reverting only `UninstallStateStore.cs`
+> reproduces the four escapes". That experiment is **no longer re-runnable at
+> HEAD** — the same single-file reversion now fails to compile against
+> `InstallSession` and `UninstallEngine` (`EnsureDirectory`, `StashDirectoryFor`, a
+> 6-argument `Save`, `LoadedState.InstallDir`), and it fails identically against the
+> S1 parent `8ad077d`. The negative-test evidence for this row is **historical**;
+> the ten tests that assert the behaviour are current and green.
 
 > **STATUS — FIXED in Stage 1** (lane S1, `5b65712` / PR #20). Rehydration moved
 > inside `TryLoad`'s `catch` and is treated as "state unreadable"; file-size and
@@ -796,6 +1030,15 @@ unreadable"; cap file size and record count before reading.
 
 ### R20 — `dotnet format`, PR-title lint, and schema lockstep are documented as CI-enforced but were never installed; `main` currently fails format
 **Component:** CI / repo · **Effort: S**
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane F0,
+> [#16](https://github.com/Sigil-build/sigil/pull/16) `c82f5eb`. **Evidence M:**
+> `pr-guards.yml` carries `conventional-commit PR title` (:21), `schema / docs
+> lockstep` (:39) and `dotnet format` (:73); the G0 proof-of-failure ceremony —
+> throwaway PR #17, titled `broken title` — was **observed failing** that job and
+> then closed; `dotnet format Sigil.slnx --verify-no-changes` exits 0 both locally
+> and on run `34362414470`. A gate that has been watched refusing something is the
+> strongest form of evidence in this register.
 
 `AGENTS.md:16` marks `dotnet format --verify-no-changes` "CI-enforced";
 `AGENTS.md:96` claims "PR titles are lint-gated"; `AGENTS.md:104` lists format
@@ -832,6 +1075,21 @@ the gate alone turns every subsequent PR red).
 
 ### R21 — Coverage gate is line-only and project-wide-only; per-assembly targets unenforced and unmet; three shipping assemblies absent from the denominator
 **Component:** CI · **Effort: S**
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED with a written tolerance — and with almost
+> no margin left — lane T1, [#23](https://github.com/Sigil-build/sigil/pull/23)
+> `86c2799`. **Evidence T + M:** `ci.yml`'s `ASSEMBLY_FLOORS` and union floor
+> (`:88`, `:100`, `:200`); measured on run `34362414470`: union **78.12 %** (floor
+> 77), `SigilBuild.Core` **69.02 %** (floor **69**), `SigilBuild.Packaging`
+> **86.62 %** (72), `SigilBuild.Signing` **68.79 %** (68),
+> `SigilBuild.Wrapper.Core` **79.64 %** (79). **Narrower than recorded, twice
+> over:** three shipping assemblies (`Cli`, `Wrapper`, `Installer.Host`) still
+> report **0 lines** and are a `::warning::` only — tolerated in writing, not fixed
+> — and `SigilBuild.Core` now sits **0.02 pp** above its floor, roughly one to two
+> uncovered lines of slack on the assembly every lane touches. That margin is filed
+> as **R71**. The ratchet policy itself (floors pinned to the measured value rounded
+> down, nothing ever lowered) is the right one and must not be spent to make a red
+> check green.
 
 > **STATUS — FIXED in Stage 1** (lane T1, `86c2799` / PR #23), with one deliberate
 > tolerance. Per-assembly floors are enforced, set at the **measured value rounded
@@ -870,6 +1128,19 @@ allowlist that fails when one is missing; parse branch coverage.
 ### R22 — Two of three VM jobs can pass vacuously
 **Component:** CI · **Effort: S**
 
+> **STATUS (V1.1, 2026-09-09):** CLOSED IN STRUCTURE, **claim-only in effect** —
+> lane T1, [#23](https://github.com/Sigil-build/sigil/pull/23) `86c2799`.
+> **Evidence C:** the marker and staged-host assertions are present
+> (`wrapper-vm-tests.yml:86`, `:143`, `:175`), but the guards have **still never
+> been observed refusing a marker-unset run**. The first-ever VM run
+> ([34361541578](https://github.com/Sigil-build/sigil/actions/runs/34361541578),
+> `da792fb`) failed on rotted fixtures (**R66**) before reaching them. This row
+> already admits it, and the walk confirms that admission is the honest reading —
+> it is one of only two claim-only rows in the register (the other is **R38**). The
+> first automatic run
+> ([34368896457](https://github.com/Sigil-build/sigil/actions/runs/34368896457),
+> `b07021e`) is the next chance to observe the refusal for real.
+
 > **STATUS — FIXED in Stage 1, UNPROVEN** (lane T1, `86c2799` / PR #23). Both jobs
 > now assert the `SIGIL_VM_TESTS` marker **and** the staged host exe before
 > `dotnet test`. The guards could **not** be proven by watching a VM job fail with
@@ -889,6 +1160,16 @@ having exercised nothing, silently."* The scope matrix (`:35-96`) and
 
 ### R23 — No `SECURITY.md`, no `CHANGELOG.md`, and a third-party attribution gap that is a licence-compliance defect
 **Component:** repo · **Effort: M**
+
+> **STATUS (V1.1, 2026-09-09):** **HALF CLOSED** — lane REL,
+> [#32](https://github.com/Sigil-build/sigil/pull/32) `f9d3af5`. **Evidence M + D:**
+> `SECURITY.md`, `CHANGELOG.md` and `THIRD-PARTY-NOTICES.md` are all present, and
+> the notices name Skia, ANGLE, HarfBuzz and libsodium explicitly (41 matching
+> lines; all four names verified individually, not by a single grep). **Still open,
+> and it is an owner action:** `gh api
+> repos/Sigil-build/sigil/private-vulnerability-reporting` re-run during the walk
+> returns **`{"enabled":false}`**. No lane PR can flip a repo setting, so this half
+> is correctly recorded as unticked at G2 and belongs to the G4 owner checklist.
 
 Verified absent on disk: `CHANGELOG.md`, `SECURITY.md`,
 `THIRD-PARTY-NOTICES.*`, `NOTICE`. `LICENSE` (MIT), `CODE_OF_CONDUCT.md`
@@ -931,6 +1212,17 @@ and P-track history.
 ### R23a — No lockfiles, no `NuGet.config`: the build is not reproducible
 **Component:** build / supply chain · **Effort: M**
 
+> **STATUS (V1.1, 2026-09-09):** CLOSED **for the Debug restore graph only** — lane
+> REL, [#32](https://github.com/Sigil-build/sigil/pull/32) `f9d3af5`. **Evidence
+> M:** `NuGet.config` present, 21 tracked `packages.lock.json`, and G2 check 2 =
+> `dotnet restore Sigil.slnx --locked-mode` exit 0 from a clean clone. **Narrower
+> than recorded:** that check runs in the implicit **Debug** configuration. The
+> Release graph is never validated against the committed lock files — see **R65**,
+> which the walk **live-reproduced** at `102ea3f`: one clean `dotnet build
+> Sigil.slnx -c Release` left `src/SigilBuild.Installer.Host/packages.lock.json`
+> modified in the working tree. "The build is reproducible" is true for Debug and
+> unverified for Release.
+
 `find . -name packages.lock.json` → none.
 `grep -rn "RestoreLockedMode\|RestorePackagesWithLockFile"` → none.
 `ls nuget.config NuGet.config` → none. `ci.yml:36` is a bare
@@ -953,6 +1245,16 @@ commit the lock files, add `--locked-mode` to the CI restore, and add a
 ### R24 — Version `0.0.1-alpha` is duplicated in four places with no single source of truth
 **Component:** repo / CI · **Effort: S**
 
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane REL,
+> [#32](https://github.com/Sigil-build/sigil/pull/32) `f9d3af5`. **Evidence T + M:**
+> `VersionCommandTests` (5) `Passed` on run `34362414470`; `git grep
+> "0\.0\.1-alpha" -- '*.cs' '*.csproj' '*.yml' '*.props'` returns **nothing
+> tracked** (G2 check 9); one source of truth at `Directory.Build.props:36`
+> (`<Version>0.1.0-alpha</Version>`). A stale `obj/…/AssemblyInfo.cs` on the walk
+> box still carried the old literal — untracked build output from a pre-RC build,
+> not a defect, and recorded so the next person who greps a dirty tree is not
+> misled.
+
 ```
 src/SigilBuild.Cli/SigilBuild.Cli.csproj:9      <Version>0.0.1-alpha</Version>
 src/SigilBuild.Cli/Program.cs:11                public const string Version = "0.0.1-alpha";
@@ -971,6 +1273,11 @@ smoke assert *agreement* rather than a literal.
 
 ### R25 — README describes a different product than the one that shipped
 **Component:** docs · **Effort: S**
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane DOC,
+> [#34](https://github.com/Sigil-build/sigil/pull/34) `50da43c`. **Evidence M:**
+> `README.md:50-53` now states that NuGet, `winget` and the install script are
+> "pre-MVP roadmap items, not…" rather than channels that exist.
 
 `README.md` is 49 lines and **never mentions the exe wizard, `Setup.exe`, the
 install-step engine, the rollback journal, or the uninstaller** — the flagship
@@ -995,6 +1302,19 @@ list.
 
 ### R26 — The docs teach a silent-install command the parser rejects, and name output files that do not exist
 **Component:** docs · **Effort: S**
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane DOC,
+> [#34](https://github.com/Sigil-build/sigil/pull/34) `50da43c`. **Evidence T + M:**
+> `CommandLineParserTests` (49) `Passed` on run `34362414470`;
+> `docs/setup-exe-reference.md` documents at least 16 distinct runtime tokens (`/?`,
+> `/D=`, `/LOG=`, `/PName=Value`, `/Poption.Name=Value`, `/S`, `/Uninstall`,
+> `/Update`, `/allusers`, `/closeapps`, `/currentuser`, `/help`, `/lang=`,
+> `/launch`, `/silent`, `/verysilent`) — the DoD's "fifteen" is now a floor, not a
+> count; zero bare `/install_dir=` or `/edition=` remain under `docs/`; zero
+> `uninstaller.exe` references outside plan docs. **The strongest half is the
+> ceremony:** G2 check 1 copy-pasted the documented silent line against a real
+> CI-built `Setup.exe` — exit `0`, files, state and ARP row all present, cleanly
+> removed afterwards.
 
 **The worst instance first.** Two guides document this verbatim:
 
@@ -1049,6 +1369,12 @@ it from `docs/README.md`; correct the filenames and the four
 ### R26a — `architecture-overview.md` misstates the compression library, the crypto, the project layout, and what CI enforces
 **Component:** docs · **Effort: S**
 
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane DOC,
+> [#34](https://github.com/Sigil-build/sigil/pull/34) `50da43c`. **Evidence M:**
+> `docs/architecture-overview.md:55` and `:104` now state BCL `ECDsa` P-256 with no
+> native crypto, and `:43` names `libSkiaSharp.dll` and `libsodium.dll` — the two
+> native DLLs that actually ship.
+
 This is a live, user-facing doc, not plan history:
 
 - `:90` "Compression | **ZstdNet** + native fallback (zstd 1.5+ dictionary
@@ -1076,6 +1402,12 @@ and mark which are actually gated.
 ### R27 — Colliding ADR numbers across two directories; CODEOWNERS protects the stale one and a file that does not exist
 **Component:** docs / governance · **Effort: S**
 
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane DOC,
+> [#34](https://github.com/Sigil-build/sigil/pull/34) `50da43c`. **Evidence M:**
+> `sigil-docs/` is gone; `docs/architecture/` holds adr-008…adr-014 with no
+> colliding numbers; `CODEOWNERS` routes `/docs/architecture/` and carries the
+> correction comment naming this row.
+
 ```
 docs/architecture/       adr-008-expression-policy, adr-009-update-manifest-signature, adr-010-delta-update-deferral, adr-avalonia-aot, adr-msix-companion
 sigil-docs/architecture/ adr-009-brand-token-runtime-json-vs-source-gen, adr-010-schema-validator-monolith
@@ -1094,6 +1426,13 @@ signature ADR, has no tech-lead review requirement.
 
 ### R28 — `.sigil-bak` backups survive a successful install
 **Component:** Wrapper.Core · **Effort: S**
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED, **thinly** — lane S5,
+> [#29](https://github.com/Sigil-build/sigil/pull/29) `50e5de4`. **Evidence T:**
+> `StashLifecycleTests` (2) `Passed` on run `34362414470`. **Narrower than
+> recorded:** two tests for an entire stash lifecycle. The walk found no defect and
+> is not reopening the row — it is recording that "closed" here rests on thin
+> coverage, the same note as **R56**.
 
 Re-verified and **confirmed**: `RollbackJournal.DiscardTransientStashes`
 (`RollbackJournal.cs:48-63`) handles only `RestoreDeletedFile` (`:50`),
@@ -1118,6 +1457,14 @@ either way.
 ### R29 — De-elevation fallback silently launches the app with the installer's admin token
 **Component:** Wrapper.Core · **Effort: S**
 
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane S5,
+> [#29](https://github.com/Sigil-build/sigil/pull/29) `50e5de4`. **Evidence T:**
+> `LaunchDeElevationTests` (4) `Passed` on run `34362414470`. Note the one
+> deliberately inverted skip that belongs to this surface:
+> `LaunchTests.LaunchAppUnelevated_direct_spawn_produces_the_observable_side_effect`
+> skips **because** the CI runner is elevated and runs on an unelevated box — it is
+> the entire local-21 vs CI-22 skip delta, and it is correct in both places.
+
 `Engine/Launcher.cs:37-47`. The primary path is correct — Explorer's primary
 token via `CreateProcessWithTokenW` (`:79-176`) — but on any failure it falls
 through to `TryLaunchDirect(path, args)` (`:47`), handing the launched app the
@@ -1132,6 +1479,15 @@ Done screen rather than launching elevated.
 
 ### R30 — `sigil init`'s own template tells publishers to put a private-key file path in the manifest
 **Component:** CLI templates · **Effort: S**
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane S4,
+> [#28](https://github.com/Sigil-build/sigil/pull/28) `3e94b8b`. **Evidence T + M:**
+> `NetworkTrustParseTests.Updates_signingKey_must_be_a_base64_p256_spki` (6 cases →
+> `SIG0325`), `ManifestParserFullTests` (6) and the schema fixture
+> `invalid/signing-key-file-path.yaml` — `Passed` on run `34362414470`; G2 check 3
+> ran `sigil init --template full-config` and then packed the result, exit `0`, with
+> a negative control on the pre-R30 shape. Red assertion on the parent, shared with
+> **R8**.
 
 `src/SigilBuild.Cli/Commands/Templates/full-config.yaml:42` —
 `signingKey: ./keys/update-signing.ed25519` — versus
@@ -1152,6 +1508,17 @@ diagnostic that `signingKey` decodes as base64 and imports as a P-256 SPKI.
 
 ### R31 — `schtasks /TR` is built by string concatenation with unescaped quotes
 **Component:** Wrapper.Core / steps · **Effort: S**
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane S2,
+> [#21](https://github.com/Sigil-build/sigil/pull/21) `4505b24`. **Evidence T:**
+> `StepValueInjectionTests` (15) `Passed` on run `34362414470`. Negative-test
+> re-check — a **red assertion**, not a compile break: reverting
+> `Steps/ScheduledTaskCreateStep.cs` to `4505b24~1` fails exactly 3 of 15
+> (`Task_program_containing_a_quote_is_refused`,
+> `Task_program_with_a_single_leading_quote_is_refused_too`,
+> `The_step_reports_a_refused_program_as_a_step_failure_and_journals_nothing`) with
+> 12 passing as positive controls. This also settles the audit's UNVERIFIED note on
+> this row.
 
 > **STATUS — FIXED in Stage 1** (lane S2, `4505b24` / PR #21). `"` is rejected in
 > `program`, and the validation runs **before anything is journalled**. 12 of the 15
@@ -1177,6 +1544,14 @@ proper escaping.
 ### R32 — `ini_write` does not escape CRLF: line injection into the INI
 **Component:** Wrapper.Core / steps · **Effort: S**
 
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane S2,
+> [#21](https://github.com/Sigil-build/sigil/pull/21) `4505b24`. **Evidence T:**
+> `StepValueInjectionTests` (15) `Passed` on run `34362414470`. **Narrower than
+> recorded in one respect:** the parent revert is not isolable for this row —
+> reverting `Steps/IniWriteStep.cs` alone does not compile (`error CS7036`, the
+> required `stepType` parameter of `ConfigFileEditor.Edit`), so R32's fail-on-parent
+> evidence is API-level, while **R31**'s from the same lane is a red assertion.
+
 > **STATUS — FIXED in Stage 1** (lane S2, `4505b24` / PR #21). `\r`, `\n` and a
 > leading `[` are rejected. The leading-`[` rejection on a *value* is a conservative
 > over-rejection, as specified.
@@ -1194,6 +1569,18 @@ wizard field or a `registry_read` var rather than a literal.
 # POST-v1
 
 ### R33 — `XmlEditStep` relies on a framework default for XXE and has no entity-expansion cap
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane S6,
+> [#30](https://github.com/Sigil-build/sigil/pull/30) `3be9187`. **Evidence T:**
+> `ConfigEditorTests` (31) `Passed` on run `34362414470`, including
+> `Xml_edit_refuses_a_document_declaring_an_internal_dtd_subset`,
+> `Xml_edit_never_resolves_an_external_entity` and
+> `Xml_edit_refuses_a_dtd_even_with_no_entities_at_all`. **The strongest
+> negative-test evidence in the whole walk:** reverting `Steps/XmlEditStep.cs` to
+> `3be9187~1` builds cleanly and then fails exactly those 3, with the other 28
+> passing as positive controls — a red assertion with the invariant quoted in each
+> failure message ("no DTD reaches this parser", not "no expensive DTD").
+
 `Steps/XmlEditStep.cs:42-45` uses `new XmlDocument{…}` + `LoadXml` with no
 `XmlResolver`/`DtdProcessing` assignment — and no such assignment exists
 anywhere in the repo. On .NET 10 `XmlDocument.XmlResolver` defaults to `null`,
@@ -1206,6 +1593,14 @@ can write, per R16). No test asserts the XXE posture. **Fix:** set
 `DtdProcessing.Prohibit`, add a `<!DOCTYPE>` regression test. **S**
 
 ### R34 — Setup single-instance mutex fails open on the `NULL` branch
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane S5,
+> [#29](https://github.com/Sigil-build/sigil/pull/29) `50e5de4`. **Evidence T:**
+> `FilesInUseTests.A_squatted_guard_name_fails_closed_rather_than_pretending_to_hold_a_lock`
+> `Passed` on run `34362414470` — and it earns the mention: it reaches the `NULL`
+> branch by creating a *different* kernel object under the derivable name, rather
+> than by mocking the branch.
+
 `Engine/SetupInstanceLock.cs:49-53` names it
 `Global\sigil-setup-<appId>-machine` (machine) / `Local\…` (user) — fully
 predictable from the public app id. `:71-93` uses raw `CreateMutexW` and
@@ -1219,6 +1614,12 @@ same-user only. **Fix:** distinguish `ERROR_ACCESS_DENIED` from other failures
 and treat it as contention. **S**
 
 ### R35 — `json_edit` re-parses the resolved value as JSON
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane S6,
+> [#30](https://github.com/Sigil-build/sigil/pull/30) `3be9187`. **Evidence T:**
+> `ConfigStepsParseTests` (9), `ConfigStepRoundtripTests` (6), `ConfigEditorTests`
+> (31), `ConfigStepIntegrationTests` (5) — all `Passed` on run `34362414470`.
+
 `Steps/JsonEditStep.cs:163` `return JsonNode.Parse(value);` — documented as
 intentional literal inference, but a value sourced from a wizard field or
 registry var writes an object/array/`true` where the manifest author expected a
@@ -1226,6 +1627,15 @@ string. Encoding itself is safe. **Fix:** add `value_type: string|json`,
 defaulting to `string`. **S**
 
 ### R36 — `com_register` runs publisher DLL code inside the elevated installer process
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED **as a decision** — lane S6,
+> [#30](https://github.com/Sigil-build/sigil/pull/30) `3be9187`. **Evidence D:**
+> `docs/architecture/adr-012-com-registration-isolation.md` records the decision to
+> keep `com_register`'s in-process DLL load, with the rejected alternatives. No code
+> change and no test, which is the correct shape for a decision row — what makes it
+> closed is that the reasoning is written somewhere a reader will find it, unlike
+> **R53**.
+
 `Steps/Win32/ComRegistration.cs:66-101`, `ComRegisterStep.cs:62` —
 `DllRegisterServer` executes in-process at high integrity, so a malformed or
 hijacked DLL takes over the installer rather than a disposable child. The choice
@@ -1234,6 +1644,11 @@ is deliberate and documented (AOT/interop rationale, `ComRegistration.cs:9-29`).
 **S**
 
 ### R37 — `minFromVersion` floor is skipped when the installed version is malformed
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane S4,
+> [#28](https://github.com/Sigil-build/sigil/pull/28) `3e94b8b`. **Evidence T:**
+> `UpdateRunnerTests` (24) `Passed` on run `34362414470`.
+
 `Update/UpdateRunner.cs:141-163` enforces the floor only when
 `VersionComparison.IsWellFormed(state.InstalledVersion)`; otherwise it logs and
 proceeds. For a user-scope install the version comes from HKCU, so a user can
@@ -1241,6 +1656,19 @@ steer their own eligibility — publisher policy, not a security boundary, and a
 least logged. **Fix:** treat an incomparable version as not-eligible. **S**
 
 ### R38 — Restart Manager session key is a mutated managed `string`
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED, **claim-only** — lane S5,
+> [#29](https://github.com/Sigil-build/sigil/pull/29) `50e5de4`. **Evidence C:** the
+> `ref ushort` / caller-allocated `char[]` signature change and its explaining
+> comments at `Engine/FilesInUse.cs:235` and `:618` are present in the tree, but
+> **no test anywhere in `tests/` names R38, `strSessionKey` or `RmStartSession`**.
+> The justification — "no behaviour change; the existing files-in-use tests are the
+> coverage" — lives only in [#29](https://github.com/Sigil-build/sigil/pull/29)'s
+> PR body, and until this line it was written nowhere in the register. It is one of
+> only two claim-only rows (the other is **R22**), and it is the same shape as
+> **R72**. Fix shape if it is ever worth one: a test that pins the marshalling
+> contract, not the caller.
+
 `Engine/FilesInUse.cs:209-210` — `[LibraryImport]` with UTF-16 marshalling pins
 the managed string's buffer and `RmStartSession` writes 32 chars + NUL into it.
 The size is exact and `new string(char,count)` is never interned, so there is no
@@ -1248,6 +1676,12 @@ overflow today, but it is one refactor away from corrupting an interned literal.
 **Fix:** use a `char[33]`/`Span<char>` with a `ref char` signature. **S**
 
 ### R39 — Channel manifest JSON is parsed before its signature is verified
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane S4,
+> [#28](https://github.com/Sigil-build/sigil/pull/28) `3e94b8b`. **Evidence T:**
+> `UpdateRunnerTests` (24), `ChannelManifestParserTests` (15) — `Passed` on run
+> `34362414470`.
+
 `Update/UpdateRunner.cs:105` (parse) precedes `:116` (verify). No parsed field is
 used before verification, so this is not exploitable — but it exposes the JSON
 parser to unverified network input and lets an attacker choose which diagnostic
@@ -1259,11 +1693,24 @@ the user sees. Verify-then-parse is the cheaper invariant to keep true.
 # NOTE
 
 ### R40 — `.gitignore:41` contains `./docs/`, which git never matches
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane F0,
+> [#16](https://github.com/Sigil-build/sigil/pull/16) `c82f5eb`. **Evidence M:**
+> `.gitignore` re-read during the walk — the never-matching `./docs/` line is gone
+> and there is **no `docs` entry at all**, which is the correct end state.
+
 A leading `./` makes the pattern inert. Harmless today (`docs/` is tracked and
 should be), but it silently does nothing, so whatever it was meant to exclude
 isn't. **Fix:** delete the line or write the intended pattern. **S**
 
 ### R41 — Repo hygiene for a first public read
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane F0,
+> [#16](https://github.com/Sigil-build/sigil/pull/16) `c82f5eb`. **Evidence M:**
+> `git check-ignore -v .superpowers` → `.gitignore:44:.superpowers/` (exit 0);
+> `_agent-setup/` absent; `git ls-files .claude` non-empty (the agent config is
+> deliberately tracked); `git ls-remote --heads origin` shows only `main`,
+> `release/v0.1.0-alpha` and the live fix-lane branches.
 
 > **Corrected 2026-07-28 and RESOLVED.** The audit originally reported 15 stale
 > remote branches from `git branch -r`. That count was wrong: 7 had already been
@@ -1298,6 +1745,20 @@ working tree — correctly ignored, worth deleting before any archive or export.
 add `.superpowers/` to the root `.gitignore`.
 
 ### R41a — `docs/sprint-01/identifier-reservation.md`: the NuGet ID is still unclaimed
+
+> **STATUS (V1.1, 2026-09-09):** **NOT CLOSED — DOCUMENTED ONLY. This row stays
+> OPEN, and the Stage 2/3 table above is corrected accordingly.** That table listed
+> R41a among [#34](https://github.com/Sigil-build/sigil/pull/34) `50da43c`'s
+> closures. **Evidence D:** what #34 actually landed is a written banner at
+> `docs/sprint-01/identifier-reservation.md:5-15` recording that both IDs are still
+> unclaimed — an honest doc, not a fix. **Both `SigilBuild` and
+> `SigilBuild.UpdateSdk` remain unreserved on nuget.org**, while `README.md` still
+> tells users `dotnet tool install -g SigilBuild`. Reserving them is an **owner
+> action on the G4 checklist** (also called out in `02-READINESS_REPORT.md`'s
+> sequencing note), not something any lane PR can deliver. This is the first of the
+> two consequences that put **R73** on the board: a row can be recorded as closed
+> in a merge table while its actual disposition is "documented open".
+
 `docs/sprint-01/identifier-reservation.md:13` marks `SigilBuild` as a "Reserved
 placeholder **to be published** before Sprint 1 ends"; `:23`
 `SigilBuild.UpdateSdk` "Pending public reservation"; `:88-89` the social handle
@@ -1309,6 +1770,22 @@ invites a name squat — the classic supply-chain attack on a new project.
 update or delete the doc. **S**
 
 ### R42 — Supply chain: preview/beta dependencies, no vulnerability scanning
+
+> **STATUS (V1.1, 2026-09-09):** PARTIALLY CLOSED — lane SUP,
+> [#33](https://github.com/Sigil-build/sigil/pull/33) `4dc7820`; the missing SBOM
+> half is in flight as [#42](https://github.com/Sigil-build/sigil/pull/42),
+> **open**. **Evidence M + D:** `.github/dependabot.yml` declares `nuget` and
+> `github-actions`; the `vulnerability-scan` job (`ci.yml:375`) **ran and
+> succeeded** on run `34362414470` — confirmed from the run, not inferred from a
+> green build (G2 check 10); SkiaSharp is on stable `3.119.4`; the
+> `System.CommandLine` beta deferral is written in the row. **Narrower than
+> recorded — the SBOM deliverable was orphaned between two merged lanes:** `grep
+> -in "sbom\|cyclonedx\|spdx" .github/workflows/release.yml` returned **zero hits**
+> at `102ea3f`. SUP wrote `docs/plan/release/sup-sbom-handoff.md` for REL to fold
+> in, but REL ([#32](https://github.com/Sigil-build/sigil/pull/32)) merged
+> **before** SUP ([#33](https://github.com/Sigil-build/sigil/pull/33)), so no lane
+> could apply it and nothing in either PR was wrong. Filed as **R70**.
+
 
 > **STATUS — PARTIALLY CLOSED in Stage 3** (lane SUP, `rc/sup-supply-chain`).
 > Done: `.github/dependabot.yml` (nuget + github-actions, weekly);
@@ -1373,6 +1850,13 @@ the newest stable that satisfies Avalonia 12 or record the constraint in an
 ADR. **M**
 
 ### R43 — Plan docs are stale about their own state
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane DOC,
+> [#34](https://github.com/Sigil-build/sigil/pull/34) `50da43c`. **Evidence M:**
+> `docs/plan/ORCHESTRATION_PLAN.md:3-8` and
+> `docs/plan/feature-parity/01-IMPLEMENTATION_PLAN.md` now carry read-only-history
+> banners pointing at this register.
+
 `docs/plan/ORCHESTRATION_PLAN.md:6` claims "527 tests green"; the measured total
 is **1097**. `ORCHESTRATION_PLAN.md` never mentions the P-track at all.
 `docs/plan/feature-parity/01-IMPLEMENTATION_PLAN.md:188` still shows P13 as
@@ -1383,6 +1867,15 @@ instead. **S**
 
 ### R44 — S2's `allow_outside_install_dir` has no counterpart in S1's replay anchor: a supported opt-out leaves the app unremovable
 **Component:** Wrapper.Core / Engine + manifest · **Effort: M** · **Cross-lane: S1 × S2**
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED with a deliberate residual — lane S7,
+> [#31](https://github.com/Sigil-build/sigil/pull/31) `2e32c83`. **Evidence T + D:**
+> `SignedAnchorageTests` (28), `UninstallAnchorSelectionTests` (6) — `Passed` on run
+> `34362414470`. **Deferral, written in two places:** the "anchor floor stays
+> equality-only" residual is deliberately unfixed, with the reasoning in
+> `UninstallEngine.IsPlausibleInstallDirectory`'s `<remarks>` (verified present
+> during the walk) and in this row. Negative-test re-check: `ReplayAnchor.Notices`
+> is absent at the parent (`2e32c83~1`).
 
 Raised by lane S1 during its branch-review fix wave, from finding I-2 of
 `reports/s1-branch-review.md`. Neither lane can see this alone; it appears only
@@ -1457,6 +1950,13 @@ The lane's own call: **R45 and R48 are the two it would not ship without.**
 ### R45 — The downloaded-binary signature policy is inferred, not declared
 **Component:** Wrapper.Core + manifest · **Effort: S** · **SHOULD-FIX**
 
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane S4,
+> [#28](https://github.com/Sigil-build/sigil/pull/28) `3e94b8b`. **Evidence T:**
+> `NetworkTrustParseTests.An_unknown_require_signed_downloads_value_is_refused` (4
+> cases), `DownloadPolicyTests` (9), and the schema fixtures
+> `valid/network-trust.yaml` + `invalid/unknown-require-signed-downloads.yaml` —
+> `Passed` on run `34362414470`. Red assertion on the parent, shared with **R8**.
+
 R11's gate decides whether a downloaded binary must be Authenticode-valid by
 reading `SignDeclared` — i.e. "did this publisher configure signing for their own
 output" — and using it as a proxy for "should downloads be verified". Those are
@@ -1469,6 +1969,15 @@ Smallest row of the four, and it names the policy the other three argue about.
 
 ### R46 — A blackholed CRL/OCSP responder suppresses revocation
 **Component:** Wrapper.Core · **Effort: M** · **SHOULD-FIX**
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED with a written limitation — lane S4,
+> [#28](https://github.com/Sigil-build/sigil/pull/28) `3e94b8b`. **Evidence T + D:**
+> `DownloadPolicyTests` (9) covering `require_signed_downloads:
+> always_verified_revocation`, `Passed` on run `34362414470`; ADR-011 records the
+> chosen opt-in-hard-fail mechanism **and the three rejected alternatives**.
+> **Narrower than recorded:** there is still no observed-API revocation fixture, so
+> the behaviour under a genuinely blackholed responder is reasoned, not observed.
+> Stated here and in **R17**.
 
 R17 now checks revocation, and correctly renders "unavailable" as distinct from
 "trusted". But `RevocationUnavailable` is not a refusal, so revocation of a stolen
@@ -1484,6 +1993,15 @@ deliberately; do not let the default stand by inattention.
 ### R47 — One `fdwRevocationChecks` constant serves two callers that want opposite policies
 **Component:** Wrapper.Core · **Effort: M** · **POST-v1**
 
+> **STATUS (V1.1, 2026-09-09):** CLOSED **as a written deferral** — lane S4,
+> [#28](https://github.com/Sigil-build/sigil/pull/28) `3e94b8b`. **Evidence D:**
+> ADR-011 § "Stated limitations (filed, not built)" files this row as post-v1 and
+> records the trap for whoever eventually splits the constant. **Bookkeeping note
+> from the walk:** #28's *title* names only R8, R13, R14, R30, R37, R39, R45, R46 —
+> R47 and R49 are in its diff and in the Stage 2/3 outcome table, but not the
+> title. Both are genuinely discharged; an auditor reading PR titles alone would
+> wrongly count them dropped. Title/table mismatch only, no missing work.
+
 The security gate wants to be strict and online. The wizard's cosmetic "Signed
 by …" line wants to be fast and never block. They share one constant.
 
@@ -1493,6 +2011,16 @@ the operator cannot tell the two apart, which was the whole defect.
 
 ### R48 — The trust-line lookup blocks the wizard's UI thread
 **Component:** Installer.Host · **Effort: S** · **RELEASE-GATING**
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED for the fix; the measurement is explicitly
+> the human partner's — lane S5,
+> [#29](https://github.com/Sigil-build/sigil/pull/29) `50e5de4`. **Evidence T + D:**
+> `TrustLineActivationTests` (3) for the off-thread fix, `Passed` on run
+> `34362414470`. **Deferral, written:** the worst-case cold-cache measurement stays
+> a human-partner item, with the 335 ms best-case floor and two measurement traps
+> recorded in this row. The walk's cross-check confirms **the split held** — no
+> lane quietly absorbed the measurement with a convenient fast run, which was the
+> stated risk when it was split.
 
 The call site is **confirmed** UI-blocking.
 
@@ -1534,6 +2062,13 @@ worst case was.
 ### R49 — Authenticode validity is integrity, not publisher identity
 **Component:** Wrapper.Core · **Effort: M** · **POST-v1**
 
+> **STATUS (V1.1, 2026-09-09):** CLOSED **as a written deferral** — lane S4,
+> [#28](https://github.com/Sigil-build/sigil/pull/28) `3e94b8b`. **Evidence D:**
+> ADR-011 § Stated limitations records that Authenticode validity proves integrity,
+> not publisher identity, and files the gap rather than half-building a
+> subject-pinning mechanism. Same title/table mismatch as **R47** — present in
+> #28's diff, absent from its title.
+
 `WinVerifyTrust` accepts any chain the machine trusts, **including a root any
 non-administrator can install into their own store**. So "Authenticode-valid"
 means the bytes were not altered after signing — not that the publisher signed
@@ -1543,6 +2078,10 @@ reads R11's fix as identity verification.
 
 ### R50 — One `New-Item` at `%ProgramData%\sigil-runtime` costs every elevated install ~18 MB
 **Component:** Wrapper.Core / native bootstrap · **Effort: M** · **SHOULD-FIX**
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane S6,
+> [#30](https://github.com/Sigil-build/sigil/pull/30) `3be9187`. **Evidence T:**
+> `NativeRuntimeReclaimTests` (10) `Passed` on run `34362414470`.
 
 The R4 fix falls back to a per-run GUID directory when the shared cache root
 cannot be established or repaired. A squat that cannot be repaired — a *file* at
@@ -1560,6 +2099,13 @@ directory it is about to delete.
 ### R51 — Registry replay anchoring is a denylist, and it is not converging
 **Component:** Wrapper.Core / Engine + wire schema · **Effort: M** · **SHOULD-FIX**
 
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane S7,
+> [#31](https://github.com/Sigil-build/sigil/pull/31) `2e32c83`. **Evidence T:**
+> `SignedAnchorageTests` (28), `RegistryRecordProducerTests` (2),
+> `ReplayAnchoringTests` (115) — `Passed` on run `34362414470`. Negative-test
+> re-check: `ReplayAnchor.Notices` absent at the parent, which is where the denylist
+> stopped being a denylist.
+
 R1's replay anchor permits registry writes by denying known-dangerous key shapes.
 Three consecutive review rounds each produced another name the denylist missed —
 `Classes\…\shell\open\command` and `App Paths\*`, then `txtfile`, `lnkfile`,
@@ -1576,6 +2122,10 @@ wire-schema change.
 ### R52 — `ScopeLayout` models one install root while containment accepts three
 **Component:** Wrapper.Core / Engine · **Effort: S** · **SHOULD-FIX**
 
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane S6,
+> [#30](https://github.com/Sigil-build/sigil/pull/30) `3be9187`. **Evidence T:**
+> `ScopeLayoutTests` (7) `Passed` on run `34362414470`.
+
 `ScopeLayout.cs:61-65` hardcodes `SpecialFolder.ProgramFiles` as *the* machine
 install root. Lane S2's containment accepts both `%ProgramFiles%` roots, and
 correctly declined to widen a shared surface mid-lane. The result is that the
@@ -1586,6 +2136,16 @@ two places and can drift apart silently.
 
 ### R53 — An elevated process replays user-scope state at all
 **Component:** Wrapper.Core / Engine · **Effort: M** · **POST-v1**
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED **as a decision**, with a discoverability
+> defect now fixed — lane S5, [#29](https://github.com/Sigil-build/sigil/pull/29)
+> `50e5de4`. **Evidence D:** the decision — an elevated run *may* replay user-scope
+> state, and why that is acceptable given R1's provenance gate — is recorded at
+> `src/SigilBuild.Wrapper.Core/Engine/InstallSession.cs:1130`. **Narrower than
+> recorded:** until this status line, that code comment was the **only** place the
+> justification existed. No register note, no ADR. A reader of this row could not
+> tell the behaviour had been decided rather than forgotten — which is the second
+> of the two consequences that put **R73** on the board.
 
 `PerformReinstallCleanupAsync` with `_scope == User` replays state out of the
 user's own profile from an elevated process. R1 clause (b) stopped a *machine*
@@ -1598,6 +2158,12 @@ inheritance. Raised by S1.3.
 ### R54 — `shortcut_create.location`'s explicit-path branch has no containment
 **Component:** Wrapper.Core / steps · **Effort: S** · **SHOULD-FIX**
 
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane S6,
+> [#30](https://github.com/Sigil-build/sigil/pull/30) `3be9187`. **Evidence T:**
+> `ShortcutCreateStepTests` (8), `ReinstallIdempotencyTests` (1) — `Passed` on run
+> `34362414470`. Negative-test re-check:
+> `ShortcutCreateStep.CheckLocationContained` is absent at the parent.
+
 Pre-existing, and outside lane S2's task list. The named anchors
 (`start_menu`, `desktop`, …) are contained; an explicit path is not.
 
@@ -1605,6 +2171,12 @@ Pre-existing, and outside lane S2's task list. The named anchors
 
 ### R55 — The docs still teach the broken `parameters.install_dir` idiom, and two migration guides state something false
 **Component:** docs · **Effort: S** · **SHOULD-FIX** · **route to lane DOC (Stage 3)**
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane DOC,
+> [#34](https://github.com/Sigil-build/sigil/pull/34) `50da43c`. **Evidence M:**
+> zero "auto-inserted" / "automatically inserted" claims remain under
+> `docs/migration/` or `docs/guides/`, and zero instances of the broken
+> `install_dir:` parameter-declaration idiom survive in the five named files.
 
 Declaring a parameter named `install_dir` creates a *second*, unrelated value that
 diverges from the real one the moment a user installs anywhere but the default.
@@ -1633,6 +2205,13 @@ rather than in a failed install.
 ### R56 — Hook-phase refusal notices go nowhere
 **Component:** Wrapper.Core / Engine · **Effort: S** · **SHOULD-FIX**
 
+> **STATUS (V1.1, 2026-09-09):** CLOSED, **thinly** — lane S5,
+> [#29](https://github.com/Sigil-build/sigil/pull/29) `50e5de4`. **Evidence T:**
+> `HookProgressSinkTests.A_hook_phase_gives_its_steps_somewhere_to_report_refusals`
+> `Passed` on run `34362414470`. **Narrower than recorded:** that is **one** test
+> for all four hook phases. No defect found; the coverage is thin, same note as
+> **R28**.
+
 `ctx.ProgressSink` is set only by `InstallEngine`, so the disarm and
 staging-refusal notices raised during a `pre_install` hook or an uninstall hook are
 reported to nothing. A security refusal that is not logged is, from the operator's
@@ -1641,6 +2220,11 @@ were fixed to remove, surviving in the one phase nobody checked.
 
 ### R57 — A test deletes an HKLM key on an elevated runner
 **Component:** tests · **Effort: S** · **NOTE**
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane S5,
+> [#29](https://github.com/Sigil-build/sigil/pull/29) `50e5de4`. **Evidence M:**
+> `grep -rn "DeleteSubKeyTree" tests/` returns no source hits (binary matches under
+> `bin/` only, from stale build output).
 
 `tests/SigilBuild.Wrapper.Tests/…/UninstallEngineTests.cs:76` calls
 `DeleteSubKeyTree` against `HKLM\…\Uninstall\sigil.test.<guid>` in a swallowing
@@ -1829,6 +2413,25 @@ that run, and none of the three is about installer behaviour.
 ### R58 — The ARP `UninstallString` cannot complete: the uninstaller blocks on its own pid
 **Component:** Wrapper.Core / Engine · **Effort: S** · **RELEASE BLOCKER**
 
+> **STATUS (V1.1, 2026-09-09):** FIXED AND MERGED; **the end-to-end proof is still
+> pending** — [#39](https://github.com/Sigil-build/sigil/pull/39) merged as
+> `102ea3f` (the row body below still says "open, not yet merged"; it merged on
+> 2026-09-09). **Evidence T:** `FilesInUseTests` (21) `Passed` on run
+> `34362414470`, including 8+ R58-annotated cases —
+> `Scan_never_reports_the_running_process_as_its_own_blocker`,
+> `A_process_running_the_installers_own_image_is_excluded_but_no_other_is`,
+> `The_same_image_named_a_different_way_is_still_recognised`,
+> `A_different_file_with_the_same_name_is_not_the_installers_image` — the last two
+> pinning the file-identity comparison the review required instead of a string
+> compare. **Narrower than recorded — the release blocker's own e2e test has never
+> executed:**
+> `ArpUninstallStringTests.Registered_uninstall_string_completes_from_inside_the_install_dir`
+> is VM-only, reported `NotExecuted` on run `34362414470`, and is skip #1 of the 21
+> local skips. The first automatic VM run
+> ([34368896457](https://github.com/Sigil-build/sigil/actions/runs/34368896457),
+> `b07021e`) is the first that could run it. **Until a VM run executes that test,
+> this row is fixed in code and unproven in the field.**
+
 `uninstall.exe` ships **inside** `install_dir` (T15). Add/Remove Programs — and
 a user running the registered `UninstallString` directly — launches exactly
 that binary. `InstallSession.CheckFilesInUse` runs `FilesInUse.Scan` on the
@@ -1900,6 +2503,18 @@ committed lock files cover only the Debug restore graph).
 ### R59 — `from: payload/**` is the wrong idiom; only `payload://` rebases onto the extracted payload
 **Component:** docs + examples · **Effort: S** · **SHOULD-FIX**
 
+> **STATUS (V1.1, 2026-09-09):** CLOSED — lane DOC-G2,
+> [#37](https://github.com/Sigil-build/sigil/pull/37) `da792fb`, with the five
+> occurrences that sweep missed fixed by
+> [#41](https://github.com/Sigil-build/sigil/pull/41) `b07021e`. **Evidence M:**
+> `grep -rn "payload/" docs/guides/*.md examples/ | grep -v "payload://"` → zero
+> hits; both shipped examples use `payload://`. **Scope, stated rather than
+> implied:** #41's always-on `VmFixtureManifestTests` enforces the scheme **in the
+> VM fixtures only**. Docs and examples were swept **by hand**, nothing gates a
+> Markdown code fence, and `InstallStepsSchemaTests` keeps a bare `payload/**` on
+> purpose — so a future doc can reintroduce this. A docs-wide grep gate would close
+> it and is not implemented.
+
 > **STATUS — FIXED in this PR.**
 
 `StepContext.ResolvePath` (`src/SigilBuild.Wrapper.Core/Engine/StepContext.cs:734-797`)
@@ -1959,6 +2574,15 @@ not implemented here.
 ### R60 — The schema validator's `additionalProperties`-as-subschema form is never applied
 **Component:** Core / Configuration · **Effort: M** · **SHOULD-FIX**
 
+> **STATUS (V1.1, 2026-09-09):** **OPEN, correctly** — filed at G2 by
+> [#37](https://github.com/Sigil-build/sigil/pull/37) `da792fb`; no lane owns it
+> yet. **Evidence D:** re-verified during the walk —
+> `src/SigilBuild.Core/Configuration/SchemaValidator.cs:125-126` is still the
+> boolean-only `additionalProperties` gate. The fix shape and the fixture that would
+> have caught it are written in the row; nothing was claimed. Note the interaction
+> with **R71**: this fix lands in `SigilBuild.Core`, the assembly with 0.02 pp of
+> coverage headroom.
+
 `SchemaValidator.ValidateObject` (`src/SigilBuild.Core/Configuration/SchemaValidator.cs:125-126`)
 treats `additionalProperties` purely as a boolean gate:
 
@@ -2001,6 +2625,13 @@ surfaces per `AGENTS.md` if the fix changes what schema authors can rely on.
 ### R61 — `docs/guides/uninstaller.md` has drifted from the real ARP entry and uninstaller shape
 **Component:** docs + Wrapper.Core · **Effort: S (doc half) / M (code half)** · **SHOULD-FIX**
 
+> **STATUS (V1.1, 2026-09-09):** **OPEN, correctly** — filed at G2 by
+> [#37](https://github.com/Sigil-build/sigil/pull/37) `da792fb`. **Evidence D:** all
+> four `uninstaller.md` drifts plus the fifth item (the `registry_write` key
+> residue) are written out with their measured values, and the row says explicitly
+> that none of the four is fixed. Items 1 and 4 are closable by a docs pass alone;
+> items 2, 3 and the key residue need a code decision.
+
 Four drifts observed on a real installed app's ARP entry and disk footprint,
 none individually severe but compounding into a doc a publisher cannot trust:
 
@@ -2035,6 +2666,12 @@ None of the four is fixed in this PR.
 ### R62 — SDK bumps must regenerate lock files in the same commit
 **Component:** CI / dependency management · **Effort: S** · **SHOULD-FIX**
 
+> **STATUS (V1.1, 2026-09-09):** **OPEN, correctly** — filed at G2 by
+> [#37](https://github.com/Sigil-build/sigil/pull/37) `da792fb`. **Evidence D:**
+> re-verified during the walk — `.github/dependabot.yml` declares only `nuget`
+> (`:4`) and `github-actions` (`:11`); there is no `dotnet-sdk` ecosystem entry, so
+> the next deliberate SDK bump hits the same `NU1004` wall REL (#32) hit for real.
+
 Hit for real during the merge chain (2026-09-09, not theoretical): `global.json`
 previously pinned `10.0.100` with `rollForward: latestFeature`; the CI runner
 picked up the freshly released SDK `10.0.401` overnight, whose SDK-injected
@@ -2055,6 +2692,12 @@ in `10-G2_G3_RUNBOOK.md`).
 
 ### R63 — The unit suite has no seam keeping the install-state root off the real `%ProgramData%`
 **Component:** Wrapper.Core / Engine + tests · **Effort: M** · **SHOULD-FIX**
+
+> **STATUS (V1.1, 2026-09-09):** **OPEN, correctly** — filed at G2 out of hotfix
+> [#36](https://github.com/Sigil-build/sigil/pull/36)'s work. **Evidence D:**
+> re-verified during the walk — no `…ForTesting` seam exists in `ScopeLayout.cs` or
+> `UninstallStateStore.cs`, so the next test touching machine-scope state can
+> reintroduce the order-dependent failure #36 patched at one fixture.
 
 Found by hotfix #36 (2026-09-09): `CreateHardened` creates missing **ancestor**
 directories with the same admin-only DACL it applies to its target, so the
@@ -2082,6 +2725,56 @@ unit test ever creates or hardens a path under the real `%ProgramData%`.
 
 ### R64 — `wrapper-vm-tests.yml` advertises coverage no test reads
 **Component:** tests / CI · **Effort: M** · **RELEASE BLOCKER class**
+
+> **STATUS (V1.1, 2026-09-09):** **OPEN, narrowed.** The env-var half was closed by
+> [#41](https://github.com/Sigil-build/sigil/pull/41) `b07021e` — all five
+> still-orphaned toggles **removed, none faked** — so what remains is the
+> **coverage** itself. **Evidence M:** independently re-verified during the walk at
+> `102ea3f`, before #41 landed: 10 `SIGIL_VM_*` toggles declared across
+> `.github/workflows/`, 5 read by a test (`PREREQ`, `SYSTEMSTEPS`, `TESTS`,
+> `UNINSTALL_SURVIVE`, `UPGRADE`), 5 orphaned (`ARP_VALUES`, `CLOSEAPPS`,
+> `DOUBLE_INSTALL`, `SCOPE`, `SCOPE_MATRIX`); `SIGIL_VM_UNINSTALL_SURVIVE: "1"`
+> confirmed at `wrapper-vm-tests.yml:52`. **Confirmed after #41: machine-scope
+> end-to-end install is still covered by no leg.** Collapsing the vacuous
+> `currentuser × allusers` matrix removed a duplicate, not a gap — both legs had
+> been running the identical per-user suite — so the per-machine half of every leg,
+> double-install idempotency, real `manifest.App.*` ARP value assertions, and the
+> P6 `/closeapps` + setup-mutex legs all remain uncovered. #40's fix report adds
+> two more to that list: `service_install` has **no** VM leg at all, and the live
+> COM `HKCR` leg is still a `Skip=`. The honest one-line summary of the whole
+> matrix: **the pack → `Setup.exe` → install → uninstall path has still never been
+> executed by CI**, and 16 of the 21 local skips are this one toggle on this one
+> assembly.
+>
+> **What the first automatic run on `b07021e` then showed (2026-09-09), diagnosed in
+> `.superpowers/sdd/2026-09-08-g2-release-prep/vm-install-matrix-diagnosis.md`:** the
+> `vm (install matrix)` leg failed six tests, and **five of the six were fixture
+> bugs #41 missed** — `file_copy.to` given a *file* path where the step contract
+> wants a destination **directory** (three fixture builders), and one app id reused
+> across two install roots in the localization legs, so the second install's
+> reinstall-cleanup emptied the first's directory. Both are the R59/R66 shape again:
+> schema-legal, silently wrong, latent for exactly as long as the leg never ran.
+> They are fixed by [#45](https://github.com/Sigil-build/sigil/pull/45)
+> (`rc/vm-fix-fixtures-round2` @ `24a0f9d`, open), which also extends #41's always-on
+> `VmFixtureManifestTests` guard to refuse a `file_copy` `to:` that is not a directory
+> template — the guard gap belongs to this row's family: *the matrix advertises
+> coverage a fixture silently voids.* **The sixth failure is not a fixture bug: it is
+> `R74`.** Because the install-matrix leg runs **elevated** on the hosted runner, the
+> two elevation-sensitive upgrade assertions become **honest skips** in that same PR —
+> `!Elevation.IsProcessElevated()` with a reason naming **R2**, a real skip per
+> **R6**, not a vacuous pass — and stay skipped until R74 lands. Note what that
+> costs: per-user upgrade and downgrade behaviour remains unexercised end to end,
+> which is more coverage this row still owes, on top of the machine-scope gap above.
+>
+> **And de-elevating that leg — the right fix, and the diagnosis's own preference —
+> will turn those two upgrade tests RED, truthfully, until R76 lands.**
+> `Upgrade_replaces_older_version_preserving_install_dir_and_single_arp_row` and
+> `Force_downgrade_replaces_the_newer_version` both fail in a normal unelevated
+> session against the RC binaries, because the per-user upgrade removal path is
+> broken (**R76**, a RELEASE BLOCKER). So this row's coverage debt cannot be paid
+> down by de-elevation alone: doing it correctly makes the matrix red first, and that
+> redness is the point. Sequencing for whoever schedules this: **R76 before
+> de-elevation**, or expect — and keep — two red legs in between.
 
 Found while landing R58's fix (PR #39); the count below is the #39 reviewer's,
 verified precisely, not an estimate. Across `wrapper-vm-tests.yml` and its
@@ -2148,6 +2841,17 @@ R58 lived on.
 ### R65 — The committed lock files cover the Debug restore graph only
 **Component:** build / dependency management · **Effort: M** · **SHOULD-FIX**
 
+> **STATUS (V1.1, 2026-09-09):** **OPEN — and live-reproduced by the V1.1 walk.**
+> **Evidence M:** one clean `dotnet build Sigil.slnx -c Release` at `102ea3f`, on an
+> otherwise clean tree, left `src/SigilBuild.Installer.Host/packages.lock.json`
+> **modified** in the working tree. That is now **two independent agents observing
+> it on an unmodified tree**, so this row's severity note should read "reproduces on
+> every Release build", not "may": any V1 or G3 worker following
+> `10-G2_G3_RUNBOOK.md` will produce this diff and needs to know to discard it
+> rather than commit it. Fix shape (b) — a second, real CI step running `dotnet
+> restore Sigil.slnx -p:Configuration=Release --locked-mode` — would have caught it,
+> and is what also scopes **R23a**'s "reproducible" claim honestly.
+
 Found while landing R58's fix (PR #39), independently observed by two agents
 on an unmodified tree: `EnableTrimAnalyzer` is Release-conditioned in
 `Directory.Build.props`, so a **Release**-configuration restore injects
@@ -2182,6 +2886,17 @@ Rubric note: **SHOULD-FIX**, not RELEASE BLOCKER — nothing here ships a defect
 to a user; what it broke is the *evidence* the G3 gate rests on. It has to be
 fixed **in** the release, because the G3 "VM matrix green" checkbox cannot
 honestly be ticked until it is.
+
+> **STATUS (V1.1, 2026-09-09):** CLOSED —
+> [#41](https://github.com/Sigil-build/sigil/pull/41) `b07021e`. **Evidence T:**
+> `VmFixtureManifestTests` — an always-on xUnit class with no `SIGIL_VM_*` toggle,
+> no staged AOT runtime and no sandbox, so it runs in every `ci.yml` run. Verified
+> to bite: **11 failed / 22** against the rotted fixtures, **22 passed** against the
+> fix, on #41's own CI (`3826ac6`). This row postdates run `34362414470` and does
+> not cite it. **Not claimed, by the lane or by this line:** whether the VM legs now
+> *pass*. That is the matrix's own verdict; the first automatic run
+> ([34368896457](https://github.com/Sigil-build/sigil/actions/runs/34368896457),
+> `b07021e`) was still in flight when V1.1 was written.
 
 > **STATUS — FIXED by [PR #41](https://github.com/Sigil-build/sigil/pull/41)**
 > (lane `rc/vm-fix-fixtures`), together with an always-on guard so it cannot
@@ -2280,6 +2995,20 @@ so no Native AOT installer host to stage).
 ### R67 — The P11 VM legs target a System32 path that S2's anchoring refuses
 **Component:** tests (P11 system steps) · **Effort: S** · **SHOULD-FIX**
 
+> **STATUS (V1.1, 2026-09-09):** CLOSED —
+> [#40](https://github.com/Sigil-build/sigil/pull/40) merged as `c71bd8c` (the row
+> body below still says "open, not yet merged"). **Evidence T:** the P11 legs now
+> run under a resolved `install_dir` built the way `InstallSession` builds it on the
+> silent route (`/D=` → `CommandLineParser.Parse` → `StepContext.From` →
+> `InstallDirResolver`, so R3's scope-root containment applies to the fixture too),
+> with their targets copied into it; 5 new unelevated anchor tests pass, and the
+> reviewer reproduced them independently. Postdates run `34362414470`. **The policy
+> read matters as much as the fix:** relaxing the guard was never available —
+> `allow_outside_install_dir` is `SIG0231` (unrecognized) on privileged steps by
+> design — so the test was wrong, not the product. Coverage gaps that surfaced in
+> the same lane (`service_install` has no VM leg; the live COM `HKCR` leg is still a
+> `Skip=`) are folded into **R64**'s scope rather than filed separately.
+
 Found in the same first real VM run (34361541578), in the `vm (p11 system steps)`
 job — a **different** failure class from R66 and a different lane's fix.
 `ComRegisterInstallTests` and `ScheduledTaskCreateInstallTests` point their steps
@@ -2314,6 +3043,13 @@ PRs**: #41 for the install-matrix and P12 jobs, #40 for the
 ### R68 — `wrapper-vm-tests.yml`'s P12 job could never build: MSB1008
 **Component:** CI · **Effort: S** · **SHOULD-FIX**
 
+> **STATUS (V1.1, 2026-09-09):** CLOSED —
+> [#41](https://github.com/Sigil-build/sigil/pull/41) `b07021e`. **Evidence M:** the
+> `build P12 test projects` step now gives each csproj its own `dotnet build`
+> invocation, so the `vm (p12 update + web-installer)` job can reach its test steps
+> for the first time since T12.6 added it. Postdates run `34362414470`. Whether the
+> P12 legs then *pass* is the matrix's verdict, not this row's.
+
 > **STATUS — FIXED by [PR #41](https://github.com/Sigil-build/sigil/pull/41)**
 > (lane `rc/vm-fix-fixtures`).
 
@@ -2337,3 +3073,404 @@ steps). Like R66, this one is a consequence of a dispatch-only workflow: a step
 that cannot even start is caught by the first run that happens, and the first run
 took until 2026-09-09 to happen — which is why R66's fix also puts this workflow
 on a merge + weekly trigger.
+
+---
+
+# Filed during Stage 4 (2026-09-09)
+
+**R69–R73** come out of task **V1.1**, the Stage-4 register walk (report:
+`.superpowers/sdd/2026-09-08-g2-release-prep/v1-1-register-walk.md`, gitignored, not
+part of this PR). Two of them — **R69** and **R70** — already have a fix in flight as
+[PR #42](https://github.com/Sigil-build/sigil/pull/42) (`rc/v1-sbom-and-kiosk`,
+**open**); **R71**, **R72** and **R73** are open with a fix shape and no owner.
+
+**R74**, **R75** and **R76** come from the same stage but a different source: the
+**first automatic `wrapper-vm-tests.yml` run** on `b07021e`, its diagnosis
+(`vm-install-matrix-diagnosis.md`), and the round-two lanes that fixed it. R74 is the
+one product finding among the install-matrix leg's six failures — the other five were
+fixture bugs, fixed by [PR #45](https://github.com/Sigil-build/sigil/pull/45). R75 came
+out of the P11 round-two lane and is fixed in
+[PR #44](https://github.com/Sigil-build/sigil/pull/44), **open**. **R76 is a RELEASE
+BLOCKER** and was found not by the matrix but by driving the RC's own CI-built binaries
+by hand while verifying #45 (`vm-fix2-report.md` §5). All three are worth reading next
+to **R64**: they are what an unrun matrix was hiding — and R75 and R76 were each found
+only because someone finally exercised the path, R75 because the test there had been
+*asserting the wrong behaviour as correct*, R76 because no test asserted it at all.
+
+One walk finding was deliberately **not** filed as a new row: the live reproduction of
+the Release-configuration lock-file churn is **R65** happening again, not a new defect,
+so it is recorded on R65's own status line instead.
+
+### R69 — `KioskSetupFactAttribute.SetupPath` walked outside the repo, so its test could never run and its skip reason misdirected
+**Component:** tests (Packaging) · **Effort: S** · **SHOULD-FIX**
+
+> **STATUS (V1.1, 2026-09-09):** FIXED in
+> [#42](https://github.com/Sigil-build/sigil/pull/42) (`a9f5e20`), **open, not yet
+> merged**. **The test still skips here** — see "does it run now" below.
+
+`tests/SigilBuild.Packaging.Tests/ExeWrapper/KioskSetupFactAttribute.cs` composed the
+sample's path from `AppContext.BaseDirectory` plus **six** fixed `".."` segments.
+`AppContext.BaseDirectory` is `<repo>/tests/SigilBuild.Packaging.Tests/bin/Release/net10.0/`
+— five levels below the repo root — so six `".."` landed **one level above the repo**,
+and the skip message printed the proof:
+
+```
+Kiosk sample test: C:\projects\tests\kiosk\dist\Embed.Infinity.Kiosk-1.0.0-x64-Setup.exe not found
+                     ^^^^^^^^^^^^^^  should be C:\projects\Sigil\tests\...
+```
+
+`IconResourceWriterTests.Kiosk_Setup_HasEmbeddedUninstaller` therefore **could not
+execute on any machine**, and its message told the reader to "build the `tests/kiosk`
+sample first" — an action that would not have helped, because the path it checked was
+outside the repository entirely. That is precisely the class **R6** exists to
+eliminate — a skip whose stated precondition is not the real one — surviving *inside*
+R6's own fix, which is why it is filed rather than quietly patched.
+
+**Fix (in #42, `a9f5e20`).** The attribute now walks up to the nearest `Sigil.slnx`
+(the repo-root marker) and appends the sample's known repo-relative path.
+`IconResourceWriterTests` had independently recomputed the same broken six-`".."` path
+inline; it now calls `KioskSetupFactAttribute.SetupPath` directly, so the guard and the
+test body cannot disagree again. A new plain unit test,
+`KioskSetupFactAttributeTests.SetupPath_IsInsideRepositoryRoot`, pins the invariant and
+was **verified to bite** by temporarily restoring the old logic (it failed with the
+`C:\projects\tests\kiosk\...` path) before being reverted to the fix.
+
+**Does the test run now? No — it still skips, and that is correct.** `tests/kiosk/` is
+a separate, out-of-band sample build that is not in the repository, and the machine
+this was fixed on has no Native AOT toolchain to produce it. What changed is that the
+skip reason is now honest and actionable and names a path **inside** the repo, so if
+the sample is ever produced at that location the test genuinely executes. Nobody
+should read this row as adding coverage; it removes a lie about coverage.
+
+### R70 — R42's CycloneDX SBOM handoff was orphaned between two merged lanes
+**Component:** CI / release · **Effort: S** · **SHOULD-FIX**
+
+> **STATUS (V1.1, 2026-09-09):** FIXED in
+> [#42](https://github.com/Sigil-build/sigil/pull/42) (`7003b20`, plus `f4472c0` for
+> `-dpr`), **open, not yet merged**. First real execution is the `v0.1.0-alpha` tag
+> push — like the rest of `release.yml`, it has never run (**R7**).
+
+`docs/plan/release/sup-sbom-handoff.md` is a complete, ready-to-paste workflow step
+that lane SUP wrote for lane REL, because SUP's branch was cut before `release.yml`
+existed. But **REL ([#32](https://github.com/Sigil-build/sigil/pull/32)) merged before
+SUP ([#33](https://github.com/Sigil-build/sigil/pull/33))**, so no lane was ever in a
+position to apply it: `grep -in "sbom\|cyclonedx\|spdx" .github/workflows/release.yml`
+returned **zero hits** at `102ea3f`. **R42** was counted closed and its deferral text
+is honest; the SBOM deliverable simply had no owner. Neither lane did anything wrong —
+the merge order ate it, which is why this is filed as its own row rather than as a
+correction to R42.
+
+**Fix (in #42).** Two steps in `release.yml`'s `publish` job, placed after the
+win-x64 / win-arm64 archive steps (so `dist/` exists and signing has happened) and
+before `SHA256SUMS`: install the `CycloneDX` dotnet global tool pinned to **6.2.0**,
+then generate `dist/sigil-<tag>.sbom.json` with
+
+```
+dotnet CycloneDX Sigil.slnx -o dist -fn sigil-<tag>.sbom.json -F Json -dpr
+```
+
+verified by a `Test-Path` throw, with no `continue-on-error`. Three details worth
+keeping:
+
+1. **`-dpr` (`--disable-package-restore`) came out of review and is load-bearing.**
+   Without it CycloneDX runs its own **unlocked** restore after the workflow's
+   `restore (locked)` step, quietly undoing **R23a**'s guarantee for exactly the
+   dependency graph the SBOM claims to describe. The flag was confirmed present in the
+   pinned `v6.2.0` tag's own README, not assumed.
+2. The handoff doc's `--json` flag **does not exist** on the real CLI; the actual flag
+   is `-F` / `--output-format`.
+3. `~/.dotnet/tools` is appended to `GITHUB_PATH` explicitly rather than assuming the
+   runner image carries it after a global-tool install.
+
+**Not proven:** the step has never executed. `release.yml` is tag-triggered on a
+non-default branch, so its first run is the V1 release dry-run — which is itself
+blocked on the six Trusted Signing secrets. The SBOM's placement (after packaging,
+before `SHA256SUMS`) reconciles the handoff doc's two conflicting placement statements
+and deserves a second look from whoever owns `release.yml`.
+
+### R71 — `SigilBuild.Core` sits 0.02 pp above its coverage floor, so the next merge is a coin flip
+**Component:** CI / coverage · **Effort: S** · **SHOULD-FIX**
+
+> **STATUS (V1.1, 2026-09-09):** **OPEN.** Measured, not projected: run
+> `34362414470`. No owner. The fix is a coverage investment, not a config change.
+
+On run `34362414470`, `SigilBuild.Core` measured **69.02 %** against a floor of
+**69 %** — roughly **one to two uncovered lines of slack** on the assembly every lane
+touches. The floors were deliberately ratcheted to the measured value rounded down
+(**R21**), which is the right policy; the problem is the margin it leaves on this
+particular assembly.
+
+**The risk, stated concretely.** The required `build` check goes red on a change that
+adds a handful of uncovered lines with no security or behavioural meaning — a new
+diagnostic code, a parser branch, an argument-null guard. At that moment the cheapest
+apparent fix is to lower the floor by one point, which is **the one thing R21
+forbids** ("Coverage floors were re-pinned upward … Nothing was lowered"). A ratchet
+spent to turn a red check green stops being a ratchet.
+
+**Fix shape.** *Raise Core's coverage before anything else touches Core.* The next lane
+to work in `SigilBuild.Core` pays down coverage first, so the floor has real headroom —
+and there is plenty of room to aim at, since `AGENTS.md`'s stated target for Core is
+**≥ 80 %** against a measured 69.02 %. **Never lower the floor.** If the orchestrator
+ever concludes the floor genuinely must move, that is an explicit written decision with
+a reason, taken at a gate — not a number edited mid-lane to unblock a merge. Note the
+collision with **R60**, whose fix lands in this very assembly.
+
+### R72 — `Elevation.cs`'s relaunch/cleanup gating and the two hosts' relaunch wiring are exercised by no test
+**Component:** Wrapper.Core / Engine + tests · **Effort: S** · **SHOULD-FIX**
+
+> **STATUS (V1.1, 2026-09-09):** **OPEN.** Found by the walk's Step-3 sample 8a. Does
+> **not** reopen **R18**. No owner; the fix is a VM/elevated end-to-end case, not a
+> unit test.
+
+Reverting `src/SigilBuild.Wrapper.Core/Engine/Elevation.cs` to its pre-**R18** form
+(`50e5de4~1`) leaves the tree building **and all 11 `ElevationSecretHandoffTests`
+passing** — `Passed: 11, Failed: 0`. Those tests exercise `ElevationSecretHandoff.cs`,
+the envelope and its parser, in isolation. What ships unpinned is `Elevation.cs`'s own
+half of R18: the `childMayStillBeRunning` out-parameter of
+`RelaunchElevatedAndWait`, which exists precisely so the parent does **not** delete the
+DPAPI envelope out from under an elevated child that is still starting, plus the two
+hosts' wiring that consumes it. The failure mode is "the install the handoff was
+enabling fails", intermittently, only under real elevation — the kind of bug a unit
+suite structurally cannot see.
+
+**This does not reopen R18.** That row's central mechanism — a DPAPI envelope replacing
+the command line — is proven absent at the parent by the same sample's other half
+(`Program.RenderWizardStartedLine` does not exist at `50e5de4~1`, so
+`WizardLogRedactionTests` cannot even compile there). R18 is fixed; one of its two
+files is untested.
+
+**Same shape as R38**, which is why the two are worth reading together: a change whose
+only justification is "the existing tests are the coverage", where the existing tests
+demonstrably do not touch it.
+
+**Fix shape.** A VM / elevated end-to-end case: a real elevated relaunch that consumes
+a handoff, asserting the envelope survives until the child has read it and is then
+cleaned up. That is a `wrapper-vm-tests.yml` leg, not a unit test, and it belongs with
+the machine-scope coverage **R64** still owes — one elevated leg could carry both.
+
+### R73 — Per-row status notes were missing on most of the register, so closure lived only in a merge table
+**Component:** process / register hygiene · **Effort: M** · **SHOULD-FIX**
+
+> **STATUS (V1.1, 2026-09-09):** **OPEN as a standing rule.** The backfill is done —
+> this PR gives all 71 rows a status line — but the obligation it creates is per-PR
+> from here, and nothing enforces it yet.
+
+Until this PR, **49 of the 68 rows** the V1.1 walk covered carried no per-row status
+line at all; only 19 did. **Forty of the missing ones were rows closed by Stages 2 and
+3**, whose closure existed *only* as a cell in the "Stage 2/3 outcome" merge table two
+hundred lines up. A reader who landed on R33, R44 or R52 directly could not tell they
+were closed, by whom, or on what evidence.
+
+**Two consequences were already real when the walk found this**, which is what makes it
+a row rather than a style preference:
+
+- **R41a** was listed under "rows closed" while actually being a *documented open*
+  owner action — both NuGet IDs unreserved, a G4 checklist item. The merge table said
+  closed; the row said unclaimed; nothing reconciled them until now.
+- **R53**'s deferral justification existed nowhere but a code comment at
+  `InstallSession.cs:1130`. A reader of R53 could not tell the behaviour had been
+  decided rather than forgotten.
+
+The register is the artifact G3 and G4 are decided from. A row whose disposition
+requires cross-referencing a table elsewhere in the file is a row that can be
+mis-read — and, as both examples show, mis-read in the direction of "done".
+
+**The rule, from here.** Every closure carries its own `> **STATUS …**` line **in the
+same PR that closes it**, naming (a) the PR number and merge sha, (b) the evidence
+class — named test on a named CI run, manual ceremony, written deferral with its
+location, or claim-only — and (c) anything narrower than the row's own headline claim.
+A merge table is a summary; it is never the record. This pass backfills all 71 rows
+that existed at `b07021e` (and every row filed since carries its own), but keeping it
+true is a per-PR obligation, and the merge gate should check it the way it checks the
+lockstep surfaces in `AGENTS.md`.
+
+### R74 — An elevated process installing per-user plans the upgrade blind but cleans up sighted, so it can silently downgrade
+**Component:** Wrapper.Core / Engine · **Effort: M** · **SHOULD-FIX**
+
+> **STATUS (V1.1, 2026-09-09):** **OPEN.** Filed from the diagnosis of the first
+> automatic `wrapper-vm-tests.yml` run's `vm (install matrix)` leg on `b07021e`
+> (`.superpowers/sdd/2026-09-08-g2-release-prep/vm-install-matrix-diagnosis.md` §1.4,
+> §2.4, §2.5, §5). **Reproduced**, not inferred: the elevated probe was simulated
+> unelevated against the RC binaries. **Not a G3 blocker** — see the rubric note
+> below. Owner: lane **S5 / S1** (engine).
+
+Prior-install detection has **two independent sources at two different trust levels**,
+and under one specific combination they disagree:
+
+| Consumer | Source | Elevation-sensitive? |
+|---|---|---|
+| the upgrade plan, the downgrade block, prior-install-dir preservation | **ARP**, via `InstalledStateResolver` | **yes** — HKLM only when elevated |
+| `ExistingInstallDetected` → `PerformReinstallCleanupAsync` | the **state store** under `%LocalAppData%\Sigil\<appId>`, via `UninstallStateStore.TryLoad` (`InstallSession.cs:726-740`) | no |
+
+`InstalledStateResolver.ScopeProbeOrder` (`InstalledStateResolver.cs:89-92`) probes
+**HKLM only** when the process is elevated. That is lane S1's **R2** fix and it is
+correct: an elevated process must never act on HKCU-sourced data — least of all spawn
+an attacker-plantable `UninstallString` as administrator. The consequence, which R2
+did not have to reason about, is that **an elevated per-user install cannot see its own
+prior per-user install**:
+
+- `UpgradePlanner.Plan` short-circuits on `!state.Found` (`UpgradePlanner.cs:32`) →
+  `UpgradeAction.FreshInstall`, so `DowngradeBlocked` (`:73`) is unreachable;
+- the silent path therefore never reaches `return DowngradeBlockedExitCode;`
+  (`InstallSession.cs:552-555`) — **exit 0 where exit 3 was the contract**;
+- `priorInstallDir` is null, so the new version lands in its own manifest default
+  rather than preserving the directory the user already installed into;
+- **but the reinstall cleanup still fires.** `RunInstallCoreAsync` calls
+  `PerformReinstallCleanupAsync` (`InstallSession.cs:994`) which returns early only on
+  `!ExistingInstallDetected` (`:1111`) — and that flag comes from the state store, not
+  ARP. The previous install's recorded uninstall is replayed and its files are deleted
+  at the path the previous run used, while the plan believes this is a fresh install.
+
+**Reproduction (§1.4).** Removing the HKCU ARP row to simulate the elevated HLKM-only
+probe, then re-running the identical v1 setup over a v2 install, gives the runner's
+exact symptom — `EXIT_V1_SIM=0` — and the `/LOG` shows both halves in one place: a
+`delete …\app\uninstall.exe` from the cleanup, then a fresh `copy payload://app.txt`,
+then `result: success`, with ARP rewritten back to `1.0.0`. **A silent downgrade.**
+
+**Who hits this in the field:** anyone whose per-user installer runs from an elevated
+context — an admin double-clicking it, an elevated shell, SCCM/Intune as SYSTEM, or a
+CI runner. It is not exotic.
+
+**Rubric note — SHOULD-FIX, not a RELEASE BLOCKER.** Nothing crosses a trust boundary:
+no elevated run wrote outside its declared destination, and `install_dir`, containment,
+ARP registration and `uninstall.exe` all behaved correctly in the same diagnosis. What
+degrades is a **UX guard** (the downgrade refusal and directory preservation), and only
+in a session where the user already holds the privilege. Recorded explicitly so nobody
+re-triages it upward at the gate: **this does not block G3.**
+
+**Relationship to the rows it comes from.** **R2** is why the probe is HLKM-only and
+must stay that way — the fix is not "let the elevated process trust HKCU". **R53**
+("an elevated process replays user-scope state at all", decided *keep*, POST-v1) is the
+same split brain, but R53 is phrased as a privilege question; this row is the
+**behavioural divergence** that phrasing does not capture, which is why it is filed
+separately rather than appended to R53.
+
+**Fix shape (not implemented).** Make `_plan` and `ExistingInstallDetected` agree about
+what "installed" means for an elevated user-scope run — **either both blind or both
+sighted**, never one of each. Two viable routes: let the plan consult the same trusted
+state store the cleanup already uses, or apply R2's trust gate to the HKCU ARP row
+(verify it, then use it) instead of hiding the row entirely. Ship it with a unit test
+that runs under a **simulated elevated probe** — the seam
+`ScopeProbeOrder(tentativeScope, elevated)` already takes `elevated` as a parameter, so
+this is testable without an elevated runner, and the absence of such a test is why the
+divergence survived R2's own review. Until then, the two elevation-sensitive upgrade
+assertions in the VM install-matrix leg are **honest skips** naming R2 — see **R64**.
+
+### R75 — `com_register` journaled an undo for a registration that never took effect, so one failed step could make the app permanently unremovable
+**Component:** Wrapper.Core / steps + Engine · **Effort: S** · **SHOULD-FIX**
+
+> **STATUS (V1.1, 2026-09-09):** FIXED in
+> [#44](https://github.com/Sigil-build/sigil/pull/44) (lane `rc/vm-fix-p11-round2`,
+> commit `3e0ba90`), **open, not yet merged**.
+> **Evidence T:** two unit tests that fail with the retraction reverted. Found while
+> fixing the P11 VM legs — the test there **had been asserting the wrong behaviour as
+> correct**, which is why nothing caught it earlier.
+
+`ComRegisterStep.cs:75` appended a `RollbackRecord.UnregisterCom` record **before**
+attempting the registration — the right instinct, since a crash between "acted" and
+"journaled" would otherwise leave an unrecorded change — but it **kept** that record on
+two paths where the registration provably never happened:
+
+- `ExportMissing` (`:86-88`) — the DLL has no `DllRegisterServer` export;
+- `LoadFailed` (`:82-84`) — the DLL could not be loaded at all.
+
+Both return `StepResult.Failed` with the undo record still in the journal.
+
+**Why a stale record is worse than it sounds.** Since **R15**, a failed
+`DllUnregisterServer` is interpreted as *"still registered"* (`RollbackJournal.cs:1202`)
+— which is the correct fail-closed reading, because silently swallowing an undo failure
+is precisely what R15 was filed to stop. So the stale record is a **guaranteed
+`UndoFailedException` for a registration that never existed**. With
+`on_failure: continue`, the failed step does not abort the install, so the record
+reaches `uninstall.json` — and there R15's retain-on-failure rule (keep the state and
+the ARP row so the user can retry) means **every subsequent uninstall fails the same
+way**. The app can never leave Add/Remove Programs. One faulty or mis-pathed DLL, and
+the installer has produced exactly the "silently unremovable" outcome R44 and R51 exist
+to prevent, by a route neither of them covers.
+
+**Fix (#44, `3e0ba90`).** Journal-before-act is **kept** — the crash window it protects
+is real — and a **tail-only** `RollbackJournal.RetractLast` withdraws the record on the
+two paths where the action demonstrably did not occur (`LoadFailed`, `ExportMissing`).
+Tail-only matters: it can only ever remove the record the step itself just appended,
+so it cannot be used to rewrite journal history. `HResultFailure` **still journals, by
+design** — `DllRegisterServer` returning a failure HRESULT does not prove nothing was
+written to the registry, so the fail-closed reading is the right one there.
+
+**Follow-up worth doing once, not filed as a row:** audit every journal-before-act
+record whose action has **no OS query surface** to confirm afterwards. This class of
+bug — an undo recorded for a change that never landed, discoverable only at uninstall
+time, on a machine that no longer has the installer — is invisible to any test that
+does not actually run an uninstall. Cross-references **R15** (the retain-on-failure
+rule that makes this permanent) and **R36** (the decision to keep `com_register`'s
+in-process DLL load, which is what makes `LoadFailed` a reachable state at all).
+
+### R76 — A per-user upgrade fails: the installer's single-instance guard rejects the prior-version uninstaller it spawns itself
+**Component:** Wrapper.Core / Engine · **Effort: S** · **RELEASE BLOCKER**
+
+> **STATUS (V1.1, 2026-09-09):** **OPEN — RELEASE BLOCKER.** Reproduced by hand
+> against the RC's own CI-built binaries, **unelevated**, while verifying
+> [#45](https://github.com/Sigil-build/sigil/pull/45) — evidence in
+> `.superpowers/sdd/2026-09-08-g2-release-prep/vm-fix2-report.md` §5. Fix lane:
+> **`rc/p6-fix-upgrade-mutex`** (PR pending). Not found by the matrix; found by
+> driving the shipped binaries.
+
+**A shipped v1 → v2 per-user upgrade, run from a normal user session, fails and
+installs nothing:**
+
+```
+$ SigilP3Fixture-1.0.0-…-Setup.exe /S /currentuser      -> EXIT 0   (v1 installed)
+$ SigilP3Fixture-2.0.0-…-Setup.exe /S /currentuser
+Removing previous version 1.0.0.
+cannot upgrade: removing the previous version failed (uninstaller exit code 5).
+No changes were made.
+                                                        -> EXIT 1
+```
+
+`/force-downgrade` fails identically ("Removing newer version 2.0.0." → exit 1).
+
+**Mechanism.** Exit **5** is `InstallSession.AlreadyRunningExitCode`, returned from
+exactly two places, both the single-instance guard (`SigilBuild.Wrapper/Program.cs:85`
+and `SigilBuild.Installer.Host/Program.cs:151`). The running installer holds
+`SetupInstanceLock`, whose name is `NameFor(appId, scope)` =
+`Local\sigil-setup-<appId>-user` (`SetupInstanceLock.cs`) — and then **spawns the prior
+version's `uninstall.exe`**, which derives the **same** app+scope name, sees
+`ERROR_ALREADY_EXISTS`, and bails. The parent installer correctly reports that the
+removal failed and rolls back, so nothing is half-installed; the upgrade simply cannot
+proceed.
+
+**This is R58's sibling, one layer over.** R58 was the *files-in-use* gate counting the
+running uninstaller as a blocker; this is the *single-instance* guard counting the
+running installer when the installer is the very thing that spawned the uninstaller.
+Both are the same mistake in two different guards: **a guard that treats the
+installer's own child as a stranger.** Worth checking whether there is a third.
+
+**Latent since P3 met P6.** Upgrades (P3) and the single-instance guard (P6, gate G17)
+are individually correct and were individually tested; the defect lives only in their
+composition, and **nothing ever composed them** — because the VM matrix never ran
+(**R66**), and because on the elevated hosted runner **R2** hides the prior install
+entirely, so the plan is `FreshInstall` and the removal is never even attempted
+(**R74**). The install-matrix diagnosis did exercise the *downgrade-blocked* direction
+unelevated (exit 3, correct) but not the upgrade or forced-downgrade directions, so it
+did not surface there either. Three separate reasons this stayed invisible, none of
+them "the code looked fine".
+
+**Why RELEASE BLOCKER and not SHOULD-FIX.** Per-user upgrade is the single most
+common thing a publisher's users will do after the first install, it fails for every
+app on the default (unelevated) path, and the failure is total — exit 1, nothing
+installed. This is the "broken promise" half of the rubric, and unlike **R74** it is
+not confined to elevated sessions.
+
+**Effect on the VM matrix, and the sequencing that follows.** De-elevating the
+install-matrix leg — the diagnosis's preferred fix for its sixth failure, and still the
+right call — **will turn `Upgrade_replaces_older_version_preserving_install_dir_and_single_arp_row`
+and `Force_downgrade_replaces_the_newer_version` red. That redness is true**, and must
+not be worked around by re-elevating the leg or by relaxing the assertions. Fix R76
+first, or accept two honestly red legs until it lands. See **R64**.
+
+**Fix shape (not implemented here).** The spawned uninstaller must not contend with its
+own parent installer for the app+scope lock — the same exemption **R58** made for the
+files-in-use sweep, and it should be made the same way: by *identity*, not by name or
+by a bare "skip the check" flag. **The guard must stay fail-closed** for every other
+caller — that is **R34**, which exists because this mutex once failed *open* on its
+`NULL` branch, and a fix that widens the hole is worse than the bug. Cross-references
+**R34**, **R58** and **R74**.

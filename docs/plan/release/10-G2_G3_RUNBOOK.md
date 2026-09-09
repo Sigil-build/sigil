@@ -141,6 +141,17 @@ every red check had a root cause outside the lane's own diff.
 
 ## 3. G2 manual checks (after DOC merges) — commands inline
 
+**STATUS (2026-09-09): checks 1, 3, 4 and 5 have been run for real** against a
+CI-built `Setup.exe` and the merged RC at `3ba97f6` — all four **PASS**. Full
+command-level evidence:
+`.superpowers/sdd/2026-09-08-g2-release-prep/g2-checks-report.md` (gitignored).
+Results are folded into `00-GAP_REGISTER.md`'s "Stage 2/3 outcome" section and
+`03-RC_ORCHESTRATION.md`'s G2 checklist. Running check 1's cleanup step (the
+registered `UninstallString`) surfaced **R58**, a release blocker — see
+Section 6 below. The descriptions in this section are kept as the reference
+for re-running any of these (e.g. after R58's fix lands), corrected below
+where they had gone stale.
+
 Source: the ten-item "G2 — after Stages 2 and 3" checklist in
 `docs/plan/release/03-RC_ORCHESTRATION.md`. All ten need the **merged RC**
 (after DOC #34) — several exercise behavior that lands only with S4, REL, or
@@ -151,8 +162,14 @@ merges, not from a stale worktree.
    example out of the **post-DOC-merge** `docs/guides/parameters.md` — R26's
    fix replaces the old `/install_dir=…` / `/edition=…` form (which the
    parser rejects with `UsageException: unrecognized flag`) with the form
-   the parser actually accepts, `/P<Name>=<Value>`, e.g.
-   `Setup.exe /S /Pinstall_dir="C:\Apps\MyApp" /Pedition=professional` — and
+   the parser actually accepts. **Corrected 2026-09-09:** the shipped guide
+   does not use `/Pinstall_dir=` — it explicitly warns against ever declaring
+   a parameter named `install_dir` (see
+   `docs/guides/install-steps.md#write-the-destination-as-install_dir`) and
+   routes the destination through the engine's own `/D=` override instead.
+   The real documented line is
+   `Setup.exe /S /D="C:\Apps\MyApp" /Pedition=professional` — one `/D=` for
+   the destination plus one `/P<Name>=<Value>` per declared parameter — and
    run it against a real `Setup.exe`. Expected: exits `0` (or `3010` if a
    reboot is pending), installs silently to the given directory, no
    `UsageException`. **This box cannot build `Setup.exe`** (no AOT
@@ -185,19 +202,28 @@ merges, not from a stale worktree.
    source under `parameters`, `schemas/sigil-schema.json` near lines 45 and
    624) is `http://example.invalid/options.json` instead of `https://`.
    Expected: pack fails with a pack-time diagnostic mirroring the existing
-   `SIG0235` (`http_download`'s HTTPS-only check) — S4 adds this check; its
-   exact new `SIG02xx` code is only knowable once #28 is read post-merge.
-   Also confirm the same rejection re-fires at install time if
+   `SIG0235` (`http_download`'s HTTPS-only check) — S4 adds this check.
+   **Resolved 2026-09-09: the code is `SIG0323`**
+   (`DiagnosticCodes.ParameterSourceInsecure`,
+   `src/SigilBuild.Core/Diagnostics/DiagnosticCodes.cs:128`). Also confirm the
+   same rejection re-fires at install time if
    `Installer.Host/Services/HttpOptionsLoader.cs` re-checks the URL before
-   fetching, per R8's stated fix.
+   fetching, per R8's stated fix — confirmed present at lines 50-55.
 
 5. **A manifest with `updates: { manifestUrl: "http://…" }` fails to pack
    (R14).** Pack a manifest with
    `updates: { manifestUrl: "http://example.invalid/channel.json" }`.
-   Expected: pack fails. Today `schemas/sigil-schema.json`'s `manifestUrl`
-   only enforces `"format": "uri"` (which accepts `http://`); S4 adds an
-   explicit HTTPS-only pack-time check per R14's fix. Also confirm the same
-   rejection at fetch time in `Update/UpdateSeams.cs`.
+   Expected: pack fails. **Corrected 2026-09-09:** `schemas/sigil-schema.json`'s
+   `manifestUrl` no longer only enforces `"format": "uri"` (which alone would
+   accept `http://`) — it now also carries an explicit `"pattern": "^https://"`,
+   so the rejection is doubly enforced: schema `SIG0010` **and** the S4-added
+   pack-time check, **`SIG0324`**
+   (`DiagnosticCodes.UpdateManifestUrlInsecure`, `DiagnosticCodes.cs:135`).
+   Also confirm the same rejection at fetch time — **the runtime re-check
+   lives in `src/SigilBuild.Wrapper.Core/Update/UpdateRunner.cs:95-98`, not
+   `Update/UpdateSeams.cs`** (this document previously pointed at the wrong
+   file); `Update/ChannelManifestParser.cs:82-84` separately refuses a
+   non-`https://` `packageUrl` inside the fetched channel manifest itself.
 
 6. **A replayed stale signed channel manifest is rejected (R13).** Host a
    channel manifest signed with a test P-256 key, install the app, then
@@ -253,7 +279,19 @@ merges, not from a stale worktree.
   and has never run** — zero runs in its history. Run it for real
   (`gh workflow run wrapper-vm-tests.yml`) against non-vacuous tests, then
   add a schedule trigger (or a merge trigger) via a follow-up PR so it stops
-  being on-demand-only, per the G3 checkbox.
+  being on-demand-only, per the G3 checkbox. **Before that first real run
+  means anything, close R64**: ten `SIGIL_VM_*` scenario toggles are
+  declared across the workflows and only four were read by any test at the
+  RC base — five still drive no test at all today (`SIGIL_VM_SCOPE`,
+  `SIGIL_VM_SCOPE_MATRIX`, `SIGIL_VM_ARP_VALUES`, `SIGIL_VM_CLOSEAPPS`,
+  `SIGIL_VM_DOUBLE_INSTALL`) — `SIGIL_VM_CLOSEAPPS` is R58's own P6 leg,
+  which is exactly how R58 reached the merged RC undetected. Each toggle
+  either gets a real test or gets removed; a green run against toggles
+  nobody reads proves nothing for the legs they claim.
+  `SIGIL_VM_UNINSTALL_SURVIVE` is genuinely closed, not just nominally: PR
+  #39's `ArpUninstallStringTests` runs behind `wrapper-vm-tests.yml:52`'s
+  `SIGIL_VM_UNINSTALL_SURVIVE: "1"` set on both scope-matrix legs, confirmed
+  not a vacuous pass.
 - **`release.yml` will not appear in `gh workflow list` until it first
   fires.** Confirmed empirically: `gh workflow list --all` today shows only
   `ci`, `docs`, `pr-guards`, `secret-scan`, `wrapper-vm-tests` — no
@@ -286,9 +324,13 @@ merges, not from a stale worktree.
   failure a log-only check would miss). Two things to check on that clean
   machine, both first-run-only in `release.yml`: that the zip contains
   `runtimes/win-x64/` **and** `runtimes/win-arm64/` beside `sigil.exe`, and
-  that `sigil pack --format exe` on a sample manifest actually produces a
-  Setup.exe from it (C1 — the pre-fix workflow shipped a CLI that threw
-  `FileNotFoundException` for the product's headline format).
+  that `sigil pack` on a sample manifest whose `package.formats` includes
+  `exe` actually produces a Setup.exe from it. **Corrected 2026-09-09:**
+  `sigil pack` has no `--format` flag — the produced format(s) come from the
+  manifest's own `package.formats` list, one artifact per declared
+  `(format, architecture)` pair (`src/SigilBuild.Cli/Commands/PackCommand.cs`).
+  (C1 — the pre-fix workflow shipped a CLI that threw
+  `FileNotFoundException` for the product's headline format.)
 
 ## 5. What this preparation did NOT verify
 
@@ -311,7 +353,58 @@ merges, not from a stale worktree.
 
 ## 6. Register-row candidates found during this preparation (orchestrator files at gate close)
 
-None of these block G2. (b), (c) and (d) were found as a side effect of
+**Headline item — R58 (RELEASE BLOCKER), filed 2026-09-09.** Running G2 check
+1 for real (Section 3, item 1 above) and then following its own cleanup
+instruction — run the registered `UninstallString` — surfaced that the ARP
+uninstall path is dead: `uninstall.exe` ships inside `install_dir` (T15),
+`FilesInUse.Scan` has no self-exclusion, and the running uninstaller blocks on
+**its own pid** (exit `4`; `/closeapps`, the remedy the message itself names,
+cannot rescue it — the Restart Manager cannot close the caller). Filed as
+**R58** in `00-GAP_REGISTER.md`'s "Filed at gate G2" section, with the
+own-pid proof (`Start-Process -PassThru` captures the pid independently
+before the process reports anything itself) and a differential control
+(the same uninstall via the original `Setup.exe`, outside `install_dir`,
+succeeds). **This blocks G3** — do not treat the VM matrix as proof of a
+working uninstall path while R58 is open. **R59–R65** were filed alongside it
+from the same gate-close pass and the fix that followed; R59 (the
+`payload/**` vs `payload://**` doc bug) is fixed in the same PR that adds
+these rows.
+
+**R58's fix is now open — [PR #39](https://github.com/Sigil-build/sigil/pull/39)
+(`rc/p6-fix-uninstall-self-block`, commit `48e864f`), not yet merged.** It
+excludes not just the running process but any process executing the **same
+image path** (`Environment.ProcessPath`) from the uninstaller's own
+files-in-use scan — a machine-scope `/allusers` uninstall's un-elevated
+parent (same image, blocked in `WaitForSingleObject` on its elevated child)
+is a second, distinct instance of "the uninstaller blocks on itself" that
+excluding only the launching pid would have missed. Landing it surfaced two
+more rows, filed right next to R58 in `00-GAP_REGISTER.md` because both are
+G3 prerequisites:
+
+- **R64 (release-blocker class) — `wrapper-vm-tests.yml` advertises coverage
+  no test reads.** Ten `SIGIL_VM_*` scenario toggles are declared and only
+  four were read by any test at the RC base — six drove no test at all,
+  including `SIGIL_VM_CLOSEAPPS` (R58's own P6 leg, and exactly why R58
+  reached the merged RC without the VM matrix catching it). The good news:
+  PR #39 genuinely closes one of the six — `wrapper-vm-tests.yml:52` sets
+  `SIGIL_VM_UNINSTALL_SURVIVE: "1"` on both scope-matrix legs, and
+  `ArpUninstallStringTests` runs behind that, not vacuously — leaving five
+  still orphaned. See Section 4's updated V1 checklist item and
+  `00-GAP_REGISTER.md`'s R64 for the full toggle list and fix shape. **Do
+  not treat a green `wrapper-vm-tests.yml` run as proof of anything these
+  toggles claim to cover until R64 is closed alongside R58.**
+- **R65 — the committed lock files cover the Debug restore graph only.**
+  `EnableTrimAnalyzer`'s Release-conditioning makes a Release-configuration
+  restore inject `Microsoft.NET.ILLink.Tasks` and rewrite
+  `packages.lock.json`, which CI's Debug-only locked restore never exercises.
+  Not a G3 blocker on its own — filed so R23a's "reproducible" claim is scoped
+  honestly. See `00-GAP_REGISTER.md`'s R65 for the fix-shape choice.
+
+Also from PR #39: a stale comment in `WixClassInstallUninstallTests` that
+claimed `Setup.exe /Uninstall` is the ARP code path (it is not — that
+confusion is R58's whole subject) was corrected in-lane; no separate row.
+
+None of (a)–(g) below block G2. (b), (c) and (d) were found as a side effect of
 Task 3's R18 work (secrets off the elevated relaunch command line, landing in
 S5 #29) and are explicitly out of that task's scope; (e) comes from the final
 whole-plan review of REL #32. File them in `00-GAP_REGISTER.md` at the next

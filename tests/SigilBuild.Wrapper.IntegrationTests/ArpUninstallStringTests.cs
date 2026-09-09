@@ -5,6 +5,8 @@ using System.Runtime.Versioning;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.Win32;
+using SigilBuild.Core.Manifest;
+using SigilBuild.Wrapper.Engine;
 using Xunit;
 
 namespace SigilBuild.Wrapper.IntegrationTests;
@@ -91,7 +93,7 @@ public sealed class ArpUninstallStringTests
         }
         finally
         {
-            CleanupArp(appId);
+            Cleanup(appId);
         }
     }
 
@@ -207,11 +209,19 @@ install_steps:
         return key?.GetValue(valueName) as string;
     }
 
+    /// <summary>
+    /// Undo everything an install leaves outside the sandbox directory: the HKCU ARP
+    /// subtree AND the per-user state dir under <c>%LocalAppData%\Sigil\&lt;appId&gt;</c>,
+    /// which lives outside <see cref="VmSandbox"/>'s root and so survives its disposal.
+    /// A failed run must not leave residue on the runner for the next leg to trip over.
+    /// </summary>
     [SupportedOSPlatform("windows")]
-    private static void CleanupArp(string appId)
+    private static void Cleanup(string appId)
     {
 #pragma warning disable CA1031 // best-effort test cleanup
         try { Registry.CurrentUser.DeleteSubKeyTree($@"{UninstallRoot}\{appId}", throwOnMissingSubKey: false); }
+        catch { /* best-effort */ }
+        try { UninstallStateStore.Delete(appId, InstallScope.User); }
         catch { /* best-effort */ }
 #pragma warning restore CA1031
     }

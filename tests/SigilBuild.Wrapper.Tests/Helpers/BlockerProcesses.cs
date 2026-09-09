@@ -7,6 +7,72 @@ using System.Threading;
 namespace SigilBuild.Wrapper.Tests.Helpers;
 
 /// <summary>
+/// R58 — alternative spellings of one path, for asserting that the same-image check
+/// compares FILE IDENTITY and not strings. The production sides of that comparison come
+/// from two APIs with different conventions (<c>GetModuleFileNameW(NULL)</c> keeps the
+/// launch form; <c>QueryFullProcessImageNameW</c> canonicalises), so a string compare
+/// silently stops recognising the installer's own image.
+/// </summary>
+[SupportedOSPlatform("windows")]
+internal static class PathForms
+{
+    /// <summary>
+    /// The extended-length spelling (<c>\\?\C:\…</c>) — a different string for the same
+    /// file, on every volume, with no dependency on 8.3 generation being enabled.
+    /// </summary>
+    public static string Extended(string path) => @"\\?\" + Path.GetFullPath(path);
+
+    /// <summary>
+    /// The 8.3 short spelling, or <c>null</c> when this volume does not generate 8.3
+    /// aliases (common on non-system volumes) — the realistic production case, since
+    /// <c>/D=C:\PROGRA~1\Acme</c> makes the ARP row launch the uninstaller by short path.
+    /// Callers must treat <c>null</c> as "cannot be demonstrated on this volume" rather
+    /// than as a pass.
+    /// </summary>
+    /// <remarks>
+    /// Read via <c>cmd</c>'s <c>%~s</c> path modifier rather than <c>GetShortPathNameW</c>
+    /// on purpose: this test assembly does not enable <c>AllowUnsafeBlocks</c>, which
+    /// <c>[LibraryImport]</c> requires, and turning it on for one helper is a worse trade
+    /// than one short-lived subprocess in one test.
+    /// </remarks>
+    public static string? Short(string path)
+    {
+        var full = Path.GetFullPath(path);
+        var psi = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"))
+        {
+            // Arguments, not ArgumentList: .NET quotes list entries per
+            // CommandLineToArgvW (escaping inner quotes as \"), and cmd.exe does not
+            // parse that dialect — the `for` expression arrives mangled and silently
+            // yields nothing. A raw command line hands cmd exactly what it expects.
+            Arguments = $"/c for %I in (\"{full}\") do @echo %~sI",
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            WorkingDirectory = Path.GetTempPath(),
+        };
+
+        string output;
+        using (var p = Process.Start(psi))
+        {
+            if (p is null)
+            {
+                return null;
+            }
+            output = p.StandardOutput.ReadToEnd().Trim();
+            p.WaitForExit(15_000);
+        }
+
+        // Empty, unchanged, or (8.3 disabled) echoed back long — nothing to prove with.
+        if (output.Length == 0 || string.Equals(output, full, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+        return File.Exists(output) ? output : null;
+    }
+}
+
+/// <summary>
 /// R58 — a real, separate process that holds a data file open under a directory the
 /// files-in-use sweep will scan. The Restart Manager's positive control: after the R58
 /// self-exclusion, a blocker has to be somebody OTHER than the running installer for an

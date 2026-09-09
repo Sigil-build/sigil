@@ -38,11 +38,15 @@ public readonly record struct AppBlocker(string Name, uint ProcessId, bool FromM
 /// there is no force-kill fallback — both are explicit non-goals.
 /// </summary>
 /// <remarks>
-/// All interop is source-generated <c>[LibraryImport]</c> (Native-AOT safe). Every
+/// <para>All interop is source-generated <c>[LibraryImport]</c> (Native-AOT safe). Every
 /// probe is best-effort: on any RM failure the sweep reports no blockers rather than
 /// failing the install — a false "clear" degrades to the pre-P6 behaviour (the step
 /// engine surfaces the locked-file error and rolls back), whereas a false "blocked"
-/// would wedge a perfectly good install.
+/// would wedge a perfectly good install.</para>
+/// <para>R58: the one thing the RM sweep never reports is the installer itself — see
+/// <see cref="IsRunningInstallerProcess"/>. T15 runs the uninstaller from inside the
+/// directory this sweep registers, so without that exclusion the gate refused its own
+/// ARP <c>UninstallString</c>.</para>
 /// </remarks>
 public static partial class FilesInUse
 {
@@ -56,8 +60,9 @@ public static partial class FilesInUse
 
     /// <summary>
     /// Probe the declared mutexes and sweep <paramref name="installDir"/> with the
-    /// Restart Manager. Returns every distinct blocker found (empty = clear). Never
-    /// throws; always empty off Windows.
+    /// Restart Manager. Returns every distinct blocker found (empty = clear) — never
+    /// this installer's own process (R58, see <see cref="IsRunningInstallerProcess"/>).
+    /// Never throws; always empty off Windows.
     /// </summary>
     public static IReadOnlyList<AppBlocker> Scan(IReadOnlyList<string>? appMutexes, string? installDir)
     {
@@ -243,16 +248,137 @@ public static partial class FilesInUse
             return blockers;
         }
 
+        // R58: resolved once, not per entry — the blocker list is short but the lookup
+        // is two syscalls.
+        var selfImage = SelfImagePath();
+
         for (var i = 0; i < count; i++)
         {
+            var pid = infos[i].Process.dwProcessId;
+
+            // R58 — the running installer is never a blocker of ITSELF. T15's
+            // survivability design copies the running setup image into the install
+            // directory as `uninstall.exe` and ARP's UninstallString points at that copy,
+            // so the uninstaller executes from INSIDE the very directory this sweep
+            // registers. The Restart Manager duly reported the uninstaller's own image
+            // and the P6 gate refused its own ARP entry with exit 4 —
+            // "blocked by: installer (pid N)", N being its own pid — before touching
+            // anything, and /closeapps could not rescue it because the Restart Manager
+            // cannot close its own caller. The uninstaller's image is not the gate's
+            // problem: it is deleted by the reboot-scheduled MoveFileEx that T15 relies
+            // on (RollbackRecord.RemoveUninstaller / SelfDelete), never by closing an
+            // application. This is the ONLY exclusion — a third-party process holding
+            // anything under the install directory is still a blocker, including an app
+            // whose own image lives there, which is the case the gate exists for.
+            if (IsRunningInstallerProcess(pid, selfImage))
+            {
+                continue;
+            }
+
             var name = ReadFixed(infos[i].strAppName);
             if (string.IsNullOrWhiteSpace(name))
             {
-                name = $"pid {infos[i].Process.dwProcessId}";
+                name = $"pid {pid}";
             }
-            blockers.Add(new AppBlocker(name, infos[i].Process.dwProcessId, FromMutex: false));
+            blockers.Add(new AppBlocker(name, pid, FromMutex: false));
         }
         return blockers;
+    }
+
+    /// <summary>
+    /// R58 — true when <paramref name="processId"/> is this very process, or another
+    /// process running this installer's own executable image. Both are the installer
+    /// itself and neither can be a blocker of its own run; everything else is.
+    /// </summary>
+    /// <remarks>
+    /// <para>The second case is T12's self-elevation, not paranoia. A machine-scope ARP
+    /// uninstall runs <c>&lt;install_dir&gt;\uninstall.exe /S /Uninstall /allusers</c>
+    /// un-elevated, and <see cref="Elevation.RelaunchElevatedAndWait"/> relaunches THE
+    /// SAME IMAGE elevated and then sits in <c>WaitForSingleObject</c> until the child
+    /// exits. So while the elevated child runs this gate, its un-elevated parent is
+    /// still alive with <c>&lt;install_dir&gt;\uninstall.exe</c> loaded as its image —
+    /// and the Restart Manager reports a process for a loaded image alone, with no data
+    /// file open (asserted in <c>FilesInUseTests</c>). Excluding only the child's own pid
+    /// would therefore have left every <c>/allusers</c> ARP uninstall blocked on its own
+    /// parent.</para>
+    /// <para>The match is on the image PATH, deliberately not on "is an ancestor of
+    /// mine": <c>uninstall.exe</c> is commonly launched from Explorer, and Explorer very
+    /// plausibly holds a handle under the install directory, so excluding the parent
+    /// process as such would silently disarm the gate for a real blocker. Only a process
+    /// running the identical image file is skipped, and the single-instance guard
+    /// (<see cref="SetupInstanceLock"/>) is what refuses genuinely concurrent installer
+    /// instances — that is not this gate's job.</para>
+    /// <para>Fails CLOSED: when the image path cannot be resolved (the process exited,
+    /// or is not openable) the blocker is kept.</para>
+    /// </remarks>
+    [SupportedOSPlatform("windows")]
+    internal static bool IsRunningInstallerProcess(uint processId, string? selfImagePath)
+    {
+        if (processId == (uint)Environment.ProcessId)
+        {
+            return true;
+        }
+        if (string.IsNullOrEmpty(selfImagePath))
+        {
+            return false;
+        }
+
+        var image = TryGetProcessImagePath(processId);
+        return image is not null
+            && string.Equals(image, selfImagePath, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// This process's own executable image path, or <c>null</c> when it is unavailable
+    /// (in which case only the pid check applies).
+    /// </summary>
+    private static string? SelfImagePath()
+    {
+        var path = Environment.ProcessPath;
+        return string.IsNullOrEmpty(path) ? null : path;
+    }
+
+    /// <summary>
+    /// R58 — the full image path of another process, or <c>null</c> when it cannot be
+    /// determined. Used only to recognise this installer's own image (see
+    /// <see cref="IsRunningInstallerProcess"/>).
+    /// </summary>
+    /// <remarks>
+    /// <c>PROCESS_QUERY_LIMITED_INFORMATION</c> is the least privilege that answers this
+    /// and is available across integrity levels, which matters because the elevated
+    /// child asks about its un-elevated parent. Best-effort like every other probe here:
+    /// a failure returns <c>null</c> and the caller keeps the blocker.
+    /// </remarks>
+    [SupportedOSPlatform("windows")]
+    internal static string? TryGetProcessImagePath(uint processId)
+    {
+        if (processId == 0)
+        {
+            return null;
+        }
+
+        var handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, bInheritHandle: false, processId);
+        if (handle == IntPtr.Zero)
+        {
+            return null;
+        }
+        try
+        {
+            // Sized for an extended-length path so the call cannot fail for length
+            // alone; this runs only for a reported blocker, never per registered file.
+            var buffer = new char[MaxExtendedPathChars];
+            var view = MemoryMarshal.Cast<char, ushort>(buffer.AsSpan());
+            var size = (uint)buffer.Length;
+            if (!QueryFullProcessImageNameW(handle, 0, ref view[0], ref size) || size == 0)
+            {
+                return null;
+            }
+            return new string(buffer, 0, (int)size);
+        }
+        finally
+        {
+            CloseHandle(handle);
+        }
     }
 
     /// <summary>
@@ -302,6 +428,10 @@ public static partial class FilesInUse
     private const int ERROR_SUCCESS = 0;
     private const int ERROR_MORE_DATA = 234;
     private const uint SYNCHRONIZE = 0x00100000;
+    private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+
+    /// <summary>Extended-length path ceiling (<c>\\?\</c> form), in chars.</summary>
+    private const int MaxExtendedPathChars = 32768;
 
     // Every RM struct below is kept FULLY BLITTABLE (no bool, no marshalled types):
     // that is what lets [LibraryImport] pass the arrays with no runtime marshaller,
@@ -387,6 +517,21 @@ public static partial class FilesInUse
     [SupportedOSPlatform("windows")]
     [LibraryImport("kernel32.dll", EntryPoint = "OpenMutexW", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
     private static partial IntPtr OpenMutexW(uint dwDesiredAccess, [MarshalAs(UnmanagedType.Bool)] bool bInheritHandle, string lpName);
+
+    [SupportedOSPlatform("windows")]
+    [LibraryImport("kernel32.dll", EntryPoint = "OpenProcess", SetLastError = true)]
+    private static partial IntPtr OpenProcess(
+        uint dwDesiredAccess, [MarshalAs(UnmanagedType.Bool)] bool bInheritHandle, uint dwProcessId);
+
+    [SupportedOSPlatform("windows")]
+    // lpExeName is an OUT buffer and lpdwSize an in/out char count, so this takes a
+    // `ref` into a caller-allocated char[] rather than a managed string — the same
+    // discipline (and the same `ref ushort` spelling, since `ref char` would demand
+    // DisableRuntimeMarshalling assembly-wide) as RmStartSession above.
+    [LibraryImport("kernel32.dll", EntryPoint = "QueryFullProcessImageNameW", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool QueryFullProcessImageNameW(
+        IntPtr hProcess, uint dwFlags, ref ushort lpExeName, ref uint lpdwSize);
 
     [SupportedOSPlatform("windows")]
     [LibraryImport("kernel32.dll", SetLastError = true)]

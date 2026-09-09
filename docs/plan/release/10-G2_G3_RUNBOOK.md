@@ -8,6 +8,7 @@ Nothing here can be automated away by another agent pass.
 ## 1. Merge chain (strict checks force this to be serial)
 
 Order: **S4 [#28](https://github.com/Sigil-build/sigil/pull/28) →
+**hotfix [#36](https://github.com/Sigil-build/sigil/pull/36) (R1 test fixture — the RC is red at `3e94b8b` without it; merge BEFORE S5)** →
 S5 [#29](https://github.com/Sigil-build/sigil/pull/29) →
 S6 [#30](https://github.com/Sigil-build/sigil/pull/30) →
 S7 [#31](https://github.com/Sigil-build/sigil/pull/31) →
@@ -40,6 +41,13 @@ AOT toolchain. Treat these numbers as "the chain is structurally sound," not
 as a substitute for green CI on each PR.
 
 Two known rebase traps:
+
+**Trap 0 — the RC went red the moment S4 landed.** `CreateHardened` creates missing
+ancestors with the same admin-only DACL, so the first machine-scope call on a
+fresh runner hardens the shared `%ProgramData%\Sigil` root and the R1 plant
+fixture's precondition ("the planted directory is attacker-writable") fails
+for every later test. #36 makes the fixture grant `BUILTIN\Users` write
+explicitly. Merge #36 first; every later lane is rebased onto it.
 
 **Trap 1 — S7 rides S5.** PR #31 (S7) is stacked only on S5's branch — S4,
 S5, and S6 are independent branches off the RC, and S4 is not an ancestor of

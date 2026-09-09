@@ -727,8 +727,7 @@ public sealed class FilesInUseTests
         Environment.SetEnvironmentVariable(SetupInstanceLock.HandoffVariable, RealParentHandoff(name));
         try
         {
-            var child = SetupInstanceLock.TryAcquire(
-                appId, InstallScope.User, WrapperMode.Uninstall, out var refusal);
+            var child = AcquireAsChild(appId, WrapperMode.Uninstall, out var refusal);
 
             child.Should().NotBeNull(
                 "the installer's own teardown child must not be refused as a stranger — " +
@@ -757,8 +756,7 @@ public sealed class FilesInUseTests
         using var installer = SetupInstanceLock.TryAcquire(appId, InstallScope.User);
         installer.Should().NotBeNull();
 
-        var child = SetupInstanceLock.TryAcquire(
-            appId, InstallScope.User, WrapperMode.Uninstall, out var refusal);
+        var child = AcquireAsChild(appId, WrapperMode.Uninstall, out var refusal);
 
         child.Should().BeNull();
         refusal.Should().Be(SetupInstanceLock.SetupLockRefusal.AnotherInstanceRunning);
@@ -838,8 +836,7 @@ public sealed class FilesInUseTests
         Environment.SetEnvironmentVariable(SetupInstanceLock.HandoffVariable, RealParentHandoff(name));
         try
         {
-            var second = SetupInstanceLock.TryAcquire(
-                appId, InstallScope.User, WrapperMode.Install, out var refusal);
+            var second = AcquireAsChild(appId, WrapperMode.Install, out var refusal);
 
             second.Should().BeNull("an install is never the teardown child");
             refusal.Should().Be(SetupInstanceLock.SetupLockRefusal.AnotherInstanceRunning);
@@ -869,8 +866,7 @@ public sealed class FilesInUseTests
         Environment.SetEnvironmentVariable(SetupInstanceLock.HandoffVariable, RealParentHandoff(name));
         try
         {
-            var child = SetupInstanceLock.TryAcquire(
-                appId, InstallScope.User, WrapperMode.Uninstall, out var refusal);
+            var child = AcquireAsChild(appId, WrapperMode.Uninstall, out var refusal);
 
             child.Should().BeNull("R34's fail-closed branch stays closed");
             refusal.Should().Be(SetupInstanceLock.SetupLockRefusal.NameNotAvailable);
@@ -898,8 +894,7 @@ public sealed class FilesInUseTests
         Environment.SetEnvironmentVariable(SetupInstanceLock.HandoffVariable, RealParentHandoff(name));
         try
         {
-            using var child = SetupInstanceLock.TryAcquire(
-                appId, InstallScope.User, WrapperMode.Uninstall, out _);
+            using var child = AcquireAsChild(appId, WrapperMode.Uninstall, out _);
 
             child.Should().NotBeNull();
             child!.OwnsTheGuard.Should().BeFalse();
@@ -910,6 +905,55 @@ public sealed class FilesInUseTests
             Environment.SetEnvironmentVariable(SetupInstanceLock.HandoffVariable, null);
         }
     }
+
+    /// <summary>
+    /// R76 — the guard name carries the scope, so a token minted for one scope must not
+    /// admit the other. This is what makes "machine scope is the same code with a
+    /// <c>Global\</c> name" a tested claim rather than an inspected one: the elevated
+    /// shape reaches the identical check, and a per-user token cannot cross into it.
+    /// </summary>
+    /// <remarks>
+    /// Pure verification — no mutex is created, so the machine-scope half needs no
+    /// elevation and no <c>Global\</c> name (creating one needs
+    /// <c>SeCreateGlobalPrivilege</c>; deriving one needs nothing). Both directions are
+    /// asserted, each against its own positive control, so a refusal cannot be passing
+    /// for the wrong reason.
+    /// </remarks>
+    [WindowsFact]
+    public void A_handoff_is_bound_to_the_scope_it_was_minted_for()
+    {
+        var appId = "com.acme.p6scope-" + Guid.NewGuid().ToString("N");
+        var userName = SetupInstanceLock.NameFor(appId, InstallScope.User);
+        var machineName = SetupInstanceLock.NameFor(appId, InstallScope.Machine);
+        machineName.Should().StartWith("Global\\").And.NotBe(userName);
+
+        SetupInstanceLock.TryGetParentProcessId(out var ppid).Should().BeTrue();
+        SetupInstanceLock.TryGetProcessCreationTime(ppid, out var created).Should().BeTrue();
+
+        var userToken = SetupInstanceLock.FormatHandoff(ppid, created, userName);
+        var machineToken = SetupInstanceLock.FormatHandoff(ppid, created, machineName);
+
+        SetupInstanceLock.HandoffAdmits(userToken, userName)
+            .Should().BeTrue("control: the user-scope token admits its own guard");
+        SetupInstanceLock.HandoffAdmits(machineToken, machineName)
+            .Should().BeTrue("control: the machine-scope token admits its own guard");
+
+        SetupInstanceLock.HandoffAdmits(userToken, machineName)
+            .Should().BeFalse("a per-user handoff must not admit an elevated machine-scope run");
+        SetupInstanceLock.HandoffAdmits(machineToken, userName)
+            .Should().BeFalse("a machine-scope handoff must not admit a per-user run");
+    }
+
+    /// <summary>
+    /// What a spawned child actually does: consume the token its parent left on the
+    /// environment, then take the guard with it. The consume happens at the top of
+    /// <c>Main</c> in production (before the elevation branch); the ordering relative to
+    /// the acquisition is what these tests reproduce.
+    /// </summary>
+    private static SetupInstanceLock? AcquireAsChild(
+        string appId, WrapperMode mode, out SetupInstanceLock.SetupLockRefusal refusal)
+        => SetupInstanceLock.TryAcquire(
+            appId, InstallScope.User, mode, SetupInstanceLock.ConsumeHandoffToken(), out refusal);
 
     /// <summary>
     /// A handoff naming this process's REAL parent — the shape a spawned child sees,

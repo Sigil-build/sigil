@@ -58,6 +58,13 @@ public static partial class Program
             InstallerLog.Info(session.LanguageConflictNote);
         }
 
+        // R76: read the single-instance handoff and CLEAR it here — before the elevation
+        // branch below, which is the first thing this process can spawn. The guard is
+        // taken further down (after that branch, P6's rule) and the token is handed to
+        // it then. Read once, at the top, so no child of this process can ever inherit
+        // an admission it was not given.
+        var lockHandoff = SetupInstanceLock.ConsumeHandoffToken();
+
         // T12 — self-elevation. This MUST run before any scope-requiring work
         // (payload extraction, HKLM/Program Files writes) and before the T18 GUI
         // native bootstrap below. The host manifest requests `asInvoker`, so a
@@ -119,7 +126,7 @@ public static partial class Program
         // (SetupInstanceLock.HandoffAdmits); an ordinary second Setup.exe is refused
         // exactly as before.
         using var instanceLock = SetupInstanceLock.TryAcquire(
-            session.AppId, session.ResolvedScope, session.Mode, out var lockRefusal);
+            session.AppId, session.ResolvedScope, session.Mode, lockHandoff, out var lockRefusal);
         if (lockRefusal != SetupInstanceLock.SetupLockRefusal.None)
         {
             // R34: record which branch was taken, in the always-on diagnostic log and

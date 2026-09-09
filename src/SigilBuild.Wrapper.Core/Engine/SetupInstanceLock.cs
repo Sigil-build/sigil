@@ -35,13 +35,18 @@ using SigilBuild.Wrapper.Cli;
 /// derives the same app+scope name and, until R76, was refused as a second instance,
 /// failing every unelevated per-user upgrade with exit 5 and installing nothing. The
 /// installer therefore hands that one child an explicit handoff naming itself; the
-/// child admits it only after the OS confirms the claim. The whole verification, and
-/// what it is and is not proof of, is on <see cref="HandoffAdmits"/>. Both scopes are
+/// child admits it only after the OS confirms what it can confirm. Both scopes are
 /// covered: the elevated machine-scope shape is the same code with a <c>Global\</c>
-/// name. Note that this narrows nothing for a stranger — a second Setup.exe run by
-/// hand still meets <see cref="SetupLockRefusal.AnotherInstanceRunning"/>, and R34's
-/// fail-closed <see cref="SetupLockRefusal.NameNotAvailable"/> branch is not rescuable
-/// by any handoff.
+/// name. What that check is and is not proof of is set out on
+/// <see cref="HandoffAdmits"/>, and the short version belongs here too: it does NOT
+/// establish that the minter holds the mutex — only that our real parent asserts it
+/// spawned us for a teardown of this one app+scope, so what gets admitted is an
+/// uninstall run under the same user, which already owns the state this guard
+/// protects. A second Setup.exe launched BY HAND still meets
+/// <see cref="SetupLockRefusal.AnotherInstanceRunning"/> and still exits 5; an install
+/// is refused even with a valid token; and R34's fail-closed
+/// <see cref="SetupLockRefusal.NameNotAvailable"/> branch is not rescuable by any
+/// handoff.
 /// </para>
 /// </remarks>
 public sealed partial class SetupInstanceLock : IDisposable
@@ -117,13 +122,27 @@ public sealed partial class SetupInstanceLock : IDisposable
         GuardUnavailable = 3,
 
         /// <summary>
-        /// R76 — the name is held, and the holder is the installer that SPAWNED this
-        /// process for the P3 upgrade teardown. The run proceeds inside the parent's
-        /// critical section (the parent is blocked in <c>WaitForExit</c> for its whole
-        /// duration), so exclusivity is unbroken: a stranger still meets
-        /// <see cref="AnotherInstanceRunning"/>. Reached only via a valid handoff — see
-        /// <see cref="HandoffAdmits"/>.
+        /// R76 — the name is held, and this process's REAL parent asserted, with a token
+        /// naming this exact guard, that it spawned us for the P3 upgrade teardown.
         /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>Say exactly what that is worth.</b> Nothing here proves the minter is the
+        /// process HOLDING the mutex — a named mutex has existence, not an owner
+        /// identity, so a process holding no lock at all can mint a token for its own
+        /// child while a different process holds the name. What the checks do establish
+        /// is that the admitted process is an <em>uninstall</em> run, spawned by a live
+        /// parent that named this one app+scope, under the same user — the user that
+        /// already owns the install directory, the state store and the ARP row this
+        /// guard protects, and can corrupt them directly without any of this. A second
+        /// Setup.exe launched BY HAND still meets
+        /// <see cref="AnotherInstanceRunning"/> and still exits 5, and an
+        /// <see cref="Cli.WrapperMode.Install"/> run is refused even holding a valid
+        /// token. In the real path the parent is blocked in <c>WaitForExit</c> for the
+        /// child's whole duration, so the teardown runs inside its critical section.
+        /// The full analysis is on <see cref="HandoffAdmits"/>.
+        /// </para>
+        /// </remarks>
         AdmittedByParentInstaller = 4,
     }
 
@@ -154,22 +173,32 @@ public sealed partial class SetupInstanceLock : IDisposable
     /// </summary>
     public static SetupInstanceLock? TryAcquire(
         string appId, InstallScope scope, out SetupLockRefusal refusal)
-        => TryAcquire(appId, scope, WrapperMode.Install, out refusal);
+        => TryAcquire(appId, scope, WrapperMode.Install, handoff: null, out refusal);
 
     /// <summary>
     /// As <see cref="TryAcquire(string, InstallScope, out SetupLockRefusal)"/>, but able
-    /// to accept the R76 parent handoff — which is why it needs the run's
-    /// <paramref name="mode"/>. BOTH entry points must call this overload; the
-    /// mode-less ones exist for callers that can never be a teardown child.
+    /// to accept the R76 parent <paramref name="handoff"/> — which is why it also needs
+    /// the run's <paramref name="mode"/>. BOTH entry points must call this overload; the
+    /// shorter ones exist for callers that can never be a teardown child.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The handoff is honoured for <see cref="WrapperMode.Uninstall"/> ONLY. That is
     /// what the parent spawns (<c>uninstall.exe /S /Uninstall &lt;scope&gt;</c>), and
     /// restricting it there means no handoff — valid, stale or forged — can ever admit a
     /// second concurrent <em>install</em> of an application.
+    /// </para>
+    /// <para>
+    /// The token is passed IN rather than read here, because the entry point must
+    /// <see cref="ConsumeHandoffToken"/> before the elevation branch — i.e. before this
+    /// process can spawn anything at all — and this call happens after it. Passing it
+    /// through keeps "read once, clear immediately" a property of the process rather
+    /// than of this method.
+    /// </para>
     /// </remarks>
     public static SetupInstanceLock? TryAcquire(
-        string appId, InstallScope scope, WrapperMode mode, out SetupLockRefusal refusal)
+        string appId, InstallScope scope, WrapperMode mode, string? handoff,
+        out SetupLockRefusal refusal)
     {
         var name = NameFor(appId, scope);
         if (!OperatingSystem.IsWindows())
@@ -178,9 +207,6 @@ public sealed partial class SetupInstanceLock : IDisposable
             return new SetupInstanceLock(IntPtr.Zero, name, owns: false);
         }
 
-        // Read AND clear, whatever happens next: the token must not survive into
-        // anything this process itself spawns (hooks, prerequisites, a re-exec).
-        var handoff = ConsumeHandoffToken();
         return TryAcquireWindows(
             name, mode == WrapperMode.Uninstall ? handoff : null, out refusal);
     }
@@ -277,6 +303,16 @@ public sealed partial class SetupInstanceLock : IDisposable
     /// Read the handoff token out of the environment and REMOVE it, so that whatever
     /// this process goes on to spawn does not inherit an admission it was never given.
     /// </summary>
+    /// <remarks>
+    /// Both entry points call this ONCE, at the top of <c>Main</c>, <b>before</b> the
+    /// self-elevation branch — the first thing either of them can spawn is the elevated
+    /// relaunch of itself, and a token still sitting in the environment at that point
+    /// would be a token the parent never meant to hand to that child. (It could not
+    /// admit it today, because an elevated relaunch only happens for a machine-scope run
+    /// whose guard name differs from the user-scope one the token would name — but that
+    /// is a fact about two other pieces of code, and not one worth depending on.) Not
+    /// platform-gated: the environment is the environment everywhere.
+    /// </remarks>
     internal static string? ConsumeHandoffToken()
     {
         var token = Environment.GetEnvironmentVariable(HandoffVariable);
@@ -328,9 +364,14 @@ public sealed partial class SetupInstanceLock : IDisposable
     /// <b>What this deliberately does NOT claim.</b> The token carries no secret — pid,
     /// creation time and the guard name are all public — and secrecy would buy nothing,
     /// because the appId that derives the name is public too. Its strength is the
-    /// binding above, not confidentiality. The residual: a process that itself launches
-    /// a setup process can name ITSELF as the parent and get its child admitted
-    /// alongside a running install of that one app. In user scope that grants nothing —
+    /// binding above, not confidentiality. And the binding stops short of one thing
+    /// worth naming precisely, because a mutex cannot answer it: <b>the minter is never
+    /// shown to be the HOLDER</b>. A process holding no lock at all can mint a token for
+    /// its own child while some other process holds the name, and that child — if it is
+    /// an uninstall of that same app+scope — is admitted. So the residual is: a process
+    /// that itself launches a setup process can name ITSELF as the parent and get its
+    /// own uninstall child admitted alongside a running install of that one app. In user
+    /// scope that grants nothing —
     /// the attacker is the same user, who already owns the install directory, the state
     /// store and the HKCU ARP row, and can corrupt them directly (the same reasoning as
     /// <c>InstallSession.PriorUninstallerNeedsTrust</c>). Across the privilege boundary

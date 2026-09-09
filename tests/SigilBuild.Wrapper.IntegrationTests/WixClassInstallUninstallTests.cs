@@ -46,26 +46,29 @@ using Xunit;
 /// </remarks>
 public class WixClassInstallUninstallTests
 {
-    private const string ManifestRel = "examples/exe-wrapper/hello-desktop-app/sigil.yaml";
+    internal const string ManifestRel = "examples/exe-wrapper/hello-desktop-app/sigil.yaml";
     private const string RegistrySubKey = "Software\\HelloDesktopApp";
 
-    private static string FindManifest()
-    {
-        var dir = AppContext.BaseDirectory;
-        while (dir is not null)
-        {
-            if (File.Exists(Path.Combine(dir, "Sigil.slnx")))
-            {
-                break;
-            }
-            dir = Path.GetDirectoryName(dir);
-        }
-        if (dir is null)
-        {
-            throw new InvalidOperationException("could not locate Sigil.slnx");
-        }
-        return Path.Combine(dir, ManifestRel.Replace('/', Path.DirectorySeparatorChar));
-    }
+    internal static string FindManifest() => Sigil.RepoPath(ManifestRel);
+
+    /// <summary>
+    /// The argv this leg installs with — the single definition the always-on
+    /// <see cref="VmFixtureManifestTests"/> parses through the REAL
+    /// <c>CommandLineParser</c> so a grammar drift fails in every CI run.
+    /// </summary>
+    /// <remarks>
+    /// R66: this used to be <c>/install_dir=&lt;dir&gt; /registered_user=alice</c>.
+    /// Neither is a token in the wrapper's closed grammar — the install dir is
+    /// <c>/D=</c> and a declared parameter is <c>/P&lt;name&gt;=</c> — so this leg died
+    /// with a <c>UsageException</c> (exit <b>64</b>) on the first real VM run, before
+    /// anything was installed and therefore long before the snapshot diff it exists to
+    /// assert.
+    /// </remarks>
+    internal static string[] SilentInstallArgs(string installDir) =>
+        new[] { "/S", "/D=" + installDir, "/Pregistered_user=alice" };
+
+    /// <summary>The argv this leg uninstalls with (see the comment at the call site).</summary>
+    internal static string[] SilentUninstallArgs() => new[] { "/S", "/Uninstall" };
 
     /// <summary>
     /// Copy the example (manifest + <c>payload/</c>, which <c>build.source: ./payload</c>
@@ -152,11 +155,7 @@ public class WixClassInstallUninstallTests
         // Pre-install snapshot — file root doesn't exist yet, registry subtree doesn't exist yet.
         var before = SnapshotDiffer.Take(installDir, RegistrySubKey);
 
-        var rcInstall = await sandbox.RunAsync(
-            setupExe,
-            "/S",
-            $"/install_dir={installDir}",
-            "/registered_user=alice");
+        var rcInstall = await sandbox.RunAsync(setupExe, SilentInstallArgs(installDir));
         rcInstall.Should().Be(0, "install must succeed");
 
         var afterInstall = SnapshotDiffer.Take(installDir, RegistrySubKey);
@@ -172,7 +171,7 @@ public class WixClassInstallUninstallTests
         // the original setup exe lives OUTSIDE install_dir, so it never meets the P6
         // files-in-use gate that the dropped uninstall.exe always meets from within.
         // ArpUninstallStringTests covers the registered string itself.
-        var rcUninstall = await sandbox.RunAsync(setupExe, "/S", "/Uninstall");
+        var rcUninstall = await sandbox.RunAsync(setupExe, SilentUninstallArgs());
         rcUninstall.Should().Be(0, "uninstall must succeed");
 
         var afterUninstall = SnapshotDiffer.Take(installDir, RegistrySubKey);

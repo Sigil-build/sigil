@@ -102,6 +102,67 @@ public sealed class PrerequisiteInstallTests
     }
 
     /// <summary>
+    /// A schema-valid app id for one run. R66: the id used to be
+    /// <c>"com.sigil.p5." + Guid("N")</c>, whose trailing hex segment usually starts
+    /// with a digit, which <c>app.id</c>'s letter-led-segment pattern rejects — the
+    /// manifest never reached the packer on the first real VM run. The <c>r</c> prefix
+    /// fixes the segment; hex digits are otherwise pattern-legal.
+    /// </summary>
+    internal static string AppIdFor(string id) => "com.sigil.p5.r" + id;
+
+    /// <summary>
+    /// Build the fixture manifest YAML. Pure: no sandbox, no disk, no packer — so the
+    /// always-on <see cref="VmFixtureManifestTests"/> can validate the exact string
+    /// this VM leg packs without a staged runtime (register row R66).
+    /// </summary>
+    internal static string BuildManifestYaml(
+        string id, string detectKey, int exitCode, string exitCodesOk)
+    {
+        // reg add HKCU\<detectKey> /v Installed /d 1 /f  — no spaces/quotes in the key.
+        var cmdArg = $"reg add HKCU\\{detectKey} /v Installed /d 1 /f & exit /b {exitCode}";
+        var detectExpr = $"registry_exists('HKCU', '{detectKey}', 'Installed')";
+
+        // R66: `detectKey` and `cmdArg` both carry single backslashes, and both used to
+        // be interpolated into DOUBLE-quoted YAML scalars, where `\S` is an unknown
+        // escape — "While scanning a quoted scalar, found unknown escape character",
+        // the error that killed all three of these legs on the first real VM run.
+        // Sigil.YamlQuote emits single-quoted scalars, which have no escapes at all
+        // (it doubles the apostrophes the detect expression itself contains).
+        // $$ raw string: {{...}} interpolates, single braces ({install_dir}) are literal.
+        return $$"""
+spec: v1.0
+
+app:
+  id: {{AppIdFor(id)}}
+  name: SigilP5Fixture
+  version: 1.0.0
+  publisher: SigilBuild
+
+build:
+  source: ./payload
+
+package:
+  formats: [exe]
+  architectures: [x64]
+
+installer:
+  scope: auto
+  prerequisites:
+    - name: 'Fake Redist'
+      detect: {{Sigil.YamlQuote(detectExpr)}}
+      source: 'payload://prereq/fake.exe'
+      args: ['/c', {{Sigil.YamlQuote(cmdArg)}}]
+      exit_codes_ok: {{exitCodesOk}}
+
+install_steps:
+  - id: copy-app
+    type: file_copy
+    from: 'payload://app.txt'
+    to: '{install_dir}\app.txt'
+""";
+    }
+
+    /// <summary>
     /// Write a fixture: a payload with an <c>app.txt</c> and a bundled copy of
     /// <c>cmd.exe</c> as the fake prerequisite, plus a manifest whose prerequisite runs
     /// that cmd to <c>reg add</c> the detect value (no path quoting) and exit with
@@ -121,42 +182,10 @@ public sealed class PrerequisiteInstallTests
         var cmd = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe");
         File.Copy(cmd, Path.Combine(prereqDir, "fake.exe"));
 
-        // reg add HKCU\<detectKey> /v Installed /d 1 /f  — no spaces/quotes in the key.
-        var cmdArg = $"reg add HKCU\\{detectKey} /v Installed /d 1 /f & exit /b {exitCode}";
-
-        var manifest = $$"""
-spec: v1.0
-
-app:
-  id: com.sigil.p5.{{id}}
-  name: SigilP5Fixture
-  version: 1.0.0
-  publisher: SigilBuild
-
-build:
-  source: ./payload
-
-package:
-  formats: [exe]
-  architectures: [x64]
-
-installer:
-  scope: auto
-  prerequisites:
-    - name: "Fake Redist"
-      detect: "registry_exists('HKCU', '{{detectKey}}', 'Installed')"
-      source: "payload://prereq/fake.exe"
-      args: ["/c", "{{cmdArg}}"]
-      exit_codes_ok: {{exitCodesOk}}
-
-install_steps:
-  - id: copy-app
-    type: file_copy
-    from: "payload://app.txt"
-    to: "{install_dir}\\app.txt"
-""";
         var manifestPath = Path.Combine(fixtureDir, "sigil.yaml");
-        await File.WriteAllTextAsync(manifestPath, manifest).ConfigureAwait(false);
+        await File.WriteAllTextAsync(
+                manifestPath, BuildManifestYaml(id, detectKey, exitCode, exitCodesOk))
+            .ConfigureAwait(false);
 
         var outDir = Path.Combine(fixtureDir, "out");
         return await Sigil.PackAsync(manifestPath, outDir).ConfigureAwait(false);

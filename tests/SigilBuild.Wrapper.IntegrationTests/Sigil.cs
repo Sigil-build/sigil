@@ -56,4 +56,60 @@ internal static class Sigil
         }
         return result.Artifact.Path;
     }
+
+    /// <summary>
+    /// Emit <paramref name="value"/> as a YAML <b>single-quoted</b> scalar — the one
+    /// quoting style in which a Windows path is safe to interpolate.
+    /// </summary>
+    /// <remarks>
+    /// <para>Register row <b>R66</b>. Every fixture writer in this project used to
+    /// interpolate paths and registry keys into <em>double</em>-quoted scalars
+    /// (<c>detect: "registry_exists('HKCU', '{key}', 'Installed')"</c>). In a
+    /// double-quoted YAML scalar <c>\</c> is an escape character, so
+    /// <c>Software\SigilPrereqTest\…</c> is read as the escapes <c>\S</c> and
+    /// <c>\s</c> and the parse dies with <em>"While scanning a quoted scalar, found
+    /// unknown escape character"</em> — which is exactly how the first real VM run
+    /// failed, on a runner whose temp root is <c>D:\a\_temp\…</c>. Some writers
+    /// hand-doubled the backslashes instead, which works but has to be remembered at
+    /// every call site, and was not.</para>
+    /// <para>In a single-quoted scalar there are no escapes at all: the only special
+    /// sequence is <c>''</c> for a literal apostrophe. So doubling apostrophes is the
+    /// complete encoding, backslashes need no treatment, and a value that would
+    /// otherwise look like a YAML token (<c>{install_dir}</c>, <c>*</c>, <c>&amp;</c>,
+    /// a leading digit) stays a plain string. Every interpolated scalar in this
+    /// project's fixtures goes through here.</para>
+    /// </remarks>
+    public static string YamlQuote(string value)
+    {
+        System.ArgumentNullException.ThrowIfNull(value);
+        return "'" + value.Replace("'", "''", System.StringComparison.Ordinal) + "'";
+    }
+
+    /// <summary>
+    /// Walk up from the test assembly's location to the directory holding
+    /// <c>Sigil.slnx</c> — the repo root the on-disk fixtures and shipped examples are
+    /// addressed from.
+    /// </summary>
+    public static string RepoRoot()
+    {
+        var dir = System.AppContext.BaseDirectory;
+        while (dir is not null)
+        {
+            if (File.Exists(Path.Combine(dir, "Sigil.slnx")))
+            {
+                return dir;
+            }
+            dir = Path.GetDirectoryName(dir);
+        }
+        throw new System.InvalidOperationException("could not locate Sigil.slnx");
+    }
+
+    /// <summary>
+    /// Resolve a repo-relative path (forward slashes) against <see cref="RepoRoot"/>.
+    /// </summary>
+    public static string RepoPath(string relative)
+    {
+        System.ArgumentNullException.ThrowIfNull(relative);
+        return Path.Combine(RepoRoot(), relative.Replace('/', Path.DirectorySeparatorChar));
+    }
 }

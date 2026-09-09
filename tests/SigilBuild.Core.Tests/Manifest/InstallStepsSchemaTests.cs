@@ -141,6 +141,11 @@ public class InstallStepsSchemaTests
             install_steps:
               - id: cp
                 type: file_copy
+                # R59: `payload/**` (no scheme) is deliberate here and must NOT be
+                # "corrected" to `payload://**` — this test asserts the schema accepts
+                # any string for `from:`, which is exactly why R59 could not be caught
+                # by validation. The scheme is a runtime resolution rule
+                # (StepContext.ResolvePath), not a schema constraint.
                 from: payload/**
                 to: C:\\App
               - id: mk

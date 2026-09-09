@@ -33,8 +33,8 @@ hooks and prerequisites that run around it — see below).
 
 | Inno directive | Sigil equivalent | Notes |
 |---|---|---|
-| `Source: "..."; DestDir: "{app}"` | `file_copy` step (`from` / `to`) | `from` is relative to the packed `payload/` directory; `to` is the destination, created if missing. |
-| `Flags: recursesubdirs` | `from: payload/**` | `**` recurses; `*.ext` (no `**`) is non-recursive, matching the guide's glob semantics. |
+| `Source: "..."; DestDir: "{app}"` | `file_copy` step (`from` / `to`) | `from` must start with the `payload://` scheme to be rebased onto the extracted payload — a path that does not is resolved against the installer's working directory instead, which is almost never what you want. `to` is the destination, created if missing. |
+| `Flags: recursesubdirs` | `from: payload://**` | `**` recurses; `*.ext` (no `**`) is non-recursive, matching the guide's glob semantics. |
 | `Flags: onlyifdoesntexist` | `file_copy` with `overwrite: false` | An existing file at `to` is left alone; its prior bytes are still journaled for rollback either way. |
 | `Flags: deleteafterinstall` | (no direct equivalent) | Stage transient files under a hook (`pre_install`/`post_install`) with `run_program`, or omit them from the payload entirely. |
 

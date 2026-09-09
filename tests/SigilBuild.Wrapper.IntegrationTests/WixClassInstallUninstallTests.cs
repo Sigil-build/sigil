@@ -46,8 +46,8 @@ using Xunit;
 /// </remarks>
 public class WixClassInstallUninstallTests
 {
-    private const string ManifestRel = "examples/exe-wrapper/hello-wix-killer/sigil.yaml";
-    private const string RegistrySubKey = "Software\\HelloWiXKiller";
+    private const string ManifestRel = "examples/exe-wrapper/hello-desktop-app/sigil.yaml";
+    private const string RegistrySubKey = "Software\\HelloDesktopApp";
 
     private static string FindManifest()
     {

@@ -3,7 +3,7 @@
 Canonical context file for AI coding agents (Claude Code, Codex, Cursor, Copilot, …).
 `CLAUDE.md` imports this file; keep this one as the single source of truth.
 
-Sigil is an open-source .NET 10 / Native AOT CLI that replaces NSIS / Inno Setup / WiX:
+Sigil is an open-source .NET 10 / Native AOT CLI for declarative Windows-software distribution:
 pack → sign → publish → update, driven by one `sigil.yaml`. **Status: pre-MVP, Windows-first.**
 The publish stage and delta-update SDK are not built yet.
 

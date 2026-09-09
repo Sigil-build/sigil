@@ -580,5 +580,5 @@ against the fixed uninstall path.**
 | SUP | `rc/sup-supply-chain` | ☑ | [#33](https://github.com/Sigil-build/sigil/pull/33) | ☑ `4dc7820` | G2 |
 | DOC | `rc/doc-truth` | ☑ | [#34](https://github.com/Sigil-build/sigil/pull/34) | ☑ `50da43c` | G2 |
 | RUNBOOK | `rc/doc-g2-runbook` | ☑ | [#35](https://github.com/Sigil-build/sigil/pull/35) | ☑ `3ba97f6` | **G2 ⚠️ (R58 open)** |
-| DOC-G2 | `rc/doc-g2-close` | ☑ | (this PR) | ☐ | G2 |
+| DOC-G2 | `rc/doc-g2-close` | ☑ | [#37](https://github.com/Sigil-build/sigil/pull/37) | ☐ | G2 |
 | V1  | `rc/v1-verification` | ☐ | ☐ | ☐ | G3/G4 |

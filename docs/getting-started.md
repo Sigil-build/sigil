@@ -201,4 +201,4 @@ When the manifest declares an `uninstall:` block, the packager produces a siblin
 - Read the [architecture overview](architecture-overview.md) to understand
   how packing, signing, publishing, and updates fit together.
 - Migrating from another installer? See
-  [from WiX](migration/from-wix.md) or [from NSIS](migration/from-nsis.md).
+  [from Inno Setup](migration/from-inno.md).

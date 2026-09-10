@@ -1,6 +1,7 @@
-# IMPLEMENTATION_SPEC.md section 3 — end-to-end reference manifest.
+# End-to-end reference manifest for the M0 installer surface — every installer
+# key the exe-wrapper track shipped, in one document.
 # The updated schema (M0 installer surface) MUST validate this document.
-# The illustrative `sign:` block from section 3 is omitted here: the schema's
+# The illustrative `sign:` block is omitted here: the schema's
 # pre-existing sign `allOf` requires an `azureTrustedSigning` sub-block for the
 # azure-trusted-signing provider, which is orthogonal to the installer surface
 # under test and out of M0 scope.

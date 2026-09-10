@@ -38,8 +38,8 @@ PRs that change it without touching its lockstep surfaces.
 ## Compatibility
 
 Pre-MVP, so breaking changes are allowed but must be deliberate: call the break
-out in the PR description and update the migration docs
-(`docs/migration/from-nsis.md`, `from-wix.md`) if they show affected syntax.
+out in the PR description and update the migration docs (`docs/migration/*.md`)
+if they show affected syntax.
 Never rename a shipped field silently.
 
 ## Verify

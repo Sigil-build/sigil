@@ -135,7 +135,7 @@ public class SchemaValidationTests
         var errors = schema.Validate(json);
 
         errors.Should().BeEmpty(
-            "the IMPLEMENTATION_SPEC section 3 reference manifest must satisfy the updated installer schema; got: {0}",
+            "the M0 end-to-end reference installer manifest must satisfy the updated installer schema; got: {0}",
             string.Join("; ", errors.Select(e => e.ToString())));
     }
 

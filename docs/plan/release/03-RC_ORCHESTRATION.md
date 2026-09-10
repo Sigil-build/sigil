@@ -265,13 +265,14 @@ until one final RC→main PR.
 **Tech Stack:** .NET 10, Native AOT, xUnit + FluentAssertions, Avalonia 12,
 GitHub Actions on `windows-latest`, PowerShell for build scripting.
 
-Design of record:
-[`../../superpowers/specs/2026-07-28-release-candidate-track-design.md`](../../superpowers/specs/2026-07-28-release-candidate-track-design.md).
+Design of record: **this document** — the 2026-07-28 brainstorm design that
+preceded it was fully realised by this file plus the stage documents (04–08)
+and has been retired.
 Findings and evidence:
 [`00-GAP_REGISTER.md`](00-GAP_REGISTER.md). Decision context:
 [`02-READINESS_REPORT.md`](02-READINESS_REPORT.md).
-[`01-FIX_PLAN.md`](01-FIX_PLAN.md) is **superseded by this document** and kept
-only as the audit record.
+The initial 2026-07-28 lane sketch is **superseded by this document** and has
+been retired; the audit record it summarised lives in `00-GAP_REGISTER.md`.
 
 This document holds **no lane detail** — it is an index, the gates, and the
 proof that no finding was dropped. Lane work lives in the stage documents.

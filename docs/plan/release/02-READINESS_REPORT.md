@@ -370,16 +370,18 @@ failing** throwaway PR #17's `broken title`).
    CI-built binaries by hand. Fix lane `rc/p6-fix-upgrade-mutex` (PR pending). Nothing
    below this line matters for a release until it is fixed: upgrading is what users do
    second, and right now they cannot.
-1. **VM matrix green, with its run URL recorded here.** The first *automatic* run,
-   [34368896457](https://github.com/Sigil-build/sigil/actions/runs/34368896457) on
-   `b07021e`, was **in progress** when this was written. The only prior run
-   (34361541578, `da792fb`) failed all four jobs for reasons that were entirely
-   fixture and workflow rot — **R66**, **R67**, **R68**, now all three closed by
-   [#40](https://github.com/Sigil-build/sigil/pull/40) and
-   [#41](https://github.com/Sigil-build/sigil/pull/41). Until a run is green,
-   **R58**'s own end-to-end test (`ArpUninstallStringTests`) has still never
-   executed, and **R64** shows machine-scope install remains uncovered even when it
-   is.
+1. ~~**VM matrix green, with its run URL recorded here.**~~ **MET, 2026-09-09** —
+   run [34379757534](https://github.com/Sigil-build/sigil/actions/runs/34379757534)
+   on RC `df98eba` (post-#45): `vm (p12 update + web-installer)`, `vm (p11 system
+   steps)`, and `vm (install matrix)` all **PASS**, with exactly two honest skips
+   (`Upgrade_replaces_older_version_preserving_install_dir_and_single_arp_row`,
+   `Silent_downgrade_is_blocked_with_exit_code_3` — elevation-blind, naming R2, not
+   vacuous). First green matrix in the project's history; the earlier run cited here
+   (34368896457, `b07021e`) was superseded on the way to it. **R58**'s own
+   end-to-end test (`ArpUninstallStringTests`) has now executed and passed.
+   **Caveat that a green run does not resolve:** **R64** — machine-scope install
+   remains uncovered, and because the leg runs elevated, the two skipped
+   assertions are not proven end to end here.
 2. **Release dry-run.** Blocked on the **six Trusted Signing secrets** — no lane can
    supply them; `release.yml`'s own "require signing secrets" refusal fires first.
    This is the only way to learn whether the workflow parses and runs at all.

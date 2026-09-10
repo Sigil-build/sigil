@@ -274,24 +274,50 @@ merges, not from a stale worktree.
 
 ## 4. G3 (Stage 4 / V1) prerequisites
 
-- **Dispatch `wrapper-vm-tests.yml` once by hand.** Confirmed via
-  `gh workflow list --all` that it is `active` but **`workflow_dispatch`-only
-  and has never run** — zero runs in its history. Run it for real
-  (`gh workflow run wrapper-vm-tests.yml`) against non-vacuous tests, then
-  add a schedule trigger (or a merge trigger) via a follow-up PR so it stops
-  being on-demand-only, per the G3 checkbox. **Before that first real run
-  means anything, close R64**: ten `SIGIL_VM_*` scenario toggles are
-  declared across the workflows and only four were read by any test at the
-  RC base — five still drive no test at all today (`SIGIL_VM_SCOPE`,
-  `SIGIL_VM_SCOPE_MATRIX`, `SIGIL_VM_ARP_VALUES`, `SIGIL_VM_CLOSEAPPS`,
-  `SIGIL_VM_DOUBLE_INSTALL`) — `SIGIL_VM_CLOSEAPPS` is R58's own P6 leg,
-  which is exactly how R58 reached the merged RC undetected. Each toggle
-  either gets a real test or gets removed; a green run against toggles
-  nobody reads proves nothing for the legs they claim.
-  `SIGIL_VM_UNINSTALL_SURVIVE` is genuinely closed, not just nominally: PR
-  #39's `ArpUninstallStringTests` runs behind `wrapper-vm-tests.yml:52`'s
-  `SIGIL_VM_UNINSTALL_SURVIVE: "1"` set on both scope-matrix legs, confirmed
-  not a vacuous pass.
+- **`wrapper-vm-tests.yml` is green — for real, non-vacuous, 2026-09-09.** It
+  went from `workflow_dispatch`-only with zero runs in its history to a
+  five-run trail: [34361541578](https://github.com/Sigil-build/sigil/actions/runs/34361541578)
+  (`da792fb`, the owner's first-ever dispatch — all 4 jobs failed on rotted
+  fixtures, P11 System32 anchoring, and P12's `MSB1008`) →
+  [34368896457](https://github.com/Sigil-build/sigil/actions/runs/34368896457)
+  (`b07021e`, the first *automatic* run, fired by #41's new push trigger —
+  `vm (p12 …)` green) →
+  [34374943524](https://github.com/Sigil-build/sigil/actions/runs/34374943524)
+  (`8f1c306` — `vm (p11 …)` also green, with #44) →
+  **[34379757534](https://github.com/Sigil-build/sigil/actions/runs/34379757534)
+  (`df98eba` — all three jobs green, with #45).** That closed R64's toggle half
+  along the way: ten `SIGIL_VM_*` scenario toggles were declared across the
+  workflows and only four were read by any test at the RC base — the five that
+  drove no test at all (`SIGIL_VM_SCOPE`, `SIGIL_VM_SCOPE_MATRIX`,
+  `SIGIL_VM_ARP_VALUES`, `SIGIL_VM_CLOSEAPPS` — R58's own P6 leg, which is
+  exactly how R58 reached the merged RC undetected — and
+  `SIGIL_VM_DOUBLE_INSTALL`) were **removed**, not wired: inventing the test
+  each one advertised would have been a coverage decision, not a workflow
+  edit. `SIGIL_VM_UNINSTALL_SURVIVE` is genuinely closed, not just nominally:
+  PR #39's `ArpUninstallStringTests` runs behind `wrapper-vm-tests.yml`'s
+  `SIGIL_VM_UNINSTALL_SURVIVE: "1"` set on the install-matrix leg, confirmed
+  not a vacuous pass, and it **passed** in the green run above. **R64 itself
+  stays open** — the toggles being honest is not the same as the coverage
+  being complete: machine-scope end-to-end install, double-install
+  idempotency, real `manifest.App.*` ARP value assertions, the P6
+  `/closeapps` + setup-mutex legs, `service_install`'s missing leg, and the
+  live COM `HKCR` leg (still `Skip=`) are all still uncovered by any leg that
+  ran green.
+
+  **What to expect on the next auto-run** (`push` on `main` / `release/**`,
+  per #41): **two honest skips** —
+  `Upgrade_replaces_older_version_preserving_install_dir_and_single_arp_row`
+  and `Silent_downgrade_is_blocked_with_exit_code_3`, gated on
+  `!Elevation.IsProcessElevated()` and naming R2 — **until R76 merges**
+  ([PR #46](https://github.com/Sigil-build/sigil/pull/46), CI green, awaiting
+  the human merge). Landing R76 does **not** turn those two green on this
+  workflow: the install-matrix leg runs on a hosted **elevated** runner, so
+  the `[VmUpgradeUnelevatedFactAttribute]` gate keeps skipping them there
+  regardless of R76's state — they only execute on an *unelevated* runner,
+  which nothing currently provides. Standing that runner up (or another route
+  to an unelevated leg) is **R64**/**R74** territory, tracked separately from
+  R76. Until then, expect the same shape indefinitely: 3 jobs green, 2 named
+  skips, R76's merge changing nothing about *this* workflow's output.
 - **`release.yml` will not appear in `gh workflow list` until it first
   fires.** Confirmed empirically: `gh workflow list --all` today shows only
   `ci`, `docs`, `pr-guards`, `secret-scan`, `wrapper-vm-tests` — no
@@ -347,9 +373,15 @@ merges, not from a stale worktree.
   above are local-only.** No VM legs, no elevation test, no cross-account
   UAC decrypt — see Section 6(b) below for the specific untested claim that
   most needs one.
-- **`wrapper-vm-tests.yml` has never run**, on any branch, ever. Its entire
-  test surface is unverified in CI — only in local unit tests, where
-  DPAPI/elevation allow it.
+- **`wrapper-vm-tests.yml` had never run**, on any branch, ever, at the time
+  this preparation was written. **No longer true as of 2026-09-09** — see
+  Section 4 above: five runs since, progressively fixing each job, with the
+  latest
+  ([34379757534](https://github.com/Sigil-build/sigil/actions/runs/34379757534)
+  on `df98eba`) all three jobs passing. Left here, corrected in place rather
+  than deleted, so this section stays an honest record of what this
+  preparation itself did *not* verify at the time it ran — the gap it names
+  was real then and is closed now by later work, not by this document.
 
 ## 6. Register-row candidates found during this preparation (orchestrator files at gate close)
 

@@ -78,19 +78,64 @@
 > keep two honestly red legs in between. Do not re-elevate the leg or soften the
 > assertions to get green.
 >
+> ### G3 update (2026-09-09) — the VM matrix went green
+>
+> Run [34379757534](https://github.com/Sigil-build/sigil/actions/runs/34379757534)
+> on RC `df98eba` (post-#45): `vm (p12 update + web-installer)`, `vm (p11 system
+> steps)`, and `vm (install matrix)` all **PASS** — the first green matrix in the
+> project's history. **Both G3 checkboxes for the matrix are now ticked** (see the
+> G3 list below): the run itself, and "runs on a schedule or on merge" (met by
+> #41's push trigger). The caveat that survives a green run: machine-scope
+> end-to-end install is still **UNCOVERED** (**R64**), and because the leg runs
+> elevated, the two skips
+> (`Upgrade_replaces_older_version_preserving_install_dir_and_single_arp_row`,
+> `Silent_downgrade_is_blocked_with_exit_code_3`) are not proven end to end here —
+> that needs an unelevated leg, which is **R64**/**R74** territory.
+>
+> **#42, #43, #44 merged** (by the repository owner) → RC `8f1c306`. **#45
+> merged** → RC `df98eba`, the current RC head. **R76's fix is
+> [PR #46](https://github.com/Sigil-build/sigil/pull/46)**
+> (`rc/p6-fix-upgrade-mutex`, head `cdb4c4d`): CI green including
+> `aot publish (win-x64)`, security review approved the mechanism, a final
+> wording round landed — **awaiting the human merge**. Nothing below matters for
+> a release until it merges (see `02-READINESS_REPORT.md`'s DoD block, item 0).
+>
+> ### G3 update (2026-09-09, continued) — R76 merged, and proven post-fix
+>
+> [PR #46](https://github.com/Sigil-build/sigil/pull/46) **merged** → RC
+> `6842a8c`, the current RC head. The VM matrix auto-ran on it —
+> [34383631266](https://github.com/Sigil-build/sigil/actions/runs/34383631266),
+> **success**, all three legs green, the **first post-fix green matrix**. The two
+> elevation-blind upgrade assertions remain honest skips on this **elevated**
+> hosted runner (**R64**/**R74**); they execute only on an unelevated runner,
+> which this workflow does not provide. **Every register row R1–R76 is now
+> either closed with a merge sha or explicitly deferred** — R1–R73 by
+> [#43](https://github.com/Sigil-build/sigil/pull/43)'s V1.1 pass, R74 open by
+> design (deferred, not a G3 blocker), R75 closed by #44 (`8f1c306`), R76 closed
+> by #46 (`6842a8c`). What's left is owner-only: the release dry-run (six
+> Trusted Signing secrets, none exist), the clean-machine install that needs
+> its artifact, V1.2's re-attack, the known-limitations sweep, and the two G4
+> actions below.
+>
 > **Blocked on the owner — nothing an agent lane can move:**
 >
-> - **VM matrix green.** The first *automatic* run
->   ([34368896457](https://github.com/Sigil-build/sigil/actions/runs/34368896457) on
->   `b07021e`, fired by #41's new push trigger) was in flight at the time of writing.
->   Until it is green, **R58**'s own end-to-end test has never executed.
-> - **The release dry-run** needs the **six Trusted Signing secrets**; `release.yml`
->   refuses before any restore without them, and it has never run at all.
-> - **Clean-machine install** of the published artifact (**R7**), which needs the
->   dry-run first.
+> - **The release dry-run** needs the **six Trusted Signing secrets — none exist
+>   yet**; `release.yml` refuses before any restore without them, and it has
+>   never run at all.
+> - **Clean-machine install** of the release zip (**R7**), which needs the
+>   dry-run's artifact first.
+> - **V1.2** — the re-attack pass against the *integrated* RC, not each lane at
+>   its own tip — has not run.
+> - **The known-limitations sweep.** Every register row is now closed or
+>   deferred (above), but the known-limitations draft in
+>   `02-READINESS_REPORT.md` predates **R60–R65** and **R69–R76** — closing
+>   that box means a pass over the draft, not filing more rows.
+> - **`02-READINESS_REPORT.md`'s Definition of Done** is not fully ticked — see
+>   its own dated block.
 > - **Private vulnerability reporting** is still `{"enabled":false}` (**R23**) and
 >   **both NuGet IDs are still unreserved** (**R41a**) — two G4 owner actions.
-> - **Merging the open lane PRs.** The orchestrator cannot merge them.
+> - **Merging the open lane PRs**, if any remain. The orchestrator cannot merge
+>   them.
 >
 > **Still to run in Stage 4:** **V1.2** (re-attack the integrated RC, not each lane
 > at its own tip) and **V1.3**.
@@ -623,7 +668,7 @@ check as R58.**
 
 ### G3 — after Stage 4
 
-- [ ] `wrapper-vm-tests.yml` run **for real**, green, against non-vacuous tests
+- [x] `wrapper-vm-tests.yml` run **for real**, green, against non-vacuous tests
       *(R58, R64 — ten `SIGIL_VM_*` toggles were declared, four read by tests at
       the RC base; five drove no test at all: `SIGIL_VM_SCOPE`,
       `SIGIL_VM_SCOPE_MATRIX`, `SIGIL_VM_ARP_VALUES`, `SIGIL_VM_CLOSEAPPS`
@@ -637,7 +682,8 @@ check as R58.**
       [PR #41](https://github.com/Sigil-build/sigil/pull/41) (R64, R66, R68).**
       All five orphans are **REMOVED**, not wired: wiring any of them meant
       inventing the test it advertised, which is a coverage decision rather
-      than a workflow edit. Consequences to read before ticking this box:
+      than a workflow edit. Consequences to read before reading this box as more
+      than it is:
       - the `currentuser × allusers` job matrix went with
         `SIGIL_VM_SCOPE`/`SIGIL_VM_SCOPE_MATRIX` — no test read the scope, so
         both legs ran the identical per-user suite twice (in run
@@ -653,20 +699,52 @@ check as R58.**
         the matrix claims, ran", not "every scope is covered".
       - PR #41 also fixed why the first real run was worthless at all: the
         fixtures had rotted (**R66**) and the P12 job could never build
-        (**R68**). A green run therefore also requires **R67**'s fix
-        ([PR #40](https://github.com/Sigil-build/sigil/pull/40), open) for the
+        (**R68**). A green run also required **R67**'s fix
+        ([PR #40](https://github.com/Sigil-build/sigil/pull/40)) for the
         `vm (p11 system steps)` leg.
-      Run URL → `______`
-- [ ] The VM matrix runs on a schedule or on merge, not only on demand
+
+      **GREEN, for real, 2026-09-09.** Run
+      [34379757534](https://github.com/Sigil-build/sigil/actions/runs/34379757534)
+      on RC `df98eba` (post-[#45](https://github.com/Sigil-build/sigil/pull/45)):
+      `vm (p12 update + web-installer)`, `vm (p11 system steps)`, and
+      `vm (install matrix)` all **PASS**. The only skips are the two
+      elevation-blind upgrade assertions —
+      `Upgrade_replaces_older_version_preserving_install_dir_and_single_arp_row`
+      and `Silent_downgrade_is_blocked_with_exit_code_3` — an **honest** skip
+      naming R2 on this **elevated** hosted runner, not a vacuous pass; they stay
+      skipped here until an unelevated leg exists (**R64**/**R74** territory).
+      History: run
+      [34361541578](https://github.com/Sigil-build/sigil/actions/runs/34361541578)
+      (`da792fb`, dispatched by the owner — **all 4 jobs failed**: rotted
+      fixtures, P11 System32 anchoring, P12 `MSB1008`) →
+      [34368896457](https://github.com/Sigil-build/sigil/actions/runs/34368896457)
+      (`b07021e`, the first *automatic* run, via #41's new push trigger — `vm
+      (p12 …)` green, the other two still red) →
+      [34374943524](https://github.com/Sigil-build/sigil/actions/runs/34374943524)
+      (`8f1c306` — `vm (p11 …)` also green, with #44) →
+      [34379757534](https://github.com/Sigil-build/sigil/actions/runs/34379757534)
+      (`df98eba` — all three green, with #45) — **first green matrix in the
+      project's history** — →
+      **[34383631266](https://github.com/Sigil-build/sigil/actions/runs/34383631266)
+      (`6842a8c` — all three green, with [#46](https://github.com/Sigil-build/sigil/pull/46)'s
+      R76 fix; the first post-fix green run).** **Caveat, unresolved by any of
+      these runs:** machine-scope end-to-end install is still **UNCOVERED**
+      (**R64**), and because the install-matrix leg runs elevated, the two
+      skipped upgrade/downgrade assertions (now genuinely fixed by R76, per its
+      own two-process harness and unit suite — see `00-GAP_REGISTER.md`) still
+      are not proven end to end **by this workflow** — that needs an unelevated
+      leg, which nothing currently provides (**R64**/**R74** territory).
+- [x] The VM matrix runs on a schedule or on merge, not only on demand
       *(**met on the merge half** by
       [PR #41](https://github.com/Sigil-build/sigil/pull/41): `wrapper-vm-tests.yml`
       now has a `push` trigger on `main` and `release/**`, so every merge into
-      the RC branch runs the matrix, plus `concurrency` cancel-in-progress. The
-      weekly `schedule` in the same file is **default-branch-only** — GitHub runs
-      `schedule` from the default branch's copy of the workflow — so it gives
-      `main` a floor once the file reaches `main` and does **not** cover
-      `release/**`. Tick this on the `push` half; do not read the cron as
-      release-branch coverage.)*
+      the RC branch runs the matrix, plus `concurrency` cancel-in-progress — the
+      four runs cited above are exactly that trigger firing on #41/#44/#45's
+      merges. The weekly `schedule` in the same file is **default-branch-only** —
+      GitHub runs `schedule` from the default branch's copy of the workflow — so it
+      gives `main` a floor once the file reaches `main` and does **not** cover
+      `release/**`. Ticked on the `push` half; the cron is not release-branch
+      coverage.)*
 - [ ] Release dry-run: a throwaway prerelease tag produces signed, checksummed
       artifacts with the notices attached
 - [ ] The downloaded artifact **runs on a clean machine** — verified by
@@ -725,11 +803,12 @@ check as R58.**
 | P6-FIX | `rc/p6-fix-uninstall-self-block` | ☑ | [#39](https://github.com/Sigil-build/sigil/pull/39) | ☑ `102ea3f` | G3 (R58 — e2e still unrun) |
 | VM-FIX-B | `rc/vm-fix-p11-anchoring` | ☑ | [#40](https://github.com/Sigil-build/sigil/pull/40) | ☑ `c71bd8c` | G3 (R67) |
 | VM-FIX-A | `rc/vm-fix-fixtures` | ☑ | [#41](https://github.com/Sigil-build/sigil/pull/41) | ☑ `b07021e` | G3 (R64 ⚠️, R66, R68) |
-| V1-FIX | `rc/v1-sbom-and-kiosk` | ☑ | [#42](https://github.com/Sigil-build/sigil/pull/42) | ☐ **open** | G3 (R69, R70) |
-| VM-FIX-B2 | `rc/vm-fix-p11-round2` | ☑ | [#44](https://github.com/Sigil-build/sigil/pull/44) | ☐ **open** | G3 (R75) |
-| VM-FIX-A2 | `rc/vm-fix-fixtures-round2` | ☑ | [#45](https://github.com/Sigil-build/sigil/pull/45) | ☐ **open** | G3 (install-matrix fixtures; R74 skips) |
-| P6-FIX-2 | `rc/p6-fix-upgrade-mutex` | ☐ | ☐ pending | ☐ | **G3 (R76 — RELEASE BLOCKER)** |
-| V1-DOCS | `rc/v1-register-status` | ☑ | [#43](https://github.com/Sigil-build/sigil/pull/43) | ☐ | G3 (V1.1 — R69–R76 filed) |
+| V1-FIX | `rc/v1-sbom-and-kiosk` | ☑ | [#42](https://github.com/Sigil-build/sigil/pull/42) | ☑ `81584de` | G3 (R69, R70) |
+| VM-FIX-B2 | `rc/vm-fix-p11-round2` | ☑ | [#44](https://github.com/Sigil-build/sigil/pull/44) | ☑ `8f1c306` | **G3 ✅ (R75; `vm (p11)` PASS in run 34379757534)** |
+| VM-FIX-A2 | `rc/vm-fix-fixtures-round2` | ☑ | [#45](https://github.com/Sigil-build/sigil/pull/45) | ☑ `df98eba` | **G3 ✅ (install-matrix PASS; R74 honest skips confirmed live)** |
+| P6-FIX-2 | `rc/p6-fix-upgrade-mutex` | ☑ | [#46](https://github.com/Sigil-build/sigil/pull/46) | ☑ `6842a8c` | **G3 ✅ (R76 CLOSED — matrix green post-fix in run 34383631266)** |
+| V1-DOCS | `rc/v1-register-status` | ☑ | [#43](https://github.com/Sigil-build/sigil/pull/43) | ☑ `e1d3f8f` | G3 (V1.1 — R69–R76 filed) |
+| DOC-G3 | `rc/doc-g3-progress` | ☑ | [#47](https://github.com/Sigil-build/sigil/pull/47) | ☐ | **G3 ✅ (first green matrix recorded; R58/R66–R70/R75 confirmed live; R76 CLOSED — #46 merged `6842a8c`, matrix green post-fix)** |
 | V1  | `rc/v1-verification` | ◐ V1.1 + V1.4 done | ☐ | ☐ | G3/G4 |
 
 The hotfix row (`rc/s1-fix-provenance-fixture`, [#36](https://github.com/Sigil-build/sigil/pull/36)

@@ -2431,6 +2431,16 @@ that run, and none of the three is about installer behaviour.
 > ([34368896457](https://github.com/Sigil-build/sigil/actions/runs/34368896457),
 > `b07021e`) is the first that could run it. **Until a VM run executes that test,
 > this row is fixed in code and unproven in the field.**
+>
+> **Now proven in the field (2026-09-09).** ARP `UninstallString` uninstalls
+> confirmed live: the diagnosis lane's three test installs
+> (`.superpowers/sdd/2026-09-08-g2-release-prep/vm-install-matrix-diagnosis.md` §1.6)
+> and the round-2 fixture verification's own install
+> (`vm-fix2-report.md` §1, run against the real CI binaries, unelevated) all
+> uninstalled via the registered `UninstallString`, exit 0, and
+> `ArpUninstallStringTests` itself **passed** in run
+> [34379757534](https://github.com/Sigil-build/sigil/actions/runs/34379757534) on
+> RC `df98eba`. **R58 is closed end to end** — code and field proof both in.
 
 `uninstall.exe` ships **inside** `install_dir` (T15). Add/Remove Programs — and
 a user running the registered `UninstallString` directly — launches exactly
@@ -2775,6 +2785,25 @@ unit test ever creates or hardens a path under the real `%ProgramData%`.
 > down by de-elevation alone: doing it correctly makes the matrix red first, and that
 > redness is the point. Sequencing for whoever schedules this: **R76 before
 > de-elevation**, or expect — and keep — two red legs in between.
+>
+> **The matrix went green (2026-09-09).** Run
+> [34379757534](https://github.com/Sigil-build/sigil/actions/runs/34379757534) on RC
+> `df98eba` (post-[#45](https://github.com/Sigil-build/sigil/pull/45)):
+> `vm (p12 update + web-installer)`, `vm (p11 system steps)`, and
+> `vm (install matrix)` all **PASS**. The only skips are the two
+> elevation-blind upgrade assertions themselves —
+> `Upgrade_replaces_older_version_preserving_install_dir_and_single_arp_row` and
+> `Silent_downgrade_is_blocked_with_exit_code_3` — an honest skip naming **R2** on
+> this **elevated** hosted runner, not a vacuous pass. **This does not retire the
+> row.** What it closes: the fixture-bug half of the six original failures (fixed by
+> #45) and, from the earlier run, the toggle-orphan half (R66/R68). What stays open,
+> unmoved by a green run: machine-scope (`/allusers`) end-to-end install is still
+> **UNCOVERED**, as are double-install idempotency, real `manifest.App.*` ARP value
+> assertions, the P6 `/closeapps` + setup-mutex legs, `service_install`'s missing VM
+> leg, and the live COM `HKCR` leg (still `Skip=`). And because the install-matrix
+> leg runs **elevated** by default, the two skipped upgrade/downgrade assertions are
+> not proven end to end by this run — only an *unelevated* leg proves them, which is
+> exactly the coverage this row still owes.
 
 Found while landing R58's fix (PR #39); the count below is the #39 reviewer's,
 verified precisely, not an estimate. Across `wrapper-vm-tests.yml` and its
@@ -2897,6 +2926,16 @@ honestly be ticked until it is.
 > *pass*. That is the matrix's own verdict; the first automatic run
 > ([34368896457](https://github.com/Sigil-build/sigil/actions/runs/34368896457),
 > `b07021e`) was still in flight when V1.1 was written.
+>
+> **The gap this line left open is now closed.** The matrix went green in run
+> [34379757534](https://github.com/Sigil-build/sigil/actions/runs/34379757534) on RC
+> `df98eba`, the head of the merge chain this fix rode in on
+> ([#40](https://github.com/Sigil-build/sigil/pull/40) `c71bd8c` →
+> [#41](https://github.com/Sigil-build/sigil/pull/41) `b07021e` →
+> [#44](https://github.com/Sigil-build/sigil/pull/44) `8f1c306` →
+> [#45](https://github.com/Sigil-build/sigil/pull/45) `df98eba`). Un-rotting the
+> fixtures is what let the legs run at all; whether they then passed is recorded on
+> **R64**.
 
 > **STATUS — FIXED by [PR #41](https://github.com/Sigil-build/sigil/pull/41)**
 > (lane `rc/vm-fix-fixtures`), together with an always-on guard so it cannot
@@ -3008,6 +3047,17 @@ so no Native AOT installer host to stage).
 > design — so the test was wrong, not the product. Coverage gaps that surfaced in
 > the same lane (`service_install` has no VM leg; the live COM `HKCR` leg is still a
 > `Skip=`) are folded into **R64**'s scope rather than filed separately.
+>
+> **Confirmed live.** `vm (p11 system steps)` **PASS**, first at run
+> [34374943524](https://github.com/Sigil-build/sigil/actions/runs/34374943524) on RC
+> `8f1c306` (with [#44](https://github.com/Sigil-build/sigil/pull/44)'s
+> `com_register` fix riding along) — the first time this leg has run green in the
+> project's history — and again at
+> [34379757534](https://github.com/Sigil-build/sigil/actions/runs/34379757534) on RC
+> `df98eba` (with [#45](https://github.com/Sigil-build/sigil/pull/45)). Merge chain
+> carrying this fix: [#40](https://github.com/Sigil-build/sigil/pull/40) `c71bd8c` →
+> [#41](https://github.com/Sigil-build/sigil/pull/41) `b07021e` → `8f1c306` →
+> `df98eba`.
 
 Found in the same first real VM run (34361541578), in the `vm (p11 system steps)`
 job — a **different** failure class from R66 and a different lane's fix.
@@ -3049,6 +3099,15 @@ PRs**: #41 for the install-matrix and P12 jobs, #40 for the
 > invocation, so the `vm (p12 update + web-installer)` job can reach its test steps
 > for the first time since T12.6 added it. Postdates run `34362414470`. Whether the
 > P12 legs then *pass* is the matrix's verdict, not this row's.
+>
+> **They did.** `vm (p12 update + web-installer)` **PASS** in run
+> [34368896457](https://github.com/Sigil-build/sigil/actions/runs/34368896457) on
+> `b07021e` — green from the very first automatic run this fix made possible — and
+> stayed green through
+> [34374943524](https://github.com/Sigil-build/sigil/actions/runs/34374943524)
+> (`8f1c306`) and
+> [34379757534](https://github.com/Sigil-build/sigil/actions/runs/34379757534)
+> (`df98eba`).
 
 > **STATUS — FIXED by [PR #41](https://github.com/Sigil-build/sigil/pull/41)**
 > (lane `rc/vm-fix-fixtures`).
@@ -3107,6 +3166,10 @@ so it is recorded on R65's own status line instead.
 > **STATUS (V1.1, 2026-09-09):** FIXED in
 > [#42](https://github.com/Sigil-build/sigil/pull/42) (`a9f5e20`), **open, not yet
 > merged**. **The test still skips here** — see "does it run now" below.
+>
+> **CLOSED — merged 2026-09-09.** [#42](https://github.com/Sigil-build/sigil/pull/42)
+> landed on the RC as `81584de`. The skip is unchanged and still correct: `tests/kiosk/`
+> is out-of-band and this box has no Native AOT toolchain to build it.
 
 `tests/SigilBuild.Packaging.Tests/ExeWrapper/KioskSetupFactAttribute.cs` composed the
 sample's path from `AppContext.BaseDirectory` plus **six** fixed `".."` segments.
@@ -3149,6 +3212,10 @@ should read this row as adding coverage; it removes a lie about coverage.
 > [#42](https://github.com/Sigil-build/sigil/pull/42) (`7003b20`, plus `f4472c0` for
 > `-dpr`), **open, not yet merged**. First real execution is the `v0.1.0-alpha` tag
 > push — like the rest of `release.yml`, it has never run (**R7**).
+>
+> **CLOSED — merged 2026-09-09.** [#42](https://github.com/Sigil-build/sigil/pull/42)
+> landed on the RC as `81584de`. Still unexecuted: `release.yml` has never fired
+> (**R7**), so the SBOM step's first real run remains the `v0.1.0-alpha` tag push.
 
 `docs/plan/release/sup-sbom-handoff.md` is a complete, ready-to-paste workflow step
 that lane SUP wrote for lane REL, because SUP's branch was cut before `release.yml`
@@ -3293,6 +3360,17 @@ lockstep surfaces in `AGENTS.md`.
 > §2.4, §2.5, §5). **Reproduced**, not inferred: the elevated probe was simulated
 > unelevated against the RC binaries. **Not a G3 blocker** — see the rubric note
 > below. Owner: lane **S5 / S1** (engine).
+>
+> **Still OPEN (2026-09-09); the honest skip it required is confirmed in place.**
+> Run [34379757534](https://github.com/Sigil-build/sigil/actions/runs/34379757534) on
+> RC `df98eba` shows `vm (install matrix)` **PASS** with exactly two genuine skips —
+> `Upgrade_replaces_older_version_preserving_install_dir_and_single_arp_row` and
+> `Silent_downgrade_is_blocked_with_exit_code_3`, gated on
+> `[VmUpgradeUnelevatedFactAttribute]` (`!Elevation.IsProcessElevated()`, naming this
+> row), not vacuous passes. No fix has landed here: those two assertions still cannot
+> execute at all on the **elevated** hosted runner this leg runs on — that needs an
+> unelevated leg, which is **R64** territory, before this row's own fix can be proven
+> end to end.
 
 Prior-install detection has **two independent sources at two different trust levels**,
 and under one specific combination they disagree:
@@ -3365,6 +3443,14 @@ assertions in the VM install-matrix leg are **honest skips** naming R2 — see *
 > **Evidence T:** two unit tests that fail with the retraction reverted. Found while
 > fixing the P11 VM legs — the test there **had been asserting the wrong behaviour as
 > correct**, which is why nothing caught it earlier.
+>
+> **CLOSED — merged 2026-09-09.** [#44](https://github.com/Sigil-build/sigil/pull/44)
+> landed on the RC as `8f1c306`. `vm (p11 system steps)` then ran **PASS** in run
+> [34374943524](https://github.com/Sigil-build/sigil/actions/runs/34374943524) on RC
+> `8f1c306` — the fixed `com_register` retraction path exercised end to end for the
+> first time — and stayed green through
+> [34379757534](https://github.com/Sigil-build/sigil/actions/runs/34379757534) on RC
+> `df98eba`.
 
 `ComRegisterStep.cs:75` appended a `RollbackRecord.UnregisterCom` record **before**
 attempting the registration — the right instinct, since a crash between "acted" and
@@ -3413,6 +3499,38 @@ in-process DLL load, which is what makes `LoadFailed` a reachable state at all).
 > `.superpowers/sdd/2026-09-08-g2-release-prep/vm-fix2-report.md` §5. Fix lane:
 > **`rc/p6-fix-upgrade-mutex`** (PR pending). Not found by the matrix; found by
 > driving the shipped binaries.
+>
+> **CLOSED — merged 2026-09-09.** [PR #46](https://github.com/Sigil-build/sigil/pull/46)
+> (`rc/p6-fix-upgrade-mutex`) landed on the RC as `6842a8c`. The parent installer
+> that holds the guard mints a one-time handoff token (real parent pid, read via a
+> toolhelp snapshot and never trusted from the token itself, plus the parent's
+> process creation time, the guard name, and `Uninstall` mode) onto the environment
+> block of the one child it spawns to run the prior version's `uninstall.exe`; the
+> admitted child holds the lock **non-owning**, so it cannot mint a further handoff,
+> and **R34**'s `NameNotAvailable` branch stays deliberately unrescuable by any
+> handoff. CI was green including `aot publish (win-x64)`, and security review
+> **approved the mechanism** — the one named residual is that a process holding no
+> lock at all can still mint a token for its own child while a different process
+> holds the name, which grants nothing beyond what a same-user process already has;
+> a final wording round tightened two doc comments that had overclaimed the
+> guarantee and moved token consumption ahead of the elevation branch in both hosts.
+>
+> **Proven live, not just merged.** The VM matrix auto-ran on `6842a8c` — run
+> [34383631266](https://github.com/Sigil-build/sigil/actions/runs/34383631266),
+> **success**, all three legs green — the **first green matrix run against the
+> fix**. The two elevation-blind upgrade assertions
+> (`Upgrade_replaces_older_version_preserving_install_dir_and_single_arp_row`,
+> `Silent_downgrade_is_blocked_with_exit_code_3`) remain honest skips on this
+> **elevated** hosted runner, per **R64**/**R74** — they execute only on an
+> *unelevated* runner, which this workflow does not provide, so R76's fix is proven
+> by the two-process harness in `r76-fix-report.md` §3 and by CI's unit suite, not
+> yet by an end-to-end VM assertion of the upgrade path itself.
+>
+> **Sequencing note.** Both halves — the minting parent, the admitting child — must
+> ship in the **same** build: upgrading *from* an installer built before this fix
+> still exits 5 after the fix lands, because the old `uninstall.exe` has no admit-side
+> code to receive the handoff. Harmless pre-release, since nothing has shipped yet;
+> from `v0.1.0-alpha` onward, every build carries both halves.
 
 **A shipped v1 → v2 per-user upgrade, run from a normal user session, fails and
 installs nothing:**

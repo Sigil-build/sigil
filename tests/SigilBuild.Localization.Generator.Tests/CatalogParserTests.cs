@@ -47,8 +47,8 @@ public class CatalogParserTests
     public void Parse_RecordsMalformed_ForLineStartingWithEquals()
     {
         // Input " = value" is trimmed to "= value", so eq == 0: there IS an '=', just with
-        // an empty key to its left. Task 3 narrowed the guard from `eq <= 0` to `eq < 0`,
-        // which separates "no '=' at all" from "empty key" and makes this branch reachable,
+        // an empty key to its left. The guard is `eq < 0`, not `eq <= 0` — narrower, so it
+        // separates "no '=' at all" from "empty key", making this branch reachable and
         // reporting the more precise "key is empty" instead of the generic parse message.
         var text = "nav.back = Back\n = value\n";
 

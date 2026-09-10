@@ -3,7 +3,7 @@ namespace SigilBuild.Core.Manifest;
 /// <summary>
 /// The one language-tag rule, shared by pack-time validation (SIG0291) and the
 /// installer's <c>/lang</c> flag. Two call sites, one implementation — see
-/// docs/plan/feature-parity/P9-DESIGN-localization.md §6.2.
+/// docs/architecture/adr-015-localization-design.md §3.
 /// </summary>
 /// <remarks>
 /// A deliberate ordinal subset of BCP-47: <c>ALPHA{2,3} ( "-" ALPHANUM{1,8} )*</c>.

@@ -2,8 +2,17 @@
 
 - **Status:** Accepted (spike outcome)
 - **Date:** 2026-07-09
-- **Decision driver:** IMPLEMENTATION_SPEC.md §T3 ("Wire the AOT runtime build") and
-  §4 Risks ("Avalonia 11 under Native AOT — highest uncertainty").
+- **Decision driver:** task **T3** of the exe-installer track ("wire the AOT
+  runtime build into the SDK", the track's own *core blocker*, since nothing
+  published the host exe that `WrapperRuntimeLocator.Locate()` expects under
+  `runtimes/<rid>/`). T3 required the Installer.Host publish to be **warning-clean
+  under Native AOT with `TreatWarningsAsErrors`**, and the track's risk list
+  ranked "Avalonia under Native AOT" as its **highest-uncertainty item**: decide
+  by spike before committing T3, and if trim warnings turn out to be unavoidable
+  fall back either to a self-contained non-AOT host publish or to a tiny AOT
+  console wrapper that launches the host as a child process. This ADR is that
+  spike's outcome. *(The T-numbered spec that set this task has since been
+  retired; its content for T3 is restated here so this ADR stands alone.)*
 - **Scope:** decides the T3 risk item only. This is a **spike ADR**. No `src/`
   changes were made; all measurements come from throwaway publishes under
   `artifacts-spike/` (git-ignored, not committed).

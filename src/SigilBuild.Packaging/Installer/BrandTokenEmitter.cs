@@ -16,10 +16,11 @@ namespace SigilBuild.Packaging.Installer;
 /// inside the WrapperBlob (see decision 11).
 /// </summary>
 /// <remarks>
-/// The token derivation ports the prototype's <c>colors()</c> function
-/// (<c>docs/plan/prototype/sigil-installer-wizard-prototype.html</c>) verbatim,
-/// including its literal constants and the <c>color-mix(in srgb, …)</c> blends,
-/// implemented here by <see cref="SrgbMix"/>.
+/// The token derivation ports the wizard prototype's <c>colors()</c> function
+/// verbatim, including its literal constants and the
+/// <c>color-mix(in srgb, …)</c> blends, implemented here by
+/// <see cref="SrgbMix"/>. Provenance of those constants is recorded once, at
+/// their definition site — see the "Prototype colors() port" comment below.
 /// </remarks>
 public static class BrandTokenEmitter
 {
@@ -84,6 +85,24 @@ public static class BrandTokenEmitter
 
     // ── Prototype colors() port ───────────────────────────────────────────────
     // rail = primary_color, accent = accent_color.
+    //
+    // PROVENANCE (single source of truth for these constants). Every hex literal
+    // and every SrgbMix percentage below is a verbatim transcription of the
+    // `colors()` function in the Claude-Design wizard prototype, which lived at
+    //
+    //     docs/plan/prototype/sigil-installer-wizard-prototype.html
+    //
+    // and was retired from the working tree in the pre-release docs cleanup. It
+    // is NOT lost: the file's last committed state is `b1e21d5` ("feat:
+    // wizard-driven .exe installer (sigil pack --format exe, T1-T18)", #9,
+    // 2026-07-10), so the original is recoverable with
+    //
+    //     git show b1e21d5:docs/plan/prototype/sigil-installer-wizard-prototype.html
+    //
+    // Treat that blob as the reference if a token's value is ever questioned.
+    // Changing a constant here is a deliberate divergence from the prototype,
+    // not a bug fix — say so in the commit message, and re-check the WCAG-AA
+    // assertions below, which are what these particular blends were tuned for.
 
     private static Dictionary<string, string> DeriveLight(string rail, string accent) => new()
     {

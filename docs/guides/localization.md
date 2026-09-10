@@ -77,6 +77,13 @@ same-primary candidates. There is no shared "the installer is now in German"
 state; a manifest that ships German screens but no German chrome renders
 English chrome alongside the German screens, by design.
 
+The **resolved chrome language** is also exposed to `when:` expressions as the
+`system.language` identifier (e.g. `"uk"`) — the one way a manifest can branch a
+step or a screen on the installer's language. Note it is the language the UI
+actually renders, not the OS's top preference: with OS preferences
+`[de-DE, uk-UA]` and chrome shipping only `en` + `uk`, `system.language` reads
+`uk`. See [Conditional installs](conditional-installs.md#identifier-namespaces).
+
 ## CLI
 
 ```
@@ -88,8 +95,10 @@ English chrome alongside the German screens, by design.
 
 `/lang` is silently ignored if `installer.language` is set (the manifest
 wins). An invalid `/lang` value is a usage error (exit code 64). Both flags
-are documented in full in [`cli-reference.md`](../cli-reference.md)'s
-Setup.exe section.
+are documented in full in the [setup.exe reference](../setup-exe-reference.md).
+(`cli-reference.md` is auto-generated from the `sigil` CLI's own command tree
+and covers only `validate` / `init` / `pack` / `sign` — it has no Setup.exe
+section and cannot have one.)
 
 `/lang=uk /silent` behaves identically to `/silent` in every way *except*
 which language renders — the same steps run, in the same order, with the

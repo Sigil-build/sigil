@@ -40,8 +40,28 @@ screen shows a restart notice, and a silent install exits with code **3010**.
 | `sha256` | for `https` | Integrity checksum. A download without one is refused at pack time (SIG0280). |
 | `args` | no | Arguments to the installer (typically `/quiet /norestart`). Tokens allowed. |
 | `exit_codes_ok` | no | Exit codes treated as success; default `[0]`. `3010` also flags reboot. |
-| `scope_required` | no | `allusers` or `currentuser`; a mismatch is a diagnostic at session start. |
+| `scope_required` | no | `allusers` or `currentuser`; a mismatch is a diagnostic at session start. Note this vocabulary differs from `installer.scope`, whose values are `user` / `machine` / `auto`. |
 | `timeout_seconds` | no | Per-prerequisite run timeout. |
+| `allow_unsigned` | no | Boolean, default `false`. Launch this prerequisite even when its Authenticode signature does not establish trust — see below. |
+
+### Downloaded prerequisites are Authenticode-checked before they run
+
+An `https://` prerequisite installer is signature-checked **immediately before it is
+launched**, and **refused** if it is unsigned or its signature is invalid. Unsigned
+third-party redistributables are common and legitimate, so `allow_unsigned: true` opts
+that particular prerequisite out — which is what you will need for many real
+redistributables. Three things `allow_unsigned` does not do:
+
+- It never waives a **revoked or explicitly distrusted** certificate. That is refused
+  either way.
+- It never waives the `sha256`, which is enforced regardless.
+- It has no effect on a `payload://` source, which is not signature-checked at all —
+  its integrity comes from the enclosing package's own signature.
+
+Prerequisites are **not** governed by `installer.require_signed_downloads`
+(see [Updates](updates.md#downloaded-package-signature-policy)): a redistributable from
+a third party is worth checking whoever built the installer around it, so the check is
+always on and the opt-out is per prerequisite.
 
 ## Recipe: Visual C++ 2015–2022 redistributable (registry detect)
 

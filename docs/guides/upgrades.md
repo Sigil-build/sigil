@@ -20,9 +20,30 @@ At startup the installer reads the scope-correct ARP entry for `app.id`
 | **Older installed** | **Upgrade.** The previous version's `uninstall.exe /S /Uninstall` is run first (and must exit `0`), then the new version installs into the **previous install directory** so user data outside the install journal is preserved. |
 | **Newer installed** | **Downgrade — blocked.** The wizard shows a notice screen; a silent install exits with code **3**. Pass `/force-downgrade` to override. |
 
+An upgrade over a **running** app is the other common non-zero outcome: files held
+open by a running process abort the run with exit **4** unless `/closeapps` was
+passed. See [the setup.exe reference](../setup-exe-reference.md).
+
 The upgrade removes the old version by running **its own** `uninstall.exe`
 (not the new build's uninstall logic), because that binary owns the previous
 version's rollback journal and knows exactly how to reverse it.
+
+Two things about that spawn are worth knowing before you debug one:
+
+- **The prior uninstaller is admitted through the single-instance lock explicitly.**
+  It derives the *same* app+scope mutex name as the run that spawned it, so it would
+  otherwise refuse to start as "already running" and the whole upgrade would exit **5**.
+  It is let through by a `SIGIL_SETUP_LOCK_HANDOFF` environment token, validated against
+  the real parent process id and that process's creation time — so only a genuine child
+  of the running setup is admitted, not anything else that happens to know the token.
+- **An unverifiable prior uninstaller is refused.** When privilege is at stake — a
+  machine-scope install, or a process that is already elevated — the previous version's
+  `uninstall.exe` is only launched if it is Authenticode-valid or sits in a directory
+  only administrators can write. Otherwise the run aborts before anything is installed
+  with `cannot upgrade: '…' is not verified`. This is reachable in practice for an
+  **unsigned** machine-scope install on a secondary volume such as `D:\Apps\MyApp`,
+  whose default permissions grant `Users` write. See
+  [Uninstaller](uninstaller.md#cannot-upgrade--is-not-verified).
 
 ### Scope
 

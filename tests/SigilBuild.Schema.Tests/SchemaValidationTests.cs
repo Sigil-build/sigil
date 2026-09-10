@@ -142,7 +142,7 @@ public class SchemaValidationTests
     [Fact]
     public async Task ScheduledTaskCreateFixture_IsValidAgainstSchema()
     {
-        // T11.1 (P11): scheduled_task_create must be accepted by the step-type
+        // scheduled_task_create must be accepted by the step-type
         // enum in every place it's duplicated (install_steps / pre_install /
         // post_install / uninstall / hooks).
         var schema = await LoadSchemaAsync();
@@ -157,13 +157,13 @@ public class SchemaValidationTests
     [Fact]
     public async Task AllowOutsideInstallDirFixture_IsValidAgainstSchema()
     {
-        // R16 (S2.4): the `allow_outside_install_dir` opt-out is declared on the
+        // The `allow_outside_install_dir` opt-out is declared on the
         // step shape, which the schema duplicates across install_steps /
         // pre_install / post_install / uninstall and the InstallStep /
         // InstallStepList definitions. The fixture uses the key in each of those
         // positions, on every step type that accepts it, plus the omitted and the
         // explicit-false cases — so a declaration missed in one copy fails here
-        // rather than at pack time in a publisher's manifest.
+        // rather than at pack time in a publisher's manifest. (R16)
         var schema = await LoadSchemaAsync();
         var json = YamlToJson(await File.ReadAllTextAsync("Fixtures/valid/allow-outside-install-dir.yaml"));
         var errors = schema.Validate(json);
@@ -193,7 +193,7 @@ public class SchemaValidationTests
     [Fact]
     public async Task ComRegisterFixture_IsValidAgainstSchema()
     {
-        // T11.2 (P11): com_register must be accepted by the step-type enum in
+        // com_register must be accepted by the step-type enum in
         // every place it's duplicated (install_steps / pre_install /
         // post_install / uninstall / hooks / option components).
         var schema = await LoadSchemaAsync();
@@ -208,7 +208,7 @@ public class SchemaValidationTests
     [Fact]
     public async Task FirewallRuleFixture_IsValidAgainstSchema()
     {
-        // T11.3 (P11): firewall_rule must be accepted by the step-type enum in
+        // firewall_rule must be accepted by the step-type enum in
         // every place it's duplicated (install_steps / pre_install /
         // post_install / uninstall / hooks / option components).
         var schema = await LoadSchemaAsync();
@@ -223,10 +223,10 @@ public class SchemaValidationTests
     [Fact]
     public async Task PrerequisiteAllowUnsignedFixture_IsValidAgainstSchema()
     {
-        // Register row R11: the per-prerequisite opt-out from the Authenticode gate in
-        // front of a downloaded prerequisite's launch. `additionalProperties: false` on
-        // the Prerequisite definition means an unschema'd property is a hard rejection,
-        // so this fixture is what proves the property is actually declared.
+        // The per-prerequisite opt-out from the Authenticode gate in front of a
+        // downloaded prerequisite's launch. `additionalProperties: false` on the
+        // Prerequisite definition means an unschema'd property is a hard rejection,
+        // so this fixture is what proves the property is actually declared. (R11)
         var schema = await LoadSchemaAsync();
         var json = YamlToJson(await File.ReadAllTextAsync("Fixtures/valid/prerequisite-allow-unsigned.yaml"));
         var errors = schema.Validate(json);
@@ -239,13 +239,12 @@ public class SchemaValidationTests
     [Fact]
     public async Task NetworkTrustFixture_IsValidAgainstSchema()
     {
-        // Register rows R8/R14/R30/R45. Two things this fixture is load-bearing for:
-        // the new `installer.require_signed_downloads` property must actually be
-        // DECLARED (`additionalProperties: false` on the installer object turns an
-        // undeclared property into a hard rejection), and the new https/base64
-        // `pattern` constraints must accept the correct values rather than only
-        // rejecting the wrong ones — the invalid fixtures alone would be satisfied by
-        // a pattern that rejects everything.
+        // Two things this fixture is load-bearing for: the `installer.require_signed_downloads`
+        // property must actually be DECLARED (`additionalProperties: false` on the
+        // installer object turns an undeclared property into a hard rejection), and the
+        // https/base64 `pattern` constraints must accept the correct values rather than
+        // only rejecting the wrong ones — the invalid fixtures alone would be satisfied
+        // by a pattern that rejects everything. (R8, R14, R30, R45)
         var schema = await LoadSchemaAsync();
         var json = YamlToJson(await File.ReadAllTextAsync("Fixtures/valid/network-trust.yaml"));
         var errors = schema.Validate(json);
@@ -257,8 +256,8 @@ public class SchemaValidationTests
 
     /// <summary>
     /// Every accepted <c>installer.require_signed_downloads</c> value, asserted
-    /// individually (R45). The valid fixture can only carry one of them, and an enum
-    /// that accidentally omitted a member would still let that fixture pass.
+    /// individually. The valid fixture can only carry one of them, and an enum
+    /// that accidentally omitted a member would still let that fixture pass. (R45)
     /// </summary>
     [Theory]
     [InlineData("sign_declared")]

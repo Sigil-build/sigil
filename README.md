@@ -21,11 +21,20 @@ in version control next to the app it ships.
 > and no `SigilBuild.UpdateSdk` project exists in `src/` today. `/Update`
 > always fetches and runs the complete new-version package.
 
+> **Breaking change for update publishers.** The channel manifest `/Update`
+> fetches now **requires** three more fields — `issuedAt`, `expiresAt` and
+> `sequence` — inside the signed byte range, and the client enforces a validity
+> window, a 30-day maximum age and a monotonic anti-replay high-water mark
+> (ADR-011). A manifest built to the older five-field shape is rejected as
+> malformed by every shipped installer. See
+> [Updates](docs/guides/updates.md#the-channel-manifest-contract).
+
 ## What you get
 
-`sigil.yaml` → `sigil pack --format exe` → a branded, self-elevating Windows
-wizard (`<App.Name>-<version>-<arch>-Setup.exe`) — or `zip` / `msix` if you
-don't need the wizard. The `exe` path ships:
+`sigil.yaml` with `package: { formats: [exe] }` → `sigil pack` → a branded,
+self-elevating Windows wizard (`<App.Name>-<version>-<arch>-Setup.exe`) — or
+`zip` / `msix` if you don't need the wizard. (The output format is chosen in
+the manifest; `sigil pack` has no `--format` flag.) The `exe` path ships:
 
 - a branded install wizard with wizard chrome themed from two manifest
   colors, driven entirely by `sigil.yaml`'s `installer:` / `parameters:`
@@ -48,9 +57,8 @@ distribution) is not built yet.
 
 ## Install
 
-There is no published package yet — `SigilBuild` / `SigilBuild.UpdateSdk`
-(NuGet), `winget`, and a install script are all pre-MVP roadmap items, not
-available today. Build from source:
+There is no published package yet — NuGet, `winget`, and an install script are
+all pre-MVP roadmap items, not available today. Build from source:
 
 ```bash
 git clone https://github.com/Sigil-build/sigil.git
@@ -60,9 +68,12 @@ dotnet test Sigil.slnx -c Release
 ```
 
 See [Getting started](docs/getting-started.md) for a full walkthrough
-(`init` → `validate` → `pack`). A signed GitHub Release with prebuilt
-binaries will replace this section once the release workflow ships — see
-`CHANGELOG.md`'s "Known limitations".
+(`init` → `validate` → `pack`). A signed GitHub Release with prebuilt binaries
+will replace this section on the first tagged release. The release workflow
+itself already ships: `release.yml` triggers on a `v*` tag, runs the full VM
+matrix, AOT-publishes win-x64 and win-arm64, signs with Azure Trusted Signing,
+emits a CycloneDX SBOM and `SHA256SUMS`, and publishes a prerelease. What is
+missing is a pushed tag, not the automation.
 
 ## Credits
 

@@ -10,26 +10,38 @@ Sigil is a CLI framework that orchestrates four stages of desktop-software
 distribution: **pack → sign → publish → update**. All four stages are wired
 together by a single declarative YAML manifest.
 
-```
+```text
 ┌──────────────┐
 │  sigil.yaml  │ ← single source of truth
 └───────┬──────┘
         │
-   ┌────▼────┐    ┌──────────┐    ┌───────────┐    ┌───────────┐
-   │  sigil  │ →  │  sigil   │ →  │   sigil   │ →  │   sigil   │
-   │  pack   │    │   sign   │    │  publish  │    │  update   │
-   └─────────┘    └──────────┘    └───────────┘    └───────────┘
-                                                        │
-                                                        ▼
-                                              Update SDK on user device
+   ┌────▼────┐    ┌──────────┐    ┌───────────┐
+   │  sigil  │ →  │  sigil   │ →  │  publish  │
+   │  pack   │    │   sign   │    │(not built)│
+   └─────────┘    └──────────┘    └───────────┘
+        │
+        │ produces
+        ▼
+   ┌───────────────────────────────┐
+   │  <App>-<ver>-<arch>-Setup.exe │
+   │    …/Update  ← run by the     │
+   │      installed app itself     │
+   └───────────────────────────────┘
 ```
 
+**The CLI has exactly four commands** — `validate`, `init`, `pack`, `sign`.
+There is no `sigil update` subcommand and no `SigilBuild.UpdateSdk` project:
+updating is `Setup.exe /Update`, a mode of the installer you already shipped,
+run by the installed application (or a scheduled task). See
+[Updates](guides/updates.md).
+
 Pack today ships working ZIP, MSIX, and **EXE-wrapper** paths. The
-EXE-wrapper produces a single self-extracting `setup.exe` with a branded
-Windows wizard, NSIS-style screen-grouped parameters, a dedicated install
-location screen with disk-space readout, and an auto-generated
-`uninstall.exe` plus Add/Remove Programs entry. Signing and the
-full-package update engine (see [Updates](guides/updates.md)) both ship
+EXE-wrapper produces a single self-extracting
+`<App.Name>-<version>-<arch>-Setup.exe` (and, with `--payload web`, a tiny
+`…-WebSetup.exe` stub beside it) carrying a branded Windows wizard, custom
+parameter pages declared as `installer.screens[]`, a dedicated install-location
+screen with disk-space readout, and an automatic `uninstall.exe` plus
+Add/Remove Programs entry. Signing and the full-package update engine both ship
 today too; `publish` and delta updates are the remaining pieces of the MVP
 timeline.
 
@@ -43,7 +55,11 @@ will change without a superseding architecture decision record:
   beside `libSkiaSharp.dll` and `libsodium.dll`, the native halves of
   `SigilBuild.Packaging` and `SigilBuild.Signing`. Reflection-heavy patterns
   are forbidden — source generators are used instead (YamlDotNet,
-  System.Text.Json, hand-rolled where needed).
+  System.Text.Json, hand-rolled where needed). `PublishAot` is set
+  **per project**, not in `Directory.Build.props`: `SigilBuild.Cli` and
+  `SigilBuild.Wrapper` always, and `SigilBuild.Installer.Host` behind the
+  opt-in `SigilAotPublish` property. Those three are the binaries that ship;
+  the trim/AOT *analyzer*, however, runs on every Release build.
 - **Manifest format: YAML.** Strict-mode parsing, exhaustive JSON Schema
   validation, plus a typed install-step deserializer that catches semantic
   errors the schema can't express.
@@ -58,6 +74,17 @@ will change without a superseding architecture decision record:
   new package. Delta patches (zstd dictionary mode, trained against an
   app's prior release) are intentionally deferred — see
   [ADR-010](architecture/adr-010-delta-update-deferral.md).
+- **Update trust is time-bounded, not just signed**
+  ([ADR-011](architecture/adr-011-update-manifest-freshness.md)). A signature
+  says *who* minted a document, never *when*, so the channel manifest carries
+  three **required** fields inside the signed byte range — `issuedAt`,
+  `expiresAt` and `sequence` — and the client enforces a ±5-minute skew
+  tolerance, a 30-day maximum age independent of `expiresAt`, and a persisted
+  monotonic `sequence` high-water mark against replay. Separately,
+  `installer.require_signed_downloads` makes the Authenticode policy for a
+  downloaded binary **declared** rather than inferred from whether the
+  publisher configured signing for their own output. All shipped; see
+  [Updates](guides/updates.md).
 - **Two-surface UX: CLI for developers, branded Windows wizard for end
   users.** The CLI is the primary product; the wizard is a thin host that
   consumes the same manifest.
@@ -99,7 +126,7 @@ implementation, not a fork.
 | Language | C# 14 / .NET 10 LTS, Native AOT |
 | YAML | YamlDotNet (with source generators for AOT) |
 | JSON Schema | Hand-rolled draft-07 validator |
-| Compression | ZstdSharp.Port — pure-managed C# zstd port, "nothing to bundle" (`Directory.Packages.props:38-43`) |
+| Compression | ZstdSharp.Port — pure-managed C# zstd port, "nothing to bundle" (`Directory.Packages.props:44`) |
 | Crypto — ZIP manifest signing | NSec.Cryptography / Ed25519 (`SigilBuild.Signing/Local/ZipManifestSigner.cs`) |
 | Crypto — update-manifest signing | BCL `ECDsa`, P-256 — no native crypto dependency ([ADR-009](architecture/adr-009-update-manifest-signature.md)) |
 | HTTP | HttpClient + Polly |
@@ -111,25 +138,30 @@ records the update-manifest rationale.
 
 ## Runtime targets
 
-Of the rows below, CI actually enforces **one** size number — `sigil.exe` ≤
-15 MB, `.github/workflows/ci.yml:241` — plus the project-wide test-coverage
-floor. The rest are **targets**, not gates:
+CI enforces **two** size gates and **five** coverage floors. The remaining rows
+are **targets**, not gates:
 
 | Metric | Target | CI-enforced? |
 |---|---|---|
 | `sigil --version` cold-start (Native AOT, win-x64) | ≤ 200 ms | No |
-| `sigil.exe` (AOT-published, Release, stripped) | ≤ 15 MB | **Yes** — `ci.yml:241` |
+| `sigil.exe` (AOT-published, Release, stripped) | ≤ 15 MB | **Yes** — `ci.yml:379`, and again per-architecture at `release.yml:95` (win-x64) and `release.yml:107` (win-arm64) |
+| Installer-host full footprint (win-x64) | ≤ 45 MB | **Yes** — `scripts/publish-installer-runtime.ps1:190-192`, invoked with `-SizeGateMb 45` from `ci.yml:170`, `ci.yml:441`, `release.yml:126` and `wrapper-vm-tests.yml:133, 230`. The gate a contributor is most likely to trip. |
 | `sigil pack` for a 100 MB source tree | ≤ 5 s | No |
 | `sigil sign` round-trip via Azure Trusted Signing | ≤ 8 s p50, ≤ 20 s p99 | No |
 | Delta patch generation, 100 MB → 100 MB build | ≤ 30 s | No — metric for a deferred feature, see [ADR-010](architecture/adr-010-delta-update-deferral.md) |
-| Test coverage, project-wide union | ≥ 65 % (aspirational: Core ≥ 80 %, Signing/SDK ≥ 85 %) | **Yes** — `ci.yml`'s Python coverage gate |
+| Test coverage, project-wide union | ≥ **77 %** | **Yes** — `ci.yml:232` |
+| Test coverage, per assembly | `SigilBuild.Core` ≥ 69 %, `SigilBuild.Signing` ≥ 68 %, `SigilBuild.Wrapper.Core` ≥ 79 %, `SigilBuild.Packaging` ≥ 72 % | **Yes** — `ci.yml:235-238` |
 
-A red `main` build older than four hours is "stop the world" — the project's
-quality model assumes `main` is always shippable.
+The coverage floors are a **ratchet**: each is the current measured value
+rounded down, re-pinned upward as coverage rises, never lowered. `ci.yml` also
+carries a `THRESHOLD = 0.65` constant, which is dead — its own comment says
+`PROJECT_WIDE_FLOOR` is the gate. Aspirational targets (Core ≥ 80 %) are not
+gates, and there is no SDK project to hold to one.
 
 ## Where to go next
 
 - Build and run the CLI: [getting started](getting-started.md).
 - Every subcommand: [CLI reference](cli-reference.md).
 - Every key in `sigil.yaml`: [manifest reference](manifest-reference.md).
-- Already on WiX or NSIS? [migration guides](migration/).
+- The decisions themselves: [architecture decision records](architecture/).
+- Already on another installer? [migration guides](migration/).

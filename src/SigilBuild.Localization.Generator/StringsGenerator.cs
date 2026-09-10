@@ -9,9 +9,9 @@ namespace SigilBuild.Localization.Generator;
 
 /// <summary>
 /// Incremental source generator that turns <c>Strings.&lt;lang&gt;.txt</c> catalog files
-/// into a compiled-in string table (P9): parse (Task 1) -> validate (Task 3) -> emit
-/// (Task 2). Emission is suppressed whenever any Error-severity <see cref="CatalogProblem"/>
-/// is found — see the comment above <c>hasError</c> below for why.
+/// into a compiled-in string table: parse -> validate -> emit. Emission is suppressed
+/// whenever any Error-severity <see cref="CatalogProblem"/> is found — see the comment
+/// above <c>hasError</c> below for why.
 /// </summary>
 [Generator]
 public sealed class StringsGenerator : IIncrementalGenerator

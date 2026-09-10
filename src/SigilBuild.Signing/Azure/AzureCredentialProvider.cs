@@ -7,8 +7,8 @@ using SigilBuild.Core.Manifest;
 
 namespace SigilBuild.Signing.Azure;
 
-// Token cache is **memory only** (per WBS 3.7 / sprint-07): no disk persistence,
-// process-scoped. Persisted/keychain caches are explicitly out of MVP scope.
+// Token cache is **memory only**: no disk persistence, process-scoped.
+// Persisted/keychain caches are explicitly out of MVP scope.
 public class AzureCredentialProvider
 {
     private static readonly string[] s_scopes = ["https://codesigning.azure.net/.default"];

@@ -25,9 +25,10 @@ hooks and prerequisites that run around it — see below).
 | `OutputBaseFilename` / `OutputDir` | `sigil pack --out <dir>` | Sigil names the artifact `<App>-<version>-<arch>-Setup.exe` deterministically; there is no free-form rename knob. |
 | `Compression` / `SolidCompression` | (automatic) | Sigil always packs the payload with zstd (`SIGIL_PAYLOAD_V2`) for deterministic, reproducible builds — not user-tunable. |
 | `SetupMutex` | (automatic) | Sigil's `Setup.exe` always takes its own single-instance mutex (gap G17, shipped with P6) — there is no manifest field to name or disable it, unlike Inno's opt-in `SetupMutex`. It admits exactly one process besides the first: the previous version's `uninstall.exe` that an upgrade spawns for its own teardown, and only when that child was really spawned by a live process naming this same application and scope (R76). A second `Setup.exe` you launch yourself is still refused, with exit code 5. |
-| `UninstallDisplayIcon` / `UninstallDisplayName` | (automatic, from `installer.icon` / `app.name`) | The generated `uninstall.exe` and its ARP row inherit these from the manifest; no separate keys. |
+| `UninstallDisplayName` | (automatic, from `app.name`) | The ARP row's `DisplayName` comes from `app.name`; there is no separate key. |
+| `UninstallDisplayIcon` | (no equivalent) | Sigil writes **no** `DisplayIcon` ARP value. Windows falls back to whatever it derives from the executable named by `UninstallString` — which is `uninstall.exe`, a copy of `Setup.exe`, so it does carry `installer.icon`. But there is no field that sets the ARP icon directly. |
 | `MinVersion` / `OnlyBelowVersion` | `when: os_version(...)` on a step, or a `prerequisites[]` entry with a `detect` expression | No dedicated OS-floor field yet; expression-gate the steps that need it. |
-| `Uninstallable=no` | omit `uninstall:` entirely | An app with no `uninstall:` block gets no `uninstall.exe` and no ARP registration, matching Inno's `Uninstallable=no`. |
+| `Uninstallable=no` | **no equivalent** | Every successful `exe` install writes `uninstall.exe` and the ARP entry, with or without an `uninstall:` block. There is no way to suppress either. |
 
 ## `[Files]` → `file_copy`
 
@@ -107,10 +108,9 @@ resolution, self-elevating as needed).
 Inno's `[Code]` section is a full embedded Pascal Script runtime:
 `InitializeSetup`, `CurStepChanged`, custom wizard pages, arbitrary
 conditionals, arbitrary file/registry manipulation. **Sigil deliberately has
-no embedded scripting language** — this is the same design line WiX and NSIS
-custom actions/plugins are declined at (see `from-wix.md` / `from-nsis.md`).
-The declarative surface that replaces the ~90% of `[Code]` that actual Inno
-scripts use:
+no embedded scripting language** — the same design line at which WiX custom
+actions and NSIS plugins are declined. The declarative surface that replaces
+the ~90% of `[Code]` that actual Inno scripts use:
 
 | `[Code]` pattern | Sigil equivalent |
 |---|---|
@@ -142,7 +142,7 @@ scope fails at pack time with `SIG0310`.
 
 | Inno directive | Sigil equivalent | Notes |
 |---|---|---|
-| `DownloadTemporaryFile` / `CreateDownloadPage` (built in since Inno 6.1) | `http_download` step (`url`, `dest`, `sha256`, `timeout_seconds`, `retries`) | HTTPS only; `sha256` is **required** — the packer refuses to pack a download step without one. Rollback deletes the downloaded file; transient failures (network/timeout/5xx) retry with backoff, a checksum mismatch fails immediately (gap G5, shipped P4). |
+| `DownloadTemporaryFile` / `CreateDownloadPage` (built in since Inno 6.1) | `http_download` step (`url`, `dest`, `sha256`, `timeout_seconds`, `retries`) | HTTPS only; `sha256` is **required** — the packer refuses to pack a download step without one. Rollback deletes the downloaded file; transient failures (network/timeout/5xx) retry with backoff, a checksum mismatch fails immediately (gap G5, shipped P4). Whether a downloaded *binary* is Authenticode-checked before it is launched is governed by `installer.require_signed_downloads`; a downloaded **prerequisite** is always checked and has its own `allow_unsigned` opt-out. |
 
 ## Update checks → `/Update`
 
@@ -152,7 +152,9 @@ tool. Sigil ships one built in (gap G15, shipped P12):
 
 | Inno idiom | Sigil equivalent | Notes |
 |---|---|---|
-| `[Code]`-based "check a URL for a newer version" | `updates:` manifest block + `Setup.exe /Update` | Reads an ECDSA P-256-signed channel manifest (`manifestUrl`, detached `.sig`), compares versions against the installed ARP entry, and — if newer — downloads the full package (sha256-verified) and hands off to it. Dedicated exit codes (`0` up to date, `6` not configured, `7` check/apply failed, `8` signature rejected, `9` below `minFromVersion`). See [Updates](../guides/updates.md). |
+| `[Code]`-based "check a URL for a newer version" | `updates:` manifest block + `Setup.exe /Update` | Reads an ECDSA P-256-signed channel manifest (`manifestUrl`, detached `.sig`), compares versions against the installed ARP entry, and — if newer — downloads the full package (sha256-verified) and hands off to it. Dedicated exit codes (`0` up to date, `6` not configured, `7` check/apply failed **or a malformed manifest**, `8` hard security reject, `9` below `minFromVersion`). Note `8` is not only "signature rejected": it also covers a freshness/replay refusal and an Authenticode refusal of the downloaded package. See [Updates](../guides/updates.md). |
+| Hand-rolled channel-manifest JSON | the fixed channel-manifest contract | Your manifest **must** carry `issuedAt`, `expiresAt` and `sequence` alongside `schemaVersion`, `version`, `packageUrl` and `sha256`. They are inside the signed byte range and enforced by every shipped client (ADR-011); an older five-field document is rejected as malformed. Mint a fresh, re-signed manifest before `expiresAt` lapses, and increment `sequence` on every publish. See [the contract](../guides/updates.md#the-channel-manifest-contract). |
+| `[Code]` check of "is this download signed?" | `installer.require_signed_downloads` | Decides whether the downloaded package is Authenticode-verified before it is run: `sign_declared` (default — armed only when the manifest has a `sign:` block), `always`, or `always_verified_revocation`. See [Updates](../guides/updates.md#downloaded-package-signature-policy). |
 | Hand-rolled "download and self-replace" web installer | `sigil pack --payload web --package-url <https-url>` | Emits a tiny stub `Setup.exe` (`...-WebSetup.exe`) whose only install action is an `http_download` of the full package, then a handoff to it (gap G16, shipped P12). |
 | Delta/binary-patch updates | **Not implemented** | `updates.deltaTargets` is parsed and schema-validated but has zero runtime effect today — delta updates are explicitly deferred, not silently unsupported. See [ADR-010](../architecture/adr-010-delta-update-deferral.md). Every `/Update` today fetches the full package. |
 
@@ -188,10 +190,11 @@ tool. Sigil ships one built in (gap G15, shipped P12):
 
 | Inno construct | Sigil equivalent | Notes |
 |---|---|---|
-| Auto-generated `unins000.exe` | `uninstall.exe`, generated whenever the manifest has an `uninstall:` block | Packaged as a resource in `Setup.exe` and dropped to `install_dir\uninstall.exe` on install success. |
-| ARP `UninstallString` / `QuietUninstallString` | (automatic) | The wrapper writes both, pointing at the deployed `uninstall.exe`, mirroring Inno's own ARP registration. |
+| Auto-generated `unins000.exe` | `uninstall.exe`, written on **every** successful install | Not packaged as a resource: at install time the wrapper copies its own running `Setup.exe` image, byte for byte, to `install_dir\uninstall.exe`. So it is the size of the whole Setup.exe and carries the same Authenticode signature. |
+| ARP `UninstallString` | (automatic) | Points at the deployed `uninstall.exe` and carries `/S /Uninstall` plus the scope flag (`/allusers` or `/currentuser`), so the uninstall re-resolves to the scope it was installed with. |
+| ARP `QuietUninstallString` | (never written) | Sigil writes no `QuietUninstallString` — it does not need one, because the `UninstallString` it writes already carries `/S`. The *behaviour* Inno gets from the pair is there; the second value is not. |
 | `[UninstallDelete]` | `uninstall:` step list | The install journal already replays the reverse of every install step automatically; declare `uninstall:` only for extra tear-down the journal can't infer (stopping a service, clearing an AppData cache). |
-| `UninstallDisplayIcon` | `installer.icon` | Same icon stamps `Setup.exe`, the wizard, and `uninstall.exe`. |
+| `UninstallDisplayIcon` | (no equivalent) | No `DisplayIcon` value is written; see the `[Setup]` table above. `installer.icon` does stamp `Setup.exe`, the wizard and therefore `uninstall.exe`, so the icon usually reaches ARP anyway — incidentally, not by declaration. |
 
 ## Examples
 

@@ -5,22 +5,12 @@ using System.IO;
 
 /// <summary>
 /// Reports a genuine Skipped result when the Azure Trusted Signing live-tenant
-/// preconditions are absent, instead of returning early and reporting as Passed
-/// (register row R6). Covers both early <c>return</c> sites the original
-/// <c>Signs_artifact_against_live_tenant</c> theory had:
-/// <list type="bullet">
-///   <item><description>the opt-in flag and Service-Principal/endpoint env vars
-///   (shared by every format, formerly the outer <c>ShouldRun()</c> gate);</description></item>
-///   <item><description>the per-format test artifact env var (formerly the inner
-///   "no test artifact provided for this format" gate).</description></item>
-/// </list>
-/// A single <c>[Theory]</c> cannot report a different Skip per <c>[InlineData]</c>
-/// row in xunit v2 — <c>Skip</c> is resolved once, at discovery, before any row's
-/// data is bound — so the per-format artifact env var is passed to this attribute's
-/// constructor and the theory is split into one <c>[Fact]</c> per format
-/// (<see cref="AzureTrustedSigningTests"/>) instead. The assertions inside the
-/// shared helper are unchanged; only the invocation shape changed, to make the
-/// per-format skip real rather than a swallowed early return.
+/// preconditions are absent, instead of returning early and reporting as Passed. (R6)
+/// Two gates apply: the opt-in flag plus Service-Principal/endpoint env vars (shared
+/// by every format), and the per-format test artifact env var. xunit v2 resolves
+/// <c>Skip</c> once per <c>[Theory]</c> at discovery, before any row's data is bound,
+/// so the per-format env var is passed to this attribute's constructor and the
+/// theory is split into one <c>[Fact]</c> per format (<see cref="AzureTrustedSigningTests"/>).
 /// </summary>
 internal sealed class AzureTrustedSigningFactAttribute : FactAttribute
 {

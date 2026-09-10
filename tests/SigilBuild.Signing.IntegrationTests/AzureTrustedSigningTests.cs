@@ -11,14 +11,14 @@ using SigilBuild.Signing;
 using SigilBuild.Signing.Azure;
 
 /// <summary>
-/// Azure Trusted Signing integration tests (Sprint 7, WBS 3.10). Drives the
+/// Azure Trusted Signing integration tests. Drives the
 /// real <see cref="AzureTrustedSigner"/> against a live tenant for each of
 /// the three MVP packaging formats (MSIX, ZIP, EXE-wrapper).
 /// </summary>
 /// <remarks>
 /// <para>
-/// Reports a genuine Skipped result (via <see cref="AzureTrustedSigningFactAttribute"/>,
-/// register row R6) unless every gating condition is met:
+/// Reports a genuine Skipped result (via <see cref="AzureTrustedSigningFactAttribute"/>)
+/// unless every gating condition is met: (R6)
 /// </para>
 /// <list type="bullet">
 ///   <item><description><c>SIGIL_AZURE_TS_INTEGRATION=1</c> in the environment — opt-in flag for the live-tenant suite.</description></item>
@@ -27,15 +27,11 @@ using SigilBuild.Signing.Azure;
 ///   <item><description>A test-artifact path for the format under test (<c>SIGIL_AZURE_TS_TEST_MSIX</c>, <c>SIGIL_AZURE_TS_TEST_ZIP</c>, <c>SIGIL_AZURE_TS_TEST_EXE</c>).</description></item>
 /// </list>
 /// <para>
-/// Previously a single <c>[Theory]</c> with three <c>[InlineData]</c> rows. Converted
-/// to three discrete <c>[Fact]</c>s (R6 fix round 1): xunit v2's <c>Skip</c> is
-/// resolved once per attribute instance at discovery, before any row's data is bound,
-/// so a <c>[Theory]</c> cannot report a different Skip reason per row — the missing
-/// per-format artifact precondition could not become a real, per-row Skipped result
-/// while it stayed a Theory. Splitting into one Fact per format (each carrying its own
-/// artifact env var at compile time) lets <see cref="AzureTrustedSigningFactAttribute"/>
-/// report the correct reason per format. The shared body and its assertions are
-/// unchanged.
+/// Each format is a discrete <c>[Fact]</c>, not a shared <c>[Theory]</c> row: xunit v2
+/// resolves a <c>[Theory]</c>'s <c>Skip</c> once at discovery, before any row's data is
+/// bound, so it cannot report a different Skip reason per row. One Fact per format,
+/// each carrying its own artifact env var, lets
+/// <see cref="AzureTrustedSigningFactAttribute"/> report the correct reason per format.
 /// </para>
 /// <para>
 /// The test never persists secrets to disk and tears down the produced

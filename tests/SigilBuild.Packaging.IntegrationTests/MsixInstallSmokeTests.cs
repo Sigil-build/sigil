@@ -7,15 +7,14 @@ using System.Threading.Tasks;
 using FluentAssertions;
 
 /// <summary>
-/// VM-style MSIX install smoke test (Sprint 5, WBS 2.10). Packs the
+/// VM-style MSIX install smoke test. Packs the
 /// <c>examples/msix-local-sign</c> manifest end-to-end, then drives
 /// <c>install-msix.ps1</c> with <c>-AllowUnsigned</c> to install + uninstall
 /// the produced MSIX via <c>Add-AppxPackage</c>.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Reports a genuine Skipped result (via <see cref="MsixVmFactAttribute"/>, register
-/// row R6) when:
+/// Reports a genuine Skipped result (via <see cref="MsixVmFactAttribute"/>) when: (R6)
 /// </para>
 /// <list type="bullet">
 ///   <item><description>The host is not Windows.</description></item>

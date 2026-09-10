@@ -8,7 +8,7 @@ using Xunit;
 namespace SigilBuild.Core.Tests.Manifest;
 
 /// <summary>
-/// T11.3 (P11): parsing of the <c>firewall_rule</c> install step — third and
+/// Parsing of the <c>firewall_rule</c> install step — third and
 /// last of three machine-scope-only "system steps". Covers the happy path,
 /// SIG0232 (missing required <c>name</c>/<c>direction</c>/<c>action</c>),
 /// SIG0233 (bad enum value) for <c>direction</c>/<c>action</c>/<c>protocol</c>,

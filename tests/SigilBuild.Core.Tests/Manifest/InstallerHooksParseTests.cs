@@ -9,7 +9,7 @@ using Xunit;
 namespace SigilBuild.Core.Tests.Manifest;
 
 /// <summary>
-/// P2: parsing of <c>installer.hooks</c> (four lifecycle phases) and
+/// Parsing of <c>installer.hooks</c> (four lifecycle phases) and
 /// <c>installer.run_after_install</c>, including the per-phase <c>on_failure</c>
 /// defaults (fail for pre_*, continue for post_*).
 /// </summary>

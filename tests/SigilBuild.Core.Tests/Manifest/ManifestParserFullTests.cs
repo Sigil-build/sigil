@@ -101,9 +101,8 @@ public class ManifestParserFullTests
         m.Updates!.Channel.Should().Be("beta");
         m.Updates.ManifestUrl.Should().Be("https://updates.example.com/manifest.json");
         m.Updates.DeltaTargets.Should().Be(5);
-        // R30: this fixture used to carry `./key.pem` — a file path, which the schema has
-        // always said this field must never be. It is now a real base64 P-256 SPKI,
-        // because SIG0325 rejects anything else at pack time.
+        // This fixture carries a real base64 P-256 SPKI, not a file path — SIG0325
+        // rejects anything else at pack time. (R30)
         m.Updates.SigningKey.Should().Be(
             "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEM6pwH5xM2+mhJt1IQ29ejc6kQVnvyPXhUGoX9nUttZmX" +
             "Ahvgbx9xTMcLoNEGpK3zdYmQRTR8h/ftYEBZuNznhw==");

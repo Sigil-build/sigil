@@ -8,7 +8,7 @@ using Xunit;
 namespace SigilBuild.Core.Tests.Manifest;
 
 /// <summary>
-/// P8: parsing of the ini_write / json_edit / xml_edit steps, including the
+/// Parsing of the ini_write / json_edit / xml_edit steps, including the
 /// create_if_missing default (false) and required-field diagnostics.
 /// </summary>
 public class ConfigStepsParseTests
@@ -58,13 +58,12 @@ public class ConfigStepsParseTests
         => ManifestParser.Parse(Yaml(step), "s.yaml")
             .Diagnostics.Should().Contain(d => d.Code == DiagnosticCodes.MissingRequiredStepField);
 
-    // ── json_edit.value_type (register row R35) ──────────────────────────────
+    // ── json_edit.value_type ──────────────────────────────────────────────────
 
     /// <summary>
-    /// Register row R35. The step used to infer the written node's type from the
-    /// resolved value, which let a wizard field or a <c>registry_read</c> var write an
-    /// object where the manifest author wrote a string. An omitted <c>value_type</c>
-    /// must therefore mean <c>string</c>, not the old inference.
+    /// An omitted <c>value_type</c> means <c>string</c> — not inferred from the
+    /// resolved value, which would let a wizard field or a <c>registry_read</c> var
+    /// silently write an object where the manifest author wrote a string. (R35)
     /// </summary>
     [Fact]
     public void Json_edit_value_type_defaults_to_string()

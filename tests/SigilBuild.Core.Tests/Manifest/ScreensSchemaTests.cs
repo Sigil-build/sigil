@@ -7,7 +7,7 @@ using Xunit;
 namespace SigilBuild.Core.Tests.Manifest;
 
 /// <summary>
-/// T9 parse coverage: the manifest's <c>installer.screens</c> block resolves its
+/// Parse coverage: the manifest's <c>installer.screens</c> block resolves its
 /// field references against declared parameters, validates title interpolation
 /// tokens and screen <c>when</c> expressions, and surfaces the SIG024x
 /// diagnostics on failure.
@@ -147,7 +147,7 @@ public class ScreensSchemaTests
         result.Manifest!.Installer!.Screens!.Single().When.Should().Be("param.autostart == true");
     }
 
-    // ── LocalizedText (P9, gap G10): title/subtitle normalize/carry {en, uk, ...} ──
+    // ── LocalizedText: title/subtitle normalize/carry {en, uk, ...} (gap G10) ──────
 
     [Fact]
     public void PlainStringTitle_NormalizesToEnglish()

@@ -8,9 +8,9 @@ using Xunit;
 namespace SigilBuild.Core.Tests.Manifest;
 
 /// <summary>
-/// T8: parsing of <c>installer.options</c> — each of the four built-in components
+/// Parsing of <c>installer.options</c> — each of the four built-in components
 /// is a shorthand boolean or an object <c>{ enabled, default, locked, ... }</c>
-/// (<c>file_associations</c> adds <c>extensions</c>) — into the M0 records on
+/// (<c>file_associations</c> adds <c>extensions</c>) — into the records on
 /// <see cref="InstallerSection.Options"/>.
 /// </summary>
 public class InstallerOptionsParseTests
@@ -120,7 +120,7 @@ public class InstallerOptionsParseTests
         result.Manifest!.Installer!.Options.Should().BeNull();
     }
 
-    // ── P10 (gap G11): app-defined custom components ─────────────────────────
+    // ── App-defined custom components (gap G11) ───────────────────────────────
 
     [Fact]
     public void Custom_component_parses_name_label_default_locked_when()

@@ -8,10 +8,10 @@ using Xunit;
 namespace SigilBuild.Core.Tests.Manifest;
 
 /// <summary>
-/// R16: <c>allow_outside_install_dir</c> is the documented per-step opt-out from
+/// <c>allow_outside_install_dir</c> is the documented per-step opt-out from
 /// destination containment. It is an envelope field — parsed once alongside
 /// <c>when</c> / <c>on_failure</c> — but only the step types that actually write
-/// somewhere accept the key.
+/// somewhere accept the key. (R16)
 /// </summary>
 public class AllowOutsideInstallDirParseTests
 {

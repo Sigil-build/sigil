@@ -6,7 +6,7 @@ using Xunit;
 namespace SigilBuild.Core.Tests.Manifest;
 
 /// <summary>
-/// P6 (gap G7): parsing of <c>installer.app_mutex</c> — the Inno AppMutex equivalent.
+/// Parsing of <c>installer.app_mutex</c> — the Inno AppMutex equivalent. (gap G7)
 /// </summary>
 public class AppMutexParseTests
 {

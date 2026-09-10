@@ -7,7 +7,7 @@ using Xunit;
 namespace SigilBuild.Core.Tests.Manifest;
 
 /// <summary>
-/// T12: parsing of <c>installer.scope</c> (user | machine | auto) into
+/// Parsing of <c>installer.scope</c> (user | machine | auto) into
 /// <see cref="InstallerSection.Scope"/>.
 /// </summary>
 public class InstallerScopeParseTests

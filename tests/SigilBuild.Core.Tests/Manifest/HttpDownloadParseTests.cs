@@ -8,7 +8,7 @@ using Xunit;
 namespace SigilBuild.Core.Tests.Manifest;
 
 /// <summary>
-/// P4: pack-time validation of the <c>http_download</c> step — sha256 is required
+/// Pack-time validation of the <c>http_download</c> step — sha256 is required
 /// and the URL must be https:// (both fatal, so the packer refuses to emit an
 /// unchecked or plaintext download).
 /// </summary>

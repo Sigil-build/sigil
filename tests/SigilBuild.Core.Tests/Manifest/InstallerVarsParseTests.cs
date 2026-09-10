@@ -8,7 +8,7 @@ using Xunit;
 namespace SigilBuild.Core.Tests.Manifest;
 
 /// <summary>
-/// P1: parsing of the <c>installer.vars</c> block into
+/// Parsing of the <c>installer.vars</c> block into
 /// <see cref="SigilBuild.Core.Manifest.InstallerSection.Vars"/>, including the
 /// pack-time cycle / malformed-expression diagnostics (SIG0270).
 /// </summary>

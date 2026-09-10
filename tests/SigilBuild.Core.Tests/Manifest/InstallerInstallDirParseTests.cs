@@ -5,7 +5,7 @@ using Xunit;
 namespace SigilBuild.Core.Tests.Manifest;
 
 /// <summary>
-/// T13: parsing of <c>installer.install_dir</c> into
+/// Parsing of <c>installer.install_dir</c> into
 /// <see cref="SigilBuild.Core.Manifest.InstallerSection.InstallDir"/>. The value
 /// is captured verbatim as a template; token resolution happens at install time.
 /// </summary>

@@ -2,7 +2,7 @@
 
 `install_steps:` is an ordered list of typed actions the wrapper runs at install time. Each step records a reverse operation in the rollback journal before mutating state, so a failure (or a later `setup.exe /Uninstall`) can undo every change byte-identical.
 
-The MUST-tier step set below is what's shipped today. `pre_install:` and `post_install:` accept the same step shapes and run before / after `install_steps:` respectively.
+The catalog is a **closed set of 18 step types**, listed in full below. It is not extended by configuration — a new type requires an amendment to [ADR-008](../architecture/adr-008-expression-policy.md) and a change across the whole chain from the manifest model to the runtime. `pre_install:` and `post_install:` accept the same step shapes and run before / after `install_steps:` respectively; `uninstall:` accepts them too.
 
 ## Write the destination as `{install_dir}`
 
@@ -26,7 +26,15 @@ Copies one file or a glob pattern. A `from:` (or `to:`) path that starts with th
 |---|---|---|---|---|
 |`from`|string|yes|-|File path or glob. `**` recurses; `*.txt` is non-recursive.|
 |`to`|string|yes|-|Destination directory.|
-|`overwrite`|bool|-|`true`|Overwrite existing files. When `false`, an existing file at `to` is left alone (but the prior bytes are still journaled).|
+|`overwrite`|bool|-|`true`|Overwrite existing files. When `false`, an existing file at `to` is meant to be left alone (the prior bytes are journaled either way).|
+
+> **Known issue (R77): `overwrite: false` is inert.** The step currently
+> replaces an existing file regardless of this setting, so a manifest that
+> relies on `overwrite: false` to preserve a user's existing config **will
+> overwrite it**. The prior bytes are journaled, so an uninstall or a rollback
+> puts the original back — but the file is replaced during the install. Until
+> this is fixed, gate the step with `when: "!file_exists('…')"` instead of
+> relying on `overwrite: false`.
 
 ```yaml
 - id: deploy-payload
@@ -48,7 +56,7 @@ Creates a directory (recursively, like `mkdir -p`). No-op if the directory alrea
 
 ## `directory_delete`
 
-Stashes the entire subtree to a temp location for rollback, then deletes. With `recursive: false`, fails on a non-empty directory rather than leaving partial state.
+Stashes the entire subtree to a temp location for rollback, then deletes. `recursive` **defaults to `false`**, and with `recursive: false` the step fails on a non-empty directory rather than leaving partial state — so that failure mode is the default. Set `recursive: true` explicitly to delete a tree.
 
 ```yaml
 - id: wipe-prior-install
@@ -83,6 +91,8 @@ Writes a typed value under the requested hive / key / view. Snapshots the prior 
 |`view`|`native` (default), `32bit`, `64bit`.|
 
 > `value_type` is accepted as a legacy alias for `type_value`.
+
+> **None of `hive`, `type_value` or `view` is validated at pack time.** `sigil validate` accepts any spelling; a bad one throws at **install** time, on the end user's machine, not in your build. Copy the values above exactly.
 
 ```yaml
 - id: stamp-install-dir
@@ -155,6 +165,8 @@ Writes a Windows environment variable to the user or machine hive (machine scope
 
 |Field|Notes|
 |---|---|
+|`name`|**Required.** The environment variable's name.|
+|`value`|**Required.** The value to set, append or prepend.|
 |`scope`|`user` (default) or `machine`.|
 |`action`|`set` (default), `append`, or `prepend`.|
 |`separator`|Delimiter for `append` / `prepend` (default `;`). Ignored when the prior value is empty or absent.|
@@ -192,6 +204,70 @@ Records NO journal entry: an external process is not invertible. If `run_program
   timeout_seconds: 600
 ```
 
+## `http_download`
+
+Downloads a file over HTTPS and verifies it against a mandatory SHA-256 checksum before anything else sees it. Records a `RestoreFile` rollback, exactly like `file_copy`: a pre-existing file at `dest` is stashed and put back on rollback or uninstall, and a newly created one is deleted.
+
+|Field|Type|Required|Default|Notes|
+|---|---|---|---|---|
+|`url`|string|yes|-|**Must start with `https://`.** A literal `http://` URL is rejected at pack time (**SIG0235**); a URL built from `{var.…}` / `{install_dir}` tokens is re-checked at install time and fails the step.|
+|`dest`|string|yes|-|Destination file path. Subject to the same [`install_dir` containment](#every-step-destination-is-contained-to-install_dir) as `file_copy`'s `to`.|
+|`sha256`|string|**yes**|-|Hex SHA-256 of the expected file. **Required** — packing a download with no integrity check is refused with **SIG0236**. A mismatch fails the step immediately and is never retried: it is not a transient condition.|
+|`timeout_seconds`|int|-|`300`|Per-attempt timeout.|
+|`retries`|int|-|`0`|Additional attempts after the first, with exponential backoff, for transient network failures only. Total attempts are `1 + retries`. There is no resume — a retry restarts the download.|
+
+```yaml
+- id: fetch-model
+  type: http_download
+  url: "https://cdn.example.com/models/v3.bin"
+  dest: "{install_dir}\\models\\v3.bin"
+  sha256: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+  timeout_seconds: 600
+  retries: 2
+```
+
+> `{staging_dir}` is the one destination that gets extra handling: a binary downloaded there is re-verified through a held file handle and Authenticode-checked immediately before it is launched. That is how the web-installer stub fetches its payload — see [Updates](updates.md). For an ordinary payload file, `{install_dir}\…` is the right destination.
+
+## `ini_write`
+
+Writes a single `key=value` entry into an INI file, stashing the file's prior content for rollback.
+
+|Field|Type|Required|Default|Notes|
+|---|---|---|---|---|
+|`path`|string|yes|-|The INI file to edit.|
+|`key`|string|yes|-|The key to write.|
+|`section`|string|-|`""`|The section to write into. The default, an empty string, means the keys that appear **before the first `[section]` header**.|
+|`value`|string|-|`""`|The value to write.|
+|`create_if_missing`|bool|-|`false`|When `false` (the default) and the file does not exist, the step **fails**.|
+
+See also [`ini_write` values cannot inject INI lines](#ini_write-values-cannot-inject-ini-lines) for the newline / leading-`[` rejection rules.
+
+## `json_edit`
+
+Sets one node in a JSON document, addressed by JSON Pointer, stashing the file's prior content for rollback.
+
+|Field|Type|Required|Default|Notes|
+|---|---|---|---|---|
+|`path`|string|yes|-|The JSON file to edit.|
+|`pointer`|string|yes|-|RFC 6901 JSON Pointer to the node. Must start with `/`.|
+|`value`|string|-|`""`|The value to write.|
+|`value_type`|enum|-|`string`|`string` or `json` — see [below](#json_edit-writes-a-string-unless-you-say-value_type-json).|
+|`create_if_missing`|bool|-|`false`|When `false` (the default) and the file does not exist, the step **fails**.|
+
+## `xml_edit`
+
+Sets an element's text or an attribute's value in an XML document, addressed by XPath, stashing the file's prior content for rollback.
+
+|Field|Type|Required|Default|Notes|
+|---|---|---|---|---|
+|`path`|string|yes|-|The XML file to edit.|
+|`xpath`|string|yes|-|XPath selecting the element to edit.|
+|`attribute`|string|-|(none)|The attribute to set. Omit it to set the selected element's **text** instead.|
+|`value`|string|-|`""`|The value to write.|
+|`create_if_missing`|bool|-|`false`|When `false` (the default), a missing file **fails** the step and so does an `xpath` that matches no element. When `true`, a missing element is created — but only for a **simple absolute path** of the form `/a/b/c`; anything with predicates, wildcards or axes still fails.|
+
+See also [`xml_edit` refuses a document that declares a `<!DOCTYPE>`](#xml_edit-refuses-a-document-that-declares-a-doctype).
+
 ## Privileged step targets are anchored — read this before the next four steps
 
 `service_install`, `scheduled_task_create`, `com_register` and `firewall_rule` hand a path from your manifest to something running with SYSTEM-level authority: the SCM launches a service binary, `schtasks` is always invoked with `/RU SYSTEM`, `com_register` loads the DLL **into the elevated installer process** and calls its `DllRegisterServer`, and `firewall_rule`'s `program=` grants that executable the exemption you asked for.
@@ -226,6 +302,8 @@ Registers a Windows service via `sc.exe create`, optionally starts it. Records a
 |`start_type`|`auto` (default), `demand`, `disabled`, `boot`, `system`.|
 |`service_account`|`LocalSystem` (default), `NetworkService`, `LocalService`.|
 |`start_after_install`|Default `true`. `sc start` is best-effort; "already running" is treated as success.|
+
+> **Neither `start_type` nor `service_account` is validated at pack time.** An unrecognized `start_type` silently falls back to `auto`, and an unrecognized `service_account` silently falls back to `LocalSystem` — so `start_type: automatic` or `service_account: NetworkServices` ships without a diagnostic and installs a service configured differently from what the manifest says. Spell them exactly as listed above.
 
 ```yaml
 - id: install-update-service
@@ -341,8 +419,10 @@ Every step accepts the same envelope:
 |`id`|yes|-|Stable identifier. Appears in logs and rollback journal entries.|
 |`type`|yes|-|One of the step types above.|
 |`when`|-|-|Expression gating execution. See [Conditional installs](conditional-installs.md).|
-|`on_failure`|-|`fail`|`rollback` (undo journaled steps), `continue` (log + proceed), or `fail` (abort without rollback).|
+|`on_failure`|-|`fail`|`rollback` (undo journaled steps), `continue` (log + proceed), or `fail` (abort). Note the default differs by phase: it is `fail` for `install_steps:`, `pre_install:`, `post_install:` and `uninstall:`, and for `installer.hooks.pre_*`, but **`continue`** for `installer.hooks.post_*`.|
 |`allow_outside_install_dir`|-|`false`|Opts this step out of destination containment (below). Accepted only by `file_copy`, `directory_create`, `file_delete`, `directory_delete`, `http_download`, `ini_write`, `json_edit` and `xml_edit`; on any other step type it is an unrecognized field and has no effect.|
+
+> **Known issue (R78): `on_failure: fail` and `on_failure: rollback` behave identically.** Both take the same path in the engine and both replay the **entire** rollback journal in reverse, across all phases. There is currently no "abort without rollback" mode and no "undo only up to this step" mode. Only `continue` is distinct. Treat the two as synonyms until this is fixed; if you need a step's failure not to unwind the install, use `on_failure: continue` and check the condition yourself.
 
 ## Every step destination is contained to `install_dir`
 
@@ -419,10 +499,23 @@ A `{token}` that is still present in a path after substitution — `{var.instal_
 
 This applies to **every** path-valued field of every step, not just the destinations listed above: it is enforced where paths are resolved, so `run_program.program`, `shortcut_create.target`, `service_install.binary_path` and `scheduled_task_create.program` are covered too. `allow_outside_install_dir` does not suppress it — an unresolved token is a manifest mistake under any containment policy.
 
-The tokens a step path may use are `{install_dir}`, `{scope_root}`, `{app.name}`, `{app.id}` and `{var.<name>}` for each declared `installer.vars` entry, plus `${parameters.<name>}` templates. Anything else in braces that looks like an identifier is treated as a mistake.
+The tokens a step path may use are:
+
+|Token|Resolves to|
+|---|---|
+|`{install_dir}`|The installer's resolved destination.|
+|`{scope_root}`|The install root for the resolved scope (`%ProgramFiles%` / `%LocalAppData%\Programs`).|
+|`{app.name}` / `{app.id}`|The manifest's `app.name` / `app.id`.|
+|`{var.<name>}`|Each declared `installer.vars` entry.|
+|`{temp_dir}`|The per-user temp directory, with no trailing separator.|
+|`{staging_dir}`|A freshly created, GUID-named private directory under temp. This is the security-relevant one: a binary downloaded here gets the held-handle re-verification and the pre-launch Authenticode check. It is created as a side effect of resolving the token.|
+
+Plus `${parameters.<name>}` templates — `${param.<name>}` is an accepted alias for the same thing, and it is the spelling the schema and ADR-008 use. Anything else in braces that looks like an identifier is treated as a mistake.
+
+Two different substitution passes, easily confused: `${…}` is a **template** over the identifier table (parameters, `app.*`, `option.*`, `var.*`, `scope`, …), and an unknown identifier there is a hard `FormatException` at install time. `{…}` is the **runtime token** pass listed above, and an unknown token left in a *path* fails the step. See [Conditional installs](conditional-installs.md) for the full identifier table.
 
 ## See also
 
-- [Manifest reference - install_steps](../manifest-reference.md#install-steps)
+- [Manifest reference](../manifest-reference.md)
 - [Conditional installs](conditional-installs.md)
 - [Uninstaller](uninstaller.md)

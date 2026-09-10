@@ -14,7 +14,7 @@ namespace SigilBuild.Core.Manifest;
 /// Picking a language is deliberately NOT a method here: this record is manifest
 /// data shared with pack time, while matching belongs next to the resolver in
 /// SigilBuild.Wrapper.Core/Localization. Core carries the map; Wrapper.Core
-/// resolves it. See design §5.1.
+/// resolves it.
 /// </remarks>
 public sealed record LocalizedText(IReadOnlyDictionary<string, string> Values)
 {

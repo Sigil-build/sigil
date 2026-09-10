@@ -13,8 +13,8 @@ namespace SigilBuild.Core.Manifest;
 ///   <item><description><see cref="Auto"/> — user scope unless overridden by
 ///     <c>/allusers</c> or the wizard's scope toggle. Default.</description></item>
 /// </list>
-/// Scope resolution and elevation behaviour land with T12; this enum is only
-/// the manifest/blob data surface.
+/// This enum is only the manifest/blob data surface; scope resolution and
+/// elevation behaviour live in the install engine.
 /// </remarks>
 public enum InstallScope
 {

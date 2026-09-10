@@ -3,7 +3,7 @@ using System.Collections.Generic;
 namespace SigilBuild.Core.Manifest;
 
 /// <summary>
-/// A declared custom wizard screen (decision 6 / T9). Custom screens are forms
+/// A declared custom wizard screen. Custom screens are forms
 /// over already-declared top-level <c>parameters:</c> — no arbitrary markup.
 /// Parsed from the manifest's <c>installer.screens</c> block.
 /// </summary>
@@ -24,7 +24,7 @@ public sealed record InstallerScreen(
 /// A single field on an <see cref="InstallerScreen"/>. References a declared
 /// <see cref="ParameterDefinition"/> by name; the widget is inferred from the
 /// parameter's <see cref="ParameterType"/> unless <see cref="Widget"/> overrides
-/// it (T9 widget-inference table).
+/// it.
 /// </summary>
 /// <param name="Param">Name of the declared parameter this field edits.</param>
 /// <param name="Widget">Optional widget override (e.g. <c>radio</c>,

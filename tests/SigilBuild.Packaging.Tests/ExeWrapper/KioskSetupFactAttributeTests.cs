@@ -6,12 +6,11 @@ using Xunit;
 namespace SigilBuild.Packaging.Tests.ExeWrapper;
 
 /// <summary>
-/// Register row R6: <see cref="KioskSetupFactAttribute.SetupPath"/> previously walked six
-/// fixed ".." segments up from the test assembly's output directory and landed OUTSIDE the
-/// repository (e.g. resolving to a "tests\kiosk\..." path under the repo's PARENT directory),
-/// so the guarded test could never run on any machine. This test pins the fix: the resolved
-/// path must always be inside the repository root, found by walking up to <c>Sigil.slnx</c>
-/// rather than by counting directory levels.
+/// Guards: <see cref="KioskSetupFactAttribute.SetupPath"/> must resolve to a path inside
+/// the repository root, found by walking up to <c>Sigil.slnx</c> rather than by counting
+/// a fixed number of ".." segments — a fixed count can land OUTSIDE the repository (e.g.
+/// resolving to a "tests\kiosk\..." path under the repo's PARENT directory), leaving the
+/// guarded test unable to ever run on any machine. (R6)
 /// </summary>
 public class KioskSetupFactAttributeTests
 {

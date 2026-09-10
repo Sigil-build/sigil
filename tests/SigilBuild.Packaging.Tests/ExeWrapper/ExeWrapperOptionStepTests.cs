@@ -10,7 +10,7 @@ using Xunit;
 namespace SigilBuild.Packaging.Tests.ExeWrapper;
 
 /// <summary>
-/// T8: the pack → blob half of the built-in Options feature.
+/// The pack → blob half of the built-in Options feature.
 /// <see cref="ExeWrapperPackager.BuildBlobBytes"/> auto-generates an
 /// <c>option.&lt;component&gt;</c>-gated install step for every ENABLED component,
 /// carries the enabled component list in the blob, and generates NOTHING for a

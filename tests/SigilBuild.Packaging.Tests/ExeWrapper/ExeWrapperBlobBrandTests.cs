@@ -10,7 +10,7 @@ using Xunit;
 namespace SigilBuild.Packaging.Tests.ExeWrapper;
 
 /// <summary>
-/// Verifies the pack → blob half of the T7 brand flow: <see cref="ExeWrapperPackager.BuildBlobBytes"/>
+/// Verifies the pack → blob half of the brand flow: <see cref="ExeWrapperPackager.BuildBlobBytes"/>
 /// derives the palette and embeds the light/dark token maps + base64 logo/hero
 /// into the <c>SIGIL_BLOB_V1</c> wire payload (no sidecar). The blob → host half
 /// is exercised by the host tests.
@@ -97,7 +97,7 @@ public class ExeWrapperBlobBrandTests
     [Fact]
     public void BuildBlobBytes_EmbedsAppNameAndInstallDirOverride()
     {
-        // T13: App.Name (default install-dir base + {app.name}) and the optional
+        // App.Name (default install-dir base + {app.name}) and the optional
         // install_dir override template travel in the blob so the runtime resolves
         // the effective install dir.
         var manifest = new SigilManifest("v1.0",

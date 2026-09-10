@@ -7,7 +7,7 @@ using Xunit;
 namespace SigilBuild.Packaging.Tests.ExeWrapper;
 
 /// <summary>
-/// P4: packing a manifest with an http_download step is deterministic and touches
+/// Packing a manifest with an http_download step is deterministic and touches
 /// no network — the URL is only fetched at install time. Two packs of the same
 /// manifest produce byte-identical blob bytes.
 /// </summary>

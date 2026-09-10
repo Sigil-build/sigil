@@ -10,7 +10,7 @@ using Xunit;
 namespace SigilBuild.Packaging.Tests.ExeWrapper;
 
 /// <summary>
-/// T10 pack → blob coverage: <see cref="ExeWrapperPackager.BuildBlobBytes"/>
+/// Pack → blob coverage: <see cref="ExeWrapperPackager.BuildBlobBytes"/>
 /// threads the real Add/Remove Programs fields into the blob — DisplayName from
 /// <c>App.Name</c>, Publisher from <c>App.Publisher</c>, Version from
 /// <c>App.Version</c>, and EstimatedSizeBytes from the uncompressed payload

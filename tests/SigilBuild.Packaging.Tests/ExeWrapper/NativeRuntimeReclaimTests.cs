@@ -12,10 +12,10 @@ using Xunit;
 namespace SigilBuild.Packaging.Tests.ExeWrapper;
 
 /// <summary>
-/// Register row R50: the per-run fallback cache directory that R4's fix falls back to
-/// when the shared root cannot be established was never reclaimed, so one
-/// <c>New-Item</c> at <c>%ProgramData%\sigil-runtime</c> by any unprivileged user armed
-/// an unbounded ~18 MB-per-install disk leak.
+/// The per-run fallback cache directory that the R4 fallback path creates when the
+/// shared root cannot be established must be reclaimed — otherwise one
+/// <c>New-Item</c> at <c>%ProgramData%\sigil-runtime</c> by any unprivileged user arms
+/// an unbounded ~18 MB-per-install disk leak. (R50)
 /// </summary>
 /// <remarks>
 /// <para>
@@ -240,9 +240,9 @@ public sealed class NativeRuntimeReclaimTests
     }
 
     /// <summary>
-    /// The handle-based administrator-only predicate added for R50 must reach exactly the
-    /// same verdict as the path-based one lanes S2/S3 gate SYSTEM-level step targets on,
-    /// on the three directories that predicate was hand-verified against.
+    /// The handle-based administrator-only predicate must reach exactly the
+    /// same verdict as the path-based one that gates SYSTEM-level step targets,
+    /// on the three directories that predicate was hand-verified against. (R50)
     /// </summary>
     [WindowsFact]
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]

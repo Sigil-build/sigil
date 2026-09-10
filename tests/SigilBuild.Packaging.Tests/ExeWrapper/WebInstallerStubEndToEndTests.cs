@@ -23,14 +23,14 @@ using Xunit;
 namespace SigilBuild.Packaging.Tests.ExeWrapper;
 
 /// <summary>
-/// P12 / T12.6: the web-installer stub (T12.5's
-/// <see cref="ExeWrapperPackager.BuildWebStubBlobBytes"/>) exercised end-to-end —
+/// The web-installer stub
+/// (<see cref="ExeWrapperPackager.BuildWebStubBlobBytes"/>) exercised end-to-end —
 /// its REAL two-step blob (<c>http_download</c> + <c>run_program</c>) is run
 /// through <c>InstallSession</c> against a REAL local HTTPS server (mirroring
 /// <c>HttpDownloadIntegrationTests</c>): the stub downloads the served "package",
 /// verifies its actual sha256, and chains into running it. A tampered served
 /// package must fail the stub's own checksum check (rollback), never reaching
-/// run_program. Also re-proves T12.5's CRITICAL delegation fix
+/// run_program. Also re-proves the stub's delegation invariant
 /// (<see cref="WrapperBlob.IsDelegatingStub"/>) end-to-end through this REAL
 /// download+run pair, not the hand-rolled marker step
 /// <c>WebInstallerStubCompletionTests</c> uses for its narrower unit check.
@@ -47,10 +47,10 @@ namespace SigilBuild.Packaging.Tests.ExeWrapper;
 /// proves the stub's hand-off actually executes an external process, standing in
 /// for a full nested Setup.exe (which does not itself perform its own
 /// ARP/completion bookkeeping here). The assertions below are entirely about the
-/// STUB's OWN behavior — exactly the seam T12.5's fix gates — not about whatever
-/// the downloaded child does. A true nested "real Setup.exe downloads and installs
-/// a second real Setup.exe" cross-process scenario is CI-VM-only; see the P12 job
-/// appended to <c>.github/workflows/wrapper-vm-tests.yml</c>.
+/// STUB's OWN behavior — exactly the seam the delegation invariant gates — not
+/// about whatever the downloaded child does. A true nested "real Setup.exe
+/// downloads and installs a second real Setup.exe" cross-process scenario is
+/// CI-VM-only; see the job appended to <c>.github/workflows/wrapper-vm-tests.yml</c>.
 /// </para>
 /// <para>Windows-only (real HKCU registry + file system); a no-op elsewhere.</para>
 /// </remarks>
@@ -130,11 +130,10 @@ public sealed class WebInstallerStubEndToEndTests
         using var scratch = new ScratchDir();
         using var siting = SecureStaging.UseSitingForTesting(scratch.Path);
 
-        // Register row R5's "pre-planted" half, end to end. This is the path the stub used
-        // to download to — {temp_dir}/<App>-<ver>-<arch>-Setup.exe, a pack-time constant
-        // derived from the public artifact name and therefore known to anyone holding the
-        // installer. Pre-fix the download landed exactly here, and HttpDownloadStep would
-        // have backed this file up and overwritten it. It must now be inert.
+        // R5's "pre-planted" half, end to end: {temp_dir}/<App>-<ver>-<arch>-Setup.exe is a
+        // pack-time constant derived from the public artifact name and therefore known to
+        // anyone holding the installer. The download must never land there, so a file
+        // already sitting at that path must come out untouched.
         var oldPredictableDest = Path.Combine(Path.GetTempPath(), fullPackageFileName);
         var prePlanted = Encoding.UTF8.GetBytes("attacker bytes waiting at the predictable path");
         await File.WriteAllBytesAsync(oldPredictableDest, prePlanted);
@@ -166,7 +165,7 @@ public sealed class WebInstallerStubEndToEndTests
             Directory.EnumerateFileSystemEntries(scratch.Path).Should().BeEmpty(
                 "the run staged inside the pinned root and cleaned it up afterwards");
 
-            // Delegation check (T12.5's critical fix), proven through the REAL
+            // Delegation check, proven through the REAL
             // http_download + run_program pair rather than a hand-rolled marker step.
             using (var arp = Registry.CurrentUser.OpenSubKey($@"{UninstallRoot}\{appId}"))
             {
@@ -286,9 +285,9 @@ public sealed class WebInstallerStubEndToEndTests
     /// <summary>
     /// Best-effort delete of the stub's downloaded temp package. The production
     /// blob (<see cref="ExeWrapperPackager.BuildWebStubBlobBytes"/>) defines no
-    /// cleanup step for this file — a pre-existing, out-of-scope-for-T12.6 gap
-    /// noted in the task report — so tests clean up after themselves instead of
-    /// leaving copies of cmd.exe (or tampered substitute bytes) behind in %TEMP%.
+    /// cleanup step for this file — a pre-existing gap — so tests clean up after
+    /// themselves instead of leaving copies of cmd.exe (or tampered substitute
+    /// bytes) behind in %TEMP%.
     /// </summary>
     private static void TryDeleteFile(string path)
     {
@@ -301,7 +300,7 @@ public sealed class WebInstallerStubEndToEndTests
     /// Minimal HTTPS/1.1 server over <see cref="SslStream"/> with a self-signed
     /// certificate, routing by exact request path to a mapped byte payload (200)
     /// or 404 for anything unmapped. Mirrors
-    /// <c>HttpDownloadIntegrationTests.TlsHttpServer</c> (P4) generalized with a
+    /// <c>HttpDownloadIntegrationTests.TlsHttpServer</c>, generalized with a
     /// per-path hit counter, as <c>UpdateEndToEndTests.RoutingTlsServer</c> does.
     /// </summary>
     private sealed class RoutingTlsServer : IDisposable

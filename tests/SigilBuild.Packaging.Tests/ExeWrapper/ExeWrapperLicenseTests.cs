@@ -13,14 +13,13 @@ using Xunit;
 namespace SigilBuild.Packaging.Tests.ExeWrapper;
 
 /// <summary>
-/// T14 / P9 (gap G10) pack → blob coverage: <see cref="ExeWrapperPackager.BuildBlobBytes"/>
+/// Pack → blob coverage: <see cref="ExeWrapperPackager.BuildBlobBytes"/>
 /// reads each manifest-referenced license file into a tag -&gt; text map, embeds
 /// it into the <c>SIGIL_BLOB_V1</c> wire payload, and splits diagnostic ownership
 /// by failure kind (design §5.3): a per-entry read failure is a non-fatal
 /// <see cref="DiagnosticCodes.LicenseFileUnreadable"/> (SIG0250); the resulting
 /// map lacking an <c>en</c> entry is a fatal <see cref="DiagnosticCodes.LocalizedTextMissingEnglish"/>
-/// (SIG0290); an entirely empty map omits the screen with neither diagnostic
-/// (T14's original behavior, unchanged).
+/// (SIG0290); an entirely empty map omits the screen with neither diagnostic. (gap G10)
 /// </summary>
 public class ExeWrapperLicenseTests
 {
@@ -150,7 +149,7 @@ public class ExeWrapperLicenseTests
         }
     }
 
-    // ── License map at pack time (P9, gap G10): SIG0250 -> SIG0290 ownership ──
+    // ── License map at pack time: SIG0250 -> SIG0290 ownership (gap G10) ───────
 
     [Fact]
     public void License_PlainPath_ReadsAsEnglish()
@@ -207,7 +206,7 @@ public class ExeWrapperLicenseTests
         }
     }
 
-    // T14's behavior must survive: nothing readable => screen omitted, no SIG0290.
+    // Nothing readable => screen omitted, no SIG0290.
     [Fact]
     public void License_AllEntriesUnreadable_OmitsScreen_WithoutSig0290()
     {

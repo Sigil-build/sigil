@@ -35,13 +35,13 @@ public class ExeWrapperPackagerTests
     }
 
     /// <summary>
-    /// Reconciled overhead gate (T17). ADR-008 originally hard-capped the wrapper
+    /// Reconciled overhead gate. ADR-008 originally hard-capped the wrapper
     /// overhead at 5 MB, on the assumption the stamped runtime was a thin AOT
-    /// console host. T18 changed that assumption: the Setup.exe now bundles the
-    /// full Native-AOT wizard host (<c>SigilBuild.Installer.Host.exe</c>, ~19 MB)
+    /// console host. That assumption no longer holds: the Setup.exe now bundles
+    /// the full Native-AOT wizard host (<c>SigilBuild.Installer.Host.exe</c>, ~19 MB)
     /// PLUS its Skia/ANGLE/HarfBuzz native runtime (~19 MB raw), embedded as the
     /// <c>SIGIL_RUNTIME_V1</c> resource, so a real stamped exe is ~28 MB over the
-    /// payload — the 5 MB flat cap is no longer meaningful.
+    /// payload — the 5 MB flat cap alone is no longer meaningful.
     /// <para>
     /// Rather than re-pin a single fragile magic number, the assertion is split
     /// (ADR-008 option b) into the two independent components:
@@ -49,7 +49,7 @@ public class ExeWrapperPackagerTests
     /// <list type="number">
     ///   <item><description><b>Bundled AOT runtime</b> — the host exe + its raw
     ///   native deps. This is the legitimately-large part; it is gated separately
-    ///   by the host size gate (T3, ~40 MB footprint) inside
+    ///   by the host size gate (~40 MB footprint) inside
     ///   <c>scripts/publish-installer-runtime.ps1</c>, so this test only measures
     ///   it (as the compressed <c>SIGIL_RUNTIME_V1</c> archive can never exceed
     ///   the raw bytes, the staged host + raw natives are a safe UPPER bound).</description></item>
@@ -60,9 +60,9 @@ public class ExeWrapperPackagerTests
     ///   is still enforced here.</description></item>
     /// </list>
     /// Runtime-gated: reports a genuine Skipped result (via
-    /// <see cref="RuntimeStagedFactAttribute"/>, register row R6) when the AOT host is
+    /// <see cref="RuntimeStagedFactAttribute"/>) when the AOT host is
     /// not staged (so a plain <c>dotnet test</c> stays fast), and PASSES once the
-    /// runtime is staged via <c>scripts/publish-installer-runtime.ps1</c>.
+    /// runtime is staged via <c>scripts/publish-installer-runtime.ps1</c>. (R6)
     /// </summary>
     [RuntimeStagedFact]
     public async Task PackAsync_wrapper_code_overhead_under_5mb_on_top_of_bundled_runtime()
@@ -126,13 +126,13 @@ public class ExeWrapperPackagerTests
     }
 
     /// <summary>
-    /// T4 acceptance: packing a manifest whose <c>package.formats</c> is
+    /// Acceptance: packing a manifest whose <c>package.formats</c> is
     /// <c>[exe]</c> produces one <c>&lt;App&gt;-&lt;ver&gt;-&lt;arch&gt;-Setup.exe</c>
     /// per declared architecture, each a valid PE carrying the stamped
     /// <c>SIGIL_BLOB_V1</c> + <c>SIGIL_PAYLOAD_V2</c> resources.
     /// <para>
     /// Gating: mirrors the existing skip-gated pack tests — the test reports a genuine
-    /// Skipped result (via <see cref="RuntimeStagedFactAttribute"/>, register row R6)
+    /// Skipped result (via <see cref="RuntimeStagedFactAttribute"/>, R6)
     /// when the AOT host runtime is not staged under <c>runtimes/win-x64/</c>
     /// (non-Windows, or a plain build that has not run
     /// <c>scripts/publish-installer-runtime.ps1</c>), so the normal <c>dotnet test</c>

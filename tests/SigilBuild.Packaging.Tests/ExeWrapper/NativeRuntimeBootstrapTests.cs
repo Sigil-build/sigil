@@ -13,7 +13,7 @@ using Xunit;
 namespace SigilBuild.Packaging.Tests.ExeWrapper;
 
 /// <summary>
-/// T18 coverage for the self-contained native-dependency path: the
+/// Coverage for the self-contained native-dependency path: the
 /// <c>SIGIL_RUNTIME_V1</c> archive built by <see cref="ExeWrapperPackager.BuildRuntimeBytes"/>,
 /// its deterministic bytes, the round-trip extraction via
 /// <see cref="NativeRuntimeBootstrap.ExtractArchive"/>, that the DLL-search

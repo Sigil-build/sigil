@@ -10,11 +10,11 @@ using Xunit;
 namespace SigilBuild.Packaging.Tests.ExeWrapper;
 
 /// <summary>
-/// Register row R4: the elevated wizard used to adopt its content-keyed native-runtime
-/// cache directory on the strength of a <c>.sigil-runtime-complete</c> marker file, then
-/// register that directory on the process DLL search path. Any process running as the
+/// The elevated wizard must not adopt a content-keyed native-runtime cache directory
+/// on the strength of a <c>.sigil-runtime-complete</c> marker file alone, then
+/// register that directory on the process DLL search path: any process running as the
 /// user could pre-create the (derivable) directory, drop a hostile
-/// <c>libSkiaSharp.dll</c> in it, <c>touch</c> the marker, and be loaded elevated.
+/// <c>libSkiaSharp.dll</c> in it, <c>touch</c> the marker, and be loaded elevated. (R4)
 /// </summary>
 /// <remarks>
 /// <para>
@@ -323,9 +323,9 @@ public sealed class NativeRuntimeCacheTrustTests
     /// </summary>
     /// <remarks>
     /// That path is the install-state store's root, must not be repaired from here, and
-    /// can be created by any unprivileged user (register row R1's attack) — so depending
-    /// on it turned this component's refusal into a denial of service anyone could
-    /// trigger against every elevated GUI install. <c>sigil-runtime</c> is this
+    /// can be created by any unprivileged user — so depending on it would turn this
+    /// component's refusal into a denial of service anyone could trigger against every
+    /// elevated GUI install. (R1) <c>sigil-runtime</c> is this
     /// component's own directory, which a hardened create may repair and take ownership
     /// of, so a squat costs nothing. <c>%ProgramData%</c> grants <c>BUILTIN\Users</c>
     /// create-child but not delete-child, so a directory that is ours stays ours.

@@ -9,7 +9,7 @@ checkout to a validated, packed artifact.
 
 ## 1. Prerequisites
 
-- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) (10.0.100 or newer)
+- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0), **exactly `10.0.303`**. `global.json` pins it with `"rollForward": "disable"` and `"allowPrerelease": false`, so any other 10.0.x SDK fails outright — and under a `--locked-mode` restore it fails with NU1004, because the lock files pin the SDK-injected ILCompiler / ILLink packages too.
 - Git 2.40+
 - Windows 10 1809+, Windows 11, macOS 13+, or Ubuntu 22.04+
 
@@ -44,10 +44,10 @@ project sets no `PublishSingleFile` (`src/SigilBuild.Cli/SigilBuild.Cli.csproj`)
 and links against `SigilBuild.Packaging` (SkiaSharp, for logo resizing) and
 `SigilBuild.Signing` (NSec.Cryptography, for ZIP manifest signing), so
 `publish/win-x64/` also holds `libSkiaSharp.dll` and `libsodium.dll`
-(`Directory.Packages.props:28,45-47`). CI enforces `sigil.exe` itself at
-**≤ 15 MB** (`.github/workflows/ci.yml:241`); the last locally measured build
-was 13.98 MB (`docs/plan/release/02-READINESS_REPORT.md:105`) — not the ~1 MB
-this guide used to claim.
+(`Directory.Packages.props:28` for NSec, `:51-53` for the SkiaSharp pins). CI
+enforces `sigil.exe` itself at **≤ 15 MB** (`.github/workflows/ci.yml:379`, and
+again per-architecture in `release.yml`) — a few MB, not the ~1 MB this guide
+used to claim.
 
 ## 3. Generate a manifest
 
@@ -84,10 +84,16 @@ Other templates (`--template`):
 |---|---|
 | `minimal` | Just `spec`, `app`, `build`. |
 | `msix-local-sign` | MSIX packaging + local PFX signing block. |
-| `azure-signing` | Azure Trusted Signing block + GitHub Releases publish + delta updates. |
-| `full-config` | Every v1.0 section, including the branded installer-UI slots. |
+| `azure-signing` | `app`, `build`, `package` (msix, x64 + arm64) and an Azure Trusted Signing `sign` block. No `publish:` and no `updates:`. |
+| `full-config` | `app`, `build`, `package`, `sign`, `publish`, `updates` and `installer.brand`. |
 
-Each template is documented end-to-end in [`examples/`](../examples/).
+None of the templates is a tour of the whole schema: **no** template ships
+`parameters:`, `install_steps:`, `pre_install:`/`post_install:`, `uninstall:`,
+or the rest of the `installer:` block (`options`, `screens`, `vars`, `hooks`,
+`prerequisites`, `app_mutex`, `scope`, `license`, `require_signed_downloads`).
+For those, start from a guide or from [`examples/`](../examples/) — the two
+manifests under `examples/exe-wrapper/` are the ones that produce a real
+installer.
 
 ## 4. Validate it
 
@@ -97,9 +103,13 @@ sigil validate sigil.yaml
 
 Output:
 
+```text
+OK: sigil.yaml
 ```
-sigil.yaml is valid (schema v1.0).
-```
+
+An invalid manifest prints its `SIG0xxx` diagnostics to **stderr** (one per
+line, with a `file:line:col` prefix) and exits **1**, so `sigil validate` works
+as a CI gate as-is.
 
 For machine-readable output (use this in CI):
 
@@ -124,6 +134,15 @@ unparseable `version`) are caught here too.
 sigil pack sigil.yaml --out ./dist
 ```
 
+There is no `--format` flag: **the output format is chosen in the manifest**,
+via `package.formats:` (an array, default `["zip"]`). `sigil pack`'s only
+options are `--out`, `--payload` and `--package-url`.
+
+The `exe` format is produced **only on a Windows pack host** — stamping the
+payload into the installer runtime uses `BeginUpdateResourceW`, which has no
+cross-platform equivalent. On Linux or macOS `sigil pack` emits SIG0120 and
+skips exe; the other requested formats still pack.
+
 For `package.formats: [zip]`, output lands as a flat file directly under
 `--out`: `./dist/<app.id>-<app.version>-<arch>.zip`
 (`src/SigilBuild.Packaging/Zip/ZipPackager.cs:24-25`) — not in a
@@ -131,15 +150,13 @@ per-build subdirectory.
 
 ## 6. Build the branded wizard (EXE-wrapper format)
 
-`sigil pack` with `package.format: exe` produces a single self-extracting
+`sigil pack` with `package.formats: [exe]` produces a single self-extracting
 `<App.Name>-<version>-<arch>-Setup.exe` that opens a branded Windows wizard on
-double-click (`src/SigilBuild.Packaging/ExeWrapper/ExeWrapperPackager.cs:134`
-— e.g. `HelloSigil-0.1.0-x64-Setup.exe`, not the generic `setup.exe` this
-guide used to show). The wizard flow is built dynamically from your
-`parameters:` block — there's no per-page XAML to write. The Choose Install
-Location screen itself is **not** part of that dynamic flow: it is always
-rendered, second after Welcome, whether or not you declare any parameters at
-all (`InstallerViewModel.cs:1041-1045`) — see
+double-click — e.g. `HelloSigil-0.1.0-x64-Setup.exe`, not the generic
+`setup.exe` this guide used to show. The wizard's custom pages are built from
+your `installer.screens[]` list — there's no per-page XAML to write. The Choose
+Install Location screen is **not** one of those: it is always rendered, second
+after Welcome, whether or not you declare any parameters at all — see
 [Installer wizard](guides/installer-wizard.md#screen-flow).
 
 Extend the minimal manifest with the wizard knobs you'll most often touch:
@@ -149,23 +166,27 @@ installer:
   icon: ./brand/installer.ico   # optional; the bundled default ships otherwise
   brand:
     logo: ./brand/logo.svg
-    colors:
-      primary: "#1F6FEB"
-      accent:  "#7C3AED"
+    primaryColor: "#1F6FEB"
+    accentColor:  "#7C3AED"
+  screens:                        # custom wizard pages come from here, and only here
+    - id: server
+      title: "Server Settings"
+      fields: [server_url]
+    - id: privacy
+      title: "Privacy"
+      fields: [enable_telemetry]
 
 parameters:
   server_url:
     type: string
     install_time: true
     description: "Server URL"
-    screen: "Server Settings"     # Groups onto a 'Server Settings' page.
 
   enable_telemetry:
     type: bool
     install_time: true
     default: false
     description: "Send anonymous usage telemetry"
-    screen: "Privacy"             # Renders as a CheckBox on a 'Privacy' page.
 
 install_steps:
   - id: copy-app
@@ -187,11 +208,30 @@ uninstall:
 
 The wizard flow is now:
 **Welcome → Install Location (with disk-space card) → Server Settings → Privacy → Installing → Finish**
-(License would insert after Install Location if this manifest declared one).
+(License would insert after Install Location if this manifest declared
+`installer.license`, and the built-in Options page after that if it declared
+`installer.options`).
 
-Per-parameter widget choice is automatic: `type: enum` with a `values:` list renders a ComboBox; `type: enum` with a `source: { url, items_path, value_property, label_property }` block renders a ComboBox populated by an HTTPS fetch at page-attach; `type: bool` renders a CheckBox; everything else renders a TextBox. See the [manifest reference](manifest-reference.md) for every field.
+Note the two parameters carry no `screen:` field. A parameter-level `screen:` is
+accepted by the schema but produces no wizard page — pages come from
+`installer.screens[]`, and a parameter that no screen names is never shown. See
+[Installer wizard](guides/installer-wizard.md#custom-screens-installerscreens).
 
-When the manifest declares an `uninstall:` block, the packager produces a sibling `uninstall.exe` inside the Setup.exe and the wrapper drops it to `<install_dir>\uninstall.exe` on install success — plus a Control Panel "Add/Remove Programs" entry pointing at it.
+Per-parameter widget choice is automatic: an `enum` with four or fewer `values:`
+renders a radio group and a larger one a dropdown; an `enum` with a
+`source: { url, items_path, value_property, label_property }` block renders a
+dropdown populated by an HTTPS fetch at page-attach; `bool` renders a checkbox;
+`path` a path input, `secret` a masked input, `int` a number input, `string` a
+text input. A screen field's `{ param, widget }` form overrides the default. See
+[Installer wizard](guides/installer-wizard.md#per-parameter-widget-selection).
+
+**On every successful `exe` install** — with or without an `uninstall:` block —
+the wrapper copies its own running image to `<install_dir>\uninstall.exe` and
+writes a Control Panel "Add/Remove Programs" entry pointing at it. It is a
+runtime copy, not something the packager builds and embeds, and there is no way
+to suppress either. The `uninstall:` block is for tear-down the rollback journal
+cannot infer; it is not what causes an uninstaller to exist. See
+[Uninstaller](guides/uninstaller.md).
 
 ## 7. Next steps
 
@@ -201,4 +241,4 @@ When the manifest declares an `uninstall:` block, the packager produces a siblin
 - Read the [architecture overview](architecture-overview.md) to understand
   how packing, signing, publishing, and updates fit together.
 - Migrating from another installer? See
-  [from WiX](migration/from-wix.md) or [from NSIS](migration/from-nsis.md).
+  [from Inno Setup](migration/from-inno.md).

@@ -3,11 +3,11 @@ using SigilBuild.Core.Manifest;
 namespace SigilBuild.Packaging;
 
 /// <summary>
-/// How the <c>exe</c> format's payload is delivered (P12 / T12.5).
+/// How the <c>exe</c> format's payload is delivered.
 /// </summary>
 public enum PayloadMode
 {
-    /// <summary>The app payload is embedded directly in the stamped Setup.exe (the original, unchanged behavior).</summary>
+    /// <summary>The app payload is embedded directly in the stamped Setup.exe.</summary>
     Embedded,
 
     /// <summary>

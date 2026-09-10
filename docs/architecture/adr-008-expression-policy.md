@@ -99,11 +99,16 @@ would defeat Sigil's auditability, determinism, and AOT-safety guarantees.
 | `registry_exists(hive, key, name)` | `bool` | bounded read-only registry probe (Windows-guarded) |
 
 Identifiers are a **closed set** too: the evaluator resolves against a supplied
-context dictionary keyed by full path (`param.*`, `option.*`, `app.*`,
-`system.*`, `scope*`, `install_dir`) and **throws** on any unknown identifier —
+context dictionary keyed by full path and **throws** on any unknown identifier —
 except `defined()`/`empty()`, which observe a missing identifier as `null` so
 authors can guard optional inputs. There is no dynamic dispatch, no reflection,
 no user-defined function.
+
+The seeded set is: `parameters.*` and its exact alias `param.*`; `var.*` (§2);
+`option.*`; the four `app.*` keys (`id`, `name`, `version`, `publisher`);
+`system.os`, `system.arch` and `system.language`; `scope`, `scope.root` and
+`scope_root`; `install_dir`; and `env.PATH` — the *only* `env.*` key, everything
+else needing the `env()` function.
 
 ### 1.2 Admission criteria (a function may be added iff **all** hold)
 
@@ -253,10 +258,11 @@ comment points at: localization is enabled **without** relaxing
 ## 5. Closed step catalog & packaging bounds
 
 Install-time behavior is the union of Sigil's **typed, journaled step records**
-(`file_copy`, `directory_create`/`delete`, `file_delete`,
-`registry_write`/`delete_value`/`delete_key`, `shortcut_create`, `run_program`,
-`service_install`, `env_set`, `scheduled_task_create`, `com_register`,
-`firewall_rule`, …). Like the function table, this catalog is
+— **eighteen** as of this writing: `file_copy`, `directory_create`,
+`file_delete`, `directory_delete`, `registry_write`, `registry_delete_value`,
+`registry_delete_key`, `shortcut_create`, `env_set`, `run_program`,
+`http_download`, `ini_write`, `json_edit`, `xml_edit`, `service_install`,
+`scheduled_task_create`, `com_register`, `firewall_rule`. Like the function table, this catalog is
 **closed and extended only in-repo, with an amendment to this ADR** — the same
 discipline the `Functions.cs` comment states for functions applies to steps.
 
@@ -368,6 +374,7 @@ would require replacing this ADR wholesale, not extending it.
 | 2026-07-13 | Initial policy: closed function/step catalogs, admission criteria (§1.2), P1 functions pre-admitted (§1.3), variable model (§2), transitive redaction (§3), localization stance (§4), packaging bounds + option (b) (§5), non-goals (§6). | P0 — write down the contract the four citation sites + packaging tests already assume. |
 | 2026-07-15 | §1.1: `locale()` re-pointed from `CurrentUICulture.Name` to `GetUserPreferredUILanguages`. §4: the "5–10 languages" seed count replaced by a standing named-reviewer rule; initial set en + uk. §5.2: host size gate re-pinned **40 → 45 MB**. | P9/G10 — `locale()` returned `""` under `InvariantGlobalization`, so the documented language-resolution chain could not work. **This is a behavior change, not only a source change:** a `When` using `locale()` moves from an always-`""` result to a real tag, which can flip conditions. Practical risk is ~zero precisely because the function was useless, but it is recorded here rather than assumed. `InvariantGlobalization` stays on; no satellite assemblies; no `CultureInfo` is constructed. **Size gate:** localization added ~2.26 MB to the win-x64 host (→ ~42 MB); `main` was already at 39.8 MB against the old 40 MB gate (0.2 MB headroom), so this is the P13-anticipated "globalization adds weight — re-pin consciously" case, not profligacy. Verified no ICU/globalization data was pulled in (InvariantGlobalization intact, all `CultureInfo` uses are the `InvariantCulture` singleton). New gate carries ~3 MB headroom. |
 | 2026-07-23 | §5: catalog widened with three machine-scope-only steps — `scheduled_task_create`, `com_register`, `firewall_rule`. | P11 (T11.1–T11.3) — each step overrides `InstallStep.RequiresMachineScope` to `true`; a manifest declaring one without `installer.scope: machine` is refused at pack time with SIG0310 (`SigilBuild.Core.Configuration.MachineScopeGuard`). No change to the 5 MB wrapper-overhead cap or the host size gate — these steps shell out to `schtasks.exe`/`netsh.exe` (already-shipped OS binaries) or call an exported DLL function, adding no new bundled runtime weight. |
+| 2026-09-10 | **Backfill, not a new decision.** §5's catalog enumeration now lists all eighteen shipped step types explicitly. §1.1's identifier list now states the seeded set in full. | Housekeeping against the pre-release docs audit. §5 line 268 requires one amendment row per catalog addition, and P4 (`http_download`) and P8 (`ini_write` / `json_edit` / `xml_edit`) landed without one — their enumeration in §5 was silently stale, and §1.1's identifier list read as exhaustive while omitting `parameters.*`, `var.*`, `env.PATH`, `system.language`, `scope.root` and `scope_root`. Nothing about the policy changed; only the record of what it already admits. |
 
 *(Append one row per future function/step/localization change that widens the
 surface. Never rewrite prior rows.)*

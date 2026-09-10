@@ -16,7 +16,9 @@ dotnet test Sigil.slnx -c Release
 dotnet format Sigil.slnx --verify-no-changes   # CI-enforced
 ```
 
-.NET SDK is pinned EXACTLY by `global.json` (10.0.303, `rollForward: disable`): the locked restore (R23a) pins the SDK-injected `Microsoft.DotNet.ILCompiler` / `Microsoft.NET.ILLink.Tasks` packages, so a rolled-forward SDK fails with NU1004. Bump the SDK and regenerate the lock files together. CI runs on `windows-latest` only.
+.NET SDK is pinned EXACTLY by `global.json` (10.0.303, `rollForward: disable`): the locked restore (R23a) pins the SDK-injected `Microsoft.DotNet.ILCompiler` / `Microsoft.NET.ILLink.Tasks` packages, so a rolled-forward SDK fails with NU1004. Bump the SDK and regenerate the lock files together.
+
+**CI is not Windows-only.** Every job that builds, tests or AOT-publishes runs on `windows-latest`, but five jobs across four workflows run on `ubuntu-latest`: `changes` (`ci.yml:45`), `pr-title` and `schema-lockstep` (`pr-guards.yml:22, 40`), `secret-scan` (`secret-scan.yml:21`) and `docs` (`docs.yml:25`). Do not write PowerShell into a bash job — check the job's `runs-on` before you touch a workflow step.
 
 ## Hard rules (CI will reject violations)
 
@@ -58,9 +60,25 @@ If your change trips a gate, that is a design conversation, not a number to bump
 
 ### 4. Coverage gate
 
-CI enforces ≥ 65 % project-wide **union** coverage (see the Python gate in `ci.yml`).
-Aspirational targets: Core ≥ 80 %, Signing/SDK ≥ 85 %. New code ships with tests:
-xUnit + FluentAssertions, AAA (Arrange / Act / Assert) layout.
+The Python gate in `ci.yml` enforces **five** floors, not one:
+
+| Floor | Value | Where |
+|---|---|---|
+| project-wide **union** | **0.77** | `PROJECT_WIDE_FLOOR`, `ci.yml:232` |
+| `SigilBuild.Core` | 0.69 | `ASSEMBLY_FLOORS`, `ci.yml:235-238` |
+| `SigilBuild.Signing` | 0.68 | same |
+| `SigilBuild.Wrapper.Core` | 0.79 | same |
+| `SigilBuild.Packaging` | 0.72 | same |
+
+Ignore the `THRESHOLD = 0.65` constant at `ci.yml:207` — it is dead, and its own
+comment says so. A PR written against "65 %" will fail CI.
+
+The floors are a **ratchet**: each is the current measured value rounded down,
+re-pinned upward when coverage rises, never lowered. `SigilBuild.Installer.BrandGenerator`
+and `SigilBuild.Localization.Generator` report but are deliberately unfloored.
+Aspirational (not gates): Core ≥ 80 %. There is no SDK project.
+
+New code ships with tests: xUnit + FluentAssertions, AAA (Arrange / Act / Assert) layout.
 
 ### 5. Lockstep surfaces — change one, change all
 
@@ -70,12 +88,22 @@ xUnit + FluentAssertions, AAA (Arrange / Act / Assert) layout.
 | Install-step catalog | Full chain: Core model → parser → schema → blob serializer → runtime step → StepFactory → wizard (if UI-visible) → tests → docs. Use the `add-install-step` skill in `.claude/skills/`. |
 | Architecture (engine split, packaging pipeline, AOT strategy) | An ADR in `docs/architecture/` (see `adr-avalonia-aot.md` for format). CODEOWNERS routes these to tech leads. |
 | Diagnostics | New validation errors get a `SIG0xxx` code in `src/SigilBuild.Core/Diagnostics/DiagnosticCodes.cs` — reuse the existing band ranges (e.g. SIG023x = install_steps). |
+| `src/SigilBuild.Wrapper.Core/Cli/CommandLineParser.cs` | `docs/setup-exe-reference.md`. That page is hand-written (the CLI generator cannot reach this parser) and its whole premise is line-accurate citations into this file — they drift silently. Adding or changing a token means updating the flag tables, the token count, and the cited line ranges. |
+| A new manifest field | The schema and `docs/manifest-reference.md` are not enough — a field nobody can find is a field nobody uses. Add it to the guide that owns the feature (`docs/guides/*`), too. |
 
 ### 6. CI economy — job-level gating only, never a workflow-level filter on a required check
 
-The release ruleset requires these status checks: `build`, `aot publish (win-x64)`,
-`dotnet format`, `schema / docs lockstep`, `conventional-commit PR title`, `gitleaks`.
-A workflow-level `paths:` / `paths-ignore:` filter on the *trigger* of a workflow that
+The release ruleset lives on GitHub and is **not verifiable from this repo** — treat the
+live branch-protection settings as the authority, not this file. What the repo does
+record is `ci.yml:17-24`'s own comment: `build`, `aot publish (win-x64)` and
+`dotnet format` are required status checks. The other candidates a maintainer may or
+may not have added are `schema / docs lockstep` and `conventional-commit PR title`
+(both `pr-guards.yml`) and `gitleaks` (`secret-scan.yml`); `docs drift check` is
+deliberately **not** required (see below). If you need the real list, read the
+ruleset on GitHub.
+
+The rule that follows applies to any check that is required, whichever those turn out
+to be. A workflow-level `paths:` / `paths-ignore:` filter on the *trigger* of a workflow that
 produces one of those checks means the check **never reports at all** on a PR that
 doesn't touch the filtered paths — GitHub then waits forever for a status that will
 never arrive, and the PR is wedged. This already happened once, deliberately, as a
@@ -127,8 +155,12 @@ closed (runs the expensive job) whenever it cannot positively prove a skip is sa
 | `SigilBuild.Installer.BrandGenerator` | Derives light+dark palette from two manifest colors at pack time |
 | `SigilBuild.Localization.Generator` | netstandard2.0 source generator (analyzer-only reference — beware `PublishAot` property leaks; see the comment in `Directory.Build.props`) |
 
-Decisions live in `docs/architecture/` (ADRs) and `docs/plan/` (historical specs —
-**read-only context, do not edit** to match new code; write a new doc or ADR instead).
+Decisions live in `docs/architecture/` (ADRs). The historical sprint and feature-parity
+plans under `docs/plan/` are being retired; the **live** release record is
+`docs/plan/release/`, which stays authoritative until the release ships. Edit those
+files only to record outcomes — a gate closing, a register row landing, a measured
+result — never to make an old plan agree with new code. A decision that changed needs a
+new doc or an ADR amendment, not a rewritten plan.
 
 ## Conventions
 
@@ -141,7 +173,7 @@ Decisions live in `docs/architecture/` (ADRs) and `docs/plan/` (historical specs
 
 ## PR checklist (what CI + reviewers verify)
 
-1. `dotnet build Sigil.slnx -c Release` — zero warnings
+1. `dotnet build Sigil.slnx -c Release` — zero warnings (restore with `--locked-mode`, as CI does)
 2. `dotnet test Sigil.slnx -c Release` — green (state clearly which tests you could not run locally)
 3. `dotnet format Sigil.slnx --verify-no-changes` — clean
 4. Lockstep surfaces updated (table above)

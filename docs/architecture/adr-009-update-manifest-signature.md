@@ -1,6 +1,6 @@
 # ADR-009: ECDSA P-256 for channel-manifest signatures
 
-- **Status:** Accepted
+- **Status:** Accepted — **superseded in part by [ADR-011](adr-011-update-manifest-freshness.md)**. The primitive, the encoding and the trust anchor decided here are unchanged. What changed is the *content* of the signed byte range: ADR-011 adds three **required** channel-manifest fields — `issuedAt`, `expiresAt` and `sequence` — and a client-side freshness and replay check. A signature that verifies is now necessary but no longer sufficient. Read both before minting a channel manifest.
 - **Date:** 2026-07-23
 - **Decision driver:** P12 (T12.1–T12.3) — the `/Update` runtime needs to
   trust a channel manifest fetched over the network from a host the

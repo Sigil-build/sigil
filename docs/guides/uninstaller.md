@@ -154,6 +154,6 @@ Double-clicking `<install_dir>\uninstall.exe` directly, with no flags, opens the
 
 ## See also
 
-- [Manifest reference - uninstall](../manifest-reference.md#uninstall)
+- [Manifest reference - top-level `uninstall`](../manifest-reference.md#top-level)
 - [Install steps](install-steps.md)
 - [Migrating from Inno Setup](../migration/from-inno.md)

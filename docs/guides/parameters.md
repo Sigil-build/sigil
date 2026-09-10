@@ -17,14 +17,16 @@ parameters:
     install_time: true
 ```
 
-The wizard surfaces every `install_time: true` parameter; non-install-time parameters resolve at pack time only.
+`install_time: true` marks a parameter as resolvable at install time; a parameter without it resolves at pack time only.
+
+**The wizard renders only the install-time parameters that an `installer.screens[]` entry names in its `fields:` list.** An `install_time: true` parameter that no declared screen references is never shown to the user — it silently resolves to its default, or to a `/PName=Value` override on the command line. See [Installer wizard](installer-wizard.md#custom-screens-installerscreens) for how to declare a screen.
 
 > **Do not declare a parameter named `install_dir`.** It reads as if it should
 > mean "where the app is being installed", but a parameter is just another
 > value — it does not follow the wizard's Destination screen, `/D=`, or an
 > upgrade-in-place. The real, always-current install location is the
 > `{install_dir}` brace token, resolved by the engine and substituted directly
-> into step fields (`StepContext.cs:616-637`); it is not a `${parameters.*}`
+> into step fields; it is not a `${parameters.*}`
 > value at all. See [Install steps](install-steps.md#write-the-destination-as-install_dir)
 > for the full rationale and worked examples.
 
@@ -33,11 +35,13 @@ The wizard surfaces every `install_time: true` parameter; non-install-time param
 |Type|Use for|Widget when `install_time: true`|
 |---|---|---|
 |`string`|Free-form text|TextBox|
-|`path`|Filesystem paths|TextBox (Browse... for `install_dir`)|
+|`path`|Filesystem paths|TextBox|
 |`bool`|True/false flags|CheckBox|
 |`int`|Whole numbers|TextBox|
 |`enum`|Closed set of strings|ComboBox|
 |`secret`|Passwords, tokens, keys|Masked TextBox; redacted from logs|
+
+The **Browse...** button belongs to the wizard's always-present Choose Install Location screen, not to any parameter widget — there is no file-picker widget for a `path` parameter.
 
 ## Validation
 
@@ -62,7 +66,9 @@ A missing env var is a hard pack-time error (SIG0020), not a silent empty string
 
 ## Install-time substitution inside steps
 
-Step arguments support `${parameters.<name>}` and the `app.*` namespace (`${app.name}`, `${app.version}`, `${app.id}`, `${app.publisher}`, `${app.description}`, `${app.homepage}`), plus the single-brace engine tokens `{install_dir}`, `{scope_root}`, `{app.name}`, `{app.id}`, and `{var.<name>}` (`StepContext.cs:616-637`). Resolution happens just before each step runs:
+Step arguments support `${parameters.<name>}` (spelled `${param.<name>}` if you prefer — an exact alias) and the `app.*` namespace, plus the single-brace engine tokens `{install_dir}`, `{scope_root}`, `{app.name}`, `{app.id}`, `{var.<name>}`, `{temp_dir}` and `{staging_dir}`. Resolution happens just before each step runs:
+
+**Exactly four `app.*` keys are seeded:** `${app.id}`, `${app.name}`, `${app.version}` and `${app.publisher}`. There is no `${app.description}` or `${app.homepage}` — those are unknown identifiers and throw `FormatException: unknown identifier 'app.description' in template` at install time, on the user's machine.
 
 ```yaml
 install_steps:
@@ -90,9 +96,10 @@ setup.exe /S /D="C:\Apps\MyApp" /Pedition=professional
 ```
 
 - `/D=path` overrides the install directory — not a parameter override; see [the setup.exe reference](../setup-exe-reference.md#d).
-- One `/PName=Value` token per declared parameter. Last write wins. The `P` prefix is mandatory: a bare `/Name=Value` is rejected with `UsageException: unrecognized flag` (`CommandLineParser.cs:497,503-504`).
+- One `/PName=Value` token per declared parameter. Last write wins. The `P` prefix is mandatory: a bare `/Name=Value` is rejected with `UsageException: unrecognized flag`.
 - Names match the canonical schema spelling case-insensitively; values preserve case.
 - Undeclared names are rejected (`UsageException`) - silent typos can't reach the step engine.
+- `/Poption.<Name>=<Value>` overrides an **`installer.options.components[]`** entry rather than a parameter. The `option.` prefix is a namespace, checked before the parameter table, so a custom component and a parameter may share a name — `/P<name>` still binds the parameter. An undeclared component name is rejected the same way an undeclared parameter is.
 - The wizard's silent-install child process uses the same syntax to forward the user's edits.
 
 ## Secrets
@@ -100,6 +107,7 @@ setup.exe /S /D="C:\Apps\MyApp" /Pedition=professional
 A `secret` parameter is masked in the wizard and redacted (`***`) from the install log, the audit rendering of the command line, and the persisted uninstall state. Two further guarantees, and one limit worth reading before you design around it:
 
 - **The elevated relaunch does not carry secrets.** A per-machine install started from a non-elevated process relaunches itself under UAC. It used to forward `/PName=Value` verbatim, which published the value to every process-creation auditor on the machine (Sysmon, EDR agents, WMI `Win32_Process`, the Task Manager command-line column). Secret values now cross that boundary in a DPAPI-protected, ACL-restricted, delete-after-read handoff file instead; the relaunch command line carries only a path to it.
+- **Secretness is transitive.** An `installer.vars` entry whose expression references a `secret` parameter inherits that secretness: the derived `var.<name>` is redacted everywhere the parameter itself would be. You do not have to (and cannot) mark a var secret by hand.
 - **`run_program` arguments are not a secret channel.** If your manifest interpolates `${parameters.<secret>}` into a `run_program` step's `args`, the resolved value necessarily lands on *that child process's* command line, where the same auditing sees it. Sigil cannot redact a command line it hands to another program. Pass secrets to a child through a file it reads and deletes, an environment variable, or stdin — not through `args`.
 
 ## Dynamic dropdowns
@@ -133,13 +141,17 @@ Behaviour:
 - The URL supports `${parameters.X}` template substitution. The fetch is deferred until every referenced parameter has a non-empty value (the previous page typically writes them).
 - Responses are cached for the page lifetime.
 
-## Screen grouping
+## Putting a parameter on a wizard page
 
-The optional `screen:` field on each parameter assigns it to a wizard page. Parameters with the same `screen:` value share a page in declaration order; parameters without one collapse into a trailing "Install Options" page. See [Installer wizard - multi-screen parameter grouping](installer-wizard.md#multi-screen-parameter-grouping).
+Declare an `installer.screens[]` entry and name the parameter in its `fields:` list. See [Installer wizard](installer-wizard.md#custom-screens-installerscreens).
+
+> **Known issue (R79): the parameter-level `screen:` field is dead.** The schema still accepts it and the manifest reference still describes it as grouping parameters onto wizard pages — but no wizard page is produced from it. Its value is written into a sidecar the installer host never reads. The intent is that `screen:` groups parameters onto pages; the shipped behaviour is that only `installer.screens[]` builds pages. Do not rely on `screen:` — a parameter named by no screen is invisible in the wizard.
+
+The two `screen:` values in the dynamic-dropdown example above are illustrative of the manifest field only; they do not produce the two pages their names suggest.
 
 ## See also
 
-- [Manifest reference - parameters.<name>](../manifest-reference.md#parametersname)
-- [Manifest reference - parameters.<name>.source](../manifest-reference.md#parametersnamesource)
+- [Manifest reference - `parameters.<name>`](../manifest-reference.md#parametersname)
+- [Manifest reference - `parameters.<name>.source`](../manifest-reference.md#parametersnamesource)
 - [Installer wizard](installer-wizard.md)
 - [Conditional installs](conditional-installs.md)

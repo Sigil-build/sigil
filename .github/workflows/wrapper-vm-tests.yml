@@ -6,36 +6,31 @@
 # verdict is CI's, not a dev box's.
 #
 # What this workflow ACTUALLY exercises — one line per scenario that has a test
-# reading its toggle. Register row R64: this header used to advertise a
-# currentuser × allusers scope matrix and five more scenarios that no test read,
-# which made the "VM matrix green" gate checkbox vacuous for every one of them.
-# Nothing is listed here that is not wired:
+# reading its toggle. Nothing is listed here that is not wired:
 #
 #   pack → /silent install → verify payload/ARP → uninstall → verify reversed
-#                                                  (T5/T12, MultiEdition + WixClass)
-#   registered ARP UninstallString runs from inside install_dir (T15/R58)
-#   version-aware upgrade / blocked downgrade / /force-downgrade (P3, gap G3)
-#   prerequisite detect → install → 3010 / skip / abort         (P5, gap G6)
-#   localization: /silent outcome is invariant under /lang, manifest pin wins (P9)
+#                                                  (MultiEdition + WixClass)
+#   registered ARP UninstallString runs from inside install_dir (R58)
+#   version-aware upgrade / blocked downgrade / /force-downgrade
+#   prerequisite detect → install → 3010 / skip / abort
+#   localization: /silent outcome is invariant under /lang, manifest pin wins
 #
-# Still UNCOVERED, and deliberately no longer advertised (R64 stays open for
-# them): the per-machine (/allusers) half of every leg above, double-install
-# idempotency, real manifest.App.* ARP value assertions, and the P6 files-in-use
-# /closeapps + setup-mutex legs.
+# Still UNCOVERED: the per-machine (/allusers) half of every leg above,
+# double-install idempotency, real manifest.App.* ARP value assertions, and
+# the files-in-use /closeapps + setup-mutex legs. (R64)
 #
 # The publish-runtime step ALWAYS runs before any pack: the packager stamps the
 # AOT installer host, so it must be staged next to the integration-test assembly
 # (runtimes/win-x64/) before `Sigil.PackAsync` is invoked inside a test.
 name: wrapper-vm-tests
 
-# Real installs mutate the runner's registry/PATH, so this never runs on a PR — but
-# gate G3 (docs/plan/release/03-RC_ORCHESTRATION.md) requires the matrix to run "on a
-# schedule or on merge, not only on demand": a dispatch-only workflow is one nobody
-# dispatches, which is exactly how the fixtures in this suite rotted unnoticed until
-# its first real run (register row R66).
+# Real installs mutate the runner's registry/PATH, so this never runs on a PR —
+# but the matrix must run "on a schedule or on merge, not only on demand": a
+# dispatch-only workflow is one nobody dispatches, and undispatched fixtures
+# rot unnoticed. (R66)
 #
-# G3 is met by `push`, which is the half that covers the release branch. Read the two
-# triggers separately, because GitHub does not treat them alike:
+# This is met by `push`, which is the half that covers the release branch. Read
+# the two triggers separately, because GitHub does not treat them alike:
 #
 #   push      — fires on merge into `main` AND into any `release/**` branch. This is
 #               what gives the RC a verdict: every merge into `release/v0.1.0-alpha`
@@ -89,20 +84,13 @@ jobs:
     env:
       # Opt the soft-skip integration tests into their real end-to-end body.
       SIGIL_VM_TESTS: "1"
-      # Scenario toggles. Only toggles a test actually READS may live here —
-      # register row R64: this block used to declare ten, of which five were read by
-      # nothing at all, so the workflow advertised legs that did not exist and
-      # flipping them changed nothing about what ran. Removed rather than faked:
-      # SIGIL_VM_SCOPE / SIGIL_VM_SCOPE_MATRIX (with the two-leg currentuser ×
-      # allusers matrix they parameterized — no test read the scope, so both legs
-      # ran the identical per-user suite twice), SIGIL_VM_ARP_VALUES,
-      # SIGIL_VM_DOUBLE_INSTALL and SIGIL_VM_CLOSEAPPS. Each comes back the day a
-      # test reads it; until then an honest smaller matrix beats an advertised one.
-      # (R64 stays OPEN for those five scenarios themselves — they are real gaps in
-      # coverage, now visible as gaps instead of hidden behind a live env var.)
-      SIGIL_VM_UNINSTALL_SURVIVE: "1"  # T15/R58 ArpUninstallStringTests: the registered UninstallString runs from inside install_dir
-      SIGIL_VM_UPGRADE: "1"            # P3 UpgradeInstallTests: v1→v2 upgrade (prior dir preserved), v2→v1 blocked (exit 3), /force-downgrade
-      SIGIL_VM_PREREQ: "1"             # P5 PrerequisiteInstallTests: detect→install→3010 (exit 3010), skip-when-present, abort on bad exit
+      # Scenario toggles. Only toggles a test actually READS may live here.
+      # Removed (rather than faked) for having no reader: SIGIL_VM_SCOPE /
+      # SIGIL_VM_SCOPE_MATRIX, SIGIL_VM_ARP_VALUES, SIGIL_VM_DOUBLE_INSTALL,
+      # SIGIL_VM_CLOSEAPPS — each returns the day a test reads it. (R64)
+      SIGIL_VM_UNINSTALL_SURVIVE: "1"  # ArpUninstallStringTests: the registered UninstallString runs from inside install_dir (R58)
+      SIGIL_VM_UPGRADE: "1"            # UpgradeInstallTests: v1→v2 upgrade (prior dir preserved), v2→v1 blocked (exit 3), /force-downgrade
+      SIGIL_VM_PREREQ: "1"             # PrerequisiteInstallTests: detect→install→3010 (exit 3010), skip-when-present, abort on bad exit
     steps:
       - uses: actions/checkout@v4
 
@@ -121,7 +109,7 @@ jobs:
       # SIGIL_RUNTIME_V1 native deps) so ExeWrapperPackager can stamp a Setup.exe.
       # windows-latest carries the "Desktop development with C++" workload the AOT
       # link needs; the SAME script drives local pack, so CI and `sigil pack` stamp
-      # byte-identical runtimes (spec T3/T18).
+      # byte-identical runtimes.
       - name: publish + stage installer host AOT runtime (before packing)
         shell: pwsh
         run: |
@@ -132,11 +120,12 @@ jobs:
             -DestinationRoot $dest `
             -SizeGateMb 45
 
-      # HARD GATE (T1.4/R22 — same shape as the p11 job's guard below): a dropped
+      # HARD GATE (same shape as the p11 job's guard below): a dropped
       # SIGIL_VM_TESTS or a silently empty runtime staging would make this whole
       # job go green having exercised nothing, because TestEnvironment.IsEnabled
       # soft-skips (not hard-fails) when either precondition is absent. Fail the
-      # job here instead so a green install-matrix run is proof the legs actually ran.
+      # job here instead so a green install-matrix run is proof the legs actually
+      # ran. (R22)
       - name: require SIGIL_VM_TESTS and a staged runtime (else this job would silently soft-skip)
         shell: pwsh
         run: |
@@ -164,33 +153,32 @@ jobs:
           path: '**/TestResults/**/*.trx'
           if-no-files-found: warn
 
-  # P12 (T12.6): update-engine + web-installer stub end-to-end, appended as its
-  # OWN job per the append-only convention this workflow is built on — each task
-  # appends its own job or step and never reorders another task's steps — kept
-  # separate from the install-matrix job above rather than adding a
-  # step to it. T12.6 itself already delivers everything locally runnable
-  # (SigilBuild.Wrapper.Tests/Update/UpdateEndToEndTests.cs and
-  # SigilBuild.Packaging.Tests/ExeWrapper/WebInstallerStubEndToEndTests.cs — real
-  # local HTTPS server, real ECDSA P-256 signature verify, real sha256-checked
-  # download, real checksum-rejection rollback) via a recorded-launch double for
-  # the child process. This job additionally stages the Native-AOT installer
-  # host runtime so ExeWrapperWebInstallerPackTests / ExeWrapperWebInstallerBlobTests
-  # (SigilBuild.Packaging.Tests) run their REAL pack path instead of soft-skipping
-  # (no staged runtime locally) — producing a genuine packed `--payload web` stub +
-  # full package and asserting their construction end-to-end on a real Windows host.
-  # NOT locally runnable — this job only executes on windows-latest.
-  # Still missing (left for P13 / T13.1's full-matrix consolidation): a true
-  # cross-process leg where a packed web-installer stub downloads a packed full
-  # Setup.exe over real HTTP and the full Setup.exe actually runs and registers
-  # its own ARP/uninstall state — see T12.6's report for the exact scope drawn.
+  # Update-engine + web-installer stub end-to-end, kept as its OWN job (never
+  # inserted as a step into the install-matrix job above, or reordering that
+  # job's steps) so each addition here is purely additive. Everything locally
+  # runnable already runs in
+  # SigilBuild.Wrapper.Tests/Update/UpdateEndToEndTests.cs and
+  # SigilBuild.Packaging.Tests/ExeWrapper/WebInstallerStubEndToEndTests.cs —
+  # real local HTTPS server, real ECDSA P-256 signature verify, real
+  # sha256-checked download, real checksum-rejection rollback — via a
+  # recorded-launch double for the child process. This job additionally
+  # stages the Native-AOT installer host runtime so
+  # ExeWrapperWebInstallerPackTests / ExeWrapperWebInstallerBlobTests
+  # (SigilBuild.Packaging.Tests) run their REAL pack path instead of
+  # soft-skipping (no staged runtime locally) — producing a genuine packed
+  # `--payload web` stub + full package and asserting their construction
+  # end-to-end on a real Windows host. NOT locally runnable — this job only
+  # executes on windows-latest.
+  # Still missing: a true cross-process leg where a packed web-installer
+  # stub downloads a packed full Setup.exe over real HTTP and the full
+  # Setup.exe actually runs and registers its own ARP/uninstall state.
   p12-update-webinstaller-vm:
     runs-on: windows-latest
     name: vm (p12 update + web-installer)
     env:
-      # T1.4/R22: previously this job had no VM-mode marker at all, so nothing
-      # would notice if it were silently invoked without real VM intent. Set
-      # here and asserted by the guard step below, matching the install-matrix
-      # and p11 jobs' convention.
+      # A VM-mode marker here lets the guard step below notice if this job is
+      # invoked without real VM intent, matching the install-matrix and p11
+      # jobs' convention. (R22)
       SIGIL_VM_TESTS: "1"
     steps:
       - uses: actions/checkout@v4
@@ -199,12 +187,11 @@ jobs:
         with:
           global-json-file: global.json
 
-      # R68: this was ONE `dotnet build` with TWO csproj paths, which MSBuild rejects
-      # outright — `MSBUILD : error MSB1008: Only one project can be specified` — so
-      # this job died at its first build step on the matrix's first real run, before
-      # staging a runtime or running a test. `dotnet build` takes at most one
-      # project/solution, so each project gets its own invocation. Order matters only
-      # in that both must be built before the two test steps below run --no-build.
+      # `dotnet build` takes at most one project/solution — passing it TWO
+      # csproj paths in one invocation is rejected outright (`MSBUILD : error
+      # MSB1008: Only one project can be specified`), so each project gets
+      # its own invocation here. Order matters only in that both must be
+      # built before the two test steps below run --no-build. (R68)
       - name: build P12 update-engine test project
         run: >
           dotnet build tests/SigilBuild.Wrapper.Tests/SigilBuild.Wrapper.Tests.csproj
@@ -229,11 +216,11 @@ jobs:
             -DestinationRoot $dest `
             -SizeGateMb 45
 
-      # HARD GATE (T1.4/R22 — same shape as the p11 job's guard below): without
-      # this, a dropped SIGIL_VM_TESTS or a silently empty runtime staging would
-      # make this job go green having exercised nothing. Fail the job here
-      # instead so a green p12 run is proof the web-installer pack path actually
-      # exercised a real staged AOT runtime.
+      # HARD GATE (same shape as the p11 job's guard below): without this, a
+      # dropped SIGIL_VM_TESTS or a silently empty runtime staging would make
+      # this job go green having exercised nothing. Fail the job here instead
+      # so a green p12 run is proof the web-installer pack path actually
+      # exercised a real staged AOT runtime. (R22)
       - name: require SIGIL_VM_TESTS and a staged runtime (else this job would silently soft-skip)
         shell: pwsh
         run: |
@@ -268,15 +255,15 @@ jobs:
           path: '**/TestResults/**/*.trx'
           if-no-files-found: warn
 
-  # P11 (T13.1): the live create+reverse legs for the three P11 "system steps"
-  # (scheduled_task_create/T11.1, com_register/T11.2, firewall_rule/T11.3),
-  # appended as its OWN job per the append-only convention (same rationale as
-  # the p12-update-webinstaller-vm job above: kept separate from the install
-  # matrix job rather than adding a step to it). P11 shipped with unit/parse/
-  # roundtrip tests only (ScheduledTaskCreateStepTests/FirewallRuleStepTests/
-  # ComRegisterStepTests in SigilBuild.Wrapper.Tests) — the live legs that need
-  # a real elevated schtasks.exe/netsh.exe/HKCR were explicitly deferred to
-  # "CI-VM". ScheduledTaskCreateInstallTests / FirewallRuleInstallTests /
+  # The live create+reverse legs for the three "system step" types
+  # (scheduled_task_create, com_register, firewall_rule), appended as its OWN
+  # job (same rationale as the p12-update-webinstaller-vm job above: kept
+  # separate from the install-matrix job rather than adding a step to it).
+  # These shipped with unit/parse/roundtrip tests only
+  # (ScheduledTaskCreateStepTests/FirewallRuleStepTests/ComRegisterStepTests
+  # in SigilBuild.Wrapper.Tests) — the live legs that need a real elevated
+  # schtasks.exe/netsh.exe/HKCR were explicitly deferred to "CI-VM".
+  # ScheduledTaskCreateInstallTests / FirewallRuleInstallTests /
   # ComRegisterInstallTests (SigilBuild.Wrapper.IntegrationTests) drive the
   # step classes directly (not through a packed Setup.exe — these steps are
   # machine-scope-only and the point is the step's own schtasks/netsh/COM
@@ -290,9 +277,9 @@ jobs:
   # live register->assert-HKCR-CLSID->unregister leg additionally needs a
   # bundled self-registering test DLL that does not exist yet in this repo;
   # ComRegisterInstallTests.Live_register_then_unregister_a_real_self_registering_dll
-  # is an explicit xunit Skip documenting that follow-up (see the T13.1
-  # report) rather than a fabricated fixture — it always reports "Skipped",
-  # on the VM included, until that DLL is added.
+  # is an explicit xunit Skip documenting that follow-up rather than a
+  # fabricated fixture — it always reports "Skipped", on the VM included,
+  # until that DLL is added.
   # NOT locally runnable — this job only executes on windows-latest.
   p11-system-steps-vm:
     runs-on: windows-latest

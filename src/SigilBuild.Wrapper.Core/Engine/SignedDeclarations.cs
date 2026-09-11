@@ -6,22 +6,21 @@ using SigilBuild.Core.Manifest;
 using SigilBuild.Wrapper.Cli;
 
 /// <summary>
-/// What the SIGNED BLOB declares about where this install is allowed to have written
-/// (register rows R44 and R51): the destinations a step opted out of install-dir
-/// containment with <c>allow_outside_install_dir</c>, and the registry keys the
-/// manifest's registry steps name.
+/// What the SIGNED BLOB declares about where this install is allowed to have written:
+/// the destinations a step opted out of install-dir containment with
+/// <c>allow_outside_install_dir</c>, and the registry keys the manifest's registry steps
+/// name. (R44, R51)
 /// </summary>
 /// <remarks>
 /// <para>
-/// <strong>Why this type exists at all, and why it is not a journal field.</strong>
-/// Both rows need the same thing — "was this coordinate declared?" — and both rejected
-/// the same naive answer: a per-record marker in <c>uninstall.json</c> saying "I was
-/// declared". The journal is the untrusted artefact. A record carrying that marker is a
-/// record saying <em>do not anchor me</em>, so a planted journal could opt itself out of
-/// the entire mechanism R1 exists to build. Every value here therefore comes from the
-/// running module's <c>SIGIL_BLOB_V1</c> resource — the same bytes Authenticode covers —
-/// and <strong>nothing here is ever read from, influenced by, or cross-checked against
-/// the journal.</strong>
+/// <strong>Why this is not a journal field.</strong> The question is "was this coordinate
+/// declared?", and the naive answer — a per-record marker in <c>uninstall.json</c> saying
+/// "I was declared" — is wrong because the journal is the untrusted artefact. A record
+/// carrying that marker is a record saying <em>do not anchor me</em>, so a planted journal
+/// could opt itself out of the entire anchoring mechanism (R1). Every value here therefore
+/// comes from the running module's <c>SIGIL_BLOB_V1</c> resource — the same bytes
+/// Authenticode covers — and <strong>nothing here is ever read from, influenced by, or
+/// cross-checked against the journal.</strong>
 /// </para>
 /// <para>
 /// The templates are resolved late, in <see cref="Resolve"/>, against the install
@@ -190,8 +189,8 @@ public sealed class SignedDeclarations
 
     /// <summary>
     /// Build the resolution context for the blob-backed set, or <c>null</c> when it
-    /// cannot be built — in which case nothing is declared and the anchor stays as narrow
-    /// as it was before this lane.
+    /// cannot be built — in which case nothing is declared and the anchor stays at its
+    /// narrowest.
     /// </summary>
     private StepContext? BuildContext(string installDir, List<string> notices)
     {
@@ -261,7 +260,7 @@ public sealed class SignedDeclarations
         {
             switch (step)
             {
-                // --- R51: every step type that journals a registry record ---
+                // --- every step type that journals a registry record (R51) ---
                 //
                 // The three below are the COMPLETE set of producers of
                 // RestoreRegistryValue / RestoreRegistryKey; RegistryRecordProducerTests
@@ -277,7 +276,7 @@ public sealed class SignedDeclarations
                     registryKeys.Add(new DeclaredRegistryKey(r.Hive, r.Key));
                     break;
 
-                // --- R44: the destination fields StepDestinationGuard contains ---
+                // --- the destination fields StepDestinationGuard contains (R44) ---
                 case InstallStep.FileCopy s when s.AllowOutsideInstallDir:
                     destinations.Add(s.To);
                     break;

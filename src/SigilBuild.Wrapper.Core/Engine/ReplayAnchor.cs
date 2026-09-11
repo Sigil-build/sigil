@@ -9,7 +9,7 @@ using SigilBuild.Core.Manifest;
 
 /// <summary>
 /// Decides whether a single <see cref="RollbackRecord"/> may be replayed, given the
-/// install directory the run belongs to (R1, clause (c)).
+/// install directory the run belongs to (R1).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -42,11 +42,11 @@ internal sealed class ReplayAnchor
     /// </summary>
     /// <remarks>
     /// <para>
-    /// This list is deliberately NOT the defence against execution hijacking. Rounds 0,
-    /// 1 and 2 of review each turned up another progid whose <c>shell\…\command</c>
-    /// grants machine-wide execution (<c>exefile</c>, then <c>Directory</c>, then
-    /// <c>txtfile</c> / <c>lnkfile</c> / <c>mscfile</c>), which is what enumerating
-    /// names buys you. The shape is what is dangerous, so
+    /// This list is deliberately NOT the defence against execution hijacking.
+    /// Enumerating progid names does not converge — <c>exefile</c>, <c>Directory</c>,
+    /// <c>txtfile</c>, <c>lnkfile</c> and <c>mscfile</c> each grant machine-wide
+    /// execution through <c>shell\…\command</c>, and the next one is always unlisted.
+    /// The shape is what is dangerous, so
     /// <see cref="IsExecutionShapedKey"/> denies the shape and this list is reduced to
     /// the coordinates that are categorically not application configuration.
     /// </para>
@@ -308,7 +308,7 @@ internal sealed class ReplayAnchor
             }
         }
 
-        // R44 / R51: the only widening input, and it comes from the SIGNED BLOB.
+        // The only widening input, and it comes from the SIGNED BLOB. (R44, R51)
         //
         // Resolved HERE rather than by the caller, and with `installDir` — the directory
         // UninstallEngine chose, which is the one RECORDED at install time. A declared
@@ -399,10 +399,10 @@ internal sealed class ReplayAnchor
         switch (record)
         {
             // The four content-bearing records are checked on BOTH sides. The destination
-            // says where bytes land; the source says whose bytes they are, and the
-            // register's own wording for these rows is "arbitrary file / tree write FROM
-            // AN ATTACKER-CHOSEN STASH". A contained destination fed from an uncontained
-            // source is still an attacker-content write.
+            // says where bytes land; the source says whose bytes they are, and the risk
+            // is an arbitrary file / tree write FROM AN ATTACKER-CHOSEN STASH. A
+            // contained destination fed from an uncontained source is still an
+            // attacker-content write.
             //
             // `writesContent` also decides whether the excised sub-roots apply: a record
             // that only DELETES may reach them (removing a Startup shortcut this install
@@ -489,9 +489,9 @@ internal sealed class ReplayAnchor
             // coordinate this process can independently resolve to something belonging
             // to the app, so there is nothing to anchor them to. Both are destructive
             // rather than elevating (a planted record can delete an OS task or a
-            // firewall rule; it cannot make the elevated process run attacker code),
-            // and they are not part of register row R1's evidence table. Left
-            // unanchored deliberately, and reported rather than quietly widened.
+            // firewall rule; it cannot make the elevated process run attacker code), so
+            // they fall outside the anchoring rule (R1). Left unanchored deliberately,
+            // and reported rather than quietly widened.
             default:
                 return Allow(record);
         }
@@ -515,9 +515,9 @@ internal sealed class ReplayAnchor
     /// content under <c>%TEMP%\sigil-fd-*</c> / <c>-dd-*</c> / <c>-cfg-*</c>, and
     /// <c>RollbackJournal.DiscardTransientStashes</c> reclaims those the moment the
     /// install commits — but the RECORD, stash path and all, is persisted. Refusing on the
-    /// path alone therefore refused every persisted <c>file_delete</c>,
+    /// path alone would therefore refuse every persisted <c>file_delete</c>,
     /// <c>directory_delete</c>, <c>ini_write</c>, <c>json_edit</c> and <c>xml_edit</c>
-    /// record on a perfectly healthy uninstall, and emitted the very log line the
+    /// record on a perfectly healthy uninstall, and emit the very log line the
     /// documentation tells publishers to investigate.
     /// </para>
     /// <para>
@@ -533,8 +533,8 @@ internal sealed class ReplayAnchor
     /// <c>restore_config_file</c> the undo tests its stash for existence and returns, so a
     /// rewritten source really does make the record do nothing. <c>restore_file</c> does
     /// not: with no usable backup it falls through to <c>File.Delete(Path)</c>
-    /// (<c>RollbackRecord.RestoreFile.UndoAsync</c>), so a planted record that would
-    /// previously have been refused now DELETES its destination instead. That is accepted
+    /// (<c>RollbackRecord.RestoreFile.UndoAsync</c>), so a planted record whose source was
+    /// rewritten DELETES its destination instead. That is accepted
     /// rather than overlooked — the destination has already passed the containment check
     /// above, and the identical deletion is reachable anyway through
     /// <c>RestoreFile(ExistedBefore: false)</c>, which the anchor allows by design. So no
@@ -627,10 +627,10 @@ internal sealed class ReplayAnchor
     /// The excised sub-roots apply only when <paramref name="forWrite"/> is true, and the
     /// asymmetry is the point. Excising <c>Programs\Startup</c> exists to stop a planted
     /// record WRITING an executable into a per-logon execution surface. Applying it to
-    /// deletes as well inverted the intent: a <c>shortcut_create</c> with an explicit path
-    /// into the all-users Startup folder is documented and supported, and refusing its
-    /// <c>delete_shortcut</c> record left the shortcut auto-starting after uninstall — the
-    /// anchor creating the persistence it was added to prevent.
+    /// deletes as well would invert the intent: a <c>shortcut_create</c> with an explicit
+    /// path into the all-users Startup folder is documented and supported, and refusing
+    /// its <c>delete_shortcut</c> record would leave the shortcut auto-starting after
+    /// uninstall — the anchor creating the persistence it was added to prevent.
     /// </remarks>
     private bool IsAllowedPath(string? path, bool forWrite)
     {
@@ -653,10 +653,10 @@ internal sealed class ReplayAnchor
             }
         }
 
-        // R44: the destinations the signed manifest declared with
-        // `allow_outside_install_dir`. Checked LAST, so a path already inside the install
-        // directory or a scope root reaches the same verdict it did before this lane —
-        // widening the anchor cannot change an existing answer, only add new ones.
+        // The destinations the signed manifest declared with
+        // `allow_outside_install_dir`. Checked LAST, so widening the anchor cannot change
+        // an existing answer for a path already inside the install directory or a scope
+        // root — it can only add new ones. (R44)
         //
         // The stronger predicate is deliberate. A declared root such as
         // C:\ProgramData\MyApp typically inherits BUILTIN\Users write access, so a
@@ -730,11 +730,11 @@ internal sealed class ReplayAnchor
                 "auto-run, policy and COM-activation surfaces)");
         }
 
-        // R51: the key must be one the SIGNED MANIFEST names. This is the check that
-        // closes the class the denylist above could not: `txtfile`, `lnkfile`, `mscfile`,
+        // The key must be one the SIGNED MANIFEST names. This is the check that closes
+        // the class the denylist above could not: `txtfile`, `lnkfile`, `mscfile`,
         // `Drivers32`, `App Paths`, and every key shape nobody has thought of yet are all
         // refused by the same rule, because none of them was declared — no name of theirs
-        // appears anywhere in this file, and none has to.
+        // appears anywhere in this file, and none has to. (R51)
         if (!IsDeclaredRegistryKey(effective))
         {
             return Refuse(
@@ -857,7 +857,7 @@ internal sealed class ReplayAnchor
     /// <para>
     /// Deny the shape, not the instances. Enumerating progids does not converge:
     /// <c>exefile</c>, <c>Directory</c>, <c>txtfile</c>, <c>lnkfile</c> and <c>mscfile</c>
-    /// all give machine-wide execution and each was found in a different review round.
+    /// all give machine-wide execution, and the list never ends.
     /// Any progid — including one Windows ships that this code has never heard of — is
     /// covered here, while an app restoring its own verb to its own binary still passes.
     /// </para>
@@ -871,7 +871,7 @@ internal sealed class ReplayAnchor
     /// application key that happens to contain a segment called <c>command</c>,
     /// <c>LocalServer</c> or <c>MCI32</c> — <c>Software\Acme\App\command</c> — carries no
     /// execution semantics and must replay normally, or a legitimate uninstall leaves a
-    /// stale value behind and pollutes the refusal list S5 reads for R15.
+    /// stale value behind and pollutes the refusal list consumers read (R15).
     /// </para>
     /// </remarks>
     private static bool IsExecutionShapedKey(string normalizedKey)
@@ -961,18 +961,18 @@ internal sealed class ReplayAnchor
     /// configuration space — and outside <see cref="DeniedRegistrySubtrees"/>. That is
     /// what stops the catalogue's "arbitrary HKLM write":
     /// <c>SYSTEM\CurrentControlSet\Services\…</c> and
-    /// <c>SYSTEM\…\Session Manager\Environment</c> are no longer addressable at all,
+    /// <c>SYSTEM\…\Session Manager\Environment</c> are not addressable at all,
     /// and neither are the execution-hijack surfaces that do live under
     /// <c>Software\</c>.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// This predicate is now the FLOOR, not the whole rule. It says where an installer's
+    /// This predicate is the FLOOR, not the whole rule. It says where an installer's
     /// rollback may operate at all; <see cref="IsDeclaredRegistryKey"/> then says which
     /// keys inside that space this particular application declared (R51). Both must pass.
     /// </para>
     /// <para>
-    /// It is kept rather than deleted, and the deny list with it, as defence in depth. It
+    /// It is defence in depth, along with the deny list, and it
     /// is independent of the manifest: a manifest that declares
     /// <c>Software\Microsoft\Windows\CurrentVersion\Run</c> — by mistake, or because the
     /// publisher's signing key was misused — still cannot get an auto-run key replayed
@@ -1087,7 +1087,7 @@ internal sealed class ReplayAnchor
 
     /// <summary>
     /// A <c>restore_env</c> replay writes an attacker-chosen string into an environment
-    /// variable. Machine scope is R1's named <c>PATH</c>-hijack primitive; user scope is
+    /// variable. Machine scope is the <c>PATH</c>-hijack primitive (R1); user scope is
     /// no safer during an ELEVATED replay, because HKCU is then the administrator's own
     /// hive and a standard user planting the record would be hijacking it.
     /// </summary>
@@ -1236,9 +1236,9 @@ internal sealed class ReplayAnchor
         // below: no installer legitimately `set`s PATH or ComSpec, and the subset rule must
         // keep governing them. Checked BEFORE the model rather than as one conjunct inside
         // it, and refused with its OWN code, so that deleting this guard changes the
-        // observable outcome — as one conjunct it was unfalsifiable, because a
+        // observable outcome — as one conjunct it would be unfalsifiable, because a
         // system-critical variable's value is never wholly install-owned anyway and the
-        // model would have refused on that instead.
+        // model would refuse on that instead.
         if (IsSystemCriticalVariable(r.Name))
         {
             return Refuse(
@@ -1305,9 +1305,8 @@ internal sealed class ReplayAnchor
     /// <remarks>
     /// <para>
     /// <strong>This predicate reads live system state and can be perturbed by an earlier
-    /// record in the same replay — in the PERMISSIVE direction.</strong> Stated precisely
-    /// because an earlier version of the lane's audit had the direction backwards, and a
-    /// future reader adding a predicate here will reason from it.
+    /// record in the same replay — in the PERMISSIVE direction.</strong> The direction is
+    /// easy to get backwards, and anyone adding a predicate here will reason from it.
     /// </para>
     /// <para>
     /// <see cref="StateDirectorySecurity.IsAdminOnlyWritable"/> evaluates the containing

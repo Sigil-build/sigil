@@ -3,7 +3,7 @@ namespace SigilBuild.Wrapper.Engine;
 using SigilBuild.Core.Manifest;
 
 /// <summary>
-/// The version-aware install paths (P3, gap G3), resolved once at session start by
+/// The version-aware install paths, resolved once at session start by
 /// comparing the packed version against the installed Add/Remove-Programs entry.
 /// Mirrors WiX <c>MajorUpgrade</c> + downgrade-block and the Inno/NSIS
 /// detect-old-and-uninstall idiom.
@@ -13,7 +13,7 @@ public enum UpgradeAction
     /// <summary>No prior install of this app id — a normal fresh install (unchanged behaviour).</summary>
     Fresh,
 
-    /// <summary>The same version is already installed — the existing T10 repair/reinstall path (unchanged).</summary>
+    /// <summary>The same version is already installed — the repair/reinstall path.</summary>
     Same,
 
     /// <summary>
@@ -37,7 +37,7 @@ public enum UpgradeAction
 }
 
 /// <summary>
-/// The installed state read from the scope-correct ARP entry (P3), feeding
+/// The installed state read from the scope-correct ARP entry, feeding
 /// <see cref="UpgradePlanner.Decide"/>. Produced by <see cref="InstalledStateResolver"/>
 /// (registry I/O) or injected in tests. <see cref="None"/> represents "no prior
 /// install found".
@@ -67,7 +67,7 @@ public sealed record UpgradeState(
 }
 
 /// <summary>
-/// The resolved version-aware plan for a run (P3). Carries the classification plus
+/// The resolved version-aware plan for a run. Carries the classification plus
 /// the prior-install facts the pre-body upgrade phase and the destination default need.
 /// </summary>
 /// <param name="Action">The chosen path (fresh / same / upgrade / downgrade-blocked / downgrade-forced).</param>

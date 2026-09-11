@@ -4,7 +4,7 @@ using System;
 
 /// <summary>
 /// The single version-comparison implementation, shared by the
-/// <c>version_gte(...)</c> expression function and the P3 version-aware upgrade
+/// <c>version_gte(...)</c> expression function and the version-aware upgrade
 /// decision (<see cref="UpgradePlanner"/>). Uses <see cref="System.Version"/>'s
 /// numeric dotted-quad ordering, falling back to an ordinal string compare when a
 /// value is not a parseable dotted version.

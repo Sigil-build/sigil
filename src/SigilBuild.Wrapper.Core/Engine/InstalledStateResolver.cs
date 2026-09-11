@@ -8,7 +8,7 @@ using SigilBuild.Core.Manifest;
 
 /// <summary>
 /// Reads the scope-correct Add/Remove-Programs entry for an app id to resolve the
-/// installed state feeding the P3 version-aware upgrade decision (gap G3): the
+/// installed state feeding the version-aware upgrade decision: the
 /// installed <c>DisplayVersion</c>, the prior install directory, and the prior
 /// <c>uninstall.exe</c> path. Read-only; returns <see cref="UpgradeState.None"/>
 /// off Windows or when no entry is found.
@@ -18,8 +18,8 @@ using SigilBuild.Core.Manifest;
 /// HKLM, so an existing machine install is still discovered and its scope wins (see
 /// <see cref="InstallSession"/>); reading a hive the caller cannot write is safe.
 /// A <b>machine</b>-scope resolve, or <b>any</b> resolve in an elevated process,
-/// probes HKLM and nothing else — see <see cref="ScopeProbeOrder"/> for why the
-/// mirrored fallback was a privilege escalation, not a convenience.
+/// probes HKLM and nothing else — see <see cref="ScopeProbeOrder"/> for why a
+/// mirrored fallback would be a privilege escalation, not a convenience.
 /// </remarks>
 public static class InstalledStateResolver
 {
@@ -59,31 +59,30 @@ public static class InstalledStateResolver
     /// </summary>
     /// <remarks>
     /// <para>
-    /// R2. This was symmetric: machine scope probed HKLM and then fell back to HKCU.
-    /// Everything read out of that key is acted on by an <em>already elevated</em>
-    /// process — in particular <c>UninstallString</c>, which
-    /// <see cref="ParseUninstallExe"/> turns into an exe path that
-    /// <see cref="InstallSession"/> spawns. HKCU is writable by the unprivileged user,
-    /// so that fallback let any standard user plant an ARP entry with a low
-    /// <c>DisplayVersion</c> (classified as an upgrade) and an <c>UninstallString</c>
-    /// aimed at their own binary, then wait for the next admin-approved run of the
-    /// publisher's legitimate installer to run it as administrator.
+    /// The probe order is deliberately asymmetric. Everything read out of an ARP key is
+    /// acted on by an <em>already elevated</em> process — in particular
+    /// <c>UninstallString</c>, which <see cref="ParseUninstallExe"/> turns into an exe
+    /// path that <see cref="InstallSession"/> spawns. HKCU is writable by the
+    /// unprivileged user, so a fallback to it would let any standard user plant an ARP
+    /// entry with a low <c>DisplayVersion</c> (classified as an upgrade) and an
+    /// <c>UninstallString</c> aimed at their own binary, then wait for the next
+    /// admin-approved run of the publisher's legitimate installer to run it as
+    /// administrator. (R2)
     /// </para>
     /// <para>
-    /// The condition is <b>machine scope OR an elevated process</b>, which is how
-    /// register row R2 words it, and the second half is not redundant: a
-    /// <em>user</em>-scope run can be elevated — launched with Run as administrator,
-    /// started from an already-elevated shell, or deployed by Intune / SCCM running as
-    /// SYSTEM. Keying on scope alone left every one of those probing HKCU and reaching
-    /// the same elevated spawn, with the trust gate in
+    /// The condition is <b>machine scope OR an elevated process</b>, and the second half
+    /// is not redundant: a <em>user</em>-scope run can be elevated — launched with Run as
+    /// administrator, started from an already-elevated shell, or deployed by Intune /
+    /// SCCM running as SYSTEM. Keying on scope alone would leave every one of those
+    /// probing HKCU and reaching the same elevated spawn, with the trust gate in
     /// <see cref="InstallSession.IsPriorUninstallerTrusted"/> as the sole remaining
-    /// defence. Two independent gates were the design; one is not.
+    /// defence. Two independent gates are the design; one is not.
     /// </para>
     /// <para>
     /// The unelevated user-scope fallback to HKLM stays: a per-user install reading the
     /// machine hive is reading a hive it cannot write, which is what makes a cross-scope
     /// upgrade discoverable without trusting attacker-writable data. The direction of
-    /// the asymmetry is the whole fix — do not "restore the symmetry".
+    /// the asymmetry is the point — do not "restore the symmetry".
     /// </para>
     /// </remarks>
     internal static InstallScope[] ScopeProbeOrder(InstallScope tentativeScope, bool elevated) =>
@@ -117,7 +116,7 @@ public static class InstalledStateResolver
                     : string.Empty);
 
             // If the UninstallString gave no exe but we know the dir, assume the
-            // conventional {dir}\uninstall.exe (T15 always lands it there).
+            // conventional {dir}\uninstall.exe — where the install always lands it.
             if (string.IsNullOrEmpty(uninstallExe) && !string.IsNullOrEmpty(installDir))
             {
                 uninstallExe = Path.Combine(installDir, InstallSurvivability.UninstallerFileName);

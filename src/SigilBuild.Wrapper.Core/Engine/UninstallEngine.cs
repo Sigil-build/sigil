@@ -13,14 +13,14 @@ using SigilBuild.Wrapper.Cli;
 /// and finally cleans up the per-app state directory.
 /// </summary>
 /// <remarks>
-/// Missing or corrupt state is a documented degradation: Task 19 reports
-/// the gap explicitly rather than fabricating a best-effort uninstall.
+/// Missing or corrupt state is a documented degradation: the gap is reported
+/// explicitly rather than fabricating a best-effort uninstall.
 /// </remarks>
 public sealed class UninstallEngine
 {
     /// <summary>
     /// Drive the auto-derived uninstall flow for <paramref name="appId"/> in the
-    /// scope it was installed under (T12). <paramref name="preferredScope"/> is the
+    /// scope it was installed under. <paramref name="preferredScope"/> is the
     /// scope resolved from the uninstall command line (the ARP
     /// <c>UninstallString</c> carries <c>/allusers</c> or <c>/currentuser</c>); the
     /// state store reads that scope's directory and only that one, and the scope of
@@ -37,7 +37,7 @@ public sealed class UninstallEngine
     /// destination, because the ARP <c>UninstallString</c> carries no <c>/D=</c>.
     /// </param>
     /// <param name="declarations">
-    /// What the SIGNED BLOB declares (R44/R51) — the out-of-tree destinations
+    /// What the SIGNED BLOB declares (R44, R51) — the out-of-tree destinations
     /// <c>allow_outside_install_dir</c> opted out of containment, and the registry keys
     /// the manifest's registry steps name. <strong>Required and non-optional, for exactly
     /// the reason <paramref name="fallbackInstallDir"/> is:</strong> an anchoring input
@@ -62,14 +62,14 @@ public sealed class UninstallEngine
         ArgumentException.ThrowIfNullOrWhiteSpace(fallbackInstallDir);
         ArgumentNullException.ThrowIfNull(declarations);
 
-        // progress is threaded through so an R1 state refusal reaches the console,
+        // progress is threaded through so a state refusal reaches the console,
         // the wizard log pane and the /LOG file instead of vanishing.
         var attempt = UninstallStateStore.Load(appId, preferredScope, progress);
 
-        // R1: a refusal is NOT an absence. Reporting "no uninstall state found" here
-        // would tell the operator the opposite of what happened — the brief's exact
-        // "reads as no prior install" failure mode — and would hide the attack from
-        // the one line an incident responder reads.
+        // A refusal is NOT an absence. Reporting "no uninstall state found" here would
+        // tell the operator the opposite of what happened — it reads as "no prior
+        // install" — and would hide the attack from the one line an incident responder
+        // reads. (R1)
         if (attempt.RefusalReason is not null)
         {
             return EngineResult.Failed(
@@ -87,9 +87,9 @@ public sealed class UninstallEngine
                 $"no uninstall state found for '{appId}' (expected at {UninstallStateStore.PathFor(appId, preferredScope)})");
         }
 
-        // R1 clause (c): this journal came off disk, so anchor the replay — a planted
-        // record must not be able to aim the elevated process at System32, HKLM\SYSTEM,
-        // a service the app never installed, or a DLL of the attacker's choosing.
+        // This journal came off disk, so anchor the replay — a planted record must not
+        // be able to aim the elevated process at System32, HKLM\SYSTEM, a service the
+        // app never installed, or a DLL of the attacker's choosing. (R1)
         //
         // Anchor to the RECORDED install dir, not to a recomputed default. The default
         // is wrong for every install that used /D= or a wizard-chosen destination (the
@@ -104,13 +104,13 @@ public sealed class UninstallEngine
         // launder another app's uninstall.json), and the scope narrows the shortcut
         // folders to the scope actually being replayed.
         //
-        // R44/R51: `declarations` is the ONLY widening input, and every value in it comes
-        // from the running module's signed blob. Note what is NOT passed here — nothing
-        // out of `loaded`, the state that came off disk. The journal supplies records to
-        // be judged; it supplies no part of the standard they are judged against. Both
-        // rows exist because the obvious alternative — a per-record "I was declared" flag
-        // — is a record asserting its own permission, and a planted record would assert
-        // it too.
+        // `declarations` is the ONLY widening input, and every value in it comes from the
+        // running module's signed blob. Note what is NOT passed here — nothing out of
+        // `loaded`, the state that came off disk. The journal supplies records to be
+        // judged; it supplies no part of the standard they are judged against. The
+        // obvious alternative — a per-record "I was declared" flag — is a record
+        // asserting its own permission, which a planted record would assert too.
+        // (R44, R51)
         var undo = await loaded.Journal
             .UndoAsync(
                 ReplayAnchorage.ForInstall(anchorDir, appId, loaded.Scope, declarations),
@@ -121,7 +121,7 @@ public sealed class UninstallEngine
         if (undo.RefusedRecords.Count > 0)
         {
             // Never silent: a refusal here is either a planted journal or an anchoring
-            // bug, and both need a human. S5 surfaces this per-record for R15.
+            // bug, and both need a human. Surfaced per-record above (R15).
             progress?.Report(new StepProgress(
                 0,
                 0,
@@ -141,13 +141,12 @@ public sealed class UninstallEngine
                 IsError: true));
         }
 
-        // R15. Everything below this line destroys the operator's ability to try again:
-        // the ARP row is the only entry point a user has to re-run the uninstaller, and
+        // Everything below this line destroys the operator's ability to try again: the
+        // ARP row is the only entry point a user has to re-run the uninstaller, and
         // uninstall.json is the only description of what is left to remove. Removing
-        // them after a replay that did not achieve what it set out to is how a failed
-        // uninstall became a PERMANENTLY installed app with no way to remove it — the
-        // end state four separate Stage 1 defects each arrived at. So when a record's
-        // undo RAN AND DID NOT WORK, keep both and say so.
+        // them after a replay that did not achieve what it set out to turns a failed
+        // uninstall into a PERMANENTLY installed app with no way to remove it. So when
+        // a record's undo RAN AND DID NOT WORK, keep both and say so. (R15)
         //
         // Failures only — REFUSALS deliberately do not land here, and the difference is
         // not a technicality:
@@ -159,9 +158,9 @@ public sealed class UninstallEngine
         //   • A refusal is anchoring rejecting the record as not ours (R1). A retry
         //     refuses identically, so retaining state would never clear — it would
         //     convert one planted record into an app that can never leave Add/Remove
-        //     Programs. S1 decided refusals are logged loudly and the uninstall
-        //     continues (see UninstallAnchorSelectionTests), and that ruling still
-        //     holds: aborting on a refusal is the over-refusal, not the fix.
+        //     Programs. Refusals are therefore logged loudly and the uninstall
+        //     continues (see UninstallAnchorSelectionTests): aborting on a refusal is
+        //     the over-refusal, not the fix.
         if (undo.FailedRecords.Count > 0)
         {
             return EngineResult.Failed(
@@ -222,7 +221,7 @@ public sealed class UninstallEngine
     /// no <c>/D=</c>. Anchoring a <c>/D=</c> or wizard-chosen install to that default
     /// refuses every one of its file records while the ARP row and the state are removed
     /// anyway, which leaves the app on disk and unremovable. The ARP
-    /// <c>InstallLocation</c> is written by every install since P3 and is the one place
+    /// <c>InstallLocation</c> is written by every install and is the one place
     /// the real directory survives; for machine scope it lives in HKLM and is therefore
     /// admin-authored.
     /// </para>
@@ -257,8 +256,8 @@ public sealed class UninstallEngine
                 IsError: true));
         }
 
-        // Pre-fix state (or a rejected recorded value): recover the real directory from
-        // the ARP row this app wrote at install time.
+        // No recorded directory (or a rejected one): recover the real directory from the
+        // ARP row this app wrote at install time.
         if (OperatingSystem.IsWindows())
         {
             var arp = ArpRegistration.TryGetInstallLocation(appId, scope);
@@ -280,14 +279,14 @@ public sealed class UninstallEngine
     /// <para>
     /// <strong>This check is equality-only, and that is deliberate. Do not "tighten" it
     /// to require <see cref="StateDirectorySecurity.IsAdminOnlyWritable"/> for machine
-    /// scope.</strong> It looks like an obvious improvement and it is not: lane S2
-    /// contains new machine-scope installs to the <c>%ProgramFiles%</c> roots but
-    /// deliberately GRANDFATHERS a recovered prior install directory, honouring it even
+    /// scope.</strong> It looks like an obvious improvement and it is not: new
+    /// machine-scope installs are contained to the <c>%ProgramFiles%</c> roots, but a
+    /// recovered prior install directory is deliberately GRANDFATHERED and honoured even
     /// outside that root, because an install predating containment would otherwise be
     /// neither upgradable nor removable. Requiring admin-only-writable here would refuse
     /// the uninstall of exactly that grandfathered population — machine installs sitting
     /// legitimately outside the root today — and recreate "silently unremovable" for the
-    /// very users S2's ruling exists to protect.
+    /// very users the grandfather clause exists to protect.
     /// </para>
     /// <para>
     /// The residual is accepted knowingly. A recorded directory that is user-writable but

@@ -20,8 +20,8 @@ public partial class App : Application
     private UpdateViewModel? _updateVm;
 
     /// <summary>
-    /// The outcome chosen by the user during this session (install, the T15
-    /// interactive uninstall, or a T12.4 headed <c>/Update</c>). Read by
+    /// The outcome chosen by the user during this session (install, the
+    /// interactive uninstall, or a headed <c>/Update</c>). Read by
     /// <see cref="Program.Main"/> after the Avalonia lifetime exits. The headed
     /// <c>/Update</c> run surfaces UpdateRunner's own int exit code directly (it is
     /// not one of the fixed <see cref="InstallerOutcomeCode"/> values — e.g. a
@@ -37,20 +37,20 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            // Brand data travels inside the WrapperBlob (decision 11): derived
-            // light/dark palette + base64 logo/hero, no BrandTokens.g.json sidecar.
+            // Brand data travels inside the WrapperBlob: derived light/dark palette
+            // + base64 logo/hero, no BrandTokens.g.json sidecar.
             var tokens = LoadBrandTokens();
             BrandPalette.Apply(this, tokens);
 
-            // R48: kick the Authenticode/revocation lookup onto a thread-pool thread.
+            // Kick the Authenticode/revocation lookup onto a thread-pool thread.
             // Started here, before any window is constructed, so the trust line is
-            // already on its way by the time the wizard paints — and the paint no longer
-            // waits for it.
+            // already on its way by the time the wizard paints, and the paint never
+            // waits for it. (R48)
             StartTrustLineResolution(tokens);
 
             var session = HostRuntime.Session;
 
-            // T15: an interactive uninstall (uninstall.exe double-clicked, no /S)
+            // An interactive uninstall (uninstall.exe double-clicked, no /S)
             // gets its own minimal branded confirm → progress → done window, driving
             // the real UninstallEngine. Kept entirely separate from the install
             // wizard's flow/rail.
@@ -64,13 +64,13 @@ public partial class App : Application
                 return;
             }
 
-            // T12.4: a non-silent /Update (Program.cs routes it here instead of the
+            // A non-silent /Update (Program.cs routes it here instead of the
             // headless path) gets its own minimal branded progress → up-to-date/done/
             // failed window, driving the real InstallSession.RunUpdateInteractiveAsync
             // — which runs the SAME UpdateRunner as the headless path, but launches
             // the downloaded child Setup.exe HEADED (no /silent) so the user sees its
             // own install wizard. Kept entirely separate from the install wizard's
-            // flow/rail, mirroring the T15 uninstall window above. Unlike Uninstall
+            // flow/rail, mirroring the uninstall window above. Unlike Uninstall
             // there is no confirm gesture — Start() begins checking immediately.
             if (session is not null && session.Mode == WrapperMode.Update)
             {
@@ -90,48 +90,47 @@ public partial class App : Application
             // dev/preview runs where no session was staged.
             if (session is not null)
             {
-                // T9: load the declared custom screens (from the blob) + parameter
+                // Load the declared custom screens (from the blob) + parameter
                 // schema (from the session) so the wizard renders the Configure-style
                 // forms and generates the rail from them.
-                // P9 design §4.4: thread the session's full language-preference list
+                // Design §4.4: thread the session's full language-preference list
                 // (the SAME list used below for the license map) so a declared screen's
                 // rail label resolves independently of the resolved chrome language —
                 // Sigil may ship no chrome catalog for a tag the manifest itself supplies.
                 _vm.LoadScreens(InstallerScreensLoader.LoadFromSelf(), session.Parameters, session.LanguagePreferences);
 
-                // T8: load the enabled built-in option components (from the session's
+                // Load the enabled built-in option components (from the session's
                 // blob). When ≥ 1 is present the Options screen + its rail entry appear
-                // (after license, per decision 4); when none, they are omitted.
+                // (after license); when none, they are omitted.
                 _vm.LoadOptions(session.Options);
 
-                // T14 / P9 Step 3b: load the embedded license text MAP (from the blob)
-                // and resolve it against the SAME ordered preference list the chrome
-                // language used (session.LanguagePreferences), so a manifest packing
+                // Load the embedded license text MAP (from the blob) and resolve it
+                // against the SAME ordered preference list the chrome language used
+                // (session.LanguagePreferences), so a manifest packing
                 // uk: LICENSE.uk.txt actually renders Ukrainian under a Ukrainian
                 // session instead of English forever. Resolve is total here — SIG0290
-                // (Task 9) makes an en-less license map a fatal pack-time error, so
-                // this never silently returns null for a non-null map. When present
-                // the License screen + its rail entry appear (after destination, per
-                // decision 4) and gate Next on acceptance; when absent they are
-                // omitted. The /silent path never reaches here, so silent installs
-                // imply acceptance.
+                // makes an en-less license map a fatal pack-time error, so this never
+                // silently returns null for a non-null map. When present the License
+                // screen + its rail entry appear (after destination) and gate Next on
+                // acceptance; when absent they are omitted. The /silent path never
+                // reaches here, so silent installs imply acceptance.
                 var licenseMap = InstallerLicenseLoader.LoadMapFromSelf();
                 _vm.LoadLicense(InstallerLicenseLoader.Resolve(licenseMap, session.LanguagePreferences));
 
-                // T10: surface the reinstall notice when the SAME version is already
+                // Surface the reinstall notice when the SAME version is already
                 // installed (the engine performs uninstall-then-install itself). An
-                // upgrade / downgrade is a P3 case handled by SetUpgradeState below, so
-                // the plain reinstall notice is suppressed for those.
+                // upgrade / downgrade is handled by SetUpgradeState below, so the
+                // plain reinstall notice is suppressed for those.
                 _vm.SetExistingInstall(
                     session.ExistingInstallDetected && session.UpgradeAction == UpgradeAction.Same);
 
-                // P3 (gap G3): tell the wizard whether this run is an upgrade — show the
+                // Tell the wizard whether this run is an upgrade — show the
                 // "Upgrading from x.y.z" banner — or a blocked downgrade, which routes
                 // straight to the notice screen with the dedicated exit code. The prior
                 // install dir is already honored by ResolveDefaultInstallDir below.
                 _vm.SetUpgradeState(session.UpgradeAction, session.InstalledVersion);
 
-                // T13: seed the Destination screen from the session — the scope-aware
+                // Seed the Destination screen from the session — the scope-aware
                 // default install dir (honoring /D= + the manifest install_dir), and
                 // whether the user/machine scope toggle shows (manifest `scope: auto`).
                 // Toggling scope recomputes the default path for the picked scope.
@@ -144,24 +143,24 @@ public partial class App : Application
                 // Bind the wizard-collected parameter values into param.* and the
                 // option checkbox states into option.* for the engine at install
                 // time (read lazily at call time). The collected destination path
-                // (T13) becomes the effective install dir → {install_dir}.
+                // becomes the effective install dir → {install_dir}.
                 _vm.ConfigureInstallRunner(async (progress, ct) =>
                 {
                     session.CollectedInstallDir = _vm.InstallPath;
                     var outcome = await session.RunInstallAsync(
                         _vm.CollectedParameterValues, _vm.CollectedOptionValues, progress, ct);
-                    // P5: the reboot flag is only known after the run — copy it into the
+                    // The reboot flag is only known after the run — copy it into the
                     // VM before the Done screen renders (StartInstallAsync reads outcome next).
                     _vm.SetRebootRequired(session.RebootRequired);
                     return outcome;
                 });
 
-                // P7: surface the /LOG path so the Failed screen can offer "Open log".
+                // Surface the /LOG path so the Failed screen can offer "Open log".
                 _vm.LogFilePath = session.LogFilePath;
 
-                // P6 (gap G7): wire the files-in-use probes so the wizard can gate on
-                // running applications before starting the engine, and offer to close
-                // them via the Restart Manager.
+                // Wire the files-in-use probes so the wizard can gate on running
+                // applications before starting the engine, and offer to close them
+                // via the Restart Manager.
                 _vm.ConfigureBlockerProbe(
                     scan: dir =>
                     {
@@ -175,8 +174,8 @@ public partial class App : Application
                     },
                     close: dir => session.CloseBlockers(dir));
 
-                // P2 (gap G4): wire the Done-screen "Launch <App>" checkbox to the
-                // session's unelevated launch of installer.run_after_install.
+                // Wire the Done-screen "Launch <App>" checkbox to the session's
+                // unelevated launch of installer.run_after_install.
                 _vm.ConfigureLaunch(
                     session.HasRunAfterInstall,
                     session.LaunchLabel,
@@ -215,25 +214,25 @@ public partial class App : Application
             DarkTokens = dark,
             LogoBase64 = brand.LogoBase64,
             HeroBase64 = brand.HeroBase64,
-            // T11 / decision 7: the "Signed by {publisher}" trust line renders ONLY
-            // when the manifest declared a `sign` block (SignDeclared, from the blob)
-            // AND this exe's own Authenticode signature verifies via WinVerifyTrust.
+            // The "Signed by {publisher}" trust line renders ONLY when the manifest
+            // declared a `sign` block (SignDeclared, from the blob) AND this exe's own
+            // Authenticode signature verifies via WinVerifyTrust.
             // InstallerTrustLoader short-circuits the P/Invoke when SignDeclared is
             // false, so an unsigned/un-stamped host does no trust work and shows no
             // line; a signed-then-tampered/re-stamped exe fails verification and also
             // shows no line. The neutral publisher name renders separately regardless.
             //
-            // R48: NOT resolved here. That call is WinVerifyTrust with whole-chain
+            // NOT resolved here. That call is WinVerifyTrust with whole-chain
             // revocation checking — a network operation, measured at 335 ms on the happy
             // path — and this runs while the first window is being constructed, so the
-            // wizard could not paint until it returned. TrustLine is left null (which
+            // wizard would not paint until it returned. TrustLine is left null (which
             // renders as no line, the safe default) and filled in from a thread-pool
-            // thread by StartTrustLineResolution.
+            // thread by StartTrustLineResolution. (R48)
         };
     }
 
     /// <summary>
-    /// R48 — resolve the trust line off the UI thread and let the binding fill it in.
+    /// Resolve the trust line off the UI thread and let the binding fill it in. (R48)
     /// </summary>
     /// <remarks>
     /// Fire-and-forget on purpose: the wizard must not wait for it, and the failure mode

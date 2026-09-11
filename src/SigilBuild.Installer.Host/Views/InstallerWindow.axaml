@@ -13,15 +13,15 @@
 
   <Grid ColumnDefinitions="240,*" RowDefinitions="*,56">
 
-    <!-- Sidebar (rail): brand block (T7) on top, step indicator (T9) below -->
+    <!-- Sidebar (rail): brand block on top, step indicator below -->
     <Border Grid.Row="0" Grid.Column="0" Grid.RowSpan="2" Background="{DynamicResource RailBgBrush}">
       <DockPanel Margin="24" LastChildFill="False">
         <StackPanel DockPanel.Dock="Top" Spacing="16">
           <Image Source="avares://installer/Assets/default-logo.png" Height="48" HorizontalAlignment="Left" />
           <TextBlock Text="{Binding Brand.AppName}" Foreground="{DynamicResource RailTextBrush}" FontSize="22" FontWeight="SemiBold" />
           <TextBlock Text="{Binding Brand.Publisher}" Foreground="{DynamicResource RailMutedBrush}" FontSize="13" />
-          <!-- T11 / decision 7: verified-signature-gated trust line. Visible only
-               when the manifest declared `sign` AND WinVerifyTrust(self) == valid. -->
+          <!-- Verified-signature-gated trust line. Visible only when the manifest
+               declared `sign` AND WinVerifyTrust(self) == valid. -->
           <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding Brand.HasTrustLine}">
             <TextBlock Text="&#x1F512;" FontSize="12" VerticalAlignment="Center" Foreground="{DynamicResource RailTextBrush}" />
             <TextBlock x:Name="TrustLine" Text="{Binding Brand.TrustLine}" FontSize="12"

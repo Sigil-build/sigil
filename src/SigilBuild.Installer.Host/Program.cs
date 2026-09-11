@@ -41,7 +41,7 @@ public static partial class Program
             return 64;
         }
 
-        // P9 (gap G10): resolve this session's chrome language now — installer.language
+        // Resolve this session's chrome language now — installer.language
         // (fixed) -> /lang -> the OS UI-language preference list -> en — and set
         // SessionLanguage.Current. MUST run before ANY UI is constructed, including
         // the elevated relaunch below (harmless: the elevated child re-resolves
@@ -58,34 +58,34 @@ public static partial class Program
             InstallerLog.Info(session.LanguageConflictNote);
         }
 
-        // R76: read the single-instance handoff and CLEAR it here — before the elevation
+        // Read the single-instance handoff and CLEAR it here — before the elevation
         // branch below, which is the first thing this process can spawn. The guard is
-        // taken further down (after that branch, P6's rule) and the token is handed to
-        // it then. Read once, at the top, so no child of this process can ever inherit
-        // an admission it was not given.
+        // taken further down, after that branch, and the token is handed to it then.
+        // Read once, at the top, so no child of this process can ever inherit an
+        // admission it was not given. (R76)
         var lockHandoff = SetupInstanceLock.ConsumeHandoffToken();
 
-        // T12 — self-elevation. This MUST run before any scope-requiring work
-        // (payload extraction, HKLM/Program Files writes) and before the T18 GUI
-        // native bootstrap below. The host manifest requests `asInvoker`, so a
+        // Self-elevation. This MUST run before any scope-requiring work (payload
+        // extraction, HKLM/Program Files writes) and before the GUI native
+        // bootstrap below. The host manifest requests `asInvoker`, so a
         // per-user install never triggers UAC; only a resolved per-machine scope
         // from a non-elevated process relaunches self with the `runas` verb,
         // forwarding ALL original args, and propagates the elevated child's exit
         // code as this process's exit code. /Update never elevates itself (a
-        // known limitation, unchanged by T12.4's headed progress window) — a
-        // machine-scope /Update instead falls through and runs unelevated,
-        // headless or headed depending on /silent, below.
+        // known limitation) — a machine-scope /Update instead falls through and
+        // runs unelevated, headless or headed depending on /silent, below.
         if (OperatingSystem.IsWindows()
             && session.RequiresElevation
             && session.Mode != WrapperMode.Update)
         {
             AttachParentConsole();
 
-            // R18: relaunch with the handoff-rewritten vector, never raw argv — a
+            // Relaunch with the handoff-rewritten vector, never raw argv — a
             // /P<secret>=<value> token would otherwise be published to every
             // process-creation auditor on the box. Building it can refuse (the
             // envelope could not be protected or written); refusing is the point —
-            // the alternative is elevating with the plaintext on the command line.
+            // the alternative is elevating with the plaintext on the command
+            // line. (R18)
             IReadOnlyList<string> relaunchArgs;
             try
             {
@@ -114,27 +114,28 @@ public static partial class Program
             }
         }
 
-        // P6 (gap G17): single-instance guard. Taken AFTER the elevation branch — the
-        // un-elevated parent above never installs, so it must not hold the mutex while
-        // the elevated child (which does) tries to take it. Held for the whole run;
+        // Single-instance guard. Taken AFTER the elevation branch — the un-elevated
+        // parent above never installs, so it must not hold the mutex while the
+        // elevated child (which does) tries to take it. Held for the whole run;
         // the OS releases it if the process dies, so a crash never wedges the name.
         //
-        // R76: the mode is passed because ONE process legitimately runs while the guard
+        // The mode is passed because ONE process legitimately runs while the guard
         // is already held — the prior version's uninstall.exe that an upgrade in this
         // very app+scope spawned for its teardown, which is this same image and derives
         // the same name. It is admitted only against a handoff its parent minted
-        // (SetupInstanceLock.HandoffAdmits); an ordinary second Setup.exe is refused
-        // exactly as before.
+        // (SetupInstanceLock.HandoffAdmits); an ordinary second Setup.exe is
+        // refused. (R76)
         using var instanceLock = SetupInstanceLock.TryAcquire(
             session.AppId, session.ResolvedScope, session.Mode, lockHandoff, out var lockRefusal);
         if (lockRefusal != SetupInstanceLock.SetupLockRefusal.None)
         {
-            // R34: record which branch was taken, in the always-on diagnostic log and
+            // Record which branch was taken, in the always-on diagnostic log and
             // the /LOG file. The headed MessageBox keeps the catalog string — adding a
             // localized string for a squatted mutex name would be a lockstep change for
             // a case no ordinary user meets — but an operator reading the log must be
             // able to tell "someone else is installing" from "the guard's name is
-            // occupied by something else" from "we could not create the guard at all".
+            // occupied by something else" from "we could not create the guard at
+            // all". (R34)
             InstallerLog.Info($"single-instance guard: {lockRefusal}");
         }
 
@@ -153,7 +154,7 @@ public static partial class Program
             else if (OperatingSystem.IsWindows())
             {
                 // A WinExe has no console, so the headed path needs a real notice.
-                // P9: catalog-driven — already_running.body / already_running.caption,
+                // Catalog-driven — already_running.body / already_running.caption,
                 // resolved through the session language set above (before ANY UI,
                 // including this pre-Avalonia MessageBox).
                 _ = MessageBoxW(
@@ -165,16 +166,16 @@ public static partial class Program
             return InstallSession.AlreadyRunningExitCode;
         }
 
-        // R76: hand the lock to the session so a P3 upgrade teardown can pass it on to
+        // Hand the lock to the session so an upgrade teardown can pass it on to
         // the prior version's uninstaller. Only an OWNING lock mints a handoff, so
         // setting it unconditionally is safe (an admitted or sentinel lock mints
-        // nothing). Set before BOTH the headless and the GUI path below.
+        // nothing). Set before BOTH the headless and the GUI path below. (R76)
         session.InstanceLock = instanceLock;
 
         // Headless whenever /silent or /verysilent is present (this includes the
         // ARP UninstallString's `/S /Uninstall`, and a scripted `/Update /silent`).
-        // An interactive uninstall (uninstall.exe double-clicked, no /S, T15) or a
-        // non-silent /Update (T12.4) is NOT silent, so both fall through to the
+        // An interactive uninstall (uninstall.exe double-clicked, no /S) or a
+        // non-silent /Update is NOT silent, so both fall through to the
         // branded GUI below — App picks the right window from session.Mode.
         if (session.Silent)
         {
@@ -182,31 +183,29 @@ public static partial class Program
             return session.RunHeadlessAsync(Console.Out, Console.Error).GetAwaiter().GetResult();
         }
 
-        // Interactive GUI: the install wizard, or the T15 uninstall confirm flow —
+        // Interactive GUI: the install wizard, or the uninstall confirm flow —
         // App picks the window from session.Mode. Both drive the same InstallSession
         // engine.
         HostRuntime.Session = session;
 
-        // T18: make a standalone stamped Setup.exe self-contained. Native AOT
-        // publishes the host's Skia/ANGLE/HarfBuzz native DLLs BESIDE the exe; a
-        // stamped Setup.exe instead carries them inside its SIGIL_RUNTIME_V1
-        // resource. Extract them to a per-user cache and add that directory to the
-        // native DLL search path BEFORE the Avalonia AppBuilder is created, so the
-        // first Skia/Avalonia native load resolves. GUI path ONLY — the headless
-        // /silent, /verysilent and /S-uninstall paths returned above and never touch
-        // Skia, so they skip this (the interactive uninstall window, which does reach
-        // here, needs it). On an un-stamped dev run (no resource) this is a
-        // no-op: the native DLLs already sit beside the exe. Idempotent across
-        // re-runs (content-keyed cache dir + completion marker).
+        // A stamped Setup.exe carries the host's Skia/ANGLE/HarfBuzz native DLLs in
+        // its SIGIL_RUNTIME_V1 resource rather than beside the exe. Extract them to a
+        // per-user cache and put that directory on the native DLL search path BEFORE
+        // the Avalonia AppBuilder is created, so the first Skia/Avalonia native load
+        // resolves. GUI path ONLY: the headless /silent, /verysilent and /S-uninstall
+        // paths returned above never touch Skia, while the interactive uninstall
+        // window does reach here and needs it. A no-op on an un-stamped dev run (the
+        // native DLLs already sit beside the exe), and idempotent across re-runs
+        // (content-keyed cache dir + completion marker).
         //
-        // R4: this runs INSIDE the elevated process (the elevation branch is above), so
+        // This runs INSIDE the elevated process (the elevation branch is above), so
         // whatever lands on the DLL search path is loaded with administrator rights.
-        // NativeRuntimeBootstrap therefore verifies every file in the cache against the
-        // embedded archive and — elevated — requires an administrator-only root; when it
-        // cannot get one it throws rather than loading native code it cannot vouch for.
-        // The refusal is fatal here on purpose: this wizard IS Skia, so "carry on
-        // anyway" would crash a few frames later with a worse message, having already
-        // searched the untrusted directory.
+        // NativeRuntimeBootstrap therefore verifies every cached file against the
+        // embedded archive and — elevated — requires an administrator-only root,
+        // throwing rather than loading native code it cannot vouch for. The refusal
+        // is fatal here on purpose: this wizard IS Skia, so carrying on would crash a
+        // few frames later with a worse message, having already searched the
+        // untrusted directory. (R4)
         if (OperatingSystem.IsWindows())
         {
             try
@@ -245,7 +244,7 @@ public static partial class Program
         // WinExe has no console — install a hard backstop so any unhandled
         // exception during Avalonia init lands in the wizard log instead of
         // disappearing into the void. The wrapper's stdout/stderr drain
-        // doesn't help once Avalonia detaches the standard handles. (Ported from PR #8.)
+        // doesn't help once Avalonia detaches the standard handles.
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
         {
             if (e.ExceptionObject is Exception ex)
@@ -254,14 +253,15 @@ public static partial class Program
                 InstallerLog.Error($"AppDomain.UnhandledException (non-Exception): {e.ExceptionObject}");
         };
 
-        // I1: NEVER raw argv here. This log is always on, and a per-user install
-        // does NOT take the elevation branch above — R18's handoff never engages —
-        // so its argv still carries `/P<secret>=<value>` verbatim. Writing that
-        // would drop a licence key or password into %TEMP% in plaintext and
-        // contradict docs/guides/parameters.md, which promises a secret parameter
-        // is redacted (***) from the install log. `session` is already built by
-        // this point, so render the PARSED vector through AuditSafeRendering()
-        // instead — the same rendering InstallSession's own log header uses.
+        // NEVER raw argv here. This log is always on, and a per-user install
+        // does NOT take the elevation branch above — the secret handoff never
+        // engages — so its argv still carries `/P<secret>=<value>` verbatim.
+        // Writing that would drop a licence key or password into %TEMP% in
+        // plaintext and contradict docs/guides/parameters.md, which promises a
+        // secret parameter is redacted (***) from the install log. `session` is
+        // already built by this point, so render the PARSED vector through
+        // AuditSafeRendering() instead — the same rendering InstallSession's own
+        // log header uses. (R18)
         InstallerLog.Info(RenderWizardStartedLine(session.CommandLine));
 
         try
@@ -292,7 +292,7 @@ public static partial class Program
 
     /// <summary>
     /// Builds the always-on wizard log's first line. Takes the PARSED command
-    /// line rather than argv on purpose (I1): every declared <c>secret</c>
+    /// line rather than argv on purpose: every declared <c>secret</c>
     /// parameter's value is replaced by <c>***</c> by
     /// <see cref="ParsedCommandLine.AuditSafeRendering"/>, so no licence key,
     /// password or token can reach the log file. Separated from
@@ -329,9 +329,9 @@ public static partial class Program
 
     /// <summary>
     /// Exit code for "the embedded native runtime could not be extracted to a directory
-    /// only an administrator can write" (register row R4). Distinct from a usage error
-    /// (64) and from an install failure so a scripted run can tell a refusal to start
-    /// from a failed install.
+    /// only an administrator can write". Distinct from a usage error (64) and from an
+    /// install failure so a scripted run can tell a refusal to start from a failed
+    /// install. (R4)
     /// </summary>
     private const int NativeRuntimeUntrustedExitCode = 78;
 
@@ -340,8 +340,8 @@ public static partial class Program
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool AttachConsole(uint dwProcessId);
 
-    // P6 (gap G17): the friendly "already running" notice for the headed path — a
-    // plain MessageBox, since this fires before Avalonia is initialised.
+    // The friendly "already running" notice for the headed path — a plain
+    // MessageBox, since this fires before Avalonia is initialised.
     [SupportedOSPlatform("windows")]
     [LibraryImport("user32.dll", EntryPoint = "MessageBoxW", StringMarshalling = StringMarshalling.Utf16)]
     private static partial int MessageBoxW(IntPtr hWnd, string lpText, string lpCaption, uint uType);

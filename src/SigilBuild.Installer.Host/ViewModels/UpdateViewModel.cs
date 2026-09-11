@@ -10,7 +10,7 @@ using SigilBuild.Wrapper.Core.Localization;
 namespace SigilBuild.Installer.Host.ViewModels;
 
 /// <summary>
-/// The headed, non-silent <c>/Update</c> flow (T12.4): a minimal branded window
+/// The headed, non-silent <c>/Update</c> flow: a minimal branded window
 /// that starts checking for an update as soon as it opens (no confirm gesture —
 /// unlike <see cref="UninstallViewModel"/>'s confirm → progress → done), and
 /// drives the real <see cref="InstallSession.RunUpdateInteractiveAsync"/>. States:
@@ -22,7 +22,7 @@ public enum UpdateStep { Checking, Downloading, LaunchingChild, UpToDate, Done, 
 
 public sealed class UpdateViewModel : INotifyPropertyChanged
 {
-    // T12.3's UpdateRunner reports stages as plain (message, isError) pairs — see
+    // UpdateRunner reports stages as plain (message, isError) pairs — see
     // its remarks. These two substrings are the stable, internal-only markers this
     // ViewModel keys off to move the progress display forward; if UpdateRunner's
     // wording ever changes, update both call sites together.
@@ -44,8 +44,8 @@ public sealed class UpdateViewModel : INotifyPropertyChanged
     private bool _lastReportWasError;
     private string? _lastReportMessage;
 
-    // P9: the resolved chrome language for this session, captured once at
-    // construction (Task 4 sets SessionLanguage before any UI is built).
+    // The resolved chrome language for this session, captured once at
+    // construction (SessionLanguage is set before any UI is built).
     private readonly Lang _lang = SessionLanguage.Current;
 
     public UpdateViewModel(BrandTokens tokens)

@@ -6,7 +6,7 @@ using SigilBuild.Installer.Host.ViewModels;
 namespace SigilBuild.Installer.Host.Views.Screens;
 
 /// <summary>
-/// P6 (gap G7): the "Close applications" gate. Lists what is holding the install
+/// The "Close applications" gate. Lists what is holding the install
 /// directory and offers Retry (the user closed them) or Close-for-me (Restart
 /// Manager graceful shutdown). Cancel is the shared footer button.
 /// </summary>

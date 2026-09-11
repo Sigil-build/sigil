@@ -6,7 +6,7 @@ using SigilBuild.Installer.Host.ViewModels;
 namespace SigilBuild.Installer.Host.Views;
 
 /// <summary>
-/// The headed, non-silent <c>/Update</c> window (T12.4): a minimal branded
+/// The headed, non-silent <c>/Update</c> window: a minimal branded
 /// progress → up-to-date/done/failed flow, separate from the install
 /// <see cref="InstallerWindow"/> and the <see cref="UninstallWindow"/>. State-driven
 /// panels are toggled by the view-model's <c>IsProgress</c>/<c>IsUpToDate</c>/

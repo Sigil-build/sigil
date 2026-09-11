@@ -4,7 +4,7 @@
              xmlns:loc="clr-namespace:SigilBuild.Wrapper.Core.Localization;assembly=SigilBuild.Wrapper.Core"
              x:DataType="vm:InstallerViewModel"
              x:Class="SigilBuild.Installer.Host.Views.Screens.OptionsView">
-  <!-- Built-in configurable Options screen (T8): one checkbox per enabled
+  <!-- Built-in configurable Options screen: one checkbox per enabled
        component. `locked` components render disabled (always applied). The
        checked states flow into option.* for the engine's step gating. -->
   <StackPanel Spacing="12">
@@ -15,7 +15,7 @@
     <ItemsControl ItemsSource="{Binding OptionItems}">
       <ItemsControl.ItemTemplate>
         <DataTemplate x:DataType="vm:OptionItemViewModel">
-          <!-- P10 (gap G11): built-ins + app-defined custom components share this
+          <!-- Built-ins + app-defined custom components share this
                row. A custom component may carry an optional description, shown
                under the checkbox caption when present. -->
           <StackPanel Margin="0,4">

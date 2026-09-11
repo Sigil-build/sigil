@@ -27,31 +27,31 @@ internal static class Program
             // same InstallSession for its /silent path and its GUI wizard.
             var session = InstallSession.Create(args);
 
-            // P9 (gap G10): resolve this session's chrome language now — installer.language
+            // Resolve this session's chrome language now — installer.language
             // (fixed) -> /lang -> the OS UI-language preference list -> en. MUST
             // run before any output is produced, mirroring the host's ordering
             // exactly so both entry points resolve identically. Any conflict note
             // is flushed into the /LOG sink (if requested) the first time it
-            // opens — this console entry point has no separate diagnostic log to
+            // opens; this console entry point has no separate diagnostic log to
             // additionally write it to.
             session.ResolveSessionLanguage();
 
-            // R76: read the single-instance handoff and CLEAR it here — before the
-            // elevation branch below, which is the first thing this process can spawn.
-            // The guard is taken further down (after that branch, P6's rule), and the
-            // token is handed to it then. Read once, at the top, so no child of this
-            // process can ever inherit an admission it was not given.
+            // Read the single-instance handoff and CLEAR it here — before the
+            // elevation branch below, which is the first thing this process can
+            // spawn. The guard is taken further down, after that branch, and the
+            // token is handed to it then. Read once, at the top, so no child of
+            // this process can ever inherit an admission it was not given. (R76)
             var lockHandoff = SetupInstanceLock.ConsumeHandoffToken();
 
-            // T12 — self-elevation. A resolved per-machine scope from a
-            // non-elevated process relaunches self with the `runas` verb,
-            // forwarding all args, and propagates the elevated child's exit code.
-            // Per-user installs stay prompt-free. Mirrors the host entry path.
+            // Self-elevation. A resolved per-machine scope from a non-elevated
+            // process relaunches self with the `runas` verb, forwarding all args,
+            // and propagates the elevated child's exit code. Per-user installs
+            // stay prompt-free. Mirrors the host entry path.
             if (OperatingSystem.IsWindows()
                 && session.RequiresElevation
                 && session.Mode != WrapperMode.Update)
             {
-                // R18: relaunch with the handoff-rewritten vector, never raw argv —
+                // Relaunch with the handoff-rewritten vector, never raw argv —
                 // a /P<secret>=<value> token would otherwise be published to every
                 // process-creation auditor on the box. The finally is the parent's
                 // best-effort cleanup for a declined UAC prompt, or a child that died
@@ -59,7 +59,7 @@ internal static class Program
                 // deleted it as it read it. It is SKIPPED whenever a child may still
                 // be starting up (see the out parameter) — deleting the envelope from
                 // under it would fail the very install the handoff enables. Seeded
-                // `true` so a throw before the call assumes the unsafe case.
+                // `true` so a throw before the call assumes the unsafe case. (R18)
                 var relaunchArgs = session.BuildElevationRelaunchArgs(args);
                 var childMayStillBeRunning = true;
                 try
@@ -73,22 +73,23 @@ internal static class Program
                 }
             }
 
-            // P6 (gap G17): single-instance guard. Taken AFTER the elevation branch —
-            // the un-elevated parent above never installs, so it must not hold the
+            // Single-instance guard. Taken AFTER the elevation branch — the
+            // un-elevated parent above never installs, so it must not hold the
             // mutex while the elevated child (which does) tries to take it.
             //
-            // R76: the mode is passed because ONE process legitimately runs while the
-            // guard is already held — the prior version's uninstall.exe that an upgrade
-            // in this very app+scope spawned for its teardown. It is admitted only
-            // against a handoff its parent minted (SetupInstanceLock.HandoffAdmits);
-            // an ordinary second Setup.exe is refused exactly as before.
+            // The mode is passed because ONE process legitimately runs while the
+            // guard is already held — the prior version's uninstall.exe that an
+            // upgrade in this very app+scope spawned for its teardown. It is
+            // admitted only against a handoff its parent minted
+            // (SetupInstanceLock.HandoffAdmits); an ordinary second Setup.exe is
+            // refused. (R76)
             using var instanceLock = SetupInstanceLock.TryAcquire(
                 session.AppId, session.ResolvedScope, session.Mode, lockHandoff, out var lockRefusal);
             if (instanceLock is null)
             {
-                // R34: two different situations reach here. Say which — an operator
+                // Two different situations reach here. Say which — an operator
                 // chasing "already running" with nothing running needs to know the name
-                // was occupied rather than held.
+                // was occupied rather than held. (R34)
                 Console.Error.WriteLine(
                     lockRefusal == SetupInstanceLock.SetupLockRefusal.NameNotAvailable
                         ? "the single-instance guard for this application could not be taken: its " +
@@ -100,8 +101,8 @@ internal static class Program
 
             if (lockRefusal == SetupInstanceLock.SetupLockRefusal.GuardUnavailable)
             {
-                // R34: proceeding WITHOUT the guard, out loud. This branch used to return
-                // a sentinel indistinguishable from a real lock and say nothing.
+                // Proceeding WITHOUT the guard, out loud: a silent sentinel here
+                // would be indistinguishable from a real lock. (R34)
                 Console.Error.WriteLine(
                     "note: the single-instance guard could not be created for this run — " +
                     "a concurrent setup of the same application would not be detected.");
@@ -109,21 +110,21 @@ internal static class Program
 
             if (lockRefusal == SetupInstanceLock.SetupLockRefusal.AdmittedByParentInstaller)
             {
-                // R76: say the exception out loud, as the Avalonia host records it in its
+                // Say the exception out loud, as the Avalonia host records it in its
                 // always-on diagnostic log (InstallerLog). This console shell has no such
                 // log — the /LOG sink is not open until RunHeadlessAsync — so stderr is
                 // where an operator reading the transcript of an upgrade can see WHY a
-                // second process for this app+scope was allowed to run.
+                // second process for this app+scope was allowed to run. (R76)
                 Console.Error.WriteLine(
                     $"note: single-instance guard: {lockRefusal} — the guard for this " +
                     "application is held by another process, and this uninstall was " +
                     "admitted on the handoff from the process that spawned it.");
             }
 
-            // R76: hand the lock to the session so a P3 upgrade teardown can pass it on
+            // Hand the lock to the session so an upgrade teardown can pass it on
             // to the prior version's uninstaller. Only an OWNING lock mints a handoff,
             // so setting it unconditionally is safe (an admitted or sentinel lock mints
-            // nothing).
+            // nothing). (R76)
             session.InstanceLock = instanceLock;
 
             return await session.RunHeadlessAsync(Console.Out, Console.Error).ConfigureAwait(false);

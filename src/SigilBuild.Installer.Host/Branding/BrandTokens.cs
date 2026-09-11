@@ -7,7 +7,7 @@ namespace SigilBuild.Installer.Host.Branding;
 /// Brand data consumed by the wizard. The full light/dark palette is derived at
 /// pack time (Avalonia cannot <c>color-mix</c> at runtime) and delivered inside
 /// the WrapperBlob — there is no <c>BrandTokens.g.json</c> sidecar for a stamped
-/// <c>.exe</c> (decision 11). <see cref="LightTokens"/> / <see cref="DarkTokens"/>
+/// <c>.exe</c>. <see cref="LightTokens"/> / <see cref="DarkTokens"/>
 /// map token names (railBg, accent, winBg, …) to <c>#RRGGBB</c> values.
 /// </summary>
 public sealed class BrandTokens : System.ComponentModel.INotifyPropertyChanged
@@ -36,7 +36,7 @@ public sealed class BrandTokens : System.ComponentModel.INotifyPropertyChanged
     public string? HeroBase64 { get; init; }
 
     /// <summary>
-    /// The verified-signature-gated trust line (T11 / decision 7), e.g.
+    /// The verified-signature-gated trust line, e.g.
     /// <c>"Signed by Acme, Inc."</c>. Non-null ONLY when the manifest declared a
     /// <c>sign</c> block AND the running exe's Authenticode signature verified;
     /// <c>null</c> for an unsigned, un-stamped, or tampered/re-stamped artifact —
@@ -44,16 +44,14 @@ public sealed class BrandTokens : System.ComponentModel.INotifyPropertyChanged
     /// renders separately). <see cref="HasTrustLine"/> drives its visibility.
     /// </summary>
     /// <remarks>
-    /// R48: settable and observable rather than <c>init</c>-only, because resolving it
-    /// calls <c>WinVerifyTrust</c> — a revocation lookup that reaches the network. It was
-    /// resolved inline while the wizard's first window was being built, i.e. on the UI
-    /// thread before anything had been drawn: measured at <b>335 ms on the happy path</b>
-    /// (online, warm certificate cache, embedded-signed target), which is already past
-    /// the ~100 ms at which a UI reads as unresponsive, and every condition that makes it
-    /// worse — cold cache, captive portal, unreachable CRL distribution point — moves in
-    /// one direction only. It is now resolved on a thread-pool thread and assigned here
-    /// when it arrives, so the window paints immediately and the trust line appears a
-    /// moment later. The safe default is what renders in the meantime: no line.
+    /// Settable and observable rather than <c>init</c>-only, because resolving it calls
+    /// <c>WinVerifyTrust</c> — a revocation lookup that reaches the network, measured at
+    /// <b>335 ms on the happy path</b> (online, warm certificate cache, embedded-signed
+    /// target) and only worse on a cold cache, a captive portal or an unreachable CRL
+    /// distribution point. Resolving it on the UI thread while the first window is built
+    /// would hold the paint past the ~100 ms at which a UI reads as unresponsive, so
+    /// <c>TrustLineActivation</c> resolves it on a thread-pool thread and assigns it here
+    /// when it arrives. The safe default renders in the meantime: no line. (R48)
     /// </remarks>
     public string? TrustLine
     {

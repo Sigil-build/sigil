@@ -9,8 +9,8 @@ using SigilBuild.Wrapper.Core.Localization;
 namespace SigilBuild.Installer.Host.Views.Screens;
 
 /// <summary>
-/// The Destination screen (T13): install-location input + Browse folder picker and
-/// the T12 user/machine scope radios (when the manifest scope is <c>auto</c>). The
+/// The Destination screen: install-location input + Browse folder picker and the
+/// user/machine scope radios (when the manifest scope is <c>auto</c>). The
 /// collected path becomes <c>{install_dir}</c>; validation is driven by the
 /// view-model (<see cref="InstallerViewModel.ValidateDestination"/>).
 /// </summary>

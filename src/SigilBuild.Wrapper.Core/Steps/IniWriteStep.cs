@@ -8,7 +8,7 @@ using SigilBuild.Core.Manifest;
 using SigilBuild.Wrapper.Engine;
 
 /// <summary>
-/// <c>ini_write</c> step (P8, gap G9): set <c>key=value</c> under a section in an
+/// <c>ini_write</c> step: set <c>key=value</c> under a section in an
 /// INI file, preserving all unrelated lines (comments, blank lines, other keys and
 /// sections). Hand-rolled and AOT-safe. Journaled for byte-exact rollback.
 /// </summary>
@@ -42,20 +42,18 @@ internal static class IniEditor
 {
     /// <exception cref="ArgumentException">
     /// <paramref name="section"/>, <paramref name="key"/> or <paramref name="value"/>
-    /// contains a carriage return or line feed, or begins with <c>[</c>
-    /// (register row R32).
+    /// contains a carriage return or line feed, or begins with <c>[</c> (R32).
     /// </exception>
     public static string Set(string? content, string section, string key, string value)
     {
-        // R32: section/key/value are ctx.Resolve-expanded and concatenated
-        // verbatim into "key=value", so a value of "9\n[admin]\nenabled=true"
-        // wrote arbitrary entries into another section — which matters as soon as
-        // the value comes from a wizard field or a registry_read var rather than a
-        // literal. Rejected rather than escaped: an INI has no escape for a
-        // newline inside a value, and all three are pack-time-authored, so a hard
-        // failure surfaces the mistake to the publisher instead of silently
-        // mangling it. ConfigFileEditor turns the throw into a step failure with
-        // the file left untouched.
+        // section/key/value are ctx.Resolve-expanded and concatenated verbatim into
+        // "key=value", so a value of "9\n[admin]\nenabled=true" would write arbitrary
+        // entries into another section — which matters as soon as the value comes from
+        // a wizard field or a registry_read var rather than a literal. Rejected rather
+        // than escaped: an INI has no escape for a newline inside a value, and all
+        // three are pack-time-authored, so a hard failure surfaces the mistake to the
+        // publisher instead of silently mangling it. ConfigFileEditor turns the throw
+        // into a step failure with the file left untouched (R32).
         RejectLineInjection("section", section);
         RejectLineInjection("key", key);
         RejectLineInjection("value", value);

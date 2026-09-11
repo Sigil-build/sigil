@@ -44,7 +44,7 @@ internal sealed class ShortcutCreateStep : IStep
         // — for a .lnk this installer never created. Under `on_failure: continue`
         // (or any later rollback) that would delete a same-named PRE-EXISTING
         // shortcut on the all-users Desktop or Start Menu. Same ordering rule, and
-        // the same reason, as ScheduledTaskCreateStep's R31 check.
+        // the same reason, as ScheduledTaskCreateStep's quote check.
         var argString = _spec.Args is null ? null : string.Join(" ", _spec.Args);
 
         var locationDir = ResolveLocation(_spec.Location, ctx);
@@ -97,38 +97,30 @@ internal sealed class ShortcutCreateStep : IStep
     /// <summary>
     /// Resolve the manifest's <c>location:</c> string into a real filesystem
     /// directory. The two named anchors map onto the <em>scope-correct</em> shell
-    /// folders (T12): a per-machine install writes to the all-users (common)
+    /// folders: a per-machine install writes to the all-users (common)
     /// Desktop / Start Menu, a per-user install to the calling user's per-profile
     /// folders. Anything else is treated as an explicit path so manifests can
     /// still target arbitrary install dirs.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// R16: the explicit-path branch went through <b>no substitution at all</b> —
-    /// not <c>Resolve</c>, not <c>ResolvePath</c> — and its result feeds
-    /// <see cref="Directory.CreateDirectory(string)"/>. So
-    /// <c>location: "{install_dir}\Tools"</c> created a directory literally named
-    /// <c>{install_dir}</c> next to the running installer and reported success:
-    /// register row R16's headline symptom, in the one path field a check on
-    /// substituted output could never catch, because nothing was ever substituted.
-    /// The shipped example manifest
-    /// (<c>examples/exe-wrapper/hello-desktop-app/sigil.yaml</c>) exercises this
-    /// field with <c>${parameters.install_dir}\StartMenu</c>, so it was reachable
-    /// by following the documentation.
+    /// The explicit-path branch routes through <see cref="StepContext.ResolvePath"/>,
+    /// which brings the <c>${...}</c> / <c>{...}</c> expansion, the unresolved-token
+    /// refusal and the <c>payload://</c> traversal guard. Its result feeds
+    /// <see cref="Directory.CreateDirectory(string)"/>, so without that substitution
+    /// a <c>location: "{install_dir}\Tools"</c> would create a directory literally
+    /// named <c>{install_dir}</c> next to the running installer and report success —
+    /// in the one path field a check on substituted output could never catch,
+    /// because nothing would ever have been substituted (R16).
     /// </para>
     /// <para>
-    /// It routes through <see cref="StepContext.ResolvePath"/> now, which brings
-    /// the <c>${...}</c> / <c>{...}</c> expansion it should always have had, the
-    /// unresolved-token refusal, and the <c>payload://</c> traversal guard.
-    /// </para>
-    /// <para>
-    /// <b>R16's <c>install_dir</c> containment deliberately does not apply here.</b>
+    /// <b>The <c>install_dir</c> containment rule deliberately does not apply here.</b>
     /// The whole point of <c>desktop</c> and <c>start_menu</c> is to write outside
     /// <c>install_dir</c> — anchoring this field on the install directory would
     /// refuse every ordinary shortcut. <c>shortcut_create</c> is correspondingly
-    /// not in R16's list of contained destinations and does not accept
+    /// not in the list of contained destinations and does not accept
     /// <c>allow_outside_install_dir</c>. A <em>wider</em> anchor does apply — see
-    /// <see cref="CheckLocationContained"/> (register row R54).
+    /// <see cref="CheckLocationContained"/> (R54).
     /// </para>
     /// </remarks>
     private static string ResolveLocation(string location, StepContext ctx) => location switch
@@ -139,22 +131,21 @@ internal sealed class ShortcutCreateStep : IStep
     };
 
     /// <summary>
-    /// Register row R54: the named anchors are contained by construction, the
-    /// explicit-path branch was contained by nothing at all. Returns <c>null</c>
-    /// when <paramref name="locationDir"/> sits under a root a shortcut may
-    /// legitimately be written to, or a step-failure message naming those roots.
+    /// The named anchors are contained by construction; this bounds the
+    /// explicit-path branch too. Returns <c>null</c> when
+    /// <paramref name="locationDir"/> sits under a root a shortcut may legitimately
+    /// be written to, or a step-failure message naming those roots (R54).
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>What was unbounded.</b> An explicit <c>location</c> reached
+    /// <b>What this bounds.</b> An explicit <c>location</c> reaches
     /// <see cref="Directory.CreateDirectory(string)"/> and
-    /// <see cref="ShellLink.Save"/> from an elevated process with no check, and
-    /// the <see cref="RollbackRecord.DeleteShortcut"/> queued for it deletes
-    /// whatever file that path names at rollback or uninstall. So a manifest —
-    /// or a <c>${parameters.…}</c> / <c>{var.…}</c> value sourced from a wizard
-    /// field or a <c>registry_read</c> — could materialize a directory tree
-    /// anywhere on the volume and arrange for an arbitrary path to be deleted
-    /// later.
+    /// <see cref="ShellLink.Save"/> from an elevated process, and the
+    /// <see cref="RollbackRecord.DeleteShortcut"/> queued for it deletes whatever
+    /// file that path names at rollback or uninstall. Unchecked, a manifest — or a
+    /// <c>${parameters.…}</c> / <c>{var.…}</c> value sourced from a wizard field
+    /// or a <c>registry_read</c> — could materialize a directory tree anywhere on
+    /// the volume and arrange for an arbitrary path to be deleted later.
     /// </para>
     /// <para>
     /// <b>The roots, and why each is on the list.</b> A shortcut belongs either

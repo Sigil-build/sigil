@@ -45,7 +45,7 @@ internal sealed class EnvSetStep : IStep
         var name = _spec.Name;
         var resolvedValue = ctx.Resolve(_spec.Value);
 
-        // T12: a step scope of "auto" (the value auto-generated PATH steps use)
+        // A step scope of "auto" (the value auto-generated PATH steps use)
         // defers to the resolved install scope — machine env for a per-machine
         // install, user env for a per-user install. Explicit "user"/"machine"
         // stays authoritative. The resolved scope is what lands in the rollback
@@ -102,7 +102,7 @@ internal sealed class EnvSetStep : IStep
     /// <summary>
     /// Map the manifest step's <c>scope:</c> onto a concrete <c>user</c>/<c>machine</c>
     /// env target. A literal <c>user</c>/<c>machine</c> is authoritative; <c>auto</c>
-    /// (or an empty value) defers to the resolved install scope (T12).
+    /// (or an empty value) defers to the resolved install scope.
     /// </summary>
     internal static string ResolveEnvScope(string specScope, StepContext ctx) => specScope switch
     {

@@ -24,8 +24,8 @@ using System.Runtime.Versioning;
 /// release → <c>CoUninitialize</c>.
 /// </para>
 /// <para>
-/// Task 16 ships <see cref="Save"/> only. Round-trip read-back of <c>.lnk</c>
-/// fields is intentionally deferred: <c>IShellLinkW</c>'s <c>Get*</c> methods
+/// Only <see cref="Save"/> is implemented. Round-trip read-back of <c>.lnk</c>
+/// fields is intentionally omitted: <c>IShellLinkW</c>'s <c>Get*</c> methods
 /// take caller-allocated <c>wchar_t*</c> buffers, which are awkward to express
 /// across the source generator's marshalling defaults without bespoke custom
 /// marshallers. Tests instead validate that <see cref="Save"/> wrote a
@@ -207,8 +207,8 @@ internal static class ShellLink
 /// 14:SetIconLocation, 15:SetRelativePath, 16:Resolve, 17:SetPath</c>.
 /// The Get* slots are declared with <c>nint</c> buffer pointers (effectively
 /// "any caller-supplied wchar_t*") to satisfy the source generator without
-/// pulling in a string marshaller for the read path; we never call them in
-/// Task 16 — they exist purely to anchor the vtable layout.
+/// pulling in a string marshaller for the read path; we never call them —
+/// they exist purely to anchor the vtable layout.
 /// </remarks>
 [GeneratedComInterface(StringMarshalling = StringMarshalling.Utf16)]
 [Guid("000214F9-0000-0000-C000-000000000046")]
@@ -277,7 +277,7 @@ internal partial interface IPersistFile
 
     // GetCurFile takes a CoTaskMem-allocated wchar_t** out; we model it as
     // an IntPtr so we don't accidentally drop a string marshaller into the
-    // vtable. Not called in Task 16 — present only to anchor slot order.
+    // vtable. Not called — present only to anchor slot order.
     void GetCurFile(out IntPtr ppszFileName);
 }
 

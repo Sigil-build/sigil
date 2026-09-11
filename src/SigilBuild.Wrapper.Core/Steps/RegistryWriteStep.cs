@@ -36,11 +36,10 @@ internal sealed class RegistryWriteStep : IStep
             return Task.FromResult(StepResult.Failed("registry steps require Windows"));
         }
 
-        // Resolve ${parameters.*} / ${app.*} / ${env.*} placeholders. Before
-        // this, the literal template text landed in the registry (e.g.
-        // InstallDir = "${parameters.install_dir}", InstalledBy = "Sigil
-        // ${app.version}") — a silent data-corruption bug because the engine
-        // reported the step as successful even though the value was useless.
+        // Resolve ${parameters.*} / ${app.*} / ${env.*} placeholders before the write:
+        // an unresolved template lands in the registry as literal text (e.g.
+        // InstallDir = "${parameters.install_dir}") and the engine still reports the
+        // step successful, so the corruption is silent.
         var resolvedKey = ctx.Resolve(_spec.Key);
         var resolvedName = ctx.Resolve(_spec.Name);
         var resolvedValue = _spec.Value is string s ? ctx.Resolve(s) : _spec.Value;

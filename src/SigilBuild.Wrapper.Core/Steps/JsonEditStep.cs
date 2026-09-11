@@ -10,7 +10,7 @@ using SigilBuild.Core.Manifest;
 using SigilBuild.Wrapper.Engine;
 
 /// <summary>
-/// <c>json_edit</c> step (P8, gap G9): set the value at an RFC 6901 JSON pointer in
+/// <c>json_edit</c> step: set the value at an RFC 6901 JSON pointer in
 /// a JSON file, creating intermediate objects/arrays as needed. Uses the
 /// System.Text.Json <see cref="JsonNode"/> DOM (no reflection / no source-gen), so
 /// it is AOT-safe. Journaled for byte-exact rollback. Output is re-serialized
@@ -160,27 +160,23 @@ internal static class JsonEditor
 
     /// <summary>
     /// Turn the resolved <c>value</c> into the node to write, as declared by
-    /// <c>value_type</c> (register row R35).
+    /// <c>value_type</c> (R35).
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>What changed and why.</b> This used to be unconditional literal inference:
-    /// try <see cref="JsonNode.Parse(string, JsonNodeOptions?, JsonDocumentOptions)"/>,
-    /// keep whatever came back, fall back to a string only when the parse failed. That
-    /// is defensible for a literal the publisher typed into the manifest and wrong for
-    /// everything else. The same field also carries values resolved from a wizard field,
-    /// a <c>registry_read</c> var or a <c>/P&lt;name&gt;=</c> argument, and those decide
-    /// the SHAPE of the node written into the application's own configuration: supply
-    /// <c>{"admin":true}</c> where the author wrote and reviewed a string, and the
-    /// application reads an object. Encoding was never the flaw — the output is always
-    /// well-formed JSON — the flaw is that the value's supplier picks the type.
+    /// A string is the default and literal inference is opt-in. The same field carries
+    /// values resolved from a wizard field, a <c>registry_read</c> var or a
+    /// <c>/P&lt;name&gt;=</c> argument, and unconditional inference would let the value's
+    /// supplier decide the SHAPE of the node written into the application's own
+    /// configuration: supply <c>{"admin":true}</c> where the author wrote and reviewed a
+    /// string, and the application reads an object. Encoding is not the risk — the output
+    /// is always well-formed JSON.
     /// </para>
     /// <para>
-    /// <b>String is the default</b>, so the inference is now opt-in. A manifest that
-    /// genuinely means a number or a boolean says <c>value_type: json</c>, and gets a
-    /// hard failure if the value does not parse — with the intent declared, a
-    /// non-parsing value is a manifest error rather than a silent downgrade to a
-    /// string, which would be a second way for the supplier to pick the type.
+    /// A manifest that genuinely means a number or a boolean says <c>value_type: json</c>,
+    /// and gets a hard failure if the value does not parse — with the intent declared, a
+    /// non-parsing value is a manifest error rather than a silent downgrade to a string,
+    /// which would be a second way for the supplier to pick the type.
     /// </para>
     /// </remarks>
     private static JsonNode? ToJsonNode(string value, JsonValueType valueType)

@@ -19,8 +19,7 @@ using SigilBuild.Wrapper.Engine;
 /// KNOWN GAP: when <see cref="InstallStep.RegistryDeleteKey.Recursive"/>
 /// is true and the deleted subtree contained nested subkeys / values,
 /// rollback only re-creates the immediate key with its top-level values.
-/// Nested subtree restore is deferred — see Task 19's
-/// <c>uninstall.json</c> work for a more durable serialization.
+/// Nested subtree restore is not implemented.
 /// </remarks>
 [SupportedOSPlatform("windows")]
 internal sealed class RegistryDeleteKeyStep : IStep

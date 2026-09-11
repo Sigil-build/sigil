@@ -32,8 +32,8 @@ internal sealed class DirectoryDeleteStep : IStep
     {
         var path = ctx.ResolvePath(_spec.Path);
 
-        // R16: the widest-blast-radius destination in the catalog — this deletes a
-        // whole subtree. Contained before the directory is even probed.
+        // The widest-blast-radius destination in the catalog — this deletes a whole
+        // subtree. Contained before the directory is even probed (R16).
         var refusal = StepDestinationGuard.Check(
             ctx.InstallDir, "directory_delete", "path", path, _spec.AllowOutsideInstallDir);
         if (refusal is not null)

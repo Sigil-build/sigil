@@ -11,10 +11,9 @@ using SigilBuild.Core.Manifest;
 using SigilBuild.Wrapper.Engine;
 
 /// <summary>
-/// P11 (T11.3) machine-scope-only <c>firewall_rule</c> step — third and last
-/// of the three P11 "system steps". Creates a Windows Defender Firewall rule
-/// via <c>netsh advfirewall firewall add rule</c>, which is why the step
-/// overrides <see cref="InstallStep.RequiresMachineScope"/> to <c>true</c>
+/// Machine-scope-only <c>firewall_rule</c> step. Creates a Windows Defender
+/// Firewall rule via <c>netsh advfirewall firewall add rule</c>, which is why
+/// the step overrides <see cref="InstallStep.RequiresMachineScope"/> to <c>true</c>
 /// (see <see cref="SigilBuild.Core.Configuration.MachineScopeGuard"/> /
 /// SIG0310). Records a <see cref="RollbackRecord.DeleteFirewallRule"/> BEFORE
 /// the add so a mid-install crash and <c>setup.exe /Uninstall</c> both unwind
@@ -42,11 +41,6 @@ using SigilBuild.Wrapper.Engine;
 /// existing rule with the same name (best-effort, tolerating "no rules
 /// match") immediately before the add, rather than accepting duplicate-name
 /// growth across repeated installs.
-/// </para>
-/// <para>
-/// Non-zero exit from the add is surfaced via
-/// <see cref="StepResult.Failed(string)"/> with netsh's stderr (falling back
-/// to stdout) so operators can diagnose without re-running under a debugger.
 /// </para>
 /// </remarks>
 [SupportedOSPlatform("windows")]
@@ -76,12 +70,12 @@ internal sealed class FirewallRuleStep : IStep
             return StepResult.Failed("firewall_rule: name is empty after substitution");
         }
 
-        // R3/R9: `program=` scopes the rule to one executable, so a path an
-        // unprivileged user can replace hands that user the firewall exemption the
-        // publisher granted their own binary. Only checked when a program was
-        // declared — a program-less rule has no target to anchor. Before the
-        // journal entry, so a refused step never queues a DeleteFirewallRule for a
-        // rule this installer did not add.
+        // `program=` scopes the rule to one executable, so a path an unprivileged
+        // user can replace hands that user the firewall exemption the publisher
+        // granted their own binary. Only checked when a program was declared — a
+        // program-less rule has no target to anchor. Before the journal entry, so a
+        // refused step never queues a DeleteFirewallRule for a rule this installer
+        // did not add (R3, R9).
         if (program is not null)
         {
             var refusal = PrivilegedTargetGuard.Check("firewall_rule", "program", ctx.InstallDir, program);
@@ -97,10 +91,8 @@ internal sealed class FirewallRuleStep : IStep
         // no resolved program path.
         journal.Append(new RollbackRecord.DeleteFirewallRule(name));
 
-        // Reinstall idempotency: delete any pre-existing rule of this name
-        // first (best-effort — a fresh install simply has nothing to delete;
-        // "no rules match the specified criteria" is not treated as failure)
-        // so a repeat pack/install run doesn't accumulate duplicate rules.
+        // Reinstall idempotency (see remarks): best-effort delete first, so a repeat
+        // run doesn't accumulate duplicate rules. "No rules match" is not a failure.
         await RunNetshAsync(BuildDeleteArgs(name), ct).ConfigureAwait(false);
 
         var addArgs = BuildAddArgs(name, _spec.Direction, _spec.Action, program, _spec.Port, _spec.Protocol);
@@ -118,10 +110,9 @@ internal sealed class FirewallRuleStep : IStep
     /// <summary>
     /// Builds the <c>netsh advfirewall firewall add rule</c> argument list
     /// from already-resolved values. A pure, side-effect-free seam so the
-    /// exact argument construction is unit-testable without executing
-    /// netsh.exe or requiring admin rights. The live
-    /// add → show rule → reverse leg is verified on the CI VM (see
-    /// AGENTS.md §2).
+    /// exact argument construction is unit-testable without executing netsh.exe
+    /// or requiring admin rights. The live add → show rule → reverse leg runs on
+    /// the CI VM.
     /// </summary>
     internal static List<string> BuildAddArgs(
         string name, string direction, string action, string? program, int? port, string? protocol)

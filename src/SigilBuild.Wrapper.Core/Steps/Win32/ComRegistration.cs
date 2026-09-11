@@ -5,8 +5,8 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 
 /// <summary>
-/// P11 (T11.2) — the one AOT-risk primitive in P11. Loads a COM DLL and invokes
-/// its exported <c>HRESULT DllRegisterServer(void)</c> /
+/// Loads a COM DLL and invokes its exported
+/// <c>HRESULT DllRegisterServer(void)</c> /
 /// <c>DllUnregisterServer(void)</c> through a <b>C# unmanaged function
 /// pointer</b> (<c>delegate* unmanaged[Stdcall]&lt;int&gt;</c>). That idiom is
 /// statically bound at compile time — it carries no reflection, no runtime IL
@@ -20,11 +20,11 @@ using System.Runtime.Versioning;
 /// A single native path serves both callers: the <c>com_register</c> install
 /// step (which maps each outcome to a <c>StepResult</c>, and withdraws its
 /// journaled undo when the outcome proves nothing was registered) and the undo
-/// itself (<c>RollbackRecord.UnregisterCom</c>). <b>The undo no longer ignores
-/// the outcome (R15):</b> <c>DllUnregisterServer</c> is the only probe a COM
-/// registration has, so anything other than <see cref="ComExportOutcome.Ok"/>
-/// there is reported as "the registration is still in place" rather than
-/// tolerated the way <c>RemoveService</c> tolerates a missing service. Because
+/// itself (<c>RollbackRecord.UnregisterCom</c>). <b>The undo does not ignore the
+/// outcome:</b> <c>DllUnregisterServer</c> is the only probe a COM registration
+/// has, so anything other than <see cref="ComExportOutcome.Ok"/> there is
+/// reported as "the registration is still in place" rather than tolerated the
+/// way <c>RemoveService</c> tolerates a missing service (R15). Because
 /// both the load failure and the missing-export cases are normal, expected
 /// results rather than exceptional ones, they are surfaced via
 /// <see cref="ComInvocationResult"/> instead of thrown exceptions.

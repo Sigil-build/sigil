@@ -123,7 +123,7 @@ public class SerializableWrapperBlobRoundtripTests
     [Fact]
     public void App_name_and_install_dir_override_roundtrip()
     {
-        // T13: the {install_dir} template + App.Name travel in the blob and survive
+        // The {install_dir} template + App.Name travel in the blob and survive
         // the WrapperBlob <-> SerializableWrapperBlob conversion both ways.
         var blob = new WrapperBlob(
             AppId: "com.acme.Studio",
@@ -178,7 +178,7 @@ public class SerializableWrapperBlobRoundtripTests
     [Fact]
     public void Arp_fields_roundtrip_through_the_in_memory_WrapperBlob()
     {
-        // T10: the real ARP fields must survive WrapperBlob -> Serializable -> wire ->
+        // The real ARP fields must survive WrapperBlob -> Serializable -> wire ->
         // Serializable -> WrapperBlob so the runtime's PersistCompletion reads them.
         var blob = new WrapperBlob(
             AppId: "com.acme.Studio",

@@ -1,7 +1,7 @@
 namespace SigilBuild.Wrapper.Cli;
 
 /// <summary>
-/// The /? screen. Deliberately English (design D3): console output is the support
+/// The /? screen. Deliberately English: console output is the support
 /// surface, and an admin grepping docs for "/lang=" should not get a translated
 /// page. This is why CLI help does NOT flow through the localization catalog.
 /// </summary>

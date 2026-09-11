@@ -40,6 +40,10 @@ using SigilBuild.Wrapper.Engine;
 /// daily, just at a predictable, author-documentable time. <c>logon</c> and
 /// <c>onstart</c> triggers need no start time.
 /// </para>
+/// <para>
+/// A non-zero exit surfaces through <see cref="StepResult.Failed(string)"/> with
+/// schtasks.exe's stderr, falling back to stdout.
+/// </para>
 /// </remarks>
 [SupportedOSPlatform("windows")]
 internal sealed class ScheduledTaskCreateStep : IStep
@@ -128,7 +132,7 @@ internal sealed class ScheduledTaskCreateStep : IStep
     /// including the DAILY <c>/ST</c> determinism default — is unit-testable
     /// without executing schtasks.exe or requiring admin rights. The live
     /// create+query+delete leg (which needs <c>/RU SYSTEM</c> elevation) runs on
-    /// the CI VM.
+    /// the CI VM (AGENTS.md §2).
     /// </summary>
     /// <exception cref="ArgumentException">
     /// <paramref name="program"/> contains a double quote (R31).

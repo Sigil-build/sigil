@@ -111,7 +111,9 @@ internal sealed class ShortcutCreateStep : IStep
     /// a <c>location: "{install_dir}\Tools"</c> would create a directory literally
     /// named <c>{install_dir}</c> next to the running installer and report success —
     /// in the one path field a check on substituted output could never catch,
-    /// because nothing would ever have been substituted (R16).
+    /// because nothing would ever have been substituted (R16). The shipped example
+    /// manifest (<c>examples/exe-wrapper/hello-desktop-app/sigil.yaml</c>, validated
+    /// by CI) exercises this field with <c>${parameters.install_dir}\StartMenu</c>.
     /// </para>
     /// <para>
     /// <b>The <c>install_dir</c> containment rule deliberately does not apply here.</b>

@@ -42,6 +42,10 @@ using SigilBuild.Wrapper.Engine;
 /// match") immediately before the add, rather than accepting duplicate-name
 /// growth across repeated installs.
 /// </para>
+/// <para>
+/// A non-zero exit surfaces through <see cref="StepResult.Failed(string)"/> with
+/// netsh's stderr, falling back to stdout.
+/// </para>
 /// </remarks>
 [SupportedOSPlatform("windows")]
 internal sealed class FirewallRuleStep : IStep
@@ -112,7 +116,7 @@ internal sealed class FirewallRuleStep : IStep
     /// from already-resolved values. A pure, side-effect-free seam so the
     /// exact argument construction is unit-testable without executing netsh.exe
     /// or requiring admin rights. The live add → show rule → reverse leg runs on
-    /// the CI VM.
+    /// the CI VM (AGENTS.md §2).
     /// </summary>
     internal static List<string> BuildAddArgs(
         string name, string direction, string action, string? program, int? port, string? protocol)

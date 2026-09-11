@@ -31,9 +31,9 @@ using SigilBuild.Wrapper.Steps.Win32;
 /// the undo record. This step's job is only to resolve the path, journal the
 /// inverse, and map the <see cref="ComRegistration.ComInvocationResult"/> onto a
 /// <see cref="StepResult"/>. The live register→assert-HKCR-CLSID→unregister leg
-/// needs a real self-registering DLL plus admin and runs on the CI VM; the
-/// load-failure and missing-export mappings are unit-tested locally on Windows
-/// without admin.
+/// needs a real self-registering DLL plus admin and runs on the CI VM
+/// (AGENTS.md §2); the load-failure and missing-export mappings are unit-tested
+/// locally on Windows without admin.
 /// </para>
 /// <para>
 /// <b>Journal-before is not journal-unconditionally.</b> Where

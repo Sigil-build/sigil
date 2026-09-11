@@ -6,7 +6,7 @@ using SigilBuild.Installer.Host.ViewModels;
 namespace SigilBuild.Installer.Host.Views;
 
 /// <summary>
-/// The interactive uninstall window (spec T15): a minimal branded
+/// The interactive uninstall window: a minimal branded
 /// <c>confirm → progress → done</c> flow, separate from the install
 /// <see cref="InstallerWindow"/>. State-driven panels are toggled by the
 /// view-model's <c>IsConfirm</c>/<c>IsProgress</c>/<c>IsDone</c>/<c>IsFailed</c>

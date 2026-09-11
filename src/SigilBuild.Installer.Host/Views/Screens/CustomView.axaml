@@ -3,7 +3,7 @@
              xmlns:vm="using:SigilBuild.Installer.Host.ViewModels"
              x:DataType="vm:InstallerViewModel"
              x:Class="SigilBuild.Installer.Host.Views.Screens.CustomView">
-  <!-- Declared custom screen (T9): the fields are built in code-behind from the
+  <!-- Declared custom screen: the fields are built in code-behind from the
        current screen's FieldViewModels via the widget factory. -->
   <ScrollViewer>
     <StackPanel Spacing="16">

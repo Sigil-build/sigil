@@ -9,7 +9,7 @@ public partial class FailedView : UserControl
 {
     public FailedView() { AvaloniaXamlLoader.Load(this); }
 
-    // P7: open the /LOG install log in the OS default handler.
+    // Open the /LOG install log in the OS default handler.
     private void OnOpenLogClick(object? sender, RoutedEventArgs e)
         => (DataContext as InstallerViewModel)?.OpenLog();
 }

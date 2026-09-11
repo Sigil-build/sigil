@@ -1,7 +1,7 @@
 <ResourceDictionary xmlns="https://github.com/avaloniaui"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
   <!--
-    Literal fallbacks for the derived brand palette (T7). At runtime, a stamped
+    Literal fallbacks for the derived brand palette. At runtime, a stamped
     exe overrides these via BrandPalette.Apply from the blob's token map; these
     defaults (derived from the neutral primary #1F2937 / accent #3B82F6) keep an
     un-branded dev/preview run rendering. Keys mirror the prototype colors().

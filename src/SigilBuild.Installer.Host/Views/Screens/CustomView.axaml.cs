@@ -13,7 +13,7 @@ using SigilBuild.Wrapper.Core.Localization;
 namespace SigilBuild.Installer.Host.Views.Screens;
 
 /// <summary>
-/// Renders a declared custom screen (T9): a title/subtitle plus one control per
+/// Renders a declared custom screen: a title/subtitle plus one control per
 /// field, built from the field's inferred <see cref="WizardWidget"/> via a widget
 /// factory keyed on parameter type. No arbitrary markup — forms over parameters.
 /// Controls are wired to the <see cref="FieldViewModel"/> with explicit event

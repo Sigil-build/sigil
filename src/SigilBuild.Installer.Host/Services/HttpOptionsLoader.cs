@@ -34,19 +34,19 @@ public static class HttpOptionsLoader
     /// Install Options view's attach handler) is expected to catch and log.
     /// </summary>
     /// <remarks>
-    /// Uses the one shared <see cref="SigilHttpClient"/> (P4) — system proxy,
+    /// Uses the one shared <see cref="SigilHttpClient"/> — system proxy,
     /// pooled connections — with a per-request 10 s timeout via a linked CTS.
     /// </remarks>
     public static async Task<IReadOnlyList<HttpOption>> LoadAsync(
         string url, string itemsPath, string labelProperty, string valueProperty,
         CancellationToken ct)
     {
-        // R8: re-check the scheme HERE, not only at pack time. SIG0323 validates the
+        // Re-check the scheme HERE, not only at pack time. SIG0323 validates the
         // URL as written in the manifest; this is the URL actually about to be
         // requested, after token substitution — a `source.url` assembled from
         // parameter values is not knowable at pack time, and the values this fetch
         // returns are substituted into install steps that run elevated. Refuse before
-        // the GET rather than after, so nothing cleartext is ever put on the wire.
+        // the GET rather than after, so nothing cleartext is ever put on the wire. (R8)
         if (url is null || !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
         {
             InstallerLog.Error(
@@ -94,10 +94,10 @@ public static class HttpOptionsLoader
 
     /// <summary>
     /// Stringify any JSON scalar (string/number/bool) so the dropdown can use
-    /// integer ids, GUID strings, or true/false flags interchangeably. The
-    /// previous implementation called <c>GetString()</c> unconditionally and
-    /// crashed with <c>InvalidOperationException</c> when the configured
-    /// <c>value_property</c> pointed at a numeric column.
+    /// integer ids, GUID strings, or true/false flags interchangeably. Calling
+    /// <c>GetString()</c> unconditionally would throw
+    /// <c>InvalidOperationException</c> when the configured <c>value_property</c>
+    /// points at a numeric column.
     /// </summary>
     private static string JsonValueToString(JsonElement el) => el.ValueKind switch
     {

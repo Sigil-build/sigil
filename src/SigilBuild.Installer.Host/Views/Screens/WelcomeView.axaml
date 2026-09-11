@@ -9,7 +9,7 @@
                Text="{Binding WelcomeTitle}" />
     <TextBlock TextWrapping="Wrap" Foreground="#4B5563"
                Text="{x:Static loc:S.WelcomeBody}" />
-    <!-- P3: upgrade banner ("Upgrading from x.y.z"), shown only during an upgrade. -->
+    <!-- Upgrade banner ("Upgrading from x.y.z"), shown only during an upgrade. -->
     <TextBlock TextWrapping="Wrap" FontWeight="SemiBold"
                Foreground="{DynamicResource AccentBrush}"
                IsVisible="{Binding HasUpgradeNotice}"

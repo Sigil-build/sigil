@@ -35,7 +35,7 @@ public delegate Task<IReadOnlyList<HttpOption>> OptionsFetcher(
     string url, string itemsPath, string labelProperty, string valueProperty, CancellationToken ct);
 
 /// <summary>
-/// The rendered widget for a declared screen field (T9). Inferred from the
+/// The rendered widget for a declared screen field. Inferred from the
 /// parameter's <see cref="ParameterType"/> and optionally overridden by the
 /// field's <c>widget</c> key. See <see cref="WidgetFactory.Infer"/>.
 /// </summary>
@@ -55,7 +55,7 @@ public enum WizardWidget
 
 /// <summary>
 /// Maps a declared parameter (its <see cref="ParameterType"/> and an optional
-/// <c>widget</c> override) to the concrete wizard widget, per the T9 inference
+/// <c>widget</c> override) to the concrete wizard widget, per the inference
 /// table. The single source of truth shared by the view factory and tests.
 /// </summary>
 public static class WidgetFactory
@@ -89,8 +89,8 @@ public static class WidgetFactory
 /// </summary>
 public sealed class FieldViewModel : INotifyPropertyChanged
 {
-    // P9: the resolved chrome language for this session, captured once per field
-    // (Task 4 sets SessionLanguage before any UI is built).
+    // The resolved chrome language for this session, captured once per field
+    // (SessionLanguage is set before any UI is built).
     private readonly Lang _lang = SessionLanguage.Current;
 
     public FieldViewModel(ParameterDefinition def, string? widgetOverride)
@@ -452,7 +452,7 @@ public sealed class FieldViewModel : INotifyPropertyChanged
 }
 
 /// <summary>
-/// View-model for one declared custom screen (T9): its interpolated title +
+/// View-model for one declared custom screen: its interpolated title +
 /// subtitle and the ordered field view-models rendered on it.
 /// </summary>
 public sealed class CustomScreenViewModel
@@ -476,7 +476,7 @@ public sealed class CustomScreenViewModel
     public IReadOnlyList<FieldViewModel> Fields { get; }
 
     /// <summary>
-    /// The manifest's raw <c>{tag -&gt; text}</c> screen title (P9), kept alongside
+    /// The manifest's raw <c>{tag -&gt; text}</c> screen title, kept alongside
     /// the already-interpolated <see cref="Title"/> so the rail can resolve the
     /// declared screen's title against the session language instead of falling
     /// back to <c>rail.configure</c> — see <c>InstallerViewModel.RebuildRail</c>.
@@ -499,8 +499,8 @@ public sealed class CustomScreenViewModel
 }
 
 /// <summary>
-/// View-model for one built-in option component checkbox on the Options screen
-/// (T8). Seeded from the component's resolved default; a <c>locked</c> component
+/// View-model for one built-in option component checkbox on the Options screen.
+/// Seeded from the component's resolved default; a <c>locked</c> component
 /// renders disabled (<see cref="IsEnabled"/> is false) and cannot be toggled —
 /// it is always applied at its default.
 /// </summary>
@@ -512,7 +512,7 @@ public sealed class OptionItemViewModel : INotifyPropertyChanged
         ArgumentNullException.ThrowIfNull(component);
         Name = component.Name;
         IsLocked = component.Locked;
-        // P10 (gap G11): a custom component carries its own localizable label /
+        // A custom component carries its own localizable label /
         // description in the blob; a built-in resolves its caption from the wizard
         // string catalog. Resolve the custom text against the SAME preference list
         // the declared screens use (App wires session.LanguagePreferences), falling
@@ -532,10 +532,10 @@ public sealed class OptionItemViewModel : INotifyPropertyChanged
     /// <summary>The human-readable checkbox caption.</summary>
     public string Label { get; }
 
-    /// <summary>P10: optional secondary caption for a custom component; <c>null</c> for a built-in or a component with no description.</summary>
+    /// <summary>Optional secondary caption for a custom component; <c>null</c> for a built-in or a component with no description.</summary>
     public string? Description { get; }
 
-    /// <summary>P10: whether this component has a non-empty <see cref="Description"/> to render.</summary>
+    /// <summary>Whether this component has a non-empty <see cref="Description"/> to render.</summary>
     public bool HasDescription => !string.IsNullOrEmpty(Description);
 
     /// <summary>True for a <c>locked</c> component: rendered disabled, always applied at its default.</summary>
@@ -561,8 +561,8 @@ public sealed class OptionItemViewModel : INotifyPropertyChanged
     }
 
     // The four known built-in components get catalog keys. A custom component is
-    // localized from its own manifest-supplied label (P10, gap G11); any other
-    // unknown name falls back to itself.
+    // localized from its own manifest-supplied label; any other unknown name
+    // falls back to itself.
     private static string LabelFor(string name, Lang lang) => name switch
     {
         "desktop_shortcut" => Strings.OptionsDesktopShortcut(lang),
@@ -573,7 +573,7 @@ public sealed class OptionItemViewModel : INotifyPropertyChanged
     };
 
     /// <summary>
-    /// Resolve a custom component's localizable text (P10) against the ordered
+    /// Resolve a custom component's localizable text against the ordered
     /// language-preference list the wizard resolved (installer.language -&gt; /lang
     /// -&gt; OS list -&gt; en), falling back to the resolved chrome language when no
     /// list was supplied. Mirrors how declared screen titles resolve.

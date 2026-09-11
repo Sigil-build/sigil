@@ -11,7 +11,7 @@ using SigilBuild.Wrapper.Engine;
 namespace SigilBuild.Installer.Host.ViewModels;
 
 /// <summary>
-/// The three-state interactive uninstall flow (spec T15 / design brief): a branded
+/// The three-state interactive uninstall flow (design brief): a branded
 /// <c>confirm → progress → done</c> sequence (plus a <c>failed</c> terminal) that
 /// drives the real <see cref="UninstallEngine"/> through
 /// <see cref="InstallSession.RunUninstallInteractiveAsync"/>. Deliberately kept
@@ -26,8 +26,8 @@ public sealed class UninstallViewModel : INotifyPropertyChanged
     private CancellationTokenSource? _cts;
     private UninstallStep _step = UninstallStep.Confirm;
 
-    // P9: the resolved chrome language for this session, captured once at
-    // construction (Task 4 sets SessionLanguage before any UI is built).
+    // The resolved chrome language for this session, captured once at
+    // construction (SessionLanguage is set before any UI is built).
     private readonly Lang _lang = SessionLanguage.Current;
 
     public UninstallViewModel(BrandTokens tokens)
@@ -80,7 +80,7 @@ public sealed class UninstallViewModel : INotifyPropertyChanged
 
     public string DoneMessage => Strings.UninstallDone(_lang, Brand.AppName);
 
-    /// <summary>The rail's version line (P9): replaces UninstallWindow.axaml's StringFormat.</summary>
+    /// <summary>The rail's version line, bound by UninstallWindow.axaml.</summary>
     public string VersionLine => Strings.UninstallVersion(_lang, Brand.AppVersion);
 
     private double _progress;

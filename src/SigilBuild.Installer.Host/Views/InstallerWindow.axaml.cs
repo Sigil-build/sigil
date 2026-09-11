@@ -15,7 +15,7 @@ public partial class InstallerWindow : Window
     {
         AvaloniaXamlLoader.Load(this);
         DataContextChanged += OnDataContextChanged;
-        // P2 (gap G4): when the wizard closes on the Done screen, launch the app if
+        // When the wizard closes on the Done screen, launch the app if
         // the checked-by-default "Launch <App>" box is ticked. Fires on any close
         // (Finish, X gesture) — the VM gates on OutcomeCode==Completed so a
         // cancelled / failed run never launches.

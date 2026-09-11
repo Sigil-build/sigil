@@ -4,16 +4,16 @@ using System.Threading.Tasks;
 namespace SigilBuild.Installer.Host.Branding;
 
 /// <summary>
-/// Register row R48 — resolve the "Signed by …" trust line WITHOUT blocking the wizard's
-/// UI thread.
+/// Resolve the "Signed by …" trust line WITHOUT blocking the wizard's UI
+/// thread. (R48)
 /// </summary>
 /// <remarks>
 /// <para>
 /// <c>InstallerTrustLoader.ResolveFromSelf</c> calls <c>WinVerifyTrust</c> with
-/// whole-chain revocation checking (S1/R17). That is a network operation: it fetches
-/// CRLs and talks to OCSP responders. It used to run inline in
-/// <c>App.OnFrameworkInitializationCompleted</c>, while the first window was being
-/// constructed — so the wizard could not paint until it returned.
+/// whole-chain revocation checking (R17). That is a network operation: it fetches
+/// CRLs and talks to OCSP responders, so it must never run inline in
+/// <c>App.OnFrameworkInitializationCompleted</c> while the first window is being
+/// constructed — the wizard could not paint until it returned.
 /// </para>
 /// <para>
 /// <b>335 ms on the happy path</b> — online, warm OS certificate cache, embedded-signed

@@ -4,7 +4,7 @@
              xmlns:loc="clr-namespace:SigilBuild.Wrapper.Core.Localization;assembly=SigilBuild.Wrapper.Core"
              x:DataType="vm:InstallerViewModel"
              x:Class="SigilBuild.Installer.Host.Views.Screens.DowngradeBlockedView">
-  <!-- P3 (gap G3): a newer version is already installed and setup will not downgrade.
+  <!-- A newer version is already installed and setup will not downgrade.
        A terminal notice screen — no log, no Next; the footer Cancel closes the window
        preserving the dedicated downgrade-blocked exit code (3). -->
   <StackPanel Spacing="14" VerticalAlignment="Center">

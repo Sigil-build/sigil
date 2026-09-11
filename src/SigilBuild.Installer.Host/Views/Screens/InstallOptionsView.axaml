@@ -4,8 +4,8 @@
              xmlns:loc="clr-namespace:SigilBuild.Wrapper.Core.Localization;assembly=SigilBuild.Wrapper.Core"
              x:DataType="vm:InstallerViewModel"
              x:Class="SigilBuild.Installer.Host.Views.Screens.InstallOptionsView">
-  <!-- Destination screen (T13): where the app installs. The collected path becomes
-       {install_dir}. When scope is `auto` (T12) the user/machine radios show and
+  <!-- Destination screen: where the app installs. The collected path becomes
+       {install_dir}. When scope is `auto` the user/machine radios show and
        swap the default path between %LocalAppData%\Programs and Program Files. -->
   <StackPanel Spacing="12">
     <TextBlock FontSize="20" FontWeight="SemiBold"
@@ -13,13 +13,13 @@
     <TextBlock Foreground="{DynamicResource TextMutBrush}" TextWrapping="Wrap"
                Text="{x:Static loc:S.LocationBody}" />
 
-    <!-- P3: upgrade banner ("Upgrading from x.y.z") on the ready/destination screen. -->
+    <!-- Upgrade banner ("Upgrading from x.y.z") on the ready/destination screen. -->
     <TextBlock TextWrapping="Wrap" FontWeight="SemiBold"
                Foreground="{DynamicResource AccentBrush}"
                IsVisible="{Binding HasUpgradeNotice}"
                Text="{Binding UpgradeNotice}" />
 
-    <!-- P3: upgrade banner ("Upgrading from x.y.z") on the ready/destination screen. -->
+    <!-- Upgrade banner ("Upgrading from x.y.z") on the ready/destination screen. -->
     <TextBlock TextWrapping="Wrap" FontWeight="SemiBold"
                Foreground="{DynamicResource AccentBrush}"
                IsVisible="{Binding HasUpgradeNotice}"
@@ -38,7 +38,7 @@
                IsVisible="{Binding HasInstallPathError}"
                Text="{Binding InstallPathError}" />
 
-    <!-- Scope choice (T12), shown only when the manifest scope is `auto`. -->
+    <!-- Scope choice, shown only when the manifest scope is `auto`. -->
     <StackPanel Spacing="8" Margin="0,8,0,0" IsVisible="{Binding ScopeSelectable}">
       <RadioButton GroupName="scope" IsChecked="{Binding IsUserScope, Mode=TwoWay}">
         <StackPanel>

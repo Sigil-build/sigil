@@ -10,7 +10,7 @@ using SigilBuild.Wrapper.Json;
 /// Reads and writes the install-state JSON at
 /// <c>&lt;StateRoot&gt;\Sigil\&lt;AppId&gt;\uninstall.json</c>, where
 /// <c>StateRoot</c> is <c>%ProgramData%</c> for a per-machine install and
-/// <c>%LocalAppData%</c> for a per-user install (T12). After a successful install
+/// <c>%LocalAppData%</c> for a per-user install. After a successful install
 /// the engine snapshots its <see cref="RollbackJournal"/> here (recording the
 /// scope), then on a later <c>/Uninstall</c> invocation <c>UninstallEngine</c>
 /// rehydrates and replays it in reverse in the same scope.
@@ -30,21 +30,21 @@ using SigilBuild.Wrapper.Json;
 internal static class UninstallStateStore
 {
     /// <summary>
-    /// R19: <c>uninstall.json</c> is attacker-supplied bytes until it has been read
+    /// <c>uninstall.json</c> is attacker-supplied bytes until it has been read
     /// and validated, and the read materializes the whole file. Cap it <em>before</em>
     /// the read, not after. A real journal is one short record per mutation an
     /// installer made — a few hundred records of a few dozen bytes each — so 4 MB is
     /// three orders of magnitude of headroom and still an instant read. Anything
-    /// larger is not a Sigil journal.
+    /// larger is not a Sigil journal. (R19)
     /// </summary>
     private const long MaxStateFileBytes = 4L * 1024 * 1024;
 
     /// <summary>
-    /// R19: the size cap alone does not bound the work, because the records are tiny
+    /// The size cap alone does not bound the work, because the records are tiny
     /// — 4 MB of <c>[null,null,…]</c> is on the order of a million of them. A real
     /// install journals one record per file, registry value, shortcut and PATH edit,
     /// so 50,000 is far beyond any plausible installer while still bounding
-    /// rehydration and the replay that follows it.
+    /// rehydration and the replay that follows it. (R19)
     /// </summary>
     private const int MaxStateRecords = 50_000;
 
@@ -73,8 +73,8 @@ internal static class UninstallStateStore
 
     /// <summary>
     /// Create the per-app state directory — hardened for machine scope — without writing
-    /// state. The R28 stash relocation needs it to exist with the right DACL BEFORE it
-    /// copies a file in, rather than inheriting one afterwards.
+    /// state. The stash relocation needs it to exist with the right DACL BEFORE it
+    /// copies a file in, rather than inheriting one afterwards. (R28)
     /// </summary>
     public static void EnsureDirectory(
         string appId, InstallScope scope, IProgress<StepProgress>? progress = null)
@@ -99,8 +99,9 @@ internal static class UninstallStateStore
     /// <param name="InstallDir">
     /// The directory the install actually landed in, as recorded at save time, or
     /// <c>null</c> for state written before the field existed. This — not a recomputed
-    /// default — is what the caller anchors the replay to (R1 clause (c)); a wizard- or
+    /// default — is what the caller anchors the replay to; a wizard- or
     /// <c>/D=</c>-chosen destination is not recoverable any other way at uninstall time.
+    /// (R1)
     /// </param>
     public sealed record LoadedState(
         RollbackJournal Journal, InstallScope Scope, string? InstallDir);
@@ -117,11 +118,11 @@ internal static class UninstallStateStore
     /// <summary>
     /// Persist <paramref name="journal"/> as <c>uninstall.json</c> under the
     /// scope-correct per-app state directory, creating it if needed, and record
-    /// <paramref name="scope"/> in the file (T12). <paramref name="progress"/>
-    /// carries the R1 hardening trail (e.g. a repaired state-directory DACL) into
+    /// <paramref name="scope"/> in the file. <paramref name="progress"/>
+    /// carries the hardening trail (e.g. a repaired state-directory DACL) into
     /// the console / wizard log / <c>/LOG</c> file; the store has no logger of its own.
     /// <paramref name="installDir"/> is the directory the install actually landed in and
-    /// is recorded so the uninstall can anchor its replay to it (R1 clause (c)).
+    /// is recorded so the uninstall can anchor its replay to it. (R1)
     /// </summary>
     public static void Save(
         string appId,
@@ -136,12 +137,11 @@ internal static class UninstallStateStore
 
         var dir = DirectoryFor(appId, scope);
 
-        // R1: machine scope lands in %ProgramData%, whose inherited DACL grants
+        // Machine scope lands in %ProgramData%, whose inherited DACL grants
         // BUILTIN\Users write and makes the creating user CREATOR OWNER. Create it
         // with an explicit, non-inherited DACL instead — and re-apply that DACL to a
-        // directory that already exists without it, which is the state every machine
-        // with a pre-fix install is in. User scope legitimately lives in the user's
-        // own profile, so hardening it would be meaningless.
+        // directory that already exists without it. User scope legitimately lives in
+        // the user's own profile, so hardening it would be meaningless. (R1)
         if (scope == InstallScope.Machine && OperatingSystem.IsWindows())
         {
             StateDirectorySecurity.CreateHardened(dir, progress);
@@ -170,7 +170,7 @@ internal static class UninstallStateStore
             serializable,
             WrapperBlobJsonContext.Default.SerializableRollbackJournal);
 
-        // Secret hygiene (decision 6): a Secret parameter value must never reach
+        // Secret hygiene: a Secret parameter value must never reach
         // persisted uninstall state. The journal captures *prior* system state, so
         // a freshly-written secret normally cannot land here — but redact any
         // literal secret occurrence defensively before the file touches disk.
@@ -186,14 +186,14 @@ internal static class UninstallStateStore
     /// </summary>
     /// <remarks>
     /// <para>
-    /// R1, file half: <see cref="File.WriteAllText(string, string?)"/> truncates an
-    /// existing file <em>in place</em>. It does not recreate it, so the file keeps its
-    /// original owner and its original explicit ACEs across the write. An unprivileged
+    /// <see cref="File.WriteAllText(string, string?)"/> truncates an existing file
+    /// <em>in place</em>. It does not recreate it, so the file keeps its original owner
+    /// and its original explicit ACEs across the write. An unprivileged
     /// user who pre-creates <c>uninstall.json</c> therefore still owns it after an
     /// elevated install has written to it, still holds implicit <c>WRITE_DAC</c>, and
     /// can re-grant themselves write and rewrite the records the elevated uninstall
     /// later replays — even though <see cref="StateDirectorySecurity.CreateHardened"/>
-    /// hardened the directory around it.
+    /// hardened the directory around it. (R1)
     /// </para>
     /// <para>
     /// A brand-new file in the (already hardened) directory inherits that directory's
@@ -263,7 +263,7 @@ internal static class UninstallStateStore
     /// from <paramref name="preferredScope"/>'s directory and <em>only</em> that
     /// directory (R1). <paramref name="preferredScope"/> is resolved from the
     /// uninstall command line (e.g. the <c>/allusers</c> ARP <c>UninstallString</c>);
-    /// there is deliberately no fall-through to the opposite scope, because that let a
+    /// there is deliberately no fall-through to the opposite scope, which would let a
     /// machine-scope operation read <c>%LocalAppData%</c>. The returned
     /// <see cref="LoadedState.Scope"/> is the scope of the DIRECTORY the file was found
     /// in — never the <c>scope</c> field inside the file — and drives ARP-hive /
@@ -292,11 +292,11 @@ internal static class UninstallStateStore
     /// <summary>
     /// <see cref="TryLoad"/> with the refusal distinguished from the absence: a
     /// non-<c>null</c> <see cref="LoadAttempt.RefusalReason"/> means state WAS present
-    /// and was rejected — on R1 provenance grounds, or on R19 readability grounds
+    /// and was rejected — on provenance grounds, or on readability grounds
     /// (size ceiling, malformed JSON, record ceiling, un-rehydratable record).
     /// Reporting either as "no uninstall state found" would tell the operator the
     /// opposite of what happened and would mask an attack, so
-    /// <c>UninstallEngine</c> consumes this shape.
+    /// <c>UninstallEngine</c> consumes this shape. (R1, R19)
     /// </summary>
     public static LoadAttempt Load(
         string appId,
@@ -305,14 +305,13 @@ internal static class UninstallStateStore
     {
         ArgumentException.ThrowIfNullOrEmpty(appId);
 
-        // R1 clause (b): ONE scope, and only the requested one. This used to search
-        // the preferred scope and then fall through to the OPPOSITE scope, so an
-        // elevated /allusers uninstall read %LocalAppData% — a directory the
-        // unprivileged user owns outright — whenever %ProgramData% held no state,
+        // ONE scope, and only the requested one. A fall-through to the OPPOSITE scope
+        // would let an elevated /allusers uninstall read %LocalAppData% — a directory
+        // the unprivileged user owns outright — whenever %ProgramData% holds no state,
         // which is the normal case on a machine that never had a machine-scope
         // install. Crossing the boundary is the bug; convenience is not a reason to
-        // reintroduce it. A machine uninstall that finds nothing must report "no
-        // state", not silently reach into the user's profile.
+        // introduce it. A machine uninstall that finds nothing must report "no state",
+        // not silently reach into the user's profile. (R1)
         var dirScope = preferredScope == InstallScope.Machine
             ? InstallScope.Machine
             : InstallScope.User;
@@ -323,9 +322,9 @@ internal static class UninstallStateStore
             return new LoadAttempt(null, null);
         }
 
-        // R1: an unprivileged user can pre-create %ProgramData%\Sigil\<AppId>
-        // and become CREATOR OWNER of the file the elevated uninstall later
-        // replays. Refuse rather than replay, and say so.
+        // An unprivileged user can pre-create %ProgramData%\Sigil\<AppId> and become
+        // CREATOR OWNER of the file the elevated uninstall later replays. Refuse
+        // rather than replay, and say so. (R1)
         if (dirScope == InstallScope.Machine && OperatingSystem.IsWindows())
         {
             var dir = DirectoryFor(appId, dirScope);
@@ -354,15 +353,14 @@ internal static class UninstallStateStore
             }
         }
 
-        // R19: read, deserialize AND rehydrate under ONE try. Rehydration used to sit
-        // outside it, and it throws on an unknown discriminator, a null array element
-        // or a missing required field (SerializableRollbackRecord.ToRollbackRecord) —
-        // none of which the deserialize-only catch covered, and which nothing above
-        // (UninstallEngine.RunAsync, InstallSession) caught either. A one-line planted
-        // file therefore killed every install AND every uninstall of that AppId with
-        // an unhandled exception: a persistent, per-app denial of service that any
-        // user who can write the state directory could arm. Failing closed here is
-        // right; failing fatally is not.
+        // Read, deserialize AND rehydrate under ONE try. Rehydration throws on an
+        // unknown discriminator, a null array element or a missing required field
+        // (SerializableRollbackRecord.ToRollbackRecord), and nothing above
+        // (UninstallEngine.RunAsync, InstallSession) catches it — so left outside this
+        // try, a one-line planted file kills every install AND every uninstall of that
+        // AppId with an unhandled exception: a persistent, per-app denial of service
+        // that any user who can write the state directory could arm. Failing closed
+        // here is right; failing fatally is not. (R19)
         SerializableRollbackJournal? s;
         RollbackJournal journal;
         try
@@ -408,7 +406,7 @@ internal static class UninstallStateStore
                 journal.Append(rec.ToRollbackRecord());
             }
         }
-#pragma warning disable CA1031 // The point of R19: ANY failure here is "state unreadable", never an escape.
+#pragma warning disable CA1031 // ANY failure here is "state unreadable", never an escape (R19).
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return Unreadable(path, $"the state file could not be read ({ex.Message})", progress);
@@ -417,25 +415,25 @@ internal static class UninstallStateStore
 
         // The scope is the DIRECTORY's scope, deliberately — never s.Scope.
         //
-        // R1 clause (b): the serialized `scope` field is attacker-controlled data. It
-        // drove the ARP hive (HKLM vs HKCU) and the state directory that the uninstall
-        // then wrote to and deleted, so a user-scope file claiming "machine" made an
+        // The serialized `scope` field is attacker-controlled data. It would drive the
+        // ARP hive (HKLM vs HKCU) and the state directory the uninstall then writes to
+        // and deletes, so a user-scope file claiming "machine" would make an
         // unprivileged uninstall operate on machine-wide state. A value read out of the
         // object whose trustworthiness is in question can never decide the privilege
         // that object is handled with. The field stays on the wire DTO for backward
-        // compatibility with state written before this fix — reading it back must never
-        // be reintroduced.
+        // compatibility with existing state files; reading it back must never be
+        // reintroduced. (R1)
         return new LoadAttempt(new LoadedState(journal, dirScope, s.InstallDir), null);
     }
 
     /// <summary>
-    /// R19: state that is PRESENT but cannot be read as a journal — oversized,
+    /// State that is PRESENT but cannot be read as a journal — oversized,
     /// malformed, over the record ceiling, or carrying a record that will not
-    /// rehydrate. Reported as a <em>refusal</em> on the same channel as the R1
+    /// rehydrate. Reported as a <em>refusal</em> on the same channel as the
     /// provenance refusal, deliberately: both mean "there is a file here and it was
     /// not replayed", and collapsing that into the absence channel would print "no
-    /// uninstall state found" for a file the operator can see on disk — the same
-    /// misreport R1 closed, and the same cover for an attacker.
+    /// uninstall state found" for a file the operator can see on disk — a misreport,
+    /// and cover for an attacker. (R1, R19)
     /// </summary>
     private static LoadAttempt Unreadable(
         string path, string detail, IProgress<StepProgress>? progress)
@@ -450,8 +448,8 @@ internal static class UninstallStateStore
     /// <summary>
     /// Best-effort delete of the scope-correct per-app state directory. Called on
     /// successful uninstall; failures are swallowed because the directory
-    /// may legitimately still hold logs or other artefacts a future task
-    /// chooses not to clean up.
+    /// may legitimately still hold logs or other artefacts this cleanup
+    /// does not own.
     /// </summary>
     public static void Delete(string appId, InstallScope scope)
     {

@@ -4,19 +4,18 @@ using System;
 using System.Globalization;
 
 /// <summary>
-/// Register row R16: every step destination is contained to <c>install_dir</c>.
+/// Every step destination is contained to <c>install_dir</c>. (R16)
 /// </summary>
 /// <remarks>
 /// <para>
-/// Before this, no step destination was checked at all.
-/// <c>File.WriteAllText</c> traverses reparse points and truncates an existing
-/// target in place, keeping its prior DACL — so an attacker-planted placeholder
+/// Without the check, <c>File.WriteAllText</c> traverses reparse points and truncates an
+/// existing target in place, keeping its prior DACL — so an attacker-planted placeholder
 /// stays attacker-writable after the elevated installer writes to it — and
-/// <c>Directory.CreateDirectory</c> would happily materialize a whole tree
-/// outside the install directory.
+/// <c>Directory.CreateDirectory</c> materializes a whole tree outside the install
+/// directory.
 /// </para>
 /// <para>
-/// The OTHER half of R16 — an unresolved <c>{token}</c> in a path — is not here.
+/// The OTHER half of the rule — an unresolved <c>{token}</c> in a path — is not here.
 /// It lives in <see cref="StepContext.ResolvePath"/> via
 /// <see cref="BraceTokenScanner"/>, because it applies to every path-valued step
 /// field without exception and has no opt-out, while containment is per-step and

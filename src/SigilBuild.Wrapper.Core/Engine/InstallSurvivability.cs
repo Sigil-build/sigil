@@ -5,7 +5,7 @@ using System.IO;
 
 /// <summary>
 /// The final install step that makes uninstall survive deletion of the downloaded
-/// setup exe (spec T15, decision 8): copy the running installer image into the
+/// setup exe: copy the running installer image into the
 /// install directory as <c>uninstall.exe</c>, and journal its removal so the
 /// uninstall (and a rollback) reverse it. ARP's <c>UninstallString</c> then points
 /// at this copy — never at <see cref="Environment.ProcessPath"/> (the original
@@ -60,7 +60,7 @@ public static class InstallSurvivability
     /// path is unavailable (nothing to copy).
     /// </summary>
     /// <remarks>
-    /// T13 destination seam (now wired): <paramref name="installDir"/> is the SINGLE
+    /// <paramref name="installDir"/> is the SINGLE
     /// resolved install directory that <see cref="InstallDirResolver"/> computed for
     /// this run (honoring <c>/D=</c>, the manifest <c>install_dir</c>, the
     /// wizard-collected path, else <c>&lt;scope root&gt;\&lt;App.Name&gt;</c>) and

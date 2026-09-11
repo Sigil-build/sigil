@@ -14,7 +14,7 @@ namespace SigilBuild.Wrapper.Engine;
 /// <remarks>
 /// The container is the deterministic zstd container that
 /// <c>ExeWrapperPackager.BuildPayloadBytes</c> produces via the shared
-/// <see cref="PayloadCodec"/> (T6). Extraction is guarded against zip-slip: an
+/// <see cref="PayloadCodec"/>. Extraction is guarded against zip-slip: an
 /// entry whose normalized path escapes <see cref="Root"/> aborts the whole
 /// extract.
 /// <para>

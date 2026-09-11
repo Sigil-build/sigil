@@ -7,7 +7,7 @@ using SigilBuild.Core.Manifest;
 
 /// <summary>
 /// The per-scope filesystem / registry mapping for a resolved install scope
-/// (T12). Given a concrete <see cref="InstallScope.User"/> or
+/// Given a concrete <see cref="InstallScope.User"/> or
 /// <see cref="InstallScope.Machine"/> it exposes the install root, the state /
 /// journal root, the ARP registry hive, the <c>env_set</c> PATH scope, and the
 /// shortcut folders — so every scope-varying decision is parameterized in one
@@ -57,7 +57,7 @@ public sealed class ScopeLayout
     /// The install root: <c>%ProgramFiles%</c> for machine scope,
     /// <c>%LocalAppData%\Programs</c> for user scope. Surfaced to the expression
     /// engine / templates as <c>scope.root</c> and used as the default install-dir
-    /// base (T13).
+    /// base.
     /// </summary>
     public string InstallRoot => IsMachine
         ? Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles)
@@ -69,8 +69,8 @@ public sealed class ScopeLayout
     /// Every root an <c>install_dir</c> for this scope may legitimately sit under —
     /// the <em>permitted</em> destinations, of which <see cref="InstallRoot"/> is the
     /// <em>default</em> one and always the first entry. <c>InstallDirResolver</c>'s
-    /// containment check (register row R3) is derived from this list, so the two
-    /// cannot drift apart (register row R52).
+    /// containment check is derived from this list, so the two
+    /// cannot drift apart. (R3, R52)
     /// </summary>
     /// <remarks>
     /// <para>

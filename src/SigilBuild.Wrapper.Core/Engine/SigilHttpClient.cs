@@ -5,7 +5,7 @@ using System.Net.Http;
 
 /// <summary>
 /// The single, AOT-safe <see cref="HttpClient"/> shared by every install-time
-/// HTTP consumer (P4): the <c>http_download</c> step and the wizard's
+/// HTTP consumer: the <c>http_download</c> step and the wizard's
 /// dynamic-options loader. One client honors the <b>system proxy</b> (the default
 /// <see cref="SocketsHttpHandler"/> behavior) and pools connections; per-request
 /// timeouts are applied by the caller via a <see cref="System.Threading.CancellationToken"/>,

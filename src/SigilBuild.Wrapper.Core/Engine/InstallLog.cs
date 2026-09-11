@@ -7,7 +7,7 @@ using System.Text;
 namespace SigilBuild.Wrapper.Engine;
 
 /// <summary>
-/// The single, AOT-safe install-log sink (P7, gap G8). Writes timestamped,
+/// The single, AOT-safe install-log sink. Writes timestamped,
 /// secret-redacted lines to the user-requested <c>/LOG</c> file for both the
 /// headless (<c>/silent</c>) and wizard install paths, and for uninstall. One
 /// level, no rotation, no verbosity switches (v1).
@@ -76,7 +76,7 @@ public sealed class InstallLog
 
     /// <summary>
     /// Register the run's secret values so every subsequent line is redacted
-    /// before it is written (ADR-008 §3 / decision 6). Set once, after the
+    /// before it is written (ADR-008 §3). Set once, after the
     /// <see cref="StepContext"/> is built and before the engine runs.
     /// </summary>
     public void SetSecrets(IReadOnlyList<string> secrets)
@@ -140,7 +140,7 @@ public sealed class InstallLog
 }
 
 /// <summary>
-/// An <see cref="IProgress{T}"/> decorator (P7) that forwards each
+/// An <see cref="IProgress{T}"/> decorator that forwards each
 /// <see cref="StepProgress"/> to an inner progress sink (console / wizard) and
 /// also writes its message to the <see cref="InstallLog"/>. This is how the one
 /// engine run produces identical step / rollback lines on the console, in the

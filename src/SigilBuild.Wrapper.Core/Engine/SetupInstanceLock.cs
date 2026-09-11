@@ -8,7 +8,7 @@ using SigilBuild.Core.Manifest;
 using SigilBuild.Wrapper.Cli;
 
 /// <summary>
-/// The setup's own single-instance guard (P6, gap G17) — the Inno <c>SetupMutex</c>
+/// The setup's own single-instance guard — the Inno <c>SetupMutex</c>
 /// equivalent. The first process to <c>CreateMutexW</c> the app+scope-derived name
 /// owns the install; a second simultaneous launch sees the name already taken and
 /// bails out with a friendly notice (wizard) or a dedicated exit code (silent),
@@ -30,11 +30,11 @@ using SigilBuild.Wrapper.Cli;
 /// the process exits — so a crashed setup never leaves the name stuck.
 /// </para>
 /// <para>
-/// <b>The one admitted exception (R76).</b> A P3 upgrade removes the previous version
+/// <b>The one admitted exception.</b> An upgrade removes the previous version
 /// by running ITS <c>uninstall.exe /S /Uninstall &lt;scope&gt;</c> — a child process that
-/// derives the same app+scope name and, until R76, was refused as a second instance,
-/// failing every unelevated per-user upgrade with exit 5 and installing nothing. The
-/// installer therefore hands that one child an explicit handoff naming itself; the
+/// derives the same app+scope name, so without an exception it is refused as a second
+/// instance and every unelevated per-user upgrade fails with exit 5, installing nothing.
+/// The installer therefore hands that one child an explicit handoff naming itself; the
 /// child admits it only after the OS confirms what it can confirm. Both scopes are
 /// covered: the elevated machine-scope shape is the same code with a <c>Global\</c>
 /// name. What that check is and is not proof of is set out on
@@ -44,9 +44,9 @@ using SigilBuild.Wrapper.Cli;
 /// uninstall run under the same user, which already owns the state this guard
 /// protects. A second Setup.exe launched BY HAND still meets
 /// <see cref="SetupLockRefusal.AnotherInstanceRunning"/> and still exits 5; an install
-/// is refused even with a valid token; and R34's fail-closed
+/// is refused even with a valid token; and the fail-closed
 /// <see cref="SetupLockRefusal.NameNotAvailable"/> branch is not rescuable by any
-/// handoff.
+/// handoff. (R34, R76)
 /// </para>
 /// </remarks>
 public sealed partial class SetupInstanceLock : IDisposable
@@ -87,7 +87,8 @@ public sealed partial class SetupInstanceLock : IDisposable
     /// <summary>
     /// Why <see cref="TryAcquire(string, InstallScope, out SetupLockRefusal)"/> returned
     /// no lock, or how the one it returned was obtained. Distinct values because the
-    /// three are three different situations and used to be one (R34).
+    /// three are three different situations, and one value for all three hides the two
+    /// that are not ordinary contention (R34).
     /// </summary>
     public enum SetupLockRefusal
     {
@@ -116,14 +117,14 @@ public sealed partial class SetupInstanceLock : IDisposable
         /// <c>SeCreateGlobalPrivilege</c>, which is what a machine-scope
         /// <c>/Update</c> (the one path that never self-elevates) looks like. There is
         /// no second instance to protect against here, so a sentinel is returned and the
-        /// run proceeds UNGUARDED — but the caller is told, instead of the old silent
-        /// pretence that a lock was held.
+        /// run proceeds UNGUARDED — but the caller is TOLD, rather than left to assume a
+        /// lock is held.
         /// </summary>
         GuardUnavailable = 3,
 
         /// <summary>
-        /// R76 — the name is held, and this process's REAL parent asserted, with a token
-        /// naming this exact guard, that it spawned us for the P3 upgrade teardown.
+        /// The name is held, and this process's REAL parent asserted, with a token
+        /// naming this exact guard, that it spawned us for the upgrade teardown. (R76)
         /// </summary>
         /// <remarks>
         /// <para>
@@ -147,12 +148,12 @@ public sealed partial class SetupInstanceLock : IDisposable
     }
 
     /// <summary>
-    /// R76 — the environment variable an installer sets on the PRIOR VERSION's
+    /// The environment variable an installer sets on the PRIOR VERSION's
     /// <c>uninstall.exe</c> it spawns for the upgrade teardown, naming itself as the
     /// holder of the guard the child is about to contend with. Set on the child's
     /// environment block only (<c>ProcessStartInfo.Environment</c>), never on this
     /// process's own, and consumed (cleared) by the child before it does anything else
-    /// so it is not inherited any further down the tree.
+    /// so it is not inherited any further down the tree. (R76)
     /// </summary>
     internal const string HandoffVariable = "SIGIL_SETUP_LOCK_HANDOFF";
 
@@ -177,7 +178,7 @@ public sealed partial class SetupInstanceLock : IDisposable
 
     /// <summary>
     /// As <see cref="TryAcquire(string, InstallScope, out SetupLockRefusal)"/>, but able
-    /// to accept the R76 parent <paramref name="handoff"/> — which is why it also needs
+    /// to accept the parent <paramref name="handoff"/> (R76) — which is why it also needs
     /// the run's <paramref name="mode"/>. BOTH entry points must call this overload; the
     /// shorter ones exist for callers that can never be a teardown child.
     /// </summary>
@@ -221,25 +222,24 @@ public sealed partial class SetupInstanceLock : IDisposable
 
         if (handle == IntPtr.Zero)
         {
-            // R34. This branch used to return a non-owning sentinel indistinguishable
-            // from a real lock, so two installs could run concurrently — and the name is
-            // fully derivable from the public app id, so producing this branch on demand
-            // was a same-user, no-privilege operation: create ANY other kind of kernel
-            // object (an event, a semaphore) under the name and CreateMutexW fails
-            // forever after.
+            // The mutex name is fully derivable from the public app id, so any same-user,
+            // no-privilege process can reach this branch on demand: create ANY other kind
+            // of kernel object (an event, a semaphore) under the name and CreateMutexW
+            // fails forever after. Returning a non-owning sentinel here would be
+            // indistinguishable from a real lock and let two installs run concurrently.
             //
-            // The fix is not "fail closed on every failure", which would break the one
+            // This must not fail closed on EVERY failure, which would break the one
             // legitimate case: a machine-scope /Update never self-elevates, so it asks
             // for a Global\ name without SeCreateGlobalPrivilege and is denied. That is
             // ACCESS_DENIED too, so the error code alone cannot separate "the name is
             // taken" from "we may not create names here". Asking whether the object
-            // EXISTS separates them exactly.
+            // EXISTS separates them exactly. (R34)
             if (NameIsTaken(name))
             {
-                // R76 does NOT reach here on purpose: a handoff never rescues this
-                // branch. "The name exists but CreateMutexW failed" is R34's squatted /
-                // DACL-denied case, where we cannot even establish that the object is
-                // the guard — let alone that our parent holds it. Fail closed.
+                // A handoff never rescues this branch, deliberately. "The name exists but
+                // CreateMutexW failed" is the squatted / DACL-denied case, where we
+                // cannot even establish that the object is the guard — let alone that our
+                // parent holds it. Fail closed. (R34, R76)
                 refusal = SetupLockRefusal.NameNotAvailable;
                 return null;
             }
@@ -252,11 +252,10 @@ public sealed partial class SetupInstanceLock : IDisposable
 
         if (lastError == ERROR_ALREADY_EXISTS)
         {
-            // R76: the holder may be the installer that spawned US for the upgrade
-            // teardown. `handle` is a valid second reference to the very mutex the
-            // parent holds, so an admitted child keeps it (the parent's own reference
-            // is what keeps the name exclusive against strangers; this one is dropped
-            // on Dispose).
+            // The holder may be the installer that spawned US for the upgrade teardown.
+            // `handle` is a valid second reference to the very mutex the parent holds, so
+            // an admitted child keeps it (the parent's own reference is what keeps the
+            // name exclusive against strangers; this one is dropped on Dispose). (R76)
             if (HandoffAdmits(handoff, name))
             {
                 refusal = SetupLockRefusal.AdmittedByParentInstaller;
@@ -273,13 +272,13 @@ public sealed partial class SetupInstanceLock : IDisposable
         return new SetupInstanceLock(handle, name, owns: true);
     }
 
-    // ── R76: the prior-uninstaller handoff ───────────────────────────────────
+    // ── the prior-uninstaller handoff (R76) ──────────────────────────────────
 
     /// <summary>
-    /// R76 — the token to put on the environment of the PRIOR VERSION's
-    /// <c>uninstall.exe</c> this process is about to spawn for the P3 upgrade teardown,
+    /// The token to put on the environment of the PRIOR VERSION's
+    /// <c>uninstall.exe</c> this process is about to spawn for the upgrade teardown,
     /// or <c>null</c> when this process does not own the guard (in which case there is
-    /// nothing to hand over and the child must contend normally — fail closed).
+    /// nothing to hand over and the child must contend normally — fail closed). (R76)
     /// </summary>
     internal string? MintChildHandoff()
     {
@@ -324,16 +323,17 @@ public sealed partial class SetupInstanceLock : IDisposable
     }
 
     /// <summary>
-    /// R76 — does <paramref name="token"/> prove that the process that spawned us is the
+    /// Does <paramref name="token"/> prove that the process that spawned us is the
     /// installer holding <paramref name="lockName"/>, so that we may run inside its
-    /// critical section instead of being refused as a second instance?
+    /// critical section instead of being refused as a second instance? (R76)
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Why a token at all.</b> A per-user v1 → v2 upgrade held the app+scope guard and
-    /// then spawned the prior version's <c>uninstall.exe</c>, which derived the SAME name
-    /// and bailed with exit 5 — the installer's own child counted as a stranger, and
-    /// every unelevated upgrade and forced downgrade failed with nothing installed. The
+    /// <b>Why a token at all.</b> A per-user v1 → v2 upgrade holds the app+scope guard
+    /// and then spawns the prior version's <c>uninstall.exe</c>, which derives the SAME
+    /// name: with no token the installer's own child counts as a stranger, bails with
+    /// exit 5, and every unelevated upgrade and forced downgrade fails with nothing
+    /// installed. The
     /// child cannot tell "my parent holds this" from "a stranger holds this" by looking
     /// at the mutex: a named mutex has existence, not an owner identity. So the parent
     /// says so explicitly, and this method checks the claim against facts only the OS
@@ -530,7 +530,7 @@ public sealed partial class SetupInstanceLock : IDisposable
     private const int ERROR_FILE_NOT_FOUND = 2;
     private const uint SYNCHRONIZE = 0x00100000;
 
-    // R76 handoff verification.
+    // Handoff verification (R76).
     private const uint TH32CS_SNAPPROCESS = 0x00000002;
     private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
     private const int MAX_PATH = 260;

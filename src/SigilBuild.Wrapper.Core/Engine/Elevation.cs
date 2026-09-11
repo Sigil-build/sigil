@@ -6,7 +6,7 @@ using System.Runtime.Versioning;
 using System.Text;
 
 /// <summary>
-/// Self-elevation for a per-machine install (T12, decision 9). The host exe ships
+/// Self-elevation for a per-machine install. The host exe ships
 /// with a <c>requestedExecutionLevel level="asInvoker"</c> manifest so a per-user
 /// install never triggers UAC. When the resolved scope is
 /// <see cref="SigilBuild.Core.Manifest.InstallScope.Machine"/> and the current
@@ -99,10 +99,10 @@ public static partial class Elevation
     /// </param>
     /// <param name="cancelledExitCode">Exit code reported when the relaunch did not run.</param>
     /// <remarks>
-    /// R18: a caller that cleans up a resource the elevated child is meant to consume —
+    /// A caller that cleans up a resource the elevated child is meant to consume —
     /// the secret handoff envelope — MUST skip that cleanup while this is <c>true</c>,
     /// or it races a child that is still starting up and fails the install it was
-    /// enabling. See <see cref="ElevationSecretHandoff.CleanUp"/>.
+    /// enabling. See <see cref="ElevationSecretHandoff.CleanUp"/>. (R18)
     /// </remarks>
     [SupportedOSPlatform("windows")]
     public static int RelaunchElevatedAndWait(

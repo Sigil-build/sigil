@@ -8,7 +8,7 @@ namespace SigilBuild.Wrapper.Engine;
 /// <summary>
 /// Append-only log of rollback actions recorded by individual steps as they
 /// mutate the system. <see cref="UndoAsync"/> walks the records in reverse
-/// (LIFO) on a failed install. Future tasks (19) serialize the journal as
+/// (LIFO) on a failed install. The journal is serialized as
 /// <c>uninstall.json</c> for post-install removal.
 /// </summary>
 public sealed class RollbackJournal
@@ -32,19 +32,18 @@ public sealed class RollbackJournal
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <strong>Why this exists (the R15 follow-up).</strong> Steps journal the inverse
-    /// <em>before</em> they mutate, so an interrupted install still unwinds. That is
-    /// correct, but it is an intent record, and for most steps the undo can later ask the
-    /// system whether the object exists — <c>schtasks /Query</c>, <c>netsh show rule</c>,
-    /// <c>sc query</c> — so an intent that never became a mutation replays as a silent
-    /// no-op. <see cref="RollbackRecord.UnregisterCom"/> has no such query: COM
-    /// registration can only be probed by calling <c>DllUnregisterServer</c>, whose
-    /// failure R15 (rightly) treats as "the registration is still in place". A record
+    /// Steps journal the inverse <em>before</em> they mutate, so an interrupted install
+    /// still unwinds. That is correct, but it is an intent record, and for most steps the
+    /// undo can later ask the system whether the object exists — <c>schtasks /Query</c>,
+    /// <c>netsh show rule</c>, <c>sc query</c> — so an intent that never became a mutation
+    /// replays as a silent no-op. <see cref="RollbackRecord.UnregisterCom"/> has no such
+    /// query: COM registration can only be probed by calling <c>DllUnregisterServer</c>,
+    /// whose failure is rightly treated as "the registration is still in place". A record
     /// whose <c>DllUnregisterServer</c> <em>cannot be called at all</em> — the module
     /// will not load, or exports no such function — therefore turns into a guaranteed
     /// <see cref="UndoFailedException"/> at rollback and uninstall: the install failed
     /// AND its cleanup now reports an unremovable machine-global registration on the
-    /// strength of a probe that never ran.
+    /// strength of a probe that never ran. (R15)
     /// </para>
     /// <para>
     /// <strong>The bar is the undo's feasibility, not the mutation's absence.</strong>
@@ -62,7 +61,7 @@ public sealed class RollbackJournal
     /// Only the tail is withdrawable, which keeps the contract narrow and auditable:
     /// append, act, and — if and only if nothing else was appended in between —
     /// withdraw what you just appended. "Unknown whether the undo would work" is NOT
-    /// grounds to withdraw; the record stays and the undo does its best, per R15.
+    /// grounds to withdraw; the record stays and the undo does its best.
     /// </para>
     /// <para>
     /// <strong><c>internal</c>, deliberately.</strong> The engine is the wrapper
@@ -103,14 +102,13 @@ public sealed class RollbackJournal
     /// never meant to outlive the install run. Best-effort and idempotent.
     /// </para>
     /// <para>
-    /// <strong>R28 — the omission of <see cref="RollbackRecord.RestoreFile"/> here is
-    /// deliberate and must stay.</strong> Its <c>.sigil-bak</c> is the pre-existing
-    /// content of a file the install OVERWROTE, so it has to outlive the run: it is the
-    /// only thing that lets uninstall put the user's original file back. Discarding it
-    /// would silently drop that capability. What it was missing was a lifecycle, and that
-    /// is <see cref="RelocateCommittedStashes"/>: at commit the stash moves out of the
-    /// install directory into the per-app state directory, and uninstall consumes it
-    /// there.
+    /// <strong>The omission of <see cref="RollbackRecord.RestoreFile"/> here is deliberate
+    /// and must stay.</strong> Its <c>.sigil-bak</c> is the pre-existing content of a file
+    /// the install OVERWROTE, so it has to outlive the run: it is the only thing that lets
+    /// uninstall put the user's original file back, and discarding it would silently drop
+    /// that capability. Its lifecycle is <see cref="RelocateCommittedStashes"/> instead: at
+    /// commit the stash moves out of the install directory into the per-app state
+    /// directory, and uninstall consumes it there. (R28)
     /// </para>
     /// </summary>
     public void DiscardTransientStashes()
@@ -126,8 +124,8 @@ public sealed class RollbackJournal
                     TryDeleteDirectory(d.StashPath);
                     break;
                 case RollbackRecord.RestoreConfigFile { StashPath: { } cfgStash }:
-                    // P8: the prior-content stash of an ini/json/xml edit — reclaim
-                    // it on the success path (a config edit isn't reversed on uninstall).
+                    // The prior-content stash of an ini/json/xml edit — reclaim it on the
+                    // success path (a config edit isn't reversed on uninstall).
                     TryDeleteFile(cfgStash);
                     break;
                 default:
@@ -137,28 +135,26 @@ public sealed class RollbackJournal
     }
 
     /// <summary>
-    /// R28 — the <c>.sigil-bak</c> contract. Move every surviving <c>restore_file</c>
-    /// backup out of the install directory into <paramref name="stashRoot"/> and rewrite
-    /// the records to point at their new home, so a COMMITTED install leaves no
-    /// <c>.sigil-bak</c> beside the files it replaced.
+    /// The <c>.sigil-bak</c> contract. Move every surviving <c>restore_file</c> backup out
+    /// of the install directory into <paramref name="stashRoot"/> and rewrite the records
+    /// to point at their new home, so a COMMITTED install leaves no <c>.sigil-bak</c>
+    /// beside the files it replaced. (R28)
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <strong>The decision, written down.</strong> These stashes are not litter to be
-    /// deleted: each one is the pre-existing content of a file the install overwrote, and
-    /// it is what lets uninstall put that file back.
+    /// These stashes are not litter to be deleted: each one is the pre-existing content of
+    /// a file the install overwrote, and it is what lets uninstall put that file back.
     /// <see cref="DiscardTransientStashes"/> skipping <c>RestoreFile</c> is therefore
-    /// CORRECT, and the register's accurate framing — "retained by design, with no
-    /// lifecycle story" — is the thing to fix. Discarding them on the success path would
-    /// trade a real capability (restoring a file the publisher never shipped) for
-    /// tidiness. So they are kept, and given the lifecycle they were missing:
+    /// CORRECT — discarding them on the success path would trade a real capability
+    /// (restoring a file the publisher never shipped) for tidiness. They are kept, with an
+    /// explicit lifecycle:
     /// </para>
     /// <list type="bullet">
     ///   <item>during the install they stay beside their destination, where a mid-install
     ///   rollback — which runs unanchored and in-process — restores from them;</item>
     ///   <item>at commit they move into the per-app state directory,
     ///   <c>&lt;StateRoot&gt;\Sigil\&lt;AppId&gt;\backups</c>: out of Program Files, and
-    ///   hardened to administrators-only in machine scope by the same S1 code that
+    ///   hardened to administrators-only in machine scope by the same code that
     ///   protects <c>uninstall.json</c>;</item>
     ///   <item>they then live exactly as long as the install does — uninstall's
     ///   <c>RestoreFile</c> undo copies each one back and deletes it, and whatever it
@@ -172,7 +168,7 @@ public sealed class RollbackJournal
     /// </para>
     /// <para>
     /// Best-effort per record: a stash that will not move keeps its old home AND its
-    /// record, so the worst case is the previous behaviour for one file rather than a
+    /// record, so the worst case is one stash left beside its destination rather than a
     /// lost restore.
     /// </para>
     /// </remarks>
@@ -264,10 +260,10 @@ public sealed class RollbackJournal
 
     /// <summary>
     /// Replay every record in reverse (LIFO). An individual failure does not cascade —
-    /// the remaining records are still replayed — but it is no longer <em>swallowed</em>:
+    /// the remaining records are still replayed — but it is never <em>swallowed</em>:
     /// it is reported on <paramref name="progress"/> and returned in
     /// <see cref="UndoOutcome.FailedRecords"/> so the caller can decline to report a
-    /// success it did not achieve (register row R15).
+    /// success it did not achieve. (R15)
     /// </summary>
     /// <param name="anchorage">
     /// Whether the records must be anchored before replay, and to what (R1).
@@ -286,11 +282,11 @@ public sealed class RollbackJournal
         var refused = new System.Collections.Generic.List<RefusedRecord>();
         var failed = new System.Collections.Generic.List<FailedRecord>();
 
-        // R44/R51: anything the anchor could not make sense of in the manifest's OWN
-        // declarations is reported before the first record is judged, so an operator
-        // reading the log top-to-bottom sees "this destination was declared but could not
-        // be anchored" BEFORE the refusals it goes on to cause. A dropped declaration
-        // that produced no visible line is how an uninstall silently leaves files behind.
+        // Anything the anchor could not make sense of in the manifest's OWN declarations
+        // is reported before the first record is judged, so an operator reading the log
+        // top-to-bottom sees "this destination was declared but could not be anchored"
+        // BEFORE the refusals it goes on to cause. A dropped declaration that produced no
+        // visible line is how an uninstall silently leaves files behind. (R44, R51)
         if (anchor is not null)
         {
             foreach (var notice in anchor.Notices)
@@ -299,7 +295,7 @@ public sealed class RollbackJournal
             }
         }
 
-        // Walk in reverse. Undo failures should not cascade — log and continue.
+        // Undo failures must not cascade — log and continue.
         var total = _records.Count;
         var completed = 0;
         for (var i = _records.Count - 1; i >= 0; i--)
@@ -338,8 +334,8 @@ public sealed class RollbackJournal
             catch (UndoFailedException ex)
             {
                 // The undo ran and did NOT achieve its goal: the service / task /
-                // firewall rule / COM registration is still there. R15 — the one
-                // outcome that must never be reported as a success.
+                // firewall rule / COM registration is still there — the one outcome
+                // that must never be reported as a success. (R15)
                 completed++;
                 failed.Add(new FailedRecord(WireTypeOf(record), ex.Target, ex.Code, ex.Message));
                 progress?.Report(new StepProgress(
@@ -418,7 +414,7 @@ public sealed class RollbackJournal
 
     /// <summary>
     /// A short, prototype-style reversal line for the interactive uninstall log
-    /// (spec T15 / design brief: <c>unlink</c>, <c>path -</c>, <c>reg -</c>,
+    /// (<c>unlink</c>, <c>path -</c>, <c>reg -</c>,
     /// <c>delete</c>). Derived from the record's declared fields only — no resolved
     /// parameter values, so a secret can never leak into the uninstall log.
     /// </summary>
@@ -448,8 +444,8 @@ public sealed class RollbackJournal
 /// count and route refusals without parsing prose.
 /// </summary>
 /// <remarks>
-/// Part of the cross-lane contract described on <see cref="RefusedRecord"/>. Add members
-/// rather than renumbering or repurposing existing ones.
+/// Part of the contract described on <see cref="RefusedRecord"/>. Add members rather than
+/// renumbering or repurposing existing ones.
 /// </remarks>
 public enum ReplayRefusalCode
 {
@@ -465,8 +461,8 @@ public enum ReplayRefusalCode
 
     /// <summary>
     /// The destination was in range but the content the record would restore comes from a
-    /// backup or stash outside the anchored roots — the register's "arbitrary file / tree
-    /// write from an attacker-chosen stash".
+    /// backup or stash outside the anchored roots — an arbitrary file / tree write from an
+    /// attacker-chosen stash.
     /// </summary>
     ContentSourceOutsideInstallRoots = 11,
 
@@ -538,12 +534,10 @@ public enum ReplayRefusalCode
 /// touched, why, and the line that went to the log.
 /// </summary>
 /// <remarks>
-/// <strong>Cross-lane contract.</strong> Lane S5 consumes
-/// <see cref="UndoOutcome.RefusedRecords"/> in Stage 2 for register row R15, so this is
-/// deliberately structured rather than prose: a consumer must never have to parse
+/// Deliberately structured rather than prose: a consumer must never have to parse
 /// <see cref="Message"/> to decide what happened. Treat the shape and the name
 /// <c>RefusedRecords</c> as pinned; <see cref="Message"/> is the only part free to change
-/// wording.
+/// wording. (R15)
 /// </remarks>
 /// <param name="RecordType">
 /// The journal record's wire discriminator — <c>restore_file</c>, <c>restore_env</c>,
@@ -590,14 +584,14 @@ public enum UndoFailureCode
     ServiceStillPresent = 2,
 
     /// <summary>
-    /// <c>schtasks /Delete</c> ran and the task is still present. The register's
-    /// "permanent SYSTEM scheduled task".
+    /// <c>schtasks /Delete</c> ran and the task is still present — a permanent SYSTEM
+    /// scheduled task left behind.
     /// </summary>
     ScheduledTaskStillPresent = 3,
 
     /// <summary>
     /// <c>netsh advfirewall firewall delete rule</c> ran and the rule still matches —
-    /// the register's "open firewall port".
+    /// an open firewall port left behind.
     /// </summary>
     FirewallRuleStillPresent = 4,
 
@@ -682,8 +676,7 @@ public sealed class UndoFailedException : System.Exception
 /// One entry per record that replay anchoring skipped (R1). Empty on an unanchored replay
 /// and on a clean anchored one. A non-empty list after a legitimate uninstall means either
 /// a planted journal or an anchoring bug, and either way it must reach the operator rather
-/// than being swallowed. Consumed by lane S5 in Stage 2 for R15 — see
-/// <see cref="RefusedRecord"/>.
+/// than being swallowed. See <see cref="RefusedRecord"/>.
 /// </param>
 /// <param name="FailedRecords">
 /// One entry per record whose undo ran and did not achieve its goal (R15). Distinct from
@@ -1006,7 +999,7 @@ public abstract record RollbackRecord
     }
 
     /// <summary>
-    /// Restores a config file (P8 <c>ini_write</c> / <c>json_edit</c> /
+    /// Restores a config file (<c>ini_write</c> / <c>json_edit</c> /
     /// <c>xml_edit</c>) to its exact pre-edit state on a mid-install rollback. When
     /// the file existed before the edit, its whole content was stashed to
     /// <paramref name="StashPath"/> and rollback copies it back byte-for-byte; when
@@ -1046,7 +1039,7 @@ public abstract record RollbackRecord
 
     /// <summary>
     /// Removes the survivable <c>uninstall.exe</c> copied into the install dir as
-    /// the final install step (spec T15). Undo is delegated to
+    /// the final install step. Undo is delegated to
     /// <see cref="SelfDelete"/>, which tolerates the case where <see cref="Path"/>
     /// is the <em>running</em> uninstaller image: it cannot delete its own live
     /// image, so it schedules reboot-time deletion instead. Journal replay never
@@ -1068,15 +1061,14 @@ public abstract record RollbackRecord
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <strong>The contract is the END STATE, not the exit code (R15).</strong> "No
-    /// service after rollback" is still the goal, so a service that does not exist is a
-    /// success even though <c>sc delete</c> exits 1060 for it — reporting that as a
-    /// failure would turn every uninstall of an app whose service a user already removed
-    /// into a permanently "failed" one. What is no longer tolerated is the opposite: the
-    /// service is <em>still registered</em> after both commands ran, which for a
-    /// machine-scope install means a SYSTEM-context binary that still starts, left behind
-    /// by an uninstall that reported success and then deleted the only record that could
-    /// have removed it.
+    /// <strong>The contract is the END STATE, not the exit code.</strong> "No service
+    /// after rollback" is the goal, so a service that does not exist is a success even
+    /// though <c>sc delete</c> exits 1060 for it — reporting that as a failure would turn
+    /// every uninstall of an app whose service a user already removed into a permanently
+    /// "failed" one. The opposite is never tolerated: the service is <em>still
+    /// registered</em> after both commands ran, which for a machine-scope install means a
+    /// SYSTEM-context binary that still starts, left behind by an uninstall that reported
+    /// success and then deleted the only record that could have removed it. (R15)
     /// </para>
     /// <para>
     /// A service marked for deletion (<c>DeleteFlag</c>) counts as removed: the SCM
@@ -1174,12 +1166,12 @@ public abstract record RollbackRecord
     }
 
     /// <summary>
-    /// Deletes a Windows Scheduled Task created by <c>scheduled_task_create</c>
-    /// (P11, T11.1). Recorded BEFORE the create so an interrupted install can
-    /// still unwind. Mirrors <see cref="RemoveService"/>: the contract is the END
-    /// STATE — "no task after rollback" — not the exit code. <c>schtasks /Delete</c>
-    /// on a missing task exits non-zero and that is a SUCCESS; a task still present
-    /// after the delete is the failure (R15's "permanent SYSTEM scheduled task").
+    /// Deletes a Windows Scheduled Task created by <c>scheduled_task_create</c>.
+    /// Recorded BEFORE the create so an interrupted install can still unwind.
+    /// Mirrors <see cref="RemoveService"/>: the contract is the END STATE — "no task
+    /// after rollback" — not the exit code. <c>schtasks /Delete</c> on a missing task
+    /// exits non-zero and that is a SUCCESS; a task still present after the delete is
+    /// the failure — a permanent SYSTEM scheduled task left behind (R15).
     /// Only the task NAME is carried — no secrets, no resolved program path.
     /// </summary>
     public sealed record DeleteScheduledTask(string TaskName) : RollbackRecord
@@ -1226,21 +1218,21 @@ public abstract record RollbackRecord
     }
 
     /// <summary>
-    /// Unregisters a COM DLL registered by <c>com_register</c> (P11, T11.2) by
-    /// invoking its exported <c>DllUnregisterServer</c> through the same native
+    /// Unregisters a COM DLL registered by <c>com_register</c> by invoking its
+    /// exported <c>DllUnregisterServer</c> through the same native
     /// path the register used (see
     /// <see cref="SigilBuild.Wrapper.Steps.Win32.ComRegistration"/>). Recorded
     /// BEFORE the register so an interrupted install can still unwind. Only the DLL
     /// PATH is carried — no secrets, no registry contents.
     /// <para>
-    /// <strong>The outcome is no longer ignored (R15).</strong> The goal is "COM
-    /// registration gone after rollback", and unlike a missing service there is no
-    /// benign reading of a failed <c>DllUnregisterServer</c>: the export is missing, the
-    /// module will not load, or it returned a failure HRESULT — in all three the
-    /// machine-wide registration the install created is still live, and reporting the
-    /// uninstall as a success would delete the only record that could have removed it.
-    /// The record is replayed LIFO <em>before</em> the file records that delete the DLL,
-    /// so "the DLL is already gone" is not a case this has to tolerate.
+    /// <strong>The outcome is never ignored.</strong> The goal is "COM registration gone
+    /// after rollback", and unlike a missing service there is no benign reading of a
+    /// failed <c>DllUnregisterServer</c>: the export is missing, the module will not
+    /// load, or it returned a failure HRESULT — in all three the machine-wide
+    /// registration the install created is still live, and reporting the uninstall as a
+    /// success would delete the only record that could have removed it. The record is
+    /// replayed LIFO <em>before</em> the file records that delete the DLL, so "the DLL is
+    /// already gone" is not a case this has to tolerate. (R15)
     /// </para>
     /// </summary>
     public sealed record UnregisterCom(string DllPath) : RollbackRecord
@@ -1272,13 +1264,13 @@ public abstract record RollbackRecord
 
     /// <summary>
     /// Deletes a Windows Defender Firewall rule created by <c>firewall_rule</c>
-    /// (P11, T11.3) via <c>netsh advfirewall firewall delete rule</c>. Recorded
+    /// via <c>netsh advfirewall firewall delete rule</c>. Recorded
     /// BEFORE the add so an interrupted install can still unwind. Mirrors
     /// <see cref="RemoveService"/>/<see cref="DeleteScheduledTask"/>: the contract is
     /// the END STATE — "no rule after rollback". netsh's "No rules match the specified
     /// criteria" is a SUCCESS (the rule was never created, or is already gone); a rule
-    /// that still matches after the delete is the failure (R15's "open firewall port").
-    /// Only the rule NAME is carried — no secrets, no resolved program path.
+    /// that still matches after the delete is the failure — an open firewall port left
+    /// behind (R15). Only the rule NAME is carried — no secrets, no resolved program path.
     /// </summary>
     public sealed record DeleteFirewallRule(string RuleName) : RollbackRecord
     {
@@ -1332,11 +1324,11 @@ public abstract record RollbackRecord
 /// not be started at all.
 /// </summary>
 /// <remarks>
-/// The <c>null</c> is the point (R15): "could not run the tool" and "the tool ran and
-/// said the object is gone" used to be the same outcome — a swallowed exception — and
-/// only one of them means the uninstall achieved anything. stdout/stderr are redirected
-/// so a chatty tool never blocks on a full pipe, and read to completion for the same
-/// reason.
+/// The <c>null</c> is the point: "could not run the tool" and "the tool ran and said the
+/// object is gone" must never collapse into one outcome — a swallowed spawn failure reads
+/// as a successful removal, and only the second of the two means the uninstall achieved
+/// anything (R15). stdout/stderr are redirected so a chatty tool never blocks on a full
+/// pipe, and read to completion for the same reason.
 /// </remarks>
 internal static class ExternalUndoTool
 {

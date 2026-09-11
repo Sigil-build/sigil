@@ -11,8 +11,8 @@ using System.Threading.Tasks;
 /// <summary>
 /// Shared, AOT-safe verified-download helper: streams an HTTPS URL to a destination
 /// file, verifies its SHA-256, and retries transient failures (network / timeout /
-/// 5xx) with exponential backoff. Reused by the <c>http_download</c> step (P4) and
-/// the prerequisite runner (P5) over the one <see cref="SigilHttpClient"/> (system
+/// 5xx) with exponential backoff. Reused by the <c>http_download</c> step and
+/// the prerequisite runner over the one <see cref="SigilHttpClient"/> (system
 /// proxy honored). No journaling and no resume — the caller owns rollback / cleanup;
 /// a retry restarts the download. A checksum mismatch is not transient and returns
 /// immediately.
@@ -21,11 +21,11 @@ public static class SigilDownloader
 {
     /// <summary>
     /// The ceiling a downloaded <em>file</em> (an install payload, a prerequisite
-    /// installer, an update package) may not exceed: 2 GiB. Register row R10 —
-    /// <c>Content-Length</c> was read for a progress percentage and never enforced,
-    /// and the read loop had no cap at all, so a hostile or compromised origin could
-    /// drip an unbounded body into the destination. A per-request timeout does not
-    /// bound that: a slow-drip body resets nothing but the clock on each read.
+    /// installer, an update package) may not exceed: 2 GiB. Uncapped — with
+    /// <c>Content-Length</c> read only for a progress percentage — a hostile or
+    /// compromised origin drips an unbounded body into the destination, and a
+    /// per-request timeout does not bound that: a slow-drip body resets nothing but the
+    /// clock on each read. (R10)
     /// </summary>
     /// <remarks>
     /// This is an absolute backstop, not a policy: it is deliberately far above any
@@ -71,7 +71,7 @@ public static class SigilDownloader
     /// </summary>
     /// <param name="maxBytes">
     /// Hard ceiling on the response body, in bytes. Enforced TWICE and both halves
-    /// matter (register row R10): a declared <c>Content-Length</c> above it is refused
+    /// matter (R10): a declared <c>Content-Length</c> above it is refused
     /// before a single body byte is read or the destination file is created — cheap,
     /// and it costs the attacker nothing to avoid — and the read loop itself aborts the
     /// moment the transferred count would pass it, which is the defence that actually
@@ -161,7 +161,7 @@ public static class SigilDownloader
 
         var total = resp.Content.Headers.ContentLength;
 
-        // R10, first half: refuse a declared oversize BEFORE the body stream is opened
+        // First half (R10): refuse a declared oversize BEFORE the body stream is opened
         // and before the destination file is created — so a hostile Content-Length costs
         // this process one request and nothing on disk. Cheap and honest, but it is only
         // the half an attacker can trivially skip by declaring nothing; the loop below is
@@ -179,7 +179,7 @@ public static class SigilDownloader
         var src = await resp.Content.ReadAsStreamAsync(token).ConfigureAwait(false);
         await using (src.ConfigureAwait(false))
         {
-            // R5's residual: never write THROUGH whatever already holds this name.
+            // Never write THROUGH whatever already holds this name (R5).
             // FileMode.Create opens an existing entry — including a hardlink or a file
             // reparse point an attacker planted at a predictable destination — and
             // truncates its TARGET, which from an elevated process is an arbitrary-file
@@ -201,7 +201,7 @@ public static class SigilDownloader
                 int n;
                 while ((n = await src.ReadAsync(buffer.AsMemory(0, buffer.Length), token).ConfigureAwait(false)) > 0)
                 {
-                    // R10, second half — the one that matters. Checked BEFORE the write, so
+                    // Second half — the one that matters (R10). Checked BEFORE the write, so
                     // not one byte past the ceiling ever reaches the disk. A response framed
                     // by connection-close carries no Content-Length at all, so the check
                     // above never fires for it and this is the only thing standing between a

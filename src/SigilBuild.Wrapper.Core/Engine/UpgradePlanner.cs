@@ -3,7 +3,7 @@ namespace SigilBuild.Wrapper.Engine;
 using System;
 
 /// <summary>
-/// The pure decision function for version-aware installs (P3, gap G3): classify a
+/// The pure decision function for version-aware installs: classify a
 /// run as fresh / same / upgrade / downgrade from the installed ARP state and the
 /// packed version, honoring <c>/force-downgrade</c>. Contains no I/O — the registry
 /// read is done by <see cref="InstalledStateResolver"/> — so the four-path decision

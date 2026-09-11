@@ -7,19 +7,16 @@ using SigilBuild.Core.Manifest;
 /// <summary>
 /// The Authenticode gate that stands immediately in front of every
 /// <c>Process.Start</c> of a binary this run pulled off the network — a prerequisite
-/// installer, an update package, a web-stub payload (register row R11).
+/// installer, an update package, a web-stub payload. (R11)
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>What was wrong.</b> <see cref="AuthenticodeVerifier.VerifyFile"/> existed, was
-/// AOT-clean, and had exactly one caller in the tree: the code that renders the
-/// wizard's cosmetic "Signed by …" line. Nothing downloaded was signature-checked
-/// before it was executed, elevated. SHA-256 was the sole gate — and a SHA-256 pinned
-/// in a manifest only ever says "these are the bytes the manifest names", which is
-/// worth nothing against an origin that serves different bytes and the matching digest,
-/// and nothing at all in the instant between a verification and a launch. The staging
-/// work in this lane closed those instants; this is the second line that means losing
-/// one of those races is no longer immediately fatal.
+/// <b>Why a signature check and not just the checksum.</b> A SHA-256 pinned in a
+/// manifest only ever says "these are the bytes the manifest names", which is worth
+/// nothing against an origin that serves different bytes and the matching digest, and
+/// nothing at all in the instant between a verification and a launch. Secure staging
+/// closes those instants; this gate is the second line, so losing one of those races is
+/// not immediately fatal.
 /// </para>
 /// <para>
 /// <b>Fail closed, with one deliberate hole.</b> Unsigned redistributables are common
@@ -64,7 +61,7 @@ internal static class DownloadedBinaryTrust
 
     /// <summary>
     /// The declared <c>installer.require_signed_downloads</c> policy for THIS artifact
-    /// (register row R45), read from the running exe's embedded blob.
+    /// (R45), read from the running exe's embedded blob.
     /// </summary>
     internal static RequireSignedDownloads Policy => PolicyOverride.Value ?? SelfPolicy;
 
@@ -124,10 +121,10 @@ internal static class DownloadedBinaryTrust
     /// </remarks>
     /// <remarks>
     /// <para>
-    /// <b>R45.</b> The <c>SignDeclared</c> inference above is now the DEFAULT rather than
-    /// the only answer: <c>installer.require_signed_downloads</c> lets a publisher say
-    /// what they actually mean. <see cref="RequireSignedDownloads.SignDeclared"/> keeps
-    /// the inference, so nothing that existed before this field changes behaviour.
+    /// The <c>SignDeclared</c> inference above is the DEFAULT, not the only answer:
+    /// <c>installer.require_signed_downloads</c> lets a publisher say what they actually
+    /// mean, and <see cref="RequireSignedDownloads.SignDeclared"/> keeps the inference
+    /// for a manifest that does not set it. (R45)
     /// </para>
     /// </remarks>
     internal static bool RequiredForThisArtifact => Policy switch
@@ -192,8 +189,9 @@ internal static class DownloadedBinaryTrust
     /// The artifact's declared <c>installer.require_signed_downloads</c> policy (R45).
     /// Only <see cref="RequireSignedDownloads.AlwaysVerifiedRevocation"/> changes any
     /// verdict here — it turns <see cref="AuthenticodeStatus.RevocationUnavailable"/>
-    /// from a warning into a refusal (R46). Defaults to the pre-R45 behaviour so every
-    /// existing call site and test keeps its original meaning.
+    /// from a warning into a refusal (R46). Defaults to
+    /// <see cref="RequireSignedDownloads.SignDeclared"/>, so a call site that does not
+    /// pass a policy gets the inferred behaviour.
     /// </param>
     internal static (string? Refusal, string? Report, bool IsError) Decide(
         AuthenticodeStatus status,
@@ -210,8 +208,8 @@ internal static class DownloadedBinaryTrust
             AuthenticodeStatus.Trusted =>
                 (null, $"signature: {what} is Authenticode-valid", false),
 
-            // R46: the publisher asked for revocation to be ESTABLISHED, not merely
-            // attempted. Without this, anyone who can blackhole two hostnames — a
+            // The publisher asked for revocation to be ESTABLISHED, not merely
+            // attempted (R46). Without this, anyone who can blackhole two hostnames — a
             // captive portal, a compromised resolver, a hostile corporate network —
             // suppresses revocation of a stolen signing key, and the run proceeds on a
             // warning line nobody reads. Opt-in, because refusing by default would break
@@ -314,12 +312,12 @@ internal static class DownloadedBinaryTrust
     /// <see cref="System.IO.FileShare.Read"/> handle on that path is concurrently held —
     /// opened by <c>SecureStaging.OpenVerified</c> / <c>OpenVerifiedForLaunch</c> BEFORE
     /// the check and kept open across <c>Process.Start</c>. Verifying a path nobody holds
-    /// is the identical TOCTOU that register rows R5, R11 and R12 exist to close: the
-    /// bytes examined would not provably be the bytes executed.
+    /// is the identical TOCTOU the staging and trust gates exist to close: the
+    /// bytes examined would not provably be the bytes executed. (R5, R11, R12)
     /// </para>
     /// <para>
-    /// That ordering was an invariant no test could see. Hoisting the trust check above
-    /// the open, or widening the share mode to <c>ReadWrite</c>, would have reopened the
+    /// That ordering is otherwise an invariant no test can see. Hoisting the trust check
+    /// above the open, or widening the share mode to <c>ReadWrite</c>, reopens the
     /// window with the whole suite still green. This seam is what lets a test stand
     /// inside the check and assert the handle is there.
     /// </para>

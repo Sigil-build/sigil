@@ -4,8 +4,8 @@ using System;
 using System.IO;
 
 /// <summary>
-/// The single path-containment predicate for the install engine (register row
-/// R16). Answers "does <c>candidate</c> really live inside <c>root</c>?" — both
+/// The single path-containment predicate for the install engine
+/// (R16). Answers "does <c>candidate</c> really live inside <c>root</c>?" — both
 /// textually (after canonicalization) and physically (no reparse point on the
 /// way down).
 /// </summary>
@@ -140,10 +140,9 @@ internal static class PathContainment
     /// <see cref="Path.GetDirectoryName(string)"/> STRIPS it, so an untrimmed
     /// root of <c>C:\App\</c> could never equal any value the upward walk
     /// produces — the walk would run past the anchor to the volume root and
-    /// refuse a genuine, reparse-free descendant. Task S2.3 anchors on
+    /// refuse a genuine, reparse-free descendant. Callers anchor on
     /// <c>ctx.InstallDir</c>, which keeps the trailing <c>\</c> a user typed
-    /// after <c>/D=</c>, so the shape is reachable there even though S2.2 never
-    /// produces it.
+    /// after <c>/D=</c>, so the untrimmed shape is reachable.
     /// </remarks>
     private static string Canonicalize(string path)
         => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));

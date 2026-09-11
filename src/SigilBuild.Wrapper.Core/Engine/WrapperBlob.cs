@@ -21,20 +21,20 @@ internal sealed partial record WrapperBlob(
     IReadOnlyList<InstallStep> PostInstall,
     IReadOnlyList<InstallStep> UpdateSteps,
     InstallScope Scope = InstallScope.Auto,
-    // T8: the ENABLED built-in option components. The engine seeds
+    // The ENABLED built-in option components. The engine seeds
     // `option.<Name>` from these (default, unless a wizard checkbox or a
     // `/P<Name>=value` override supplies otherwise) so the auto-generated,
     // option-gated steps — and any hand-written `when: option.*` — evaluate.
     // Null/empty for an un-stamped runtime or a manifest declaring no options.
     IReadOnlyList<InstallerOptionComponent>? Options = null,
-    // T13: the manifest's App.Name and optional install-dir override. AppName is
+    // The manifest's App.Name and optional install-dir override. AppName is
     // the default install-dir base's <App.Name> segment and backs the {app.name}
     // token; InstallDir is the verbatim `installer.install_dir` template (may
     // reference {scope_root} / {app.*}), null when the manifest omits it so the
     // default `<scope root>\<App.Name>` applies. Both feed InstallDirResolver.
     string? AppName = null,
     string? InstallDir = null,
-    // T10: the real Add/Remove Programs fields, sourced at pack time from
+    // The real Add/Remove Programs fields, sourced at pack time from
     // manifest.App.* (DisplayName ← App.Name, Publisher ← App.Publisher,
     // Version ← App.Version) and the packed size (EstimatedSizeBytes ← the
     // uncompressed payload footprint). Threaded into the ArpRegistration.Register
@@ -45,29 +45,29 @@ internal sealed partial record WrapperBlob(
     string? Publisher = null,
     string? Version = null,
     long EstimatedSizeBytes = 0,
-    // P1 (gap G1): declarative variables from installer.vars, in manifest
+    // Declarative variables from installer.vars, in manifest
     // declaration order. The engine evaluates each once at session start (in
     // dependency order — see InstallerVarGraph) and seeds var.<Name>. Null/empty
     // for a manifest declaring no vars.
     IReadOnlyList<InstallerVar>? Vars = null,
-    // P2 (gap G2): lifecycle hooks that run OUTSIDE the rollback journal, around
+    // Lifecycle hooks that run OUTSIDE the rollback journal, around
     // the transactional body. Governed only by each step's on_failure; no rollback.
     IReadOnlyList<InstallStep>? HookPreInstall = null,
     IReadOnlyList<InstallStep>? HookPostInstall = null,
     IReadOnlyList<InstallStep>? HookPreUninstall = null,
     IReadOnlyList<InstallStep>? HookPostUninstall = null,
-    // P2 (gap G4): the Done-screen "Launch <App>" target (path + args). Null when
+    // The Done-screen "Launch <App>" target (path + args). Null when
     // the manifest declares no installer.run_after_install.
     string? RunAfterInstallPath = null,
     IReadOnlyList<string>? RunAfterInstallArgs = null,
-    // P5 (gap G6): first-class prerequisite units from installer.prerequisites, in
+    // First-class prerequisite units from installer.prerequisites, in
     // declaration order. Run before the journaled body (detect → install → re-detect).
     // Null/empty for a manifest declaring no prerequisites.
     IReadOnlyList<InstallerPrerequisite>? Prerequisites = null,
-    // P6 (gap G7): named mutexes the app holds while running. Setup probes these
+    // Named mutexes the app holds while running. Setup probes these
     // before touching the install dir; an openable mutex means "app is running".
     IReadOnlyList<string>? AppMutex = null,
-    // P12 (T12.3): the app manifest's updates: metadata, threaded into the blob so
+    // The app manifest's updates: metadata, threaded into the blob so
     // the /Update runtime can fetch + verify the signed channel manifest and decide
     // whether to fetch a newer package. All null when the manifest declares no
     // updates: block — the app is then not update-enabled and /Update exits nonzero.
@@ -79,7 +79,7 @@ internal sealed partial record WrapperBlob(
     string? UpdateManifestUrl = null,
     string? UpdateSigningKey = null,
     string? UpdateChannel = null,
-    // P12 (T12.5): true only for a web-installer STUB's synthesized blob — the
+    // True only for a web-installer STUB's synthesized blob — the
     // stub is a pure delegating trampoline (http_download + run_program of the
     // full package) that must do NO install-completion bookkeeping of its own.
     // Without this flag the stub's OWN successful run would re-run
@@ -151,7 +151,7 @@ internal sealed partial record WrapperBlob(
     }
 
     /// <summary>
-    /// Read the embedded native-dependency archive (<c>SIGIL_RUNTIME_V1</c>, T18)
+    /// Read the embedded native-dependency archive (<c>SIGIL_RUNTIME_V1</c>)
     /// from the running exe. Returns <c>null</c> when the resource is absent — an
     /// un-stamped dev run whose Skia/ANGLE/HarfBuzz DLLs already sit beside the exe
     /// — so <see cref="NativeRuntimeBootstrap.EnsureNativeDependenciesLoadable"/>
@@ -164,7 +164,7 @@ internal sealed partial record WrapperBlob(
 
     /// <summary>
     /// Read only the brand data (derived light/dark token maps, base64 logo/hero,
-    /// ARP display fields) from the embedded <c>SIGIL_BLOB_V1</c> resource (T7).
+    /// ARP display fields) from the embedded <c>SIGIL_BLOB_V1</c> resource.
     /// Returns <c>null</c> for an un-stamped runtime so the wizard falls back to
     /// its literal default palette. Kept separate from <see cref="LoadFromSelf"/>
     /// because the in-memory <see cref="WrapperBlob"/> record intentionally does
@@ -194,7 +194,7 @@ internal sealed partial record WrapperBlob(
     }
 
     /// <summary>
-    /// Read the declared custom wizard screens (T9) from the embedded
+    /// Read the declared custom wizard screens from the embedded
     /// <c>SIGIL_BLOB_V1</c> resource. Returns an empty list for an un-stamped
     /// runtime (dev/preview) or a blob that declares no screens. Kept separate
     /// from <see cref="LoadFromSelf"/> because the in-memory <see cref="WrapperBlob"/>
@@ -220,12 +220,12 @@ internal sealed partial record WrapperBlob(
     }
 
     /// <summary>
-    /// Read the embedded license text MAP (T14 / P9 gap G10) from the running
+    /// Read the embedded license text MAP from the running
     /// exe's <c>SIGIL_BLOB_V1</c> resource — tag -&gt; text, one entry per
     /// manifest-declared language. Returns <c>null</c> for an un-stamped runtime
     /// or a blob with no license. The host resolves the session language's entry
     /// against this map (<see cref="InstallerLicenseLoader.Resolve"/>) — <c>en</c>
-    /// is guaranteed present because SIG0290 (Task 9) makes an <c>en</c>-less
+    /// is guaranteed present because SIG0290 makes an <c>en</c>-less
     /// license map a fatal pack-time error. Kept separate from
     /// <see cref="LoadFromSelf"/> because the in-memory <see cref="WrapperBlob"/>
     /// record does not carry license text — it is a host-rendering concern
@@ -243,7 +243,7 @@ internal sealed partial record WrapperBlob(
     }
 
     /// <summary>
-    /// Read the manifest's fixed <c>installer.language</c> tag (P9 gap G10) from
+    /// Read the manifest's fixed <c>installer.language</c> tag from
     /// the running exe's <c>SIGIL_BLOB_V1</c> resource, or <c>null</c> for an
     /// un-stamped runtime or a manifest that doesn't fix a language. Read
     /// separately from <see cref="LoadFromSelf"/> for the same reason as
@@ -265,7 +265,7 @@ internal sealed partial record WrapperBlob(
 
     private const string BlobResourceName = "SIGIL_BLOB_V1";
 
-    // T6: the payload marker is bumped to SIGIL_PAYLOAD_V2 (deterministic zstd
+    // The payload marker is SIGIL_PAYLOAD_V2 (deterministic zstd
     // container, see SigilBuild.Wrapper.Codec.PayloadCodec). Gating the reader on
     // the V2 name means a legacy V1 (Deflate zip) resource, or an un-stamped
     // runtime, both surface as an empty payload — never as a mis-decoded archive.
@@ -350,9 +350,9 @@ internal sealed partial record WrapperBlob(
 }
 
 /// <summary>
-/// Brand data extracted from the embedded blob for the wizard to render (T7):
+/// Brand data extracted from the embedded blob for the wizard to render:
 /// the derived light/dark token maps, base64 logo/hero, and the ARP display
-/// fields. Delivered inside the blob (decision 11) — no sidecar file. Public so
+/// fields. Delivered inside the blob — no sidecar file. Public so
 /// the Avalonia host (whose assembly name doesn't match the engine's
 /// <c>InternalsVisibleTo</c>) can consume it via <see cref="InstallerBrandLoader"/>.
 /// </summary>
@@ -364,7 +364,7 @@ public sealed record InstallerBrandData(
     string? DisplayName,
     string? Publisher,
     string? Version,
-    // T11 / decision 7: whether the artifact declared a verified `sign` block.
+    // Whether the artifact declared a verified `sign` block.
     // Combined with WinVerifyTrust(self) to gate the trust line (see
     // InstallerTrustLoader). Appended last to keep the record backward-compatible.
     bool SignDeclared = false,
@@ -389,7 +389,7 @@ public static class InstallerBrandLoader
 
 /// <summary>
 /// Public entry point for the host to read the declared custom wizard screens
-/// (T9) from the stamped exe's embedded blob without depending on the engine's
+/// from the stamped exe's embedded blob without depending on the engine's
 /// internal wire DTOs. Returns an empty list for an un-stamped runtime.
 /// </summary>
 public static class InstallerScreensLoader
@@ -403,7 +403,7 @@ public static class InstallerScreensLoader
 }
 
 /// <summary>
-/// Public entry point for the host to read the embedded license text (T14) from
+/// Public entry point for the host to read the embedded license text from
 /// the stamped exe's blob without depending on the engine's internal wire DTOs.
 /// Returns <c>null</c> when no license is embedded (un-stamped runtime, or a
 /// manifest with no <c>installer.license</c>) — the host then omits the License
@@ -414,12 +414,11 @@ public static class InstallerLicenseLoader
 {
     /// <summary>
     /// Read the embedded license text MAP (tag -&gt; text) from the running
-    /// exe's <c>SIGIL_BLOB_V1</c> resource, or <c>null</c> when none is present
-    /// (P9 gap G10). The host resolves this against the session's preference
-    /// list via <see cref="Resolve"/> — reading only the English entry is no
-    /// longer the public surface; a manifest packing <c>uk: LICENSE.uk.txt</c>
-    /// would otherwise render English forever regardless of the resolved chrome
-    /// language.
+    /// exe's <c>SIGIL_BLOB_V1</c> resource, or <c>null</c> when none is present.
+    /// The host resolves this against the session's preference
+    /// list via <see cref="Resolve"/>; reading only the English entry would render
+    /// English forever for a manifest packing <c>uk: LICENSE.uk.txt</c>, regardless
+    /// of the resolved chrome language.
     /// </summary>
     public static IReadOnlyDictionary<string, string>? LoadMapFromSelf() => WrapperBlob.LoadLicenseMapFromSelf();
 
@@ -427,7 +426,7 @@ public static class InstallerLicenseLoader
     /// Resolve <paramref name="map"/> against the SAME ordered preference list the
     /// chrome language used (<c>installer.language</c> fixed -&gt; <c>/lang</c> -&gt;
     /// OS preferences -&gt; <c>en</c>). Total: <see cref="LanguageResolver.Match"/>
-    /// always finds <c>en</c> because Task 9's SIG0290 makes an <c>en</c>-less
+    /// always finds <c>en</c> because SIG0290 makes an <c>en</c>-less
     /// license map a fatal pack-time error, so this never returns <c>null</c> for
     /// a non-null <paramref name="map"/>.
     /// </summary>
@@ -446,7 +445,7 @@ public static class InstallerLicenseLoader
 /// <summary>
 /// Public entry point for BOTH stamped entry points (the console
 /// <c>SigilBuild.Wrapper</c> and the Avalonia <c>SigilBuild.Installer.Host</c>) to
-/// read the manifest's fixed <c>installer.language</c> tag (P9 gap G10) from the
+/// read the manifest's fixed <c>installer.language</c> tag from the
 /// running exe's blob without depending on the engine's internal wire DTOs. Read
 /// at session start, before <see cref="SigilBuild.Wrapper.Core.Localization.SessionLanguage.Set"/>
 /// runs and before any UI is constructed. Parallels <see cref="InstallerLicenseLoader"/> /
@@ -465,7 +464,7 @@ public static class InstallerLanguageLoader
 
 /// <summary>
 /// Public entry point for the host to resolve the verified-signature-gated trust
-/// line (T11 / decision 7). The "Signed by {publisher}" line renders ONLY when the
+/// line. The "Signed by {publisher}" line renders ONLY when the
 /// manifest declared a <c>sign</c> block (<c>SignDeclared</c>, carried in the blob)
 /// AND the running exe's Authenticode signature verifies via <see cref="AuthenticodeVerifier"/>
 /// — so an unsigned artifact, or a signed-then-tampered / re-stamped one whose
@@ -490,7 +489,7 @@ public static class InstallerTrustLoader
             publisher);
 
     /// <summary>
-    /// The three-state trust line (register row R17). With revocation checking switched
+    /// The three-state trust line (R17). With revocation checking switched
     /// on, "the certificate's revocation state could not be established" is a real and
     /// common answer — an air-gapped machine, a blocked CRL distribution point — and it
     /// must render as ITS OWN thing. Showing the plain line would say "still valid" on

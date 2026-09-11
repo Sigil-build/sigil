@@ -98,7 +98,7 @@ internal static class RegistryHelper
 
     /// <summary>
     /// Value reader backing the <c>registry_read(hive, key, value)</c> and
-    /// <c>installed_version(app_id)</c> expression functions (P1). Returns the
+    /// <c>installed_version(app_id)</c> expression functions. Returns the
     /// named value as an invariant-culture string, or <c>""</c> when the hive is
     /// unrecognized, the key/value is absent, or the read is denied — read-only
     /// and total, per ADR-008 §1.2. When <paramref name="name"/> is null/empty the

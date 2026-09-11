@@ -38,8 +38,8 @@ public sealed class StepContext
     /// <see cref="InstallEngine"/>'s <c>finally</c> has already called
     /// <see cref="ReleaseStaging"/>. Held separately so
     /// <see cref="ReleasePostRunStaging"/> can reclaim it at the end of that hook phase
-    /// rather than it living forever. Before this existed, such a resolution minted a
-    /// second <see cref="SecureStaging"/> that <em>nothing disposed</em>.
+    /// rather than it living forever. Without the separate field, such a resolution mints
+    /// a second <see cref="SecureStaging"/> that <em>nothing disposes</em>.
     /// </summary>
     private SecureStaging? _postRunStaging;
 
@@ -53,9 +53,9 @@ public sealed class StepContext
     /// of these is refused rather than quietly proceeding unverified: the file is no
     /// longer covered by a re-hash under a held handle, and it is no longer
     /// Authenticode-gated either, because both of those hang off
-    /// <see cref="OpenVerifiedForLaunch"/> returning non-null. Forgetting the path made
-    /// the launch look like an ordinary <c>run_program</c> of a file nobody downloaded,
-    /// which is exactly the silent-bypass shape this lane spent two rounds removing.
+    /// <see cref="OpenVerifiedForLaunch"/> returning non-null. Forgetting the path
+    /// instead would make the launch look like an ordinary <c>run_program</c> of a file
+    /// nobody downloaded — a silent bypass of both gates.
     /// </summary>
     private System.Collections.Generic.HashSet<string>? _releasedDownloads;
 
@@ -79,7 +79,7 @@ public sealed class StepContext
     }
 
     /// <summary>
-    /// The resolved effective install directory for this run (T13): the
+    /// The resolved effective install directory for this run: the
     /// destination that the <c>{install_dir}</c> token expands to in step paths and
     /// expressions. Computed by <see cref="InstallDirResolver"/> from the scope,
     /// the manifest override, and the <c>/D=</c> / wizard overrides. <c>null</c> for
@@ -92,7 +92,7 @@ public sealed class StepContext
         new StepContext(new System.Collections.Generic.Dictionary<string, object?>());
 
     /// <summary>
-    /// Optional sink a long-running step (P4 <c>http_download</c>) uses to emit
+    /// Optional sink a long-running step (<c>http_download</c>) uses to emit
     /// intra-step progress rows (download percentage / retry notices). Set by
     /// <see cref="InstallEngine"/> to the run's progress channel, so the rows reach
     /// the wizard progress screen and the /LOG file. Message-only rows report
@@ -110,21 +110,21 @@ public sealed class StepContext
     /// </summary>
     /// <remarks>
     /// <para>
-    /// This is the destination half of register row R5. The web-installer stub used to
-    /// download to <c>{temp_dir}/&lt;App&gt;-&lt;ver&gt;-&lt;arch&gt;-Setup.exe</c> — a
-    /// pack-time constant derived from the public artifact name, so the path was known
-    /// to anyone holding the installer and could be pre-planted before the download and
-    /// swapped after it. A per-run GUID directory removes the "pre-planted" half;
+    /// This is the destination half of the verify-then-launch race (R5). A web-installer
+    /// stub downloading to <c>{temp_dir}/&lt;App&gt;-&lt;ver&gt;-&lt;arch&gt;-Setup.exe</c>
+    /// uses a pack-time constant derived from the public artifact name, so the path is
+    /// known to anyone holding the installer and can be pre-planted before the download
+    /// and swapped after it. A per-run GUID directory removes the "pre-planted" half;
     /// <see cref="OpenVerifiedForLaunch"/> removes the "swapped after" half.
     /// </para>
     /// <para>
     /// <b>After the install body, this moves to a second, separately reclaimed
     /// directory.</b> <see cref="InstallSession"/> runs the <c>post_install</c> hook
     /// phase on this same context <em>after</em> <see cref="InstallEngine"/>'s
-    /// <c>finally</c> has released the first one. Resolving the token there used to mint
-    /// a fresh <see cref="SecureStaging"/> with no owner and no disposal — an unbounded
-    /// leak of a hardened directory per install, in <c>%ProgramData%</c> when elevated.
-    /// It now lands in <c>_postRunStaging</c>, which
+    /// <c>finally</c> has released the first one. Resolving the token there mints a
+    /// fresh <see cref="SecureStaging"/>, which with no owner and no disposal would be
+    /// an unbounded leak of a hardened directory per install, in <c>%ProgramData%</c>
+    /// when elevated. It lands in <c>_postRunStaging</c> instead, which
     /// <see cref="ReleasePostRunStaging"/> reclaims when the hook phase ends, so the
     /// capability is intact and the lifetime is bounded at both ends.
     /// </para>
@@ -168,10 +168,10 @@ public sealed class StepContext
     /// download — a <c>run_program</c> of a payload binary or a system tool is unchanged.
     /// </summary>
     /// <remarks>
-    /// This is the second half of register row R5. A verify step and a launch step with a
-    /// gap between them is the bug: the SHA-256 protected the download, not the
-    /// execution. Re-doing the check adjacent to the launch, from a handle that survives
-    /// it, is what closes the gap.
+    /// This is the second half of the verify-then-launch race (R5). A verify step and a
+    /// launch step with a gap between them is the bug: the SHA-256 protects the download,
+    /// not the execution. Re-doing the check adjacent to the launch, from a handle that
+    /// survives it, is what closes the gap.
     /// </remarks>
     /// <exception cref="StagedFileVerificationException">
     /// The bytes changed after they were verified — refuse the launch.
@@ -199,11 +199,11 @@ public sealed class StepContext
 
         // Refuse, never forget. This is the cross-phase case: the install body downloaded
         // and verified this file, the engine's finally cleared the record, and a
-        // post_install hook is now asking to launch it. Returning null here — which is
-        // what "forgetting" did — makes it indistinguishable from a run_program of a
-        // payload binary, so it gets no re-hash, no held handle and no Authenticode
-        // verdict, silently. R11's text is "before launching ANY downloaded binary"; a
-        // hook is not an exception to it.
+        // post_install hook is now asking to launch it. Returning null here — forgetting
+        // — would make it indistinguishable from a run_program of a payload binary, so
+        // it would get no re-hash, no held handle and no Authenticode verdict, silently.
+        // The rule is "before launching ANY downloaded binary"; a hook is not an
+        // exception to it. (R11)
         if (_releasedDownloads is not null && _releasedDownloads.Contains(full))
         {
             throw new StagedFileVerificationException(
@@ -278,7 +278,7 @@ public sealed class StepContext
     }
 
     /// <summary>
-    /// The resolved per-scope layout for this run (T12): install root, ARP hive,
+    /// The resolved per-scope layout for this run: install root, ARP hive,
     /// PATH scope, and shortcut folders. Scope-varying steps
     /// (<see cref="Steps.EnvSetStep"/>, <see cref="Steps.ShortcutCreateStep"/>)
     /// consult this rather than hardcoding machine/user paths. Defaults to
@@ -295,7 +295,7 @@ public sealed class StepContext
     /// parameter for this run (deduplicated, empty values excluded). Consumed by
     /// the completion path (<c>UninstallStateStore</c>) and the engine's log
     /// redaction so secrets never reach persisted state or log output
-    /// (decision 6).
+    /// on every channel.
     /// </summary>
     public System.Collections.Generic.IReadOnlyList<string> SecretValues => _secretValues;
 
@@ -362,10 +362,10 @@ public sealed class StepContext
 
         var layout = ScopeLayout.For(scope);
 
-        // T13: resolve the effective install dir once, up front, so the
+        // Resolve the effective install dir once, up front, so the
         // {install_dir} token expands to a concrete directory in every step path
         // and expression. Precedence: wizard-collected → /D= → prior install dir
-        // (P3 upgrade) → manifest override → default (<scope root>\<App.Name>).
+        // (upgrade) → manifest override → default (<scope root>\<App.Name>).
         var installDir = InstallDirResolver.Resolve(
             scope: layout.Scope,
             appName: blob.AppName,
@@ -378,7 +378,7 @@ public sealed class StepContext
         var dict = new System.Collections.Generic.Dictionary<string, object?>(System.StringComparer.Ordinal);
         var secrets = new System.Collections.Generic.List<string>();
         // Secret identifier keys (param.<name> / parameters.<name> of a Secret
-        // parameter) so P1 vars can inherit secretness (ADR-008 §3). VarResolver
+        // parameter) so vars can inherit secretness (ADR-008 §3). VarResolver
         // extends this with any tainted var.<name>.
         var secretIds = new System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal);
 
@@ -419,9 +419,9 @@ public sealed class StepContext
             }
         }
 
-        // App metadata (ported from PR #8) — exposes the manifest's `app:` block
+        // App metadata — exposes the manifest's `app:` block
         // as `${app.*}` in step values (e.g. a registry_write writing
-        // `${app.version}` / `${app.publisher}`). Sourced from the blob's T10 ARP
+        // `${app.version}` / `${app.publisher}`). Sourced from the blob's ARP
         // fields (DisplayName/Publisher/Version) plus AppId/AppName. Without these
         // the placeholders would land in the registry as literal text.
         dict["app.id"] = blob.AppId;
@@ -433,8 +433,8 @@ public sealed class StepContext
         dict["system.os"] = System.Environment.OSVersion.Version.ToString();
         dict["system.arch"] = System.Runtime.InteropServices.RuntimeInformation
                                   .ProcessArchitecture.ToString().ToLowerInvariant();
-        // P9 (gap G10): the resolved CHROME language's tag, not the top OS
-        // preference — design §4.3: with OS prefs [de-DE, uk-UA] and en+uk
+        // The resolved CHROME language's tag, not the top OS
+        // preference: with OS prefs [de-DE, uk-UA] and en+uk
         // chrome, system.language reads "uk" because that's what the UI
         // actually renders, not "de". Mirrors the established
         // `_lang.ToString().ToLowerInvariant()` pattern (InstallerViewModel);
@@ -452,31 +452,31 @@ public sealed class StepContext
         // Env context (only the well-known PATH for now; full env exposure is policy-deferred).
         dict["env.PATH"] = System.Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
 
-        // Scope context (T12): the resolved install scope as a bare `scope`
+        // Scope context: the resolved install scope as a bare `scope`
         // identifier (usable in a step `when: "scope == \"machine\""`) plus the
         // per-scope install root as `scope.root` (the default install-dir base,
-        // T13). Both `scope` and `scope.root` mirror how T9 exposed `param.*`.
+        // base). Both `scope` and `scope.root` mirror how `param.*` is exposed.
         dict["scope"] = layout.Name;
         dict["scope.root"] = layout.InstallRoot;
 
-        // T13: expose the resolved install dir + scope root as dotted identifiers
+        // Expose the resolved install dir + scope root as dotted identifiers
         // too, mirroring the `{install_dir}` / `{scope_root}` brace tokens the step
         // paths + `when` expressions use (SubstituteBraceTokens handles the brace
         // form). A `when: "install_dir == '...'"` reads the dotted form here.
         dict["install_dir"] = installDir;
         dict["scope_root"] = layout.InstallRoot;
 
-        // Option context (T8): expose each ENABLED built-in component as
+        // Option context: expose each ENABLED built-in component as
         // `option.<name>` so the auto-generated, option-gated steps evaluate AND a
         // hand-written step can gate on `option.*`. Resolution precedence mirrors
         // parameters: a `locked` component is fixed at its default (the user can't
         // change it); otherwise GUI-collected checkbox → CLI `/P<name>` override →
-        // component default. Mirrors how T9 seeded `param.*` and T12 seeded `scope`.
+        // component default. Mirrors how `param.*` and `scope` are seeded.
         if (blob.Options is { } options)
         {
             foreach (var opt in options)
             {
-                // P10 (gap G11): a custom component with a `when` gate that evaluates
+                // A custom component with a `when` gate that evaluates
                 // false is not applicable to this run — its option resolves off
                 // (hiding the row in the wizard and skipping any step it gates),
                 // regardless of default / checkbox / CLI. A malformed/erroring `when`
@@ -514,7 +514,7 @@ public sealed class StepContext
             }
         }
 
-        // P1: evaluate installer.vars once, now that every base identifier is
+        // Evaluate installer.vars once, now that every base identifier is
         // seeded. Each result is exposed as var.<name> (usable in `when`, screen
         // defaults, and {var.<name>} brace tokens). Secret-derived vars inherit
         // secretness and land in `secrets` for redaction.
@@ -524,7 +524,7 @@ public sealed class StepContext
     }
 
     /// <summary>
-    /// Evaluate a custom component's applicability <c>when</c> (P10) against the
+    /// Evaluate a custom component's applicability <c>when</c> against the
     /// base identifiers seeded so far. Runs before <c>installer.vars</c> are
     /// populated, so a component's <c>when</c> may reference <c>param.*</c> /
     /// <c>scope</c> / <c>system.*</c> / prior <c>option.*</c> but not <c>var.*</c>
@@ -619,7 +619,7 @@ public sealed class StepContext
     /// that step paths and <c>when</c> expressions use (distinct from the
     /// <c>${...}</c> parameter templates handled by <see cref="Resolve"/>). This is
     /// what turns a step <c>to: "{install_dir}/app.txt"</c> into a real directory
-    /// rather than a literal <c>{install_dir}</c> folder (T13). An unknown brace
+    /// rather than a literal <c>{install_dir}</c> folder. An unknown brace
     /// token is left untouched; <c>{install_dir}</c> is left literal only when
     /// this context was built without a resolved install dir (e.g. the step unit
     /// tests).
@@ -642,7 +642,7 @@ public sealed class StepContext
             result = result.Replace("{app.name}", _appName, System.StringComparison.Ordinal);
         }
         result = result.Replace("{app.id}", _appId, System.StringComparison.Ordinal);
-        // P12 (T12.5): the web-installer stub's synthesized http_download `dest`
+        // The web-installer stub's synthesized http_download `dest`
         // needs a temp location resolvable at INSTALL time (the stub's blob is
         // packed with the literal token, so packing stays deterministic — no
         // GUID/timestamp is ever baked in). Resolves to the per-user temp
@@ -673,7 +673,7 @@ public sealed class StepContext
     }
 
     /// <summary>
-    /// Expand <c>{var.&lt;name&gt;}</c> brace tokens (P1) against the evaluated
+    /// Expand <c>{var.&lt;name&gt;}</c> brace tokens against the evaluated
     /// <c>installer.vars</c> seeded in the context. A token whose var was not
     /// declared is left literal (mirroring the unknown-brace-token behaviour of the
     /// fixed tokens). This is the cross-step data-flow channel: a step
@@ -729,7 +729,7 @@ public sealed class StepContext
     /// <exception cref="System.FormatException">
     /// A <c>payload://</c> path was used but no payload is available for this
     /// run, or the relative part escapes the payload root (a path-traversal
-    /// attempt); or a <c>{token}</c> survived substitution (register row R16).
+    /// attempt); or a <c>{token}</c> survived substitution (R16).
     /// </exception>
     public string ResolvePath(string template)
     {

@@ -28,8 +28,7 @@ public sealed class ReplayAnchorage
     /// would refuse legitimate reversals of manifest-declared work outside the install
     /// directory.
     /// <para>
-    /// <strong>Never use this for a journal that came off disk.</strong> That is
-    /// register row R1.
+    /// <strong>Never use this for a journal that came off disk.</strong> (R1)
     /// </para>
     /// </summary>
     public static ReplayAnchorage InProcess { get; } =
@@ -44,7 +43,7 @@ public sealed class ReplayAnchorage
     /// </summary>
     /// <param name="installDir">The install directory every record is checked against.</param>
     /// <param name="declarations">
-    /// What the signed blob declares (R44/R51). Required, not optional, for the same
+    /// What the signed blob declares (R44, R51). Required, not optional, for the same
     /// reason <paramref name="installDir"/> is: an omitted anchoring input is an
     /// invariant the primitive cannot enforce, and one call site forgetting it is all it
     /// takes. Pass <see cref="SignedDeclarations.None"/> when there is genuinely no
@@ -84,7 +83,7 @@ public sealed class ReplayAnchorage
     /// <param name="appId">The app whose per-app state directory is allowed.</param>
     /// <param name="scope">The scope being replayed.</param>
     /// <param name="declarations">
-    /// What the signed blob declares (R44/R51): the out-of-tree destinations
+    /// What the signed blob declares (R44, R51): the out-of-tree destinations
     /// <c>allow_outside_install_dir</c> opted out of containment, and the registry keys
     /// the manifest's registry steps name. Required — see <see cref="ForInstallDir"/>.
     /// </param>

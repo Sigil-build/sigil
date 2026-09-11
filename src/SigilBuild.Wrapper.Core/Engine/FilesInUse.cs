@@ -7,7 +7,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 
 /// <summary>
-/// A single thing blocking the install / uninstall (P6, gap G7): either a declared
+/// A single thing blocking the install / uninstall: either a declared
 /// <c>installer.app_mutex</c> that is currently held, or a process the Restart
 /// Manager reports as holding a file open under the install directory.
 /// </summary>
@@ -23,7 +23,7 @@ public readonly record struct AppBlocker(string Name, uint ProcessId, bool FromM
 }
 
 /// <summary>
-/// Files-in-use detection (P6, gap G7) — the Inno <c>AppMutex</c> +
+/// Files-in-use detection — the Inno <c>AppMutex</c> +
 /// <c>CloseApplications</c> equivalent. Two independent probes:
 /// <list type="number">
 ///   <item><description><b>Declared mutexes</b> — <c>OpenMutexW</c> on each
@@ -40,13 +40,13 @@ public readonly record struct AppBlocker(string Name, uint ProcessId, bool FromM
 /// <remarks>
 /// <para>All interop is source-generated <c>[LibraryImport]</c> (Native-AOT safe). Every
 /// probe is best-effort: on any RM failure the sweep reports no blockers rather than
-/// failing the install — a false "clear" degrades to the pre-P6 behaviour (the step
-/// engine surfaces the locked-file error and rolls back), whereas a false "blocked"
-/// would wedge a perfectly good install.</para>
-/// <para>R58: the one thing the RM sweep never reports is the installer itself — see
-/// <see cref="IsRunningInstallerProcess"/>. T15 runs the uninstaller from inside the
-/// directory this sweep registers, so without that exclusion the gate refused its own
-/// ARP <c>UninstallString</c>.</para>
+/// failing the install — a false "clear" degrades to the step engine surfacing the
+/// locked-file error and rolling back, whereas a false "blocked" would wedge a
+/// perfectly good install.</para>
+/// <para>The one thing the RM sweep never reports is the installer itself — see
+/// <see cref="IsRunningInstallerProcess"/>. The uninstaller runs from inside the
+/// directory this sweep registers, so without that exclusion the gate refuses its own
+/// ARP <c>UninstallString</c>. (R58)</para>
 /// </remarks>
 public static partial class FilesInUse
 {
@@ -74,15 +74,15 @@ public static partial class FilesInUse
     /// <param name="appMutexes">The declared <c>installer.app_mutex</c> names.</param>
     /// <param name="installDir">The directory to sweep.</param>
     /// <param name="selfImagePath">
-    /// The image path treated as "this installer" for R58's exclusion; <c>null</c> disables
+    /// The image path treated as "this installer" for the exclusion (R58); <c>null</c> disables
     /// the same-image half, leaving only the own-pid check.
     /// </param>
     /// <remarks>
     /// The seam exists so a test can supply an image it can actually launch a second
-    /// process from: a test host cannot spawn a copy of ITSELF to stand in for T12's
+    /// process from: a test host cannot spawn a copy of ITSELF to stand in for the
     /// elevated relaunch pair, so without this parameter the same-image branch could only
-    /// be tested through its predicate and never through <c>Scan</c>'s own output — which
-    /// left the wiring unpinned (passing <c>null</c> here kept every test green).
+    /// be tested through its predicate and never through <c>Scan</c>'s own output, which
+    /// leaves the wiring unpinned (passing <c>null</c> here keeps every test green).
     /// Production always calls the two-argument overload above.
     /// </remarks>
     internal static IReadOnlyList<AppBlocker> Scan(
@@ -232,15 +232,13 @@ public static partial class FilesInUse
     [SupportedOSPlatform("windows")]
     private static bool TryStartSession(out uint session)
     {
-        // R38: strSessionKey is an OUT buffer — RmStartSession writes
-        // CCH_RM_SESSION_KEY chars plus a NUL into it. This used to hand it a managed
-        // `string`, which [LibraryImport]'s UTF-16 marshalling pins in place, so the API
-        // wrote through the string's own buffer. The size was exact and
-        // `new string(char, count)` is never interned, so nothing overflowed and nothing
-        // shared was corrupted today — but one refactor to a literal or a cached
-        // constant would have silently mutated an INTERNED string, and the signature was
-        // advertising "in" for a parameter the API treats as "out". A char[] behind a
-        // `ref char` signature says what actually happens and cannot be aliased.
+        // strSessionKey is an OUT buffer — RmStartSession writes CCH_RM_SESSION_KEY
+        // chars plus a NUL into it. Never pass a managed `string` here: [LibraryImport]'s
+        // UTF-16 marshalling pins it, so the API writes through the string's own buffer,
+        // and one refactor to a literal or a cached constant silently mutates an INTERNED
+        // string. A char[] behind a `ref char` signature says what actually happens, can
+        // never be aliased, and stops the signature advertising "in" for a parameter the
+        // API treats as "out". (R38)
         var key = new char[CCH_RM_SESSION_KEY + 1];
         var buffer = MemoryMarshal.Cast<char, ushort>(key.AsSpan());
         return RmStartSession(out session, 0, ref buffer[0]) == 0;
@@ -274,20 +272,20 @@ public static partial class FilesInUse
         {
             var pid = infos[i].Process.dwProcessId;
 
-            // R58 — the running installer is never a blocker of ITSELF. T15's
-            // survivability design copies the running setup image into the install
-            // directory as `uninstall.exe` and ARP's UninstallString points at that copy,
-            // so the uninstaller executes from INSIDE the very directory this sweep
-            // registers. The Restart Manager duly reported the uninstaller's own image
-            // and the P6 gate refused its own ARP entry with exit 4 —
-            // "blocked by: installer (pid N)", N being its own pid — before touching
-            // anything, and /closeapps could not rescue it because the Restart Manager
-            // cannot close its own caller. The uninstaller's image is not the gate's
-            // problem: it is deleted by the reboot-scheduled MoveFileEx that T15 relies
-            // on (RollbackRecord.RemoveUninstaller / SelfDelete), never by closing an
-            // application. This is the ONLY exclusion — a third-party process holding
-            // anything under the install directory is still a blocker, including an app
-            // whose own image lives there, which is the case the gate exists for.
+            // The running installer is never a blocker of ITSELF. Install survivability
+            // copies the running setup image into the install directory as
+            // `uninstall.exe` and ARP's UninstallString points at that copy, so the
+            // uninstaller executes from INSIDE the very directory this sweep registers.
+            // The Restart Manager duly reports the uninstaller's own image, so without
+            // this exclusion the gate refuses its own ARP entry with exit 4 — "blocked
+            // by: installer (pid N)", N being its own pid — before touching anything,
+            // and /closeapps cannot rescue it because the Restart Manager cannot close
+            // its own caller. The uninstaller's image is not the gate's problem: it is
+            // deleted by the reboot-scheduled MoveFileEx (RollbackRecord.RemoveUninstaller
+            // / SelfDelete), never by closing an application. This is the ONLY exclusion
+            // — a third-party process holding anything under the install directory is
+            // still a blocker, including an app whose own image lives there, which is
+            // the case the gate exists for. (R58)
             if (IsRunningInstallerProcess(pid, selfImagePath))
             {
                 continue;
@@ -304,12 +302,12 @@ public static partial class FilesInUse
     }
 
     /// <summary>
-    /// R58 — true when <paramref name="processId"/> is this very process, or another
+    /// True when <paramref name="processId"/> is this very process, or another
     /// process running this installer's own executable image. Both are the installer
     /// itself and neither can be a blocker of its own run; everything else is.
     /// </summary>
     /// <remarks>
-    /// <para>The second case is T12's self-elevation, not paranoia. A machine-scope ARP
+    /// <para>The second case is self-elevation, not paranoia. A machine-scope ARP
     /// uninstall runs <c>&lt;install_dir&gt;\uninstall.exe /S /Uninstall /allusers</c>
     /// un-elevated, and <see cref="Elevation.RelaunchElevatedAndWait"/> relaunches THE
     /// SAME IMAGE elevated and then sits in <c>WaitForSingleObject</c> until the child
@@ -317,7 +315,7 @@ public static partial class FilesInUse
     /// still alive with <c>&lt;install_dir&gt;\uninstall.exe</c> loaded as its image —
     /// and the Restart Manager reports a process for a loaded image alone, with no data
     /// file open (asserted in <c>FilesInUseTests</c>). Excluding only the child's own pid
-    /// would therefore have left every <c>/allusers</c> ARP uninstall blocked on its own
+    /// would therefore leave every <c>/allusers</c> ARP uninstall blocked on its own
     /// parent.</para>
     /// <para>The match is on the identity of the image FILE, deliberately not on "is an
     /// ancestor of mine": <c>uninstall.exe</c> is commonly launched from Explorer, and
@@ -346,7 +344,7 @@ public static partial class FilesInUse
     }
 
     /// <summary>
-    /// R58 — whether two paths name the same file on disk, by FILE IDENTITY rather than
+    /// Whether two paths name the same file on disk, by FILE IDENTITY rather than
     /// by comparing the strings. <c>false</c> whenever either side cannot be resolved,
     /// which keeps the blocker.
     /// </summary>
@@ -358,10 +356,10 @@ public static partial class FilesInUse
     /// with — 8.3 short components, a <c>subst</c>ed or mapped drive letter, a junction —
     /// whereas <c>QueryFullProcessImageNameW(…, 0)</c> returns the canonical long Win32
     /// path. An ARP row written from a <c>/D=C:\PROGRA~1\Acme</c> install therefore
-    /// launches the uninstaller by its short path, the two strings differ, the T12
-    /// relaunch parent is not recognised, and a <c>/allusers</c> ARP uninstall exits 4
-    /// again with the original R58 symptom. Identity has no such convention: the volume
-    /// serial plus the file id is the same however the file was named.</para>
+    /// launches the uninstaller by its short path, the two strings differ, the
+    /// relaunch parent is not recognised, and a <c>/allusers</c> ARP uninstall exits 4 —
+    /// the exact defect this exclusion removes. Identity has no such convention: the
+    /// volume serial plus the file id is the same however the file was named.</para>
     /// <para>Both sides go through this same function, so both yield the same KIND of key
     /// and remain comparable: the 128-bit file id where the filesystem supports it (NTFS,
     /// ReFS), else the fully normalized final path. The fallback matters — a bare
@@ -453,7 +451,7 @@ public static partial class FilesInUse
     }
 
     /// <summary>
-    /// R58 — the full image path of another process, or <c>null</c> when it cannot be
+    /// The full image path of another process, or <c>null</c> when it cannot be
     /// determined. Used only to recognise this installer's own image (see
     /// <see cref="IsRunningInstallerProcess"/>).
     /// </summary>
@@ -547,7 +545,7 @@ public static partial class FilesInUse
     /// <summary>Extended-length path ceiling (<c>\\?\</c> form), in chars.</summary>
     private const int MaxExtendedPathChars = 32768;
 
-    // R58 file-identity comparison (see SameFile / TryGetFileIdentity).
+    // File-identity comparison (see SameFile / TryGetFileIdentity).
     private const uint FILE_READ_ATTRIBUTES = 0x0080;
     private const uint FILE_SHARE_READ = 0x00000001;
     private const uint FILE_SHARE_WRITE = 0x00000002;

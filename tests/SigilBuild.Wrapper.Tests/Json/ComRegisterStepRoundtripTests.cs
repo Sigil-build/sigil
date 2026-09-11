@@ -9,7 +9,7 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Json;
 
 /// <summary>
-/// T11.2 (P11): the com_register step survives the
+/// The com_register step survives the
 /// <see cref="SerializableInstallStepConverter"/> and the full source-generated
 /// (AOT-safe) <see cref="WrapperBlobJsonContext"/> blob round-trip in both
 /// directions — mirroring <c>ScheduledTaskCreateStepRoundtripTests</c>.

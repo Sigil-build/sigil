@@ -9,7 +9,7 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Json;
 
 /// <summary>
-/// T11.3 (P11): the firewall_rule step survives the
+/// The firewall_rule step survives the
 /// <see cref="SerializableInstallStepConverter"/> and the full source-generated
 /// (AOT-safe) <see cref="WrapperBlobJsonContext"/> blob round-trip in both
 /// directions — mirroring <c>ComRegisterStepRoundtripTests</c>.

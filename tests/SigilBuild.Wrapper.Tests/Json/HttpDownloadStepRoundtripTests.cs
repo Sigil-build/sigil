@@ -9,7 +9,7 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Json;
 
 /// <summary>
-/// P4: the http_download step survives the converter and the source-generated
+/// The http_download step survives the converter and the source-generated
 /// (AOT-safe) JSON context in both directions.
 /// </summary>
 public class HttpDownloadStepRoundtripTests

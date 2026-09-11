@@ -9,7 +9,7 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Json;
 
 /// <summary>
-/// T11.1 (P11): the scheduled_task_create step survives the
+/// The scheduled_task_create step survives the
 /// <see cref="SerializableInstallStepConverter"/> and the full source-generated
 /// (AOT-safe) <see cref="WrapperBlobJsonContext"/> blob round-trip in both
 /// directions — mirroring <c>HttpDownloadStepRoundtripTests</c>.

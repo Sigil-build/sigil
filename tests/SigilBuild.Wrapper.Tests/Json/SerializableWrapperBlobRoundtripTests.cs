@@ -10,7 +10,7 @@ using SigilBuild.Wrapper.Json;
 namespace SigilBuild.Wrapper.Tests.Json;
 
 /// <summary>
-/// Round-trip tests for the M0 manifest/blob data surface additions to
+/// Round-trip tests for the manifest/blob data surface additions to
 /// <see cref="SerializableWrapperBlob"/> — brand token maps, base64
 /// logo/hero, license text, ARP metadata, scope, and declared screens.
 /// Exercises the source-generated <see cref="WrapperBlobJsonContext"/> to
@@ -33,7 +33,7 @@ public class SerializableWrapperBlobRoundtripTests
     [Fact]
     public void Prerequisites_roundtrip_through_the_blob()
     {
-        // P5: full WrapperBlob → DTO → JSON (source-gen) → DTO → WrapperBlob.
+        // Full WrapperBlob → DTO → JSON (source-gen) → DTO → WrapperBlob.
         var blob = new WrapperBlob(
             AppId: "com.x",
             Parameters: Array.Empty<ParameterDefinition>(),
@@ -94,7 +94,7 @@ public class SerializableWrapperBlobRoundtripTests
     }
 
     /// <summary>
-    /// P12 (T12.5): the web-installer stub marker round-trips through the
+    /// The web-installer stub marker round-trips through the
     /// source-generated JSON context both ways — false (the embedded-payload
     /// default) and true (a synthesized stub blob).
     /// </summary>
@@ -204,7 +204,7 @@ public class SerializableWrapperBlobRoundtripTests
     [Fact]
     public void Installer_vars_roundtrip_in_declaration_order()
     {
-        // P1: installer.vars survive WrapperBlob -> Serializable -> wire ->
+        // installer.vars survive WrapperBlob -> Serializable -> wire ->
         // Serializable -> WrapperBlob, preserving declaration order and expressions.
         var blob = new WrapperBlob(
             AppId: "com.acme.Studio",
@@ -241,7 +241,7 @@ public class SerializableWrapperBlobRoundtripTests
     [Fact]
     public void Custom_and_builtin_option_components_roundtrip_through_the_blob()
     {
-        // P10: a built-in and a custom component survive
+        // A built-in and a custom component survive
         // WrapperBlob -> DTO -> JSON (source-gen) -> DTO -> WrapperBlob, preserving
         // the custom flag, localized label/description, and the `when` gate.
         var blob = new WrapperBlob(
@@ -284,7 +284,7 @@ public class SerializableWrapperBlobRoundtripTests
     [Fact]
     public void Lifecycle_hooks_and_run_after_install_roundtrip()
     {
-        // P2: hooks + launch target survive WrapperBlob -> Serializable -> wire ->
+        // Hooks + launch target survive WrapperBlob -> Serializable -> wire ->
         // Serializable -> WrapperBlob.
         InstallStep Run(string id) => new InstallStep.RunProgram(
             id, id + ".exe", System.Array.Empty<string>(), Wait: true, Cwd: null,
@@ -347,8 +347,8 @@ public class SerializableWrapperBlobRoundtripTests
     [Fact]
     public void License_text_roundtrips()
     {
-        // P9 (gap G10): LicenseText is now a tag -> text map (one entry per
-        // manifest-declared language), read at pack time.
+        // LicenseText is now a tag -> text map (one entry per
+        // manifest-declared language), read at pack time. (G10)
         var license = new Dictionary<string, string>
         {
             ["en"] = "Copyright (c) Acme.\nAll rights reserved.\n",
@@ -425,9 +425,9 @@ public class SerializableWrapperBlobRoundtripTests
         back.Fields[1].Widget.Should().Be("radio");
     }
 
-    // ── LocalizedText (P9, gap G10): Title/Subtitle/Description carry a
+    // ── LocalizedText: Title/Subtitle/Description carry a
     //    Dictionary<string,string> on the wire; installer.language rides
-    //    alongside as a plain string. ──────────────────────────────────────────
+    //    alongside as a plain string. (G10) ─────────────────────────────────────
 
     [Fact]
     public void Blob_RoundTrips_LocalizedFields()

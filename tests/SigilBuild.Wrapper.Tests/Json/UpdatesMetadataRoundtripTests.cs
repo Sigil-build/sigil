@@ -10,9 +10,9 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Json;
 
 /// <summary>
-/// P12 (T12.3): the app manifest's <c>updates:</c> metadata (manifestUrl /
+/// The app manifest's <c>updates:</c> metadata (manifestUrl /
 /// signingKey / channel) survives the blob wire form so the <c>/Update</c>
-/// runtime can read it back (M0 lockstep discipline). Plain strings — no new
+/// runtime can read it back. Plain strings — no new
 /// source-gen registration needed on <see cref="WrapperBlobJsonContext"/>.
 /// </summary>
 public class UpdatesMetadataRoundtripTests

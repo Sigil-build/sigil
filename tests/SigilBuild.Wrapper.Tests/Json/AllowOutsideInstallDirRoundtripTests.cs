@@ -6,10 +6,10 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Json;
 
 /// <summary>
-/// R16: the <c>allow_outside_install_dir</c> opt-out is an envelope field on the
+/// The <c>allow_outside_install_dir</c> opt-out is an envelope field on the
 /// base <see cref="InstallStep"/> record, so it has to survive the AOT-safe wire
 /// form for every step type that can carry it — the runtime steps read it out of
-/// the blob, not out of the manifest.
+/// the blob, not out of the manifest. (R16)
 /// </summary>
 public class AllowOutsideInstallDirRoundtripTests
 {

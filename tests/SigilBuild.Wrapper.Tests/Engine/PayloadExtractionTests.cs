@@ -76,7 +76,7 @@ public sealed class PayloadExtractionTests
     }
 
     /// <summary>
-    /// Build a deterministic <c>SIGIL_PAYLOAD_V2</c> zstd container (T6) via the
+    /// Build a deterministic <c>SIGIL_PAYLOAD_V2</c> zstd container via the
     /// shared <see cref="PayloadCodec"/> — the same encoder the packager uses — so
     /// the extraction tests exercise the real on-disk container format.
     /// </summary>

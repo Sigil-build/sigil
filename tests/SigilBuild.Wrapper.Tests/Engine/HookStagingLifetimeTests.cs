@@ -20,18 +20,18 @@ using Xunit;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>1. A silent bypass.</b> The release cleared the verified-download record, so a hook
-/// <c>run_program</c> of a binary the install body downloaded found nothing, took the
-/// "this run did not download it" path, and was launched with <b>no SHA-256 re-check, no
+/// <b>1. A silent bypass.</b> If the release clears the verified-download record, a hook
+/// <c>run_program</c> of a binary the install body downloaded finds nothing, takes the
+/// "this run did not download it" path, and is launched with <b>no SHA-256 re-check, no
 /// held handle and no Authenticode verdict</b> — indistinguishable, from the outside, from
-/// a launch that had all three. That is the same shape as the disarmed gate fixed one
-/// round earlier: absent rather than refusing, with nothing said. R11's text is "before
-/// launching ANY downloaded binary"; a hook is not an exception to it.
+/// a launch that had all three: a gate absent rather than refusing, with nothing said. The
+/// rule is "before launching ANY downloaded binary"; a hook is not an exception to it.
+/// (R11)
 /// </para>
 /// <para>
-/// <b>2. An unbounded leak.</b> Resolving <c>{staging_dir}</c> in such a hook minted a
-/// second <c>SecureStaging</c> that nothing ever disposed — a hardened directory per
-/// install, in <c>%ProgramData%</c> on an elevated run.
+/// <b>2. An unbounded leak.</b> Resolving <c>{staging_dir}</c> in such a hook must not
+/// mint a second <c>SecureStaging</c> that nothing disposes — that is a hardened directory
+/// per install, in <c>%ProgramData%</c> on an elevated run.
 /// </para>
 /// <para>
 /// <b>Elevated vs unelevated.</b> Neither test reads an elevation token, and no assertion

@@ -12,7 +12,7 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Engine;
 
 /// <summary>
-/// P2 (gap G4): the run-after-install launch. The token-level "de-elevate when the
+/// The run-after-install launch. The token-level "de-elevate when the
 /// installer ran as admin" assertion needs an elevated runner and belongs to the
 /// VM matrix; here we prove the launch mechanism starts the target and that a
 /// silent install starts it only with <c>/launch</c>. Windows-only (uses cmd.exe).
@@ -58,7 +58,7 @@ public sealed class LaunchTests
     /// <c>LaunchAppUnelevated</c> reports that it started one. Kept separate from
     /// <see cref="LaunchAppUnelevated_direct_spawn_produces_the_observable_side_effect"/>
     /// so an elevated runner still executes these assertions instead of returning
-    /// early from a single combined test (register row R6).
+    /// early from a single combined test. (R6)
     /// </summary>
     [WindowsFact]
     public void LaunchAppUnelevated_reports_starting_the_run_after_install_target()
@@ -90,8 +90,8 @@ public sealed class LaunchTests
     /// guaranteed write access to this process's temp dir) — exactly the
     /// token-level behaviour this class's doc comment says belongs to the VM
     /// matrix. So the marker assertion is gated on the reliable direct-spawn path,
-    /// and the gate now reports a genuine Skipped result naming that precondition
-    /// instead of returning early and reporting PASSED (register row R6).
+    /// and the gate reports a genuine Skipped result naming that precondition
+    /// instead of returning early and reporting PASSED. (R6)
     /// </remarks>
     [UnelevatedWindowsFact]
     public async Task LaunchAppUnelevated_direct_spawn_produces_the_observable_side_effect()

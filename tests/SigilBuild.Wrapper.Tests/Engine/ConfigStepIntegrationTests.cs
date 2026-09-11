@@ -12,7 +12,7 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Engine;
 
 /// <summary>
-/// P8: end-to-end coverage for the ini_write / json_edit / xml_edit steps —
+/// End-to-end coverage for the ini_write / json_edit / xml_edit steps —
 /// create_if_missing modes, byte-exact rollback, created-file removal, a /silent
 /// run exercising all three, and secret redaction in the log.
 /// </summary>
@@ -110,22 +110,22 @@ public sealed class ConfigStepIntegrationTests
             var blob = new WrapperBlob(
                 AppId: appId,
                 Parameters: Array.Empty<ParameterDefinition>(),
-                // R16 contains every step destination to install_dir. These three
-                // edit files in an OS temp directory, which no real silent install
+                // Containment anchors every step destination to install_dir. These
+                // three edit files in an OS temp directory, which no real silent install
                 // resolves as install_dir — so the fixture declares the out-of-tree
                 // write with the very per-step manifest opt-out a publisher editing
                 // %ProgramData% would use. The production rule is not relaxed;
-                // StepDestinationContainmentTests exercises it directly.
+                // StepDestinationContainmentTests exercises it directly. (R16)
                 InstallSteps: new InstallStep[]
                 {
                     new InstallStep.IniWrite("i", ini, "app", "x", "9", false, null, OnFailure.Fail)
                         { AllowOutsideInstallDir = true },
                     new InstallStep.JsonEdit("j", json, "/a", "2", false, null, OnFailure.Fail)
                         { AllowOutsideInstallDir = true },
-                    // R35: `value_type` must survive the blob wire, not only the
-                    // in-process editor. This step lands as a NUMBER only if the flag
-                    // reached the runtime; "j" above lands as a STRING because the
-                    // default is now `string`.
+                    // `value_type` must survive the blob wire, not only the in-process
+                    // editor. This step lands as a NUMBER only if the flag reached the
+                    // runtime; "j" above lands as a STRING because the default is
+                    // `string`. (R35)
                     new InstallStep.JsonEdit(
                         "j2", json, "/b", "7", false, null, OnFailure.Fail, JsonValueType.Json)
                         { AllowOutsideInstallDir = true },
@@ -174,8 +174,8 @@ public sealed class ConfigStepIntegrationTests
                 },
                 InstallSteps: new InstallStep[]
                 {
-                    // R16: an OS temp directory is never install_dir — see the
-                    // note in Silent_install_applies_all_three_config_edits.
+                    // An OS temp directory is never install_dir — see the note in
+                    // Silent_install_applies_all_three_config_edits. (R16)
                     new InstallStep.IniWrite("i", ini, "auth", "token", "${parameters.token}", false, null, OnFailure.Fail)
                         { AllowOutsideInstallDir = true },
                 },

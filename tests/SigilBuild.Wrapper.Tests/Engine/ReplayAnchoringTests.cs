@@ -14,11 +14,11 @@ using SigilBuild.Wrapper.Tests.Helpers;
 using Xunit;
 
 /// <summary>
-/// R1, clause (c): journal records carried absolute paths and full registry
-/// coordinates with no anchoring, so a planted <c>uninstall.json</c> handed the
-/// elevated process arbitrary file write/delete, arbitrary HKLM write, a machine
-/// <c>PATH</c> hijack, service deletion, and — via <c>unregister_com</c> —
-/// <c>LoadLibrary</c> plus an export call on an attacker-chosen DLL.
+/// Journal records must not carry unanchored absolute paths and full registry
+/// coordinates: a planted <c>uninstall.json</c> would then hand the elevated process
+/// arbitrary file write/delete, arbitrary HKLM write, a machine <c>PATH</c> hijack,
+/// service deletion, and — via <c>unregister_com</c> — <c>LoadLibrary</c> plus an
+/// export call on an attacker-chosen DLL. (R1)
 /// </summary>
 /// <remarks>
 /// <para>
@@ -79,7 +79,8 @@ public class ReplayAnchoringTests
         var outcome = await journal.UndoAsync(
             ReplayAnchorage.ForInstallDir(installDir.Path, SignedDeclarations.None), progress: null, ct: CancellationToken.None);
 
-        // Assert — the structured shape lane S5 consumes for R15, not just the prose.
+        // Assert — the structured shape the uninstall outcome reports, not just the
+        // prose. (R15)
         var refusal = outcome.RefusedRecords.Should().ContainSingle().Subject;
         refusal.RecordType.Should().Be("unregister_com");
         refusal.Target.Should().Be(evil);
@@ -157,9 +158,9 @@ public class ReplayAnchoringTests
     [InlineData("restore_config_file")]
     public void Every_path_bearing_record_is_refused_outside_the_anchor(string type)
     {
-        // Arrange — the whole path-bearing half of R1's evidence table, each with a
+        // Arrange — the whole path-bearing half of the attack table, each with a
         // target in a scratch directory that is neither the install dir nor a scope
-        // root. Predicate only; nothing is executed.
+        // root. Predicate only; nothing is executed. (R1)
         using var installDir = new TempDir();
         using var elsewhere = new TempDir();
         var outside = Path.Combine(elsewhere.Path, "outside.dat");
@@ -204,13 +205,13 @@ public class ReplayAnchoringTests
     [WindowsFact("Windows-only state layout")]
     public void One_apps_journal_cannot_reach_another_apps_state_file()
     {
-        // Arrange — the allowlist used to be the SHARED <StateRoot>\Sigil parent, so a
-        // record in app A's journal could name app B's uninstall.json. Deleting it makes
-        // B unremovable ("no uninstall state found"); overwriting it is worse, because
-        // the elevated process writes inside the hardened directory and the result comes
-        // out Administrators-owned — passing B's provenance gate on its next load, which
-        // launders attacker content into trusted state. Predicate only; no file is
-        // created, read or deleted.
+        // Arrange — the allowlist must not be the SHARED <StateRoot>\Sigil parent: a
+        // record in app A's journal could then name app B's uninstall.json. Deleting it
+        // makes B unremovable ("no uninstall state found"); overwriting it is worse,
+        // because the elevated process writes inside the hardened directory and the
+        // result comes out Administrators-owned — passing B's provenance gate on its next
+        // load, which launders attacker content into trusted state. Predicate only; no
+        // file is created, read or deleted.
         using var installDir = new TempDir();
         var appA = "sigil.appA." + Guid.NewGuid().ToString("N");
         var appB = "sigil.appB." + Guid.NewGuid().ToString("N");
@@ -274,13 +275,13 @@ public class ReplayAnchoringTests
     [InlineData("restore_config_file")]
     public void A_contained_destination_fed_from_an_uncontained_source_is_refused(string type)
     {
-        // Arrange — the register's wording for these rows is "arbitrary file / tree write
-        // FROM AN ATTACKER-CHOSEN STASH". Checking only the destination is a narrower
-        // guarantee than that: the bytes still come from wherever the record says.
+        // Arrange — the attack is "arbitrary file / tree write FROM AN ATTACKER-CHOSEN
+        // STASH". Checking only the destination is a narrower guarantee than that: the
+        // bytes still come from wherever the record says.
         //
         // The source is CREATED here, which is what makes this the planted case rather
         // than the ordinary one: a persisted record whose stash was already reclaimed
-        // names a path that no longer exists, and that must stay quiet (see
+        // names a path that does not exist, and that must stay quiet (see
         // A_persisted_record_whose_stash_was_reclaimed_replays_silently).
         using var installDir = new TempDir();
         using var elsewhere = new TempDir();
@@ -503,7 +504,7 @@ public class ReplayAnchoringTests
     // ---------------------------------------------------------------------------
 
     [WindowsTheory("Windows registry semantics")]
-    // Not application-configuration space at all: R1's named coordinates.
+    // Not application-configuration space at all: the named attack coordinates. (R1)
     [InlineData("HKLM", @"SYSTEM\CurrentControlSet\Services\Spooler")]
     [InlineData("HKLM", @"System\CurrentControlSet\Control\Session Manager\Environment")]
     // Execution hijacks that DO live under Software\ — a bare "must be under Software"
@@ -519,9 +520,9 @@ public class ReplayAnchoringTests
     [InlineData("HKLM", @"Software\Classes\Directory\shell\evil\command")]
     [InlineData("HKLM", @"Software\Classes\.exe\shell\open\command")]
     [InlineData("HKLM", @"Software\Policies\Microsoft\Windows\System")]
-    // The progids each successive review round turned up. They are refused by SHAPE —
-    // none of these names appears anywhere in ReplayAnchor — which is the point: the
-    // next unheard-of progid is covered too.
+    // Hijackable system progids. They are refused by SHAPE — none of these names
+    // appears anywhere in ReplayAnchor — which is the point: the next unheard-of progid
+    // is covered too.
     [InlineData("HKLM", @"Software\Classes\txtfile\shell\open\command")]
     [InlineData("HKLM", @"Software\Classes\lnkfile\shell\open\command")]
     [InlineData("HKLM", @"Software\Classes\mscfile\shell\open\command")]
@@ -544,9 +545,9 @@ public class ReplayAnchoringTests
         var record = new RollbackRecord.RestoreRegistryValue(
             hive, key, "Value", "default", "REG_SZ", @"C:\Users\Public\evil.exe", PreviouslyAbsent: false);
 
-        // Act — the manifest DECLARES the key under test (R51), so the refusal can only
-        // come from the space and shape rules this test exists for. Declaring a
-        // dangerous coordinate must not be a way to have it replayed.
+        // Act — the manifest DECLARES the key under test, so the refusal can only come
+        // from the space and shape rules this test exists for. Declaring a dangerous
+        // coordinate must not be a way to have it replayed. (R51)
         var verdict = AnchorDeclaring(installDir.Path, hive, key).Check(record);
 
         // Assert
@@ -565,8 +566,8 @@ public class ReplayAnchoringTests
     {
         // Arrange — the positives that keep real uninstalls working: a registry_write
         // step may name any key the manifest author chose, including the app's own
-        // progid, its own file extension, and its own ARP row. Since R51 those keys must
-        // be DECLARED to replay — which is what the step that wrote them does.
+        // progid, its own file extension, and its own ARP row. Those keys must be
+        // DECLARED to replay — which is what the step that wrote them does. (R51)
         using var installDir = new TempDir();
         var record = new RollbackRecord.RestoreRegistryValue(
             hive, key, "Installed", "default", "REG_SZ", null, PreviouslyAbsent: true);
@@ -661,9 +662,9 @@ public class ReplayAnchoringTests
             PriorValue: $"\"{evil}\" \"%1\"",
             PreviouslyAbsent: false);
 
-        // Act — the key is DECLARED, so R51's allowlist passes it through and the
+        // Act — the key is DECLARED, so the allowlist passes it through and the
         // execution-mapping rule is what refuses it. This is the layering stated as a
-        // test: a manifest declaration does not buy an unowned machine-wide mapping.
+        // test: a manifest declaration does not buy an unowned machine-wide mapping. (R51)
         var verdict = AnchorDeclaring(
             installDir.Path, "HKLM", @"Software\Classes\exefile\shell\open\command").Check(record);
 
@@ -678,7 +679,7 @@ public class ReplayAnchoringTests
     // A subkey or value name that happens to be spelled like an execution-mapping
     // segment, in ordinary application space. None of these has execution semantics, and
     // refusing them strands a value on every legitimate uninstall AND pollutes the
-    // RefusedRecords list lane S5 reads for R15.
+    // RefusedRecords list the uninstall outcome reports. (R15)
     [InlineData(@"Software\Acme\App\command")]
     [InlineData(@"Software\Acme\App\TreatAs")]
     [InlineData(@"Software\Acme\App\LocalServer")]
@@ -763,7 +764,7 @@ public class ReplayAnchoringTests
     }
 
     // ---------------------------------------------------------------------------
-    // Environment — R1's named PATH-hijack primitive, in both scopes.
+    // Environment — the named PATH-hijack primitive, in both scopes. (R1)
     // ---------------------------------------------------------------------------
 
     [WindowsFact("Windows registry semantics")]
@@ -844,13 +845,13 @@ public class ReplayAnchoringTests
         // anything, and "restore PATH to absent" — which breaks the box — would be
         // permitted. Predicate only; the registry is read, never written.
         //
-        // The assertion deliberately does NOT depend on the ambient profile. The user
-        // row previously required HKCU\Environment\Path to exist and would have gone red
-        // on a fresh profile or a clean CI runner. Rather than have the fixture write a
-        // real PATH value — precisely the kind of thing this file exists to avoid — the
-        // predicate now fails closed when a system-critical variable's current value
-        // cannot be read, so the refusal holds on every host. Both branches produce a
-        // reason beginning "deleting <scope>-scope 'Path'", which is what is asserted.
+        // The assertion deliberately does NOT depend on the ambient profile: requiring
+        // HKCU\Environment\Path to exist goes red on a fresh profile or a clean CI
+        // runner. Rather than have the fixture write a real PATH value — precisely the
+        // kind of thing this file exists to avoid — the predicate fails closed when a
+        // system-critical variable's current value cannot be read, so the refusal holds
+        // on every host. Both branches produce a reason beginning "deleting <scope>-scope
+        // 'Path'", which is what is asserted.
         using var installDir = new TempDir();
         var record = new RollbackRecord.RestoreEnv(
             scope, "Path", PriorValue: null, PreviouslyAbsent: true);
@@ -890,7 +891,7 @@ public class ReplayAnchoringTests
     public void Deleting_an_ordinary_application_variable_the_install_created_is_allowed()
     {
         // Arrange — the POSITIVE half of the delete rule, and the case that keeps real
-        // uninstalls (and the T10 reinstall cleanup) working: an installer legitimately
+        // uninstalls (and the reinstall cleanup) working: an installer legitimately
         // sets something like ACME_HOME to a data directory OUTSIDE install_dir, and its
         // removal must still replay. A false "the install created this" claim on an
         // ordinary variable costs one deleted application variable — a nuisance, not a
@@ -1159,8 +1160,8 @@ public class ReplayAnchoringTests
     public async Task Replay_still_reverses_a_legitimate_record_inside_the_install_dir()
     {
         // Arrange — THE test that keeps anchoring honest, executed for real against
-        // scratch coordinates: a file the install created inside install_dir, reversed
-        // by exactly the record a file_copy step records.
+        // scratch coordinates: a file the install created inside install_dir, undone by
+        // exactly the record a file_copy step writes.
         using var installDir = new TempDir();
         var installed = Path.Combine(installDir.Path, "app.exe");
         File.WriteAllText(installed, "payload");
@@ -1233,7 +1234,7 @@ public class ReplayAnchoringTests
     }
 
     // ---------------------------------------------------------------------------
-    // The RefusedRecords contract (lane S5 consumes this in Stage 2 for R15).
+    // The RefusedRecords contract, which the uninstall outcome reports. (R15)
     // ---------------------------------------------------------------------------
 
     [WindowsFact("Windows path + registry semantics")]
@@ -1252,8 +1253,8 @@ public class ReplayAnchoringTests
         var registry = anchor.Check(new RollbackRecord.RestoreRegistryValue(
             "HKLM", @"SYSTEM\CurrentControlSet\Services\Spooler", "ImagePath", "default",
             "REG_SZ", @"C:\Users\Public\evil.exe", false));
-        // Declared (R51), so this record reaches the execution-mapping rule and carries
-        // that rule's code rather than the allowlist's.
+        // Declared, so this record reaches the execution-mapping rule and carries that
+        // rule's code rather than the allowlist's. (R51)
         var mapping = AnchorDeclaring(
                 installDir.Path, "HKLM", @"Software\Classes\exefile\shell\open\command")
             .Check(new RollbackRecord.RestoreRegistryValue(
@@ -1330,12 +1331,12 @@ public class ReplayAnchoringTests
 
     /// <summary>
     /// An anchor whose signed manifest declares <paramref name="keys"/> in
-    /// <paramref name="hive"/> (R51). Every registry test that expects a record to be
-    /// judged on its SPACE or its SHAPE now has to declare the key first — otherwise the
-    /// allowlist refuses it earlier and the test would pass without exercising the rule
-    /// it was written for. Declaring a key is exactly what a manifest carrying a
-    /// <c>registry_write</c> step for it does; it is not an escape hatch, which is what
-    /// the deny-list and execution-mapping negatives below now also prove.
+    /// <paramref name="hive"/>. Every registry test that expects a record to be judged
+    /// on its SPACE or its SHAPE has to declare the key first — otherwise the allowlist
+    /// refuses it earlier and the test passes without exercising the rule it was written
+    /// for. Declaring a key is exactly what a manifest carrying a <c>registry_write</c>
+    /// step for it does; it is not an escape hatch, which is what the deny-list and
+    /// execution-mapping negatives below also prove. (R51)
     /// </summary>
     private static ReplayAnchor AnchorDeclaring(string installDir, string hive, params string[] keys) =>
         ReplayAnchor.For(ReplayAnchorage.ForInstallDir(
@@ -1423,7 +1424,7 @@ public class ReplayAnchoringTests
     /// Create a GUID-named scratch variable in the CURRENT USER's <c>Environment</c> key.
     /// Never a system variable and never machine scope; removed by
     /// <see cref="DeleteUserEnv"/> in the caller's <c>finally</c>. Same pattern as
-    /// <c>ReinstallIdempotencyTests</c>, which predates this lane.
+    /// <c>ReinstallIdempotencyTests</c>.
     /// </summary>
     private static void WriteUserEnv(string name, string value)
     {

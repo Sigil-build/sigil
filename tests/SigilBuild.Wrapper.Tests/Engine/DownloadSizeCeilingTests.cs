@@ -19,8 +19,8 @@ using SigilBuild.Wrapper.Update;
 using Xunit;
 
 /// <summary>
-/// Register row R10 — no size cap on any download, and the channel manifest fully
-/// buffered before its signature is checked.
+/// Every download needs a size cap, and the channel manifest must not be fully
+/// buffered before its signature is checked. (R10)
 /// </summary>
 /// <remarks>
 /// <para>
@@ -28,9 +28,9 @@ using Xunit;
 /// </para>
 /// <list type="number">
 ///   <item><description>
-///   <b><see cref="SigilDownloader"/>'s file ceiling.</b> <c>Content-Length</c> was read
-///   only to compute a progress percentage, and the read loop had no cap at all. Both
-///   halves of the fix are asserted, and they are told apart by <em>whether the
+///   <b><see cref="SigilDownloader"/>'s file ceiling.</b> <c>Content-Length</c> must gate
+///   the transfer, not merely compute a progress percentage, and the read loop must cap
+///   independently. Both halves are asserted, and they are told apart by <em>whether the
 ///   destination file was ever created</em>: the declared-oversize refusal happens before
 ///   the destination is opened, the mid-stream abort necessarily after.
 ///   </description></item>
@@ -38,8 +38,7 @@ using Xunit;
 ///   <b><see cref="HttpUpdateResourceFetcher"/>'s pre-authentication ceiling.</b> That
 ///   buffer is filled before <c>ChannelManifestVerifier.Verify</c> runs, so every byte
 ///   in it is accepted on an unauthenticated party's say-so. These tests name no type
-///   and no member that did not already exist, so the whole class of them can be dropped
-///   onto the parent commit unchanged to watch them fail.
+///   and no member the ceiling introduced, so they are non-vacuous against its absence.
 ///   </description></item>
 /// </list>
 /// <para>
@@ -157,10 +156,10 @@ public sealed class DownloadSizeCeilingTests
     // ── 4. The pre-authentication buffer (the higher-value half) ───────────────
 
     /// <summary>
-    /// The decisive negative test for R10, and the one that compiles unchanged on the
-    /// parent commit: <see cref="HttpUpdateResourceFetcher.FetchAsync"/>'s signature is
-    /// untouched by the fix. On the parent it buffers the whole undeclared body and
-    /// reports success; here it must refuse.
+    /// The decisive negative test, and one that depends on no new API:
+    /// <see cref="HttpUpdateResourceFetcher.FetchAsync"/>'s signature is untouched by the
+    /// ceiling. Without it the whole undeclared body is buffered and reported as success;
+    /// here it must refuse. (R10)
     /// </summary>
     [Fact]
     public async Task The_channel_manifest_fetch_aborts_an_undeclared_oversized_body()

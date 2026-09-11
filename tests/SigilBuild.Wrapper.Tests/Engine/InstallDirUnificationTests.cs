@@ -13,15 +13,15 @@ using SigilBuild.Wrapper.Tests.Helpers;
 using Xunit;
 
 /// <summary>
-/// Cross-task regression for the install-dir divergence bug: the survivable
-/// <c>uninstall.exe</c> copy and the ARP <c>UninstallString</c> MUST land in the
-/// exact SINGLE install directory that T13's <see cref="InstallDirResolver"/>
-/// resolved for the run (honoring <c>/D=</c>, the manifest <c>install_dir</c>, the
-/// wizard-collected path, else <c>&lt;scope root&gt;\&lt;App.Name&gt;</c>) — the same
-/// directory the install steps copied files into. The former code recomputed the
-/// location as <c>ScopeLayout.InstallRoot + AppId</c>, so a <c>/D=</c> override put
-/// files in one place and the uninstaller in another. These tests pin that they now
-/// coincide (no divergence). Windows-only (real HKCU ARP write); a no-op elsewhere.
+/// The install-dir divergence guard: the survivable <c>uninstall.exe</c> copy and the
+/// ARP <c>UninstallString</c> MUST land in the exact SINGLE install directory
+/// <see cref="InstallDirResolver"/> resolved for the run (honoring <c>/D=</c>, the
+/// manifest <c>install_dir</c>, the wizard-collected path, else
+/// <c>&lt;scope root&gt;\&lt;App.Name&gt;</c>) — the same directory the install steps
+/// copied files into. Recomputing the location as
+/// <c>ScopeLayout.InstallRoot + AppId</c> instead puts files in one place and the
+/// uninstaller in another whenever <c>/D=</c> is given. Windows-only (real HKCU ARP
+/// write); a no-op elsewhere.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class InstallDirUnificationTests
@@ -72,7 +72,7 @@ public sealed class InstallDirUnificationTests
         // the uninstaller copy itself makes the directory when needed.
         var overrideDir = Path.Combine(tmp.Path, "G3App");
 
-        // The dir the T13 resolver computes for these exact inputs — what the STEPS use.
+        // The dir the resolver computes for these exact inputs — what the STEPS use.
         var stepInstallDir = InstallDirResolver.Resolve(
             scope: InstallScope.User,
             appName: "G3App",

@@ -12,7 +12,7 @@ using SigilBuild.Wrapper.Tests.Helpers;
 using Xunit;
 
 /// <summary>
-/// T15 uninstall survivability: the running installer is copied into the install
+/// Uninstall survivability: the running installer is copied into the install
 /// dir as <c>uninstall.exe</c>, the copy is journaled (so uninstall / rollback
 /// reverse it), the ARP <c>UninstallString</c> targets that copy rather than the
 /// downloaded setup exe, and the self-deletion record tolerates the running image.
@@ -79,7 +79,7 @@ public sealed class InstallSurvivabilityTests
 
         uninstallString.Should().Contain("uninstall.exe");
         uninstallString.Should().Contain("/S /Uninstall /currentuser");
-        // The critical T15 guarantee: ARP does NOT point at the (deletable) download.
+        // The critical guarantee: ARP does NOT point at the (deletable) download.
         uninstallString.Should().NotContain("Downloaded-Setup.exe");
     }
 

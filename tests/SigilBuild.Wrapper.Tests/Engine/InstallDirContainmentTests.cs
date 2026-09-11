@@ -11,10 +11,10 @@ using SigilBuild.Wrapper.Engine;
 using SigilBuild.Wrapper.Tests.Helpers;
 
 /// <summary>
-/// Register row R3: <c>/D=</c> was accepted unvalidated, and <c>{install_dir}</c>
-/// substitutes into <c>scheduled_task_create.program</c> / <c>service_install.binary_path</c>
-/// — both SYSTEM-level. Every <c>install_dir</c> source must be contained to the
-/// scope root, not just <c>/D=</c>.
+/// <c>{install_dir}</c> substitutes into <c>scheduled_task_create.program</c> /
+/// <c>service_install.binary_path</c> — both SYSTEM-level — so every
+/// <c>install_dir</c> source must be contained to the scope root, not just an
+/// unvalidated <c>/D=</c>. (R3)
 /// </summary>
 public sealed class InstallDirContainmentTests
 {
@@ -54,7 +54,7 @@ public sealed class InstallDirContainmentTests
 
     // ── Every source, not just /D= ────────────────────────────────────────────
     // A manifest author pointing at C:\Users\Public is the same hole, and so is
-    // a recovered prior install dir (R1's neighbour) or a wizard-collected path.
+    // a recovered prior install dir or a wizard-collected path. (R1)
 
     [WindowsFact("Windows scope roots")]
     public void Machine_scope_rejects_an_out_of_root_manifest_install_dir()
@@ -83,10 +83,10 @@ public sealed class InstallDirContainmentTests
         act.Should().Throw<InstallDirRejectedException>().WithMessage("*outside*");
     }
 
-    // NOTE: an out-of-root `priorInstallDir` was refused in the first cut of this
-    // lane. That was reversed by ruling — see the grandfather-clause section
-    // below. A recovered prior directory is not attacker-supplied input, and
-    // refusing it stranded installs that predate containment.
+    // NOTE: an out-of-root `priorInstallDir` is deliberately NOT refused — see
+    // the grandfather-clause section below. A recovered prior directory is not
+    // attacker-supplied input, and refusing it strands installs that predate
+    // containment.
 
     [WindowsFact("Windows scope roots")]
     public void Machine_scope_rejects_a_traversal_escape_from_the_scope_root()
@@ -186,12 +186,11 @@ public sealed class InstallDirContainmentTests
     [WindowsFact("Windows directory junctions")]
     public void Wizard_prefill_does_not_rethrow_when_the_scope_default_is_itself_a_junction()
     {
-        // Fix round 1, Important 2. The fallback inside
-        // catch (InstallDirRejectedException) used to call the CHECKING overload
-        // again. If <InstallRoot>\<AppName> is itself a junction that second call
-        // also rejects — and the exception escapes the very catch written to stop
-        // the first one. App.axaml.cs has no try/catch, so the wizard would die
-        // with no window at all.
+        // The fallback inside catch (InstallDirRejectedException) must not call
+        // the CHECKING overload again. If <InstallRoot>\<AppName> is itself a
+        // junction that second call also rejects — and the exception escapes the
+        // very catch written to stop the first one. App.axaml.cs has no
+        // try/catch, so the wizard would die with no window at all.
         var installRoot = ScopeLayout.For(InstallScope.User).InstallRoot;
         Directory.CreateDirectory(installRoot);
 
@@ -224,12 +223,12 @@ public sealed class InstallDirContainmentTests
         }
     }
 
-    // ── Ruling 1: contain new installs, GRANDFATHER prior ones ────────────────
+    // ── Contain new installs, GRANDFATHER prior ones ──────────────────────────
     //
-    // An install that already lives outside the scope root predates R3. Refusing
-    // it strands the user with an app that can be neither upgraded nor cleanly
-    // removed — worse than the hole it closes, and a prior install dir is not
-    // attacker-supplied input. But the exemption must not become a bypass.
+    // An install that already lives outside the scope root predates containment.
+    // Refusing it strands the user with an app that can be neither upgraded nor
+    // cleanly removed — worse than the hole it closes, and a prior install dir is
+    // not attacker-supplied input. But the exemption must not become a bypass. (R3)
 
     private const string OutOfRootPriorDir = @"C:\Apps\Acme";
 
@@ -306,10 +305,10 @@ public sealed class InstallDirContainmentTests
         // attacker-reachable destination and stays refused even though an
         // out-of-root prior install is recorded.
         //
-        // (The earlier wording here described a precedence gate. That rule was
-        // REVERSED in review round 3 because it made the exemption depend on the
-        // wizard not echoing back its own prefilled path, which refused every
-        // headed upgrade of a pre-containment install. Do not reinstate it.)
+        // Do not key the exemption on submission precedence instead — that design
+        // is broken, because it makes the exemption depend on the wizard not
+        // echoing back its own prefilled path, and so refuses every headed upgrade
+        // of a pre-containment install.
         var act = () => InstallDirResolver.Resolve(
             InstallScope.User,
             appName: "Acme",
@@ -324,11 +323,11 @@ public sealed class InstallDirContainmentTests
 
     // ── The two post-install contexts, driven through their REAL entry points ──
     //
-    // An earlier version of these pins rebuilt StepContext.From by hand with the
-    // same arguments. That guarded nothing: deleting `priorInstallDir` from the
-    // production call sites left it green, because the expectation was constructed
-    // from something other than the thing under test. Both tests below now go
-    // through the real member, and both go red if the argument is removed.
+    // These pins must not rebuild StepContext.From by hand with the same
+    // arguments: the expectation would then be constructed from something other
+    // than the thing under test, so deleting `priorInstallDir` from the production
+    // call sites would leave it green. Both tests below go through the real
+    // member, and both go red if the argument is removed.
 
     [WindowsFact("Windows scope roots")]
     public async Task Done_screen_launch_resolves_a_grandfathered_install_dir()
@@ -511,7 +510,8 @@ public sealed class InstallDirContainmentTests
         // Widening to two Program Files roots must not have widened anything
         // else. Each of these is writable by a non-administrator (ProgramData
         // grants BUILTIN\Users:(CI)(WD,AD,WEA,WA); Windows\Tracing grants
-        // BUILTIN\Users:(RX,W)), which is exactly R3's escalation.
+        // BUILTIN\Users:(RX,W)), which is exactly the escalation containment
+        // exists to stop. (R3)
         var act = () => InstallDirResolver.Resolve(
             InstallScope.Machine,
             appName: "MyApp",

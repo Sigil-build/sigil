@@ -16,8 +16,8 @@ using SigilBuild.Wrapper.Update;
 using Xunit;
 
 /// <summary>
-/// Pins the ordering that makes all three R11 gates sound, and the lifetime that stops a
-/// <c>post_install</c> hook walking around them.
+/// Pins the ordering that makes all three Authenticode launch gates sound, and the
+/// lifetime that stops a <c>post_install</c> hook walking around them. (R11)
 /// </summary>
 /// <remarks>
 /// <para>
@@ -26,10 +26,10 @@ using Xunit;
 /// <c>DownloadedBinaryTrust</c> a string. That is correct <em>only</em> because a
 /// <see cref="FileShare.Read"/> handle on that path is already open and stays open across
 /// the launch, so the bytes <c>WinVerifyTrust</c> reads are provably the bytes the loader
-/// will map. Nothing pinned that. Hoisting the trust check above the open, or widening the
-/// share mode to <see cref="FileShare.ReadWrite"/>, reopens R5/R11/R12's TOCTOU
-/// <em>with the entire suite still green</em> — a security property held by an
-/// undocumented ordering is an accident, not a property.
+/// will map. Unpinned, hoisting the trust check above the open — or widening the share
+/// mode to <see cref="FileShare.ReadWrite"/> — reopens the verify-then-launch TOCTOU
+/// <em>with the entire suite still green</em>; a security property held by an
+/// undocumented ordering is an accident, not a property. (R5, R11, R12)
 /// </para>
 /// <para>
 /// The mechanism is a probe substituted for the Authenticode verdict, which therefore runs

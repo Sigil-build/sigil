@@ -13,7 +13,7 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Engine;
 
 /// <summary>
-/// End-to-end coverage for T5: an embedded payload archive is extracted, a
+/// End-to-end payload coverage: an embedded payload archive is extracted, a
 /// <c>file_copy</c> from a <c>payload://</c> source lands its file, and the
 /// temp extraction dir is always cleaned up — on success and on rollback.
 /// </summary>

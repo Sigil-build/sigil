@@ -20,7 +20,7 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Engine;
 
 /// <summary>
-/// P4 (gap G5): the http_download step against a local HTTPS server with a
+/// The http_download step against a local HTTPS server with a
 /// self-signed certificate (trusted just for the test via the injectable
 /// <see cref="SigilHttpClient"/> seam). Covers success + hash verification,
 /// checksum-mismatch rollback, timeout-then-retry, and retries-exhausted → a
@@ -31,12 +31,12 @@ public sealed class HttpDownloadIntegrationTests
     private static string Sha256Hex(byte[] data) =>
         Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
 
-    // R16 contains http_download's `dest` to install_dir. Every case here
+    // Containment anchors http_download's `dest` to install_dir. Every case here
     // downloads into an OS temp directory, which no real install resolves as
     // install_dir, so the fixture declares the out-of-tree write with the
     // production per-step opt-out — the same one the web-installer stub's
     // synthesized download uses. Containment itself is exercised by
-    // StepDestinationContainmentTests.
+    // StepDestinationContainmentTests. (R16)
     private static InstallStep.HttpDownload Step(string url, string dest, string sha256, int? timeout = null, int? retries = null)
         => new("dl", url, dest, sha256, timeout, retries, When: null, OnFailure.Rollback)
         {
@@ -135,20 +135,20 @@ public sealed class HttpDownloadIntegrationTests
         server.RequestCount.Should().Be(2, "1 initial attempt + 1 retry");
     }
 
-    // ── Register row R5: the gap between the checksum and the launch ──────────
+    // ── The gap between the checksum and the launch (R5) ──────────────────────
 
     /// <summary>
-    /// The decisive R5 case, through the real steps: <c>http_download</c> writes and
+    /// The decisive case, through the real steps: <c>http_download</c> writes and
     /// verifies a binary, something replaces its bytes before the <c>run_program</c> that
-    /// executes it, and the launch must be refused.
+    /// executes it, and the launch must be refused. (R5)
     /// </summary>
     /// <remarks>
     /// <para>
     /// The attacker is stood in for by a <c>file_copy</c> step between the two — an
     /// ordinary catalog step, so no shell quoting or spawned helper can muddy what is
-    /// being asserted. It occupies exactly the window register row R5 describes: the
-    /// download handle is closed before the hash is compared and was never re-opened, so
-    /// pre-fix the swapped bytes were simply executed, elevated.
+    /// being asserted. It occupies exactly the verify-then-launch window: if the
+    /// download handle is closed before the hash is compared and never re-opened, the
+    /// swapped bytes are simply executed, elevated.
     /// </para>
     /// <para>
     /// The substituted bytes are a valid image (the genuine payload plus one trailing
@@ -253,11 +253,10 @@ public sealed class HttpDownloadIntegrationTests
     }
 
     /// <summary>
-    /// The other half of R5's residual: <c>SigilDownloader</c> opened its destination
-    /// with <see cref="FileMode.Create"/>, which opens an <em>existing</em> name and
-    /// truncates it. A hardlink planted at a predictable destination therefore had its
-    /// <b>target</b> rewritten — from an elevated process, an arbitrary-file-write
-    /// primitive.
+    /// The other half of that residual: opening the destination with
+    /// <see cref="FileMode.Create"/> opens an <em>existing</em> name and truncates it, so
+    /// a hardlink planted at a predictable destination has its <b>target</b> rewritten —
+    /// from an elevated process, an arbitrary-file-write primitive. (R5)
     /// </summary>
     /// <remarks>
     /// The victim here is a scratch file in a throwaway directory, never a real system

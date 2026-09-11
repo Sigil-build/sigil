@@ -8,11 +8,11 @@ using SigilBuild.Wrapper.Engine;
 using SigilBuild.Wrapper.Tests.Helpers;
 
 /// <summary>
-/// The pure seam behind register rows R3 and R9. Exercising the predicate
+/// The pure seam behind the privileged-target guard. Exercising the predicate
 /// directly is what lets the accept side be proved at all: running one of the
 /// four privileged steps to completion would create a real scheduled task,
 /// service, COM registration or firewall rule on an elevated runner, so no test
-/// does that — the steps are only ever driven down their refusal paths.
+/// does that — the steps are only ever driven down their refusal paths. (R3, R9)
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class PrivilegedTargetGuardTests
@@ -66,9 +66,9 @@ public sealed class PrivilegedTargetGuardTests
     [WindowsFact("Windows ACL APIs")]
     public void Refuses_a_contained_target_whose_directory_a_non_administrator_can_write()
     {
-        // The check that actually stops R3: containment alone is satisfied by any
-        // path under install_dir, and a per-user install root is always
-        // user-writable. %ProgramData% is the register's own R1 example.
+        // The check that actually stops the escalation: containment alone is satisfied
+        // by any path under install_dir, and a per-user install root is always
+        // user-writable. %ProgramData% is the canonical example. (R1, R3)
         using var installDir = new TempDir();
 
         var message = PrivilegedTargetGuard.Check(

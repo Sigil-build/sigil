@@ -15,18 +15,18 @@ using SigilBuild.Wrapper.Tests.Helpers;
 using Xunit;
 
 /// <summary>
-/// R12's primitive: <see cref="SecureStaging"/> — a private per-run staging
-/// directory plus <c>OpenVerified</c>, which re-hashes a staged file from an open
-/// handle whose sharing mode denies write and delete and hands that handle back to
-/// be held across <c>Process.Start</c>.
+/// The verify-then-launch primitive: <see cref="SecureStaging"/> — a private per-run
+/// staging directory plus <c>OpenVerified</c>, which re-hashes a staged file from an
+/// open handle whose sharing mode denies write and delete and hands that handle back
+/// to be held across <c>Process.Start</c>.
 /// </summary>
 /// <remarks>
 /// <para>
 /// The decisive case is
 /// <see cref="OpenVerified_throws_when_the_staged_file_changed_after_it_was_hashed"/>:
 /// stage a file, take its hash, overwrite it, then ask for it back under the
-/// original hash. That is exactly the swap R12 describes, and it must be a hard
-/// refusal.
+/// original hash. That is exactly the post-verification swap, and it must be a hard
+/// refusal. (R12)
 /// </para>
 /// <para>
 /// <b>This file runs UNELEVATED</b> (as the whole suite does). An unelevated process
@@ -172,10 +172,10 @@ public sealed class SecureStagingTests
     /// <b>This asserts the unelevated contract unconditionally, on every host.</b> It goes
     /// through the <em>public</em> entry point, and the assembly-wide test floor forces the
     /// unelevated siting there, so branching on <c>Elevation.IsProcessElevated()</c> would
-    /// now be wrong: on an elevated runner the token says "elevated" while the siting is
-    /// deliberately not. An earlier revision did branch that way and passed on CI only
-    /// because the suite was still staging into the real <c>%ProgramData%</c> — the bug.
-    /// The elevated contract moved to
+    /// be wrong: on an elevated runner the token says "elevated" while the siting is
+    /// deliberately not. Branching that way only passes while the suite still stages into
+    /// the real <c>%ProgramData%</c> — which is the thing the floor exists to stop. The
+    /// elevated contract lives in
     /// <see cref="The_elevated_siting_agrees_with_the_frozen_predicate_or_refuses"/>, which
     /// asks for that siting explicitly.
     /// </remarks>
@@ -185,7 +185,7 @@ public sealed class SecureStagingTests
         using var root = new TempDir();
         using var staging = Staging("prereq", root.Path);
 
-        // The single frozen predicate (S1) is the only answer consulted — SecureStaging
+        // The single frozen predicate is the only answer consulted — SecureStaging
         // implements no second ACL check, so its own flag must agree with it.
         staging.IsAdminOnly.Should().Be(StateDirectorySecurity.IsAdminOnlyWritable(staging.Directory));
 
@@ -214,7 +214,7 @@ public sealed class SecureStagingTests
     /// <para>
     /// <b>Elevated host:</b> the hardened directory really is administrator-only, the frozen
     /// predicate agrees, and it is a direct child of the root it was given. That is the
-    /// premise the whole lane rests on — if <c>CreateHardened</c>'s output did not satisfy
+    /// premise everything else rests on — if <c>CreateHardened</c>'s output did not satisfy
     /// <c>IsAdminOnlyWritable</c>, every elevated install would refuse — so this test is how
     /// CI states it rather than assuming it.
     /// </para>
@@ -391,9 +391,9 @@ public sealed class SecureStagingTests
     // ── Where an elevated run stages, and what it refuses ─────────────────────
 
     /// <summary>
-    /// The routed R5 residual and its policy: an <b>elevated</b> run that cannot obtain
+    /// The routed residual and its policy: an <b>elevated</b> run that cannot obtain
     /// an administrator-only staging directory <b>refuses</b> rather than staging where
-    /// the current user can also write.
+    /// the current user can also write. (R5)
     /// </summary>
     /// <remarks>
     /// <para>
@@ -403,18 +403,18 @@ public sealed class SecureStagingTests
     /// real branch depends on a token this process does not have.
     /// </para>
     /// <para>
-    /// <b>The refusal is provoked by something genuinely un-creatable on any host.</b> An
-    /// earlier version pointed at an ordinary empty scratch directory and relied on the
-    /// created child failing the administrator-only confirmation — true here, but false on
-    /// an <em>elevated</em> runner, where the child really would be administrator-owned and
-    /// staging must correctly proceed. That test could only pass in the world where
+    /// <b>The refusal must be provoked by something genuinely un-creatable on any host.</b>
+    /// Pointing at an ordinary empty scratch directory and relying on the created child
+    /// failing the administrator-only confirmation is true unelevated but false on an
+    /// <em>elevated</em> runner, where the child really would be administrator-owned and
+    /// staging must correctly proceed — such a test can only pass in the world where
     /// production is broken. This one denies
     /// <see cref="FileSystemRights.CreateDirectories"/> to <c>Everyone</c> on the parent,
     /// which stops the create for every caller at every privilege level.
     /// </para>
     /// <para>
-    /// Pre-fix this path reported a degrade and handed back <c>%TEMP%</c>; the negative
-    /// assertion is that it now hands back nothing at all, and leaves nothing behind.
+    /// This path must not report a degrade and hand back <c>%TEMP%</c>; the negative
+    /// assertion is that it hands back nothing at all, and leaves nothing behind.
     /// </para>
     /// </remarks>
     [WindowsFact("Windows ACL APIs")]
@@ -448,7 +448,7 @@ public sealed class SecureStagingTests
     }
 
     /// <summary>
-    /// The guard behind this lane's "no test writes to a real <c>%ProgramData%</c>"
+    /// The guard behind the suite-wide "no test writes to a real <c>%ProgramData%</c>"
     /// claim, asserted through the <b>production</b> entry point — the same
     /// <c>SecureStaging.Create(purpose, report, fallbackRoot)</c> that
     /// <c>PrerequisiteRunner</c>, <c>UpdateRunner</c> and every <c>{staging_dir}</c>
@@ -550,12 +550,12 @@ public sealed class SecureStagingTests
     }
 
     /// <summary>
-    /// The denial of service that an earlier revision of this type created, and that this
-    /// siting removes. Staging used to live at <c>%ProgramData%\Sigil\staging</c> and
-    /// refuse when the intermediate <c>Sigil</c> directory was not administrator-only —
-    /// but that directory is the install-state store's (so this type must not repair it)
-    /// and <b>any unprivileged user can create it</b>, which made the refusal above a
-    /// lever anyone could pull against every elevated install.
+    /// The denial of service this siting avoids. Staging must NOT live at
+    /// <c>%ProgramData%\Sigil\staging</c> and refuse when the intermediate <c>Sigil</c>
+    /// directory is not administrator-only: that directory belongs to the install-state
+    /// store (so this type must not repair it) and <b>any unprivileged user can create
+    /// it</b>, which turns the refusal into a lever anyone can pull against every
+    /// elevated install.
     /// </summary>
     [WindowsFact("Windows ACL APIs")]
     public void A_squatted_state_root_neither_blocks_an_elevated_run_nor_is_touched_by_it()

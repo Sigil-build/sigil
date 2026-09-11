@@ -7,23 +7,22 @@ using SigilBuild.Wrapper.Engine;
 using Xunit;
 
 /// <summary>
-/// Register row R29 — the de-elevation fallback.
+/// The de-elevation fallback. (R29)
 /// </summary>
 /// <remarks>
 /// <para>
 /// The primary path is correct: an elevated installer launches the app under the desktop
 /// shell's medium-integrity primary token via <c>CreateProcessWithTokenW</c>. On any
-/// failure of that path the code used to fall through to a plain <c>Process.Start</c>,
-/// which hands the launched application the INSTALLER'S ADMIN TOKEN — with no log line
-/// and no user-visible signal. One de-elevation failure (no interactive shell, a token
-/// that will not duplicate) silently undid the entire mechanism, and P2's own acceptance
-/// criterion with it.
+/// failure of that path there must be no fall-through to a plain <c>Process.Start</c>:
+/// that hands the launched application the INSTALLER'S ADMIN TOKEN — with no log line
+/// and no user-visible signal, so one de-elevation failure (no interactive shell, a
+/// token that will not duplicate) silently undoes the entire mechanism.
 /// </para>
 /// <para>
 /// The elevated branch cannot be reached on an unelevated test runner, and forcing a
 /// real de-elevation failure on an elevated one would mean breaking the desktop shell.
 /// The three effects are therefore injected: the assertion is on the DECISION — was the
-/// direct spawn reached at all — which is the thing that was wrong.
+/// direct spawn reached at all — which is the thing that can go wrong.
 /// </para>
 /// </remarks>
 public class LaunchDeElevationTests
@@ -68,7 +67,8 @@ public class LaunchDeElevationTests
 
     /// <summary>
     /// The over-refusal guard. A per-user install runs unelevated, where a plain spawn
-    /// already runs at the user's own integrity level — R29 must not cost that its launch.
+    /// already runs at the user's own integrity level — the guard must not cost that
+    /// install its launch. (R29)
     /// </summary>
     [Fact]
     public void An_unelevated_installer_still_launches_directly()

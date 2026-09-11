@@ -14,7 +14,7 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Engine;
 
 /// <summary>
-/// Decision 6 / T9 secret hygiene: a <see cref="ParameterType.Secret"/> value must
+/// Secret hygiene: a <see cref="ParameterType.Secret"/> value must
 /// never reach the on-screen/console log lines or the persisted uninstall state
 /// (journal). These tests grep both surfaces for a known secret and assert it is
 /// absent (redacted to <c>***</c>).
@@ -54,9 +54,9 @@ public sealed class SecretHygieneTests
         // A step whose resolved path embeds the secret — so the rollback journal's
         // RemoveDirectory record would carry it verbatim if not redacted.
         var dir = tmp.Path + "/app-${parameters.license_key}";
-        // R16: an OS temp directory is never install_dir, so the out-of-tree write
-        // is declared with the production per-step opt-out. Under test here is
-        // secret redaction in the journal and the log.
+        // An OS temp directory is never install_dir, so the out-of-tree write is
+        // declared with the production per-step opt-out. Under test here is secret
+        // redaction in the journal and the log. (R16)
         var blob = BlobWith(new InstallStep.DirectoryCreate("mk", dir, When: null, OnFailure.Fail)
         { AllowOutsideInstallDir = true });
         var parsed = CommandLineParser.Parse(new[] { $"/Plicense_key={Secret}" }, blob.Parameters);
@@ -96,7 +96,7 @@ public sealed class SecretHygieneTests
     {
         using var tmp = new TempDir();
 
-        // P1: a var derives from the secret param, and a step path references it as
+        // A var derives from the secret param, and a step path references it as
         // {var.tainted}. The resolved directory embeds the secret, so both the log
         // and the persisted journal would leak it unless the var inherited
         // secretness (ADR-008 §3) and the value is redacted end-to-end.
@@ -104,7 +104,7 @@ public sealed class SecretHygieneTests
         var blob = new WrapperBlob(
             AppId: "com.acme.Studio",
             Parameters: new[] { LicenseKey() },
-            // R16: an OS temp directory is never install_dir — see the note above.
+            // An OS temp directory is never install_dir — see the note above (R16).
             // Note the {var.tainted} token must still RESOLVE, opt-out or not.
             InstallSteps: new InstallStep[]
             {
@@ -149,16 +149,15 @@ public sealed class SecretHygieneTests
         }
     }
 
-    // ── P11 system steps: journal records carry only name/path — never a
-    // resolved secret. schtasks/netsh/COM all journal their inverse BEFORE the
-    // native/process call (see each step's own "no secrets" doc comment); these
-    // three tests drive the SAME redaction path (UninstallStateStore.RedactSecrets)
-    // the DirectoryCreate tests above cover, but through the actual P11 step
-    // types so the P11 journal surfaces are directly exercised, not just
-    // inferred from a generic mechanism. Each step's own unit tests
-    // (ScheduledTaskCreateStepTests / FirewallRuleStepTests /
-    // ComRegisterStepTests) already establish that running these steps
-    // unelevated is safe locally (the journal append happens before the native
+    // ── System steps: journal records carry only name/path — never a resolved
+    // secret. schtasks/netsh/COM all journal their inverse BEFORE the native/process
+    // call (see each step's own "no secrets" doc comment); these three tests drive
+    // the SAME redaction path (UninstallStateStore.RedactSecrets) the DirectoryCreate
+    // tests above cover, but through the actual system step types, so those journal
+    // surfaces are directly exercised rather than inferred from a generic mechanism.
+    // Each step's own unit tests (ScheduledTaskCreateStepTests /
+    // FirewallRuleStepTests / ComRegisterStepTests) establish that running these
+    // steps unelevated is safe locally (the journal append happens before the native
     // call, so a non-admin sandbox never actually mutates system state).
     //
     // No log/progress assertion here (unlike the DirectoryCreate tests above):
@@ -179,17 +178,15 @@ public sealed class SecretHygieneTests
             return;
         }
 
-        // R3/R9 changed how this record can be produced. `scheduled_task_create`
-        // now refuses a program that is not anchored in an admin-only-writable
-        // install_dir, so driving the step far enough to journal would mean
-        // anchoring it somewhere admin-only — and then schtasks.exe DOES run, with
-        // /RU SYSTEM, creating a live SYSTEM task named after the secret on any
-        // elevated runner. The record is therefore appended directly. The property
-        // under test is unchanged and still exercises exactly the surface it
-        // always did: UninstallStateStore's redaction over a DeleteScheduledTask
-        // record whose task name came out of ctx.Resolve. That the step appends
-        // this record before it launches schtasks is asserted end-to-end by
-        // ScheduledTaskCreateInstallTests on the CI VM.
+        // `scheduled_task_create` refuses a program that is not anchored in an
+        // admin-only-writable install_dir, so driving the step far enough to journal
+        // would mean anchoring it somewhere admin-only — and then schtasks.exe DOES
+        // run, with /RU SYSTEM, creating a live SYSTEM task named after the secret on
+        // any elevated runner. The record is therefore appended directly. The property
+        // under test is UninstallStateStore's redaction over a DeleteScheduledTask
+        // record whose task name came out of ctx.Resolve. That the step appends this
+        // record before it launches schtasks is asserted end-to-end by
+        // ScheduledTaskCreateInstallTests on the CI VM. (R3, R9)
         var blob = BlobWith();
         var parsed = CommandLineParser.Parse(new[] { $"/Plicense_key={Secret}" }, blob.Parameters);
         var ctx = StepContext.From(blob, parsed);
@@ -256,20 +253,18 @@ public sealed class SecretHygieneTests
         // or a real self-registering DLL (mirrors ComRegisterStepTests), and safe
         // on an elevated runner too: nothing is ever registered.
         //
-        // R3/R9: the DLL path is now anchored to install_dir and must sit in an
-        // admin-only-writable directory, so the run is machine-scope into
-        // %ProgramFiles%\Common Files — a real admin-only directory — with a file
-        // that does not exist in it. The step is admitted, journals its inverse,
-        // and then LoadLibraryEx fails, which is exactly the arrangement this test
-        // has always used.
+        // The DLL path is anchored to install_dir and must sit in an admin-only-
+        // writable directory, so the run is machine-scope into
+        // %ProgramFiles%\Common Files — a real admin-only directory — with a file that
+        // does not exist in it. The step is admitted, journals its inverse, and then
+        // LoadLibraryEx fails. (R3, R9)
         //
-        // What changed (the R15 follow-up): the step now WITHDRAWS its UnregisterCom
-        // when the register provably did not take effect, so this LoadFailed run
-        // persists an empty journal. That is a stronger hygiene result — the secret
-        // never reaches the file at all — but it no longer exercises the redaction
-        // machinery, so the assertion is split: this run proves the secret is absent,
-        // and a second save below proves the record a SUCCESSFUL register would have
-        // journaled persists with the secret redacted.
+        // The step WITHDRAWS its UnregisterCom when the register provably did not take
+        // effect, so this LoadFailed run persists an empty journal. That is a stronger
+        // hygiene result — the secret never reaches the file at all — but it does not
+        // exercise the redaction machinery, so the assertion is split: this run proves
+        // the secret is absent, and a second save below proves the record a SUCCESSFUL
+        // register would have journaled persists with the secret redacted. (R15)
         var blob = BlobWith(new InstallStep.ComRegister(
             "reg", @"{install_dir}\${parameters.license_key}.dll", When: null, OnFailure: OnFailure.Continue));
         var parsed = CommandLineParser.Parse(new[] { $"/Plicense_key={Secret}" }, blob.Parameters);

@@ -12,7 +12,7 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Engine;
 
 /// <summary>
-/// P5 (gap G6): the prerequisite runner's decision logic — detect-skip, acquire →
+/// The prerequisite runner's decision logic — detect-skip, acquire →
 /// run → re-detect, exit-code acceptance, 3010 reboot flag, and the scope-required
 /// gate. The process launch is faked via the internal <see cref="PrerequisiteRunner.Launcher"/>
 /// seam so these stay fast and OS-independent; the <c>detect</c> expression flips from

@@ -11,10 +11,10 @@ using SigilBuild.Wrapper.Engine;
 using Xunit;
 
 /// <summary>
-/// R51's registry allowlist rests on one claim: <strong>the three registry steps are the
+/// The registry allowlist rests on one claim: <strong>the three registry steps are the
 /// only producers of <c>restore_registry_value</c> / <c>restore_registry_key</c>
 /// records</strong>, so collecting the keys those steps declare yields a COMPLETE
-/// allowlist.
+/// allowlist. (R51)
 /// </summary>
 /// <remarks>
 /// <para>
@@ -22,8 +22,8 @@ using Xunit;
 /// step journals a registry record without being added to
 /// <c>SignedDeclarations.CollectFrom</c>, that step's key is undeclared, its record is
 /// refused at uninstall, and the app it belongs to becomes unremovable — silently, and
-/// only discovered when a user tries to remove it. Stage 1 closed four separate routes
-/// into that end state; this file exists so a fifth cannot open by omission.
+/// only discovered when a user tries to remove it. This file exists so no new route
+/// into that end state can open by omission.
 /// </para>
 /// <para>
 /// The source scan is deliberate rather than reflective: what matters is which code

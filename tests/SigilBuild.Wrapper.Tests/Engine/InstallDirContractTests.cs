@@ -13,7 +13,7 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Engine;
 
 /// <summary>
-/// The <c>{install_dir}</c> contract (T13): the token resolves in step paths and
+/// The <c>{install_dir}</c> contract: the token resolves in step paths and
 /// <c>when</c> expressions; <c>/D=</c> relocates the install; and the concrete
 /// regression — a <c>file_copy to "{install_dir}"</c> under <c>/silent /D=&lt;tmp&gt;</c>
 /// lands the file under <c>&lt;tmp&gt;</c>, not in a literal <c>{install_dir}</c> folder.
@@ -138,8 +138,8 @@ public sealed class InstallDirContractTests
     {
         var blob = MakeBlob(appName: "Acme Studio", installDir: "{scope_root}/Acme Studio");
 
-        // R3: /D= is now contained to the scope root, so the fixture points at a
-        // legal user-scope destination (it used to be a bare C:\Tools\Acme).
+        // /D= is contained to the scope root, so the fixture must point at a legal
+        // user-scope destination — a bare C:\Tools\Acme would be refused. (R3)
         var chosen = Path.Combine(ScopeLayout.For(InstallScope.User).InstallRoot, "Tools", "Acme");
         var withD = InstallSession.ForTesting(
             blob, CommandLineParser.Parse(new[] { "/silent", "/D=" + chosen }, blob.Parameters));

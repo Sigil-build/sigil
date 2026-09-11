@@ -5,7 +5,7 @@
 ## Linked work
 
 - Related issue / discussion:
-- Related sprint task (WBS id):
+- Related task / ticket:
 
 ## Checklist
 

@@ -12,9 +12,9 @@ using SigilBuild.Wrapper.Tests.Helpers;
 using Xunit;
 
 /// <summary>
-/// Register rows R31 and R32 — the two places where a manifest-substitutable
-/// value was concatenated into a syntax that gives it more authority than the
-/// field it was written in.
+/// The two places where a manifest-substitutable value was concatenated into a
+/// syntax that gives it more authority than the field it was written in.
+/// (R31, R32)
 /// </summary>
 /// <remarks>
 /// No test here creates a scheduled task, and none writes an INI file: every case
@@ -28,7 +28,7 @@ using Xunit;
 [System.Runtime.Versioning.SupportedOSPlatform("windows")]
 public sealed class StepValueInjectionTests
 {
-    // ── R31: schtasks /TR ─────────────────────────────────────────────────────
+    // ── schtasks /TR (R31) ──────────────────────────────────────────────────────
 
     [Fact]
     public void Task_program_containing_a_quote_is_refused()
@@ -111,7 +111,7 @@ public sealed class StepValueInjectionTests
             "same-named task this installer never created");
     }
 
-    // ── R32: ini_write line injection ─────────────────────────────────────────
+    // ── ini_write line injection (R32) ──────────────────────────────────────────
 
     [Fact]
     public void Ini_value_containing_a_newline_cannot_inject_a_section()
@@ -180,12 +180,12 @@ public sealed class StepValueInjectionTests
         File.ReadAllText(path).Should().Be("[app]\r\nx=1\r\n", "the file must not have been rewritten");
         File.ReadAllText(path).Should().NotContain("[admin]");
 
-        // The one refusal in this lane that legitimately DOES journal:
+        // The one refusal that legitimately DOES journal:
         // ConfigFileEditor snapshots the prior file before handing off to the
-        // transform, and the transform is where R32 rejects. The record is a
+        // transform, and the transform is where the rejection happens. The record is a
         // RESTORE of a file inside this test's own temp directory —
         // non-destructive by type — and is pinned here so that "refused implies
-        // empty journal" is never assumed in the one place it does not hold.
+        // empty journal" is never assumed in the one place it does not hold. (R32)
         journal.Records.Should().ContainSingle()
             .Which.Should().BeOfType<RollbackRecord.RestoreConfigFile>()
             .Which.OriginalPath.Should().Be(path);

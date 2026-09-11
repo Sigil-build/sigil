@@ -12,7 +12,7 @@ using SigilBuild.Wrapper.Tests.Helpers;
 using Xunit;
 
 /// <summary>
-/// T11.3 (P11): the <c>firewall_rule</c> step. The exact
+/// The <c>firewall_rule</c> step. The exact
 /// <c>netsh advfirewall firewall add rule</c> / <c>delete rule</c> argument
 /// construction is proven via the pure
 /// <see cref="FirewallRuleStep.BuildAddArgs"/> / <see cref="FirewallRuleStep.BuildDeleteArgs"/>

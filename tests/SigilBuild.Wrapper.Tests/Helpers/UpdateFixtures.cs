@@ -21,7 +21,7 @@ internal static class UpdateFixtures
     public const string ManifestUrl = "https://updates.example.com/acme/stable.json";
 
     /// <summary>
-    /// In-memory replacement for R13's replay high water mark. Every test that drives
+    /// In-memory replacement for the replay high water mark (R13). Every test that drives
     /// <see cref="UpdateRunner"/> must pass one of these: the production store reads and
     /// WRITES <c>%ProgramData%\Sigil\&lt;AppId&gt;\update-sequence.txt</c>, and CI runs
     /// elevated, so a test on the default store would be mutating the runner's real
@@ -68,8 +68,8 @@ internal static class UpdateFixtures
     public static (byte[] Manifest, byte[] Signature, string PublicKeyBase64) SignedManifest(
         string version, string sha256)
     {
-        // R13: freshness fields are required. "Minted now, valid for a week, sequence 1"
-        // keeps every pre-R13 fixture behaving exactly as it did.
+        // Freshness fields are required. "Minted now, valid for a week, sequence 1"
+        // keeps every fixture caller behaving unchanged. (R13)
         var issued = DateTimeOffset.UtcNow;
         var json =
             "{\n" +

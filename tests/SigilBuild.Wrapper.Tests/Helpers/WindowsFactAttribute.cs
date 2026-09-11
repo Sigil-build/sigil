@@ -5,9 +5,9 @@ using Xunit;
 
 /// <summary>
 /// A <see cref="FactAttribute"/> that reports a genuine Skipped result on
-/// non-Windows hosts instead of passing vacuously. See register row R6: the
-/// repo's existing <c>if (!OperatingSystem.IsWindows()) return;</c> pattern reports
-/// as PASSED, which is the defect this track exists to fix.
+/// non-Windows hosts instead of passing vacuously. The repo's existing
+/// <c>if (!OperatingSystem.IsWindows()) return;</c> pattern reports
+/// as PASSED, which is the defect this fixes. (R6)
 /// </summary>
 /// <remarks>
 /// <c>tests/SigilBuild.Wrapper.Tests</c> is on xunit 2.9.2, whose
@@ -32,7 +32,7 @@ internal sealed class WindowsFactAttribute : FactAttribute
 /// today just the run-after-install de-elevation side effect (see
 /// <c>LaunchTests</c>). Reports a genuine Skipped result on a non-Windows host or
 /// an elevated one, rather than the <c>if (Elevation.IsProcessElevated()) return;</c>
-/// early return that reported PASSED on every elevated runner (register row R6).
+/// early return that reported PASSED on every elevated runner. (R6)
 /// </summary>
 /// <remarks>
 /// CI runs elevated, so this gate fires there: the skip reason in the trx is the

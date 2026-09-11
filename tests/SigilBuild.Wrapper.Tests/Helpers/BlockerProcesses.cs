@@ -7,11 +7,11 @@ using System.Threading;
 namespace SigilBuild.Wrapper.Tests.Helpers;
 
 /// <summary>
-/// R58 — alternative spellings of one path, for asserting that the same-image check
+/// Alternative spellings of one path, for asserting that the same-image check
 /// compares FILE IDENTITY and not strings. The production sides of that comparison come
 /// from two APIs with different conventions (<c>GetModuleFileNameW(NULL)</c> keeps the
 /// launch form; <c>QueryFullProcessImageNameW</c> canonicalises), so a string compare
-/// silently stops recognising the installer's own image.
+/// silently stops recognising the installer's own image. (R58)
 /// </summary>
 [SupportedOSPlatform("windows")]
 internal static class PathForms
@@ -73,10 +73,10 @@ internal static class PathForms
 }
 
 /// <summary>
-/// R58 — a real, separate process that holds a data file open under a directory the
-/// files-in-use sweep will scan. The Restart Manager's positive control: after the R58
+/// A real, separate process that holds a data file open under a directory the
+/// files-in-use sweep will scan. The Restart Manager's positive control: after the
 /// self-exclusion, a blocker has to be somebody OTHER than the running installer for an
-/// assertion about it to mean anything.
+/// assertion about it to mean anything. (R58)
 /// </summary>
 /// <remarks>
 /// <c>powershell.exe</c> is the holder because its own image lives in System32, far
@@ -167,11 +167,11 @@ internal sealed class FileHolderProcess : IDisposable
 }
 
 /// <summary>
-/// R58 — a real, separate process whose EXECUTABLE IMAGE lives inside the directory the
+/// A real, separate process whose EXECUTABLE IMAGE lives inside the directory the
 /// sweep scans, holding no other handle there. Two things rest on it: the Restart Manager
 /// reports such a process (so "the app you are upgrading is running" keeps being caught),
-/// and it is the exact shape of T12's un-elevated relaunch parent, which is why the R58
-/// exclusion is keyed on the image path.
+/// and it is the exact shape of an un-elevated relaunch parent, which is why the
+/// exclusion is keyed on the image path. (R58)
 /// </summary>
 /// <remarks>
 /// The image is a copy of <c>ping.exe</c>: a tiny, always-present System32 executable

@@ -17,10 +17,10 @@ using SigilBuild.Wrapper.Engine;
 /// client-side trust scope that accepts its ephemeral certificate.
 /// </summary>
 /// <remarks>
-/// The older lane tests each carry their own copy of this on purpose — so a whole test
-/// file can be dropped onto a parent commit unchanged to watch it fail. This shared one
-/// exists for tests that pin an invariant of the CURRENT tree and have no parent-commit
-/// story to preserve; duplicating it a fourth time would buy nothing.
+/// Older test files each carry their own copy of this on purpose, so a whole test file
+/// can be dropped onto a parent commit unchanged to watch it fail. This shared copy
+/// exists for tests that pin an invariant of the current tree and have no parent-commit
+/// story to preserve; duplicating it again would buy nothing.
 /// <para>
 /// The certificate is ephemeral and in-memory. It is handed to <see cref="SslStream"/> and
 /// disposed; it is never passed to <c>X509Store</c>, so no test using this mutates the

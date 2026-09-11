@@ -23,31 +23,31 @@ internal sealed record SerializableWrapperBlob
     public SerializableInstallStep[] PostInstall { get; init; } = Array.Empty<SerializableInstallStep>();
     public SerializableInstallStep[] UpdateSteps { get; init; } = Array.Empty<SerializableInstallStep>();
 
-    // --- Add/Remove Programs metadata (T10). Sourced from manifest.App.* +
+    // --- Add/Remove Programs metadata. Sourced from manifest.App.* +
     //     the packed size; consumed by ArpRegistration at install time. ---
     public string? DisplayName { get; init; }
     public string? Version { get; init; }
     public string? Publisher { get; init; }
     public long? EstimatedSizeBytes { get; init; }
 
-    /// <summary>Resolved install scope (T12). Defaults to <see cref="InstallScope.Auto"/>.</summary>
+    /// <summary>Resolved install scope. Defaults to <see cref="InstallScope.Auto"/>.</summary>
     public InstallScope Scope { get; init; } = InstallScope.Auto;
 
     /// <summary>
-    /// The manifest's <c>App.Name</c> (T13). The <c>&lt;App.Name&gt;</c> segment of
+    /// The manifest's <c>App.Name</c>. The <c>&lt;App.Name&gt;</c> segment of
     /// the default install dir (<c>&lt;scope root&gt;\&lt;App.Name&gt;</c>) and the
     /// value of the <c>{app.name}</c> token in an <c>install_dir</c> override.
     /// </summary>
     public string? AppName { get; init; }
 
     /// <summary>
-    /// The manifest's optional <c>installer.install_dir</c> override template (T13);
+    /// The manifest's optional <c>installer.install_dir</c> override template;
     /// <c>null</c> when omitted so the default install dir applies. May reference
     /// <c>{scope_root}</c> / <c>{app.*}</c>; resolved at install time by the engine.
     /// </summary>
     public string? InstallDir { get; init; }
 
-    // --- Signing (T11 / decision 7). ---
+    // --- Signing. ---
 
     /// <summary>
     /// True iff the manifest declared a verified <c>sign</c> block — i.e. the
@@ -61,10 +61,10 @@ internal sealed record SerializableWrapperBlob
     public bool SignDeclared { get; init; }
 
     /// <summary>
-    /// The declared downloaded-binary signature policy, <c>installer.require_signed_downloads</c>
-    /// (register row R45). Defaults to <see cref="RequireSignedDownloads.SignDeclared"/>,
-    /// which is the pre-R45 behaviour, so a blob stamped before this field existed
-    /// deserializes to exactly what it used to mean.
+    /// The declared downloaded-binary signature policy,
+    /// <c>installer.require_signed_downloads</c>. Defaults to
+    /// <see cref="RequireSignedDownloads.SignDeclared"/>, so a blob stamped before this
+    /// field existed keeps the behaviour it was stamped with (R45).
     /// </summary>
     /// <remarks>
     /// Carried in the blob rather than recomputed at runtime because the blob is inside
@@ -75,7 +75,7 @@ internal sealed record SerializableWrapperBlob
     /// </remarks>
     public RequireSignedDownloads RequireSignedDownloads { get; init; } = RequireSignedDownloads.SignDeclared;
 
-    // --- Branding (T7). Derived at pack time (Avalonia cannot color-mix at
+    // --- Branding. Derived at pack time (Avalonia cannot color-mix at
     //     runtime), delivered inside the blob rather than a sidecar file. ---
 
     /// <summary>Derived light-mode brand token map (token name → value).</summary>
@@ -92,56 +92,56 @@ internal sealed record SerializableWrapperBlob
 
     /// <summary>
     /// Embedded license text (plain text / RTF-as-text v1), tag -&gt; file
-    /// contents (P9, gap G10). <c>null</c> when no readable entry survived pack
-    /// time (T14's original "no License screen" case). Each file is read at PACK
+    /// contents. <c>null</c> when no readable entry survived pack time (the "no
+    /// License screen" case). Each file is read at PACK
     /// time (<c>ExeWrapperPackager.ReadLicenseText</c>) — this carries contents,
     /// not paths. <c>Dictionary&lt;string,string&gt;</c> is already registered in
     /// <see cref="WrapperBlobJsonContext"/>, so no new source-gen entry is needed.
     /// </summary>
     public Dictionary<string, string>? LicenseText { get; init; }
 
-    /// <summary>Declared custom wizard screens (T9).</summary>
+    /// <summary>Declared custom wizard screens.</summary>
     public SerializableInstallerScreen[] Screens { get; init; }
         = Array.Empty<SerializableInstallerScreen>();
 
     /// <summary>
-    /// The ENABLED built-in option components (T8). Carried so the runtime can seed
+    /// The ENABLED built-in option components. Carried so the runtime can seed
     /// <c>option.*</c> for step gating and the host can render one checkbox each.
     /// </summary>
     public SerializableOptionComponent[] Options { get; init; }
         = Array.Empty<SerializableOptionComponent>();
 
     /// <summary>
-    /// Declarative variables from <c>installer.vars</c> (P1), in manifest
+    /// Declarative variables from <c>installer.vars</c>, in manifest
     /// declaration order. The runtime evaluates each once at session start and
     /// seeds <c>var.&lt;Name&gt;</c>. An ordered array (not a map) so the wire form
     /// is deterministic and dependency order is reproducible.
     /// </summary>
     public SerializableVar[] Vars { get; init; } = Array.Empty<SerializableVar>();
 
-    // --- P2 lifecycle hooks (gap G2). Ordered step lists that run OUTSIDE the
+    // --- Lifecycle hooks. Ordered step lists that run OUTSIDE the
     //     rollback journal, around the transactional body. ---
     public SerializableInstallStep[] HookPreInstall { get; init; } = Array.Empty<SerializableInstallStep>();
     public SerializableInstallStep[] HookPostInstall { get; init; } = Array.Empty<SerializableInstallStep>();
     public SerializableInstallStep[] HookPreUninstall { get; init; } = Array.Empty<SerializableInstallStep>();
     public SerializableInstallStep[] HookPostUninstall { get; init; } = Array.Empty<SerializableInstallStep>();
 
-    // --- P2 run-after-install (gap G4): the Done-screen "Launch <App>" target. ---
+    // --- Run-after-install: the Done-screen "Launch <App>" target. ---
     public string? RunAfterInstallPath { get; init; }
     public string[]? RunAfterInstallArgs { get; init; }
 
     /// <summary>
-    /// First-class prerequisite units (P5, gap G6) from <c>installer.prerequisites</c>,
+    /// First-class prerequisite units from <c>installer.prerequisites</c>,
     /// in declaration order. Run before the journaled body (detect → install → re-detect).
     /// An ordered array so the wire form is deterministic.
     /// </summary>
     public SerializablePrerequisite[] Prerequisites { get; init; } = Array.Empty<SerializablePrerequisite>();
 
-    /// <summary>P6 (gap G7): declared app mutex names probed before touching the install dir.</summary>
+    /// <summary>Declared app mutex names, probed before touching the install dir.</summary>
     public string[]? AppMutex { get; init; }
 
     /// <summary>
-    /// P9 (gap G10): the manifest's optional <c>installer.language</c> fixed
+    /// The manifest's optional <c>installer.language</c> fixed
     /// language tag. <c>null</c> when the manifest doesn't fix a language, so the
     /// session's language resolver falls through to <c>/lang</c> / the OS
     /// preference list / <c>en</c>. A host-rendering / session-bootstrap concern
@@ -150,7 +150,7 @@ internal sealed record SerializableWrapperBlob
     /// </summary>
     public string? Language { get; init; }
 
-    // --- P12 (T12.3) update metadata, sourced from the manifest's updates: block.
+    // --- Update metadata, sourced from the manifest's updates: block.
     //     Read back by the /Update runtime (InstallSession) to fetch + verify the
     //     signed channel manifest. All null when the manifest declares no updates:. ---
 
@@ -164,7 +164,7 @@ internal sealed record SerializableWrapperBlob
     public string? Channel { get; init; }
 
     /// <summary>
-    /// P12 (T12.5): true only for a web-installer stub's synthesized blob — see
+    /// True only for a web-installer stub's synthesized blob — see
     /// <see cref="WrapperBlob.IsDelegatingStub"/> for why this gates
     /// <c>InstallSession</c>'s success-path completion bookkeeping. Defaults to
     /// <c>false</c> (an embedded-payload pack, or any un-stamped/legacy blob).
@@ -186,28 +186,28 @@ internal sealed record SerializableWrapperBlob
             Vars: ConvertVars(s.Vars),
             AppName: s.AppName,
             InstallDir: s.InstallDir,
-            // T10: real ARP fields threaded into the in-memory blob so
+            // Real ARP fields threaded into the in-memory blob so
             // InstallSession.PersistCompletion registers the actual
             // name/version/publisher/size instead of the placeholders.
             DisplayName: s.DisplayName,
             Publisher: s.Publisher,
             Version: s.Version,
             EstimatedSizeBytes: s.EstimatedSizeBytes ?? 0,
-            // P2: hooks + launch target.
+            // Hooks + launch target.
             HookPreInstall: ConvertSteps(s.HookPreInstall),
             HookPostInstall: ConvertSteps(s.HookPostInstall),
             HookPreUninstall: ConvertSteps(s.HookPreUninstall),
             HookPostUninstall: ConvertSteps(s.HookPostUninstall),
             RunAfterInstallPath: s.RunAfterInstallPath,
             RunAfterInstallArgs: s.RunAfterInstallArgs,
-            // P5: prerequisite units.
+            // Prerequisite units.
             Prerequisites: ConvertPrerequisites(s.Prerequisites),
             AppMutex: s.AppMutex,
-            // P12: update metadata read back by the /Update runtime.
+            // Update metadata read back by the /Update runtime.
             UpdateManifestUrl: s.ManifestUrl,
             UpdateSigningKey: s.SigningKey,
             UpdateChannel: s.Channel,
-            // P12 (T12.5): the web-installer stub marker.
+            // The web-installer stub marker.
             IsDelegatingStub: s.IsDelegatingStub);
     }
 
@@ -227,28 +227,28 @@ internal sealed record SerializableWrapperBlob
             Vars = SerializeVars(blob.Vars),
             AppName = blob.AppName,
             InstallDir = blob.InstallDir,
-            // T10: carry the real ARP fields onto the wire DTO. A zero size is
+            // Carry the real ARP fields onto the wire DTO. A zero size is
             // emitted as null so a blob with no computed footprint round-trips to
             // the same "unset" state (matching the DisplayName/Version/Publisher nulls).
             DisplayName = blob.DisplayName,
             Publisher = blob.Publisher,
             Version = blob.Version,
             EstimatedSizeBytes = blob.EstimatedSizeBytes == 0 ? null : blob.EstimatedSizeBytes,
-            // P2: hooks + launch target.
+            // Hooks + launch target.
             HookPreInstall = SerializeSteps(blob.HookPreInstall ?? Array.Empty<InstallStep>()),
             HookPostInstall = SerializeSteps(blob.HookPostInstall ?? Array.Empty<InstallStep>()),
             HookPreUninstall = SerializeSteps(blob.HookPreUninstall ?? Array.Empty<InstallStep>()),
             HookPostUninstall = SerializeSteps(blob.HookPostUninstall ?? Array.Empty<InstallStep>()),
             RunAfterInstallPath = blob.RunAfterInstallPath,
             RunAfterInstallArgs = blob.RunAfterInstallArgs is null ? null : ToStringArray(blob.RunAfterInstallArgs),
-            // P5: prerequisite units.
+            // Prerequisite units.
             Prerequisites = SerializePrerequisites(blob.Prerequisites),
             AppMutex = blob.AppMutex is null ? null : ToStringArray(blob.AppMutex),
-            // P12: update metadata carried onto the wire DTO.
+            // Update metadata carried onto the wire DTO.
             ManifestUrl = blob.UpdateManifestUrl,
             SigningKey = blob.UpdateSigningKey,
             Channel = blob.UpdateChannel,
-            // P12 (T12.5): the web-installer stub marker.
+            // The web-installer stub marker.
             IsDelegatingStub = blob.IsDelegatingStub,
         };
     }
@@ -470,7 +470,7 @@ internal sealed record SerializableParameterDefinition
 }
 
 /// <summary>
-/// Flat, AOT-friendly wire DTO for a declared custom wizard screen (T9).
+/// Flat, AOT-friendly wire DTO for a declared custom wizard screen.
 /// Mirrors <see cref="InstallerScreen"/> with an array of
 /// <see cref="SerializableScreenField"/> so the source-generated context can
 /// serialize it without reflection.
@@ -543,7 +543,7 @@ internal sealed record SerializableScreenField
 }
 
 /// <summary>
-/// Flat, AOT-friendly wire DTO for a single declarative variable (P1). Mirrors
+/// Flat, AOT-friendly wire DTO for a single declarative variable. Mirrors
 /// <see cref="InstallerVar"/> so the source-generated context can serialize it
 /// without reflection.
 /// </summary>
@@ -566,7 +566,7 @@ internal sealed record SerializableVar
 }
 
 /// <summary>
-/// Flat, AOT-friendly wire DTO for a single prerequisite unit (P5, gap G6). Mirrors
+/// Flat, AOT-friendly wire DTO for a single prerequisite unit. Mirrors
 /// <see cref="InstallerPrerequisite"/> so the source-generated context can serialize
 /// it without reflection.
 /// </summary>
@@ -582,9 +582,9 @@ internal sealed record SerializablePrerequisite
     public int? TimeoutSeconds { get; init; }
 
     /// <summary>
-    /// Register row R11's per-prerequisite opt-out. Carried in the blob because the
-    /// decision is the manifest author's and is taken at install time, in the engine,
-    /// immediately before the launch.
+    /// Per-prerequisite opt-out from the downloaded-binary signature gate. Carried in
+    /// the blob because the decision is the manifest author's and is taken at install
+    /// time, in the engine, immediately before the launch (R11).
     /// </summary>
     public bool AllowUnsigned { get; init; }
 
@@ -622,8 +622,8 @@ internal sealed record SerializablePrerequisite
 }
 
 /// <summary>
-/// Flat, AOT-friendly wire DTO for a single ENABLED built-in option component
-/// (T8). Mirrors <see cref="InstallerOptionComponent"/> so the source-generated
+/// Flat, AOT-friendly wire DTO for a single ENABLED built-in option component.
+/// Mirrors <see cref="InstallerOptionComponent"/> so the source-generated
 /// context can serialize it without reflection.
 /// </summary>
 internal sealed record SerializableOptionComponent
@@ -632,7 +632,7 @@ internal sealed record SerializableOptionComponent
     public bool Default { get; init; }
     public bool Locked { get; init; }
 
-    // P10 (gap G11): app-defined custom components. Custom marks the entry as one
+    // App-defined custom components. Custom marks the entry as one
     // (built-ins leave it false); Label/Description carry the localizable captions
     // (tag -> text); When is the optional applicability gate. All default to
     // absent, so a built-in component round-trips to the same three-field shape.

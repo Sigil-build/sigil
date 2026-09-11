@@ -13,11 +13,11 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Update;
 
 /// <summary>
-/// T12.3: the headless <c>/Update</c> decision logic behind the fetch / download /
+/// The headless <c>/Update</c> decision logic behind the fetch / download /
 /// child-launch seams. Feeds tampered / malformed manifests through the REAL parser
-/// (SIG0320) + verifier (SIG0321) and drives the P3 version comparison with a
+/// (SIG0320) + verifier (SIG0321) and drives the version comparison with a
 /// stubbed installed version — no network, no child process. The live
-/// fetch→download→run-child leg is CI-VM-only (T12.6); here we assert the exit-code
+/// fetch→download→run-child leg is CI-VM-only; here we assert the exit-code
 /// decision table and the child invocation the seam is handed (scope flag + /silent).
 /// </summary>
 public class UpdateRunnerTests
@@ -29,10 +29,10 @@ public class UpdateRunnerTests
 
     /// <summary>
     /// The bytes <see cref="FakeDownloader"/> puts on disk, and their real digest. The
-    /// double must leave a file the runner can re-open and re-verify (R12): the runner
-    /// now holds the staged package open across the child launch, so a downloader that
+    /// double must leave a file the runner can re-open and re-verify: the runner
+    /// holds the staged package open across the child launch, so a downloader that
     /// reports success without writing anything is no longer a faithful stand-in for a
-    /// real one.
+    /// real one. (R12)
     /// </summary>
     private static readonly byte[] PackageBytes = Encoding.UTF8.GetBytes("the-downloaded-setup-payload");
 
@@ -102,10 +102,10 @@ public class UpdateRunnerTests
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// R13: the freshness fields are REQUIRED, so every fixture manifest carries them.
+    /// The freshness fields are REQUIRED, so every fixture manifest carries them.
     /// The defaults are deliberately "minted just now, valid for a week, sequence 1" —
-    /// a fixture that never had to think about freshness behaves exactly as it did
-    /// before R13, and a test that IS about freshness passes explicit values.
+    /// a fixture that never had to think about freshness behaves exactly as it did,
+    /// and a test that IS about freshness passes explicit values. (R13)
     /// </summary>
     private static (byte[] Manifest, byte[] Signature, string PublicKeyBase64) SignedManifest(
         string version,
@@ -159,8 +159,8 @@ public class UpdateRunnerTests
         UpgradeState installed,
         List<string> log,
         IUpdateSequenceStore? sequences = null) =>
-        // R13: never the production sequence store — it reads and WRITES a real
-        // %ProgramData% path, and CI runs elevated.
+        // Never the production sequence store — it reads and WRITES a real
+        // %ProgramData% path, and CI runs elevated. (R13)
         new(fetcher, downloader, launcher, () => installed, (m, _) => log.Add(m),
             sequences ?? new Helpers.UpdateFixtures.InMemorySequenceStore());
 
@@ -235,14 +235,14 @@ public class UpdateRunnerTests
         launcher.Args.Should().Equal(expectedScopeFlag, "/silent");
     }
 
-    // ── 3b. T12.4: SilentChild threads through to the child's launch args ─────
+    // ── 3b. SilentChild threads through to the child's launch args ────────────
 
     [Fact]
     public async Task SilentChild_defaults_to_true_when_unspecified()
     {
-        // Every T12.3-era call site (and every test above) constructs UpdateRequest
+        // Every existing call site (and every test above) constructs UpdateRequest
         // without naming SilentChild — the default must keep launching the child
-        // /silent, exactly as before T12.4.
+        // /silent unless the caller opts out.
         var request = Request(NewPublicKeyBase64());
         request.SilentChild.Should().BeTrue();
     }
@@ -250,7 +250,7 @@ public class UpdateRunnerTests
     [Fact]
     public async Task Headed_update_SilentChild_false_launches_the_child_without_slash_silent()
     {
-        // T12.4: a headed, non-silent /Update launches the downloaded child WITHOUT
+        // A headed, non-silent /Update launches the downloaded child WITHOUT
         // /silent so the user sees its own install wizard — only the scope flag is
         // forwarded.
         var (manifest, sig, key) = SignedManifest("2.0.0");
@@ -270,13 +270,14 @@ public class UpdateRunnerTests
             "the installing-stage log line must also reflect the headed (no /silent) child launch");
     }
 
-    // ── 3b. R14: a non-https manifestUrl is refused before anything is fetched ─
+    // ── 3b. A non-https manifestUrl is refused before anything is fetched (R14) ─
 
     /// <summary>
-    /// Register row R14, runtime half. SIG0324 catches this at pack time; this is not
-    /// redundant with it, because the detached-signature URL is <c>manifestUrl + ".sig"</c>
-    /// — so a cleartext manifestUrl silently drags the signature fetch onto cleartext too
-    /// — and because installers stamped before SIG0324 existed are already in the field.
+    /// This is the runtime half: SIG0324 catches this at pack time, but that check is
+    /// not redundant with it, because the detached-signature URL is
+    /// <c>manifestUrl + ".sig"</c> — so a cleartext manifestUrl silently drags the
+    /// signature fetch onto cleartext too — and because installers stamped before
+    /// SIG0324 existed are already in the field. (R14)
     /// </summary>
     [Theory]
     [InlineData("http://updates.example.com/acme/stable.json")]
@@ -306,11 +307,12 @@ public class UpdateRunnerTests
     // ── 4. Malformed channel manifest → verified first, so SIG0321 (R39) ──────
 
     /// <summary>
-    /// Register row R39: verify BEFORE parse. This test previously asserted SIG0320 —
+    /// Verify BEFORE parse. This test previously asserted SIG0320 —
     /// i.e. that unverified network bytes reached the JSON parser first. They must not.
     /// A malformed, unsigned document is a SIGNATURE failure, because that is the first
     /// question asked of it; whoever answered the request does not get to choose which
     /// diagnostic the user sees, and the parser is not exposed to unauthenticated input.
+    /// (R39)
     /// </summary>
     [Fact]
     public async Task Malformed_unsigned_manifest_is_rejected_as_a_signature_failure_not_a_parse_failure()
@@ -375,16 +377,16 @@ public class UpdateRunnerTests
         string.Join("\n", log).Should().Contain("minimum");
     }
 
-    // ── 6b. R37: a malformed installed version is NOT eligible for a floored ──
-    // ── package — an unevaluable floor is not a satisfied floor ───────────────
+    // ── 6b. A malformed installed version is NOT eligible for a floored ──────
+    // ── package — an unevaluable floor is not a satisfied floor (R37) ─────────
 
     /// <summary>
-    /// Register row R37. This test previously asserted the opposite — that an
+    /// This test previously asserted the opposite — that an
     /// incomparable installed version SKIPPED the floor and the update proceeded.
     /// That is the defect: for a user-scope install the installed version is read from
     /// the user's own HKCU, so anything that can make it unparseable can opt out of a
     /// floor the publisher declared. A floor that cannot be evaluated has not been
-    /// satisfied.
+    /// satisfied. (R37)
     /// </summary>
     [Fact]
     public async Task Malformed_installed_version_is_not_eligible_for_a_floored_package()

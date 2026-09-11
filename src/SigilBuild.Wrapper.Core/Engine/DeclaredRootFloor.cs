@@ -6,7 +6,7 @@ using System.IO;
 
 /// <summary>
 /// The floor a manifest-declared out-of-tree destination must clear before it becomes an
-/// anchored replay root (register row R44).
+/// anchored replay root (R44).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -30,9 +30,9 @@ using System.IO;
 /// like the obvious hardening and it is wrong here.
 /// <c>C:\ProgramData\MyApp</c> inherits <c>BUILTIN\Users:(CI)(WD,AD)</c> from its parent,
 /// so requiring an admin-only ACL would refuse the exact example the documentation tells
-/// publishers to use — recreating "silently unremovable" for the population this row
-/// exists to serve. The residual is the same one R44's register row accepts for the
-/// anchor floor: a record can be replayed inside a user-writable directory the attacker
+/// publishers to use — recreating "silently unremovable" for the population the rule
+/// exists to serve. The residual is the same one the anchor floor accepts: a record
+/// can be replayed inside a user-writable directory the attacker
 /// already controls, which is not an escalation. The escalating consequences are closed
 /// elsewhere and stay closed — see the note on <c>OwnedByThisInstall</c> below.
 /// </para>
@@ -41,8 +41,8 @@ using System.IO;
 /// consulted by <c>ReplayAnchor.OwnedByThisInstall</c>, which governs machine
 /// <c>PATH</c> entries and machine-wide execution mappings. Those stay pinned to the
 /// install directory with an admin-only ACL, whatever a manifest declares. That
-/// separation is the whole reason widening the anchor for R44 does not hand back the
-/// hijack primitives R1 took away.
+/// separation is the whole reason widening the anchor for a declared root does not hand
+/// back the hijack primitives anchoring took away. (R1, R44)
 /// </para>
 /// </remarks>
 internal static class DeclaredRootFloor
@@ -107,7 +107,7 @@ internal static class DeclaredRootFloor
         // somewhere else entirely, so the coordinate that cleared the checks above is not
         // the coordinate that would be written. Junctions need no privilege on Windows,
         // which makes this the realistic way to defeat the rest of this floor. Reuses the
-        // same predicate the install-time destination guard uses (lane S2's R16 work) so
+        // same predicate the install-time destination guard uses (R16) so
         // the two cannot drift apart.
         if (!PathContainment.IsUnderWithoutTraversal(volumeRoot, full))
         {
@@ -123,7 +123,7 @@ internal static class DeclaredRootFloor
     /// <summary>
     /// Folders that belong to Windows or to every application at once. A declaration
     /// EQUAL to one of these is refused; a declaration INSIDE one (the documented
-    /// <c>%ProgramData%\MyApp</c>) is exactly what R44 is for and passes.
+    /// <c>%ProgramData%\MyApp</c>) is the supported shape and passes. (R44)
     /// </summary>
     private static IEnumerable<string> WellKnownFolders()
     {

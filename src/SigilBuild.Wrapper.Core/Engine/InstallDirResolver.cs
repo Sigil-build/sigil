@@ -5,7 +5,7 @@ using System.IO;
 using SigilBuild.Core.Manifest;
 
 /// <summary>
-/// Pins the <c>{install_dir}</c> contract (T13): computes the <em>effective</em>
+/// Pins the <c>{install_dir}</c> contract: computes the <em>effective</em>
 /// install directory for a run from the resolved scope, the app identity, the
 /// manifest override, and the command-line / wizard overrides — and resolves the
 /// <c>{scope_root}</c> / <c>{app.*}</c> tokens an <c>install_dir</c> template may
@@ -16,7 +16,7 @@ using SigilBuild.Core.Manifest;
 /// <list type="number">
 ///   <item><description>the wizard-collected destination path (GUI), then</description></item>
 ///   <item><description><c>/D=path</c> (silent + GUI prefill), then</description></item>
-///   <item><description>the prior install directory during an upgrade (P3 — preserve
+///   <item><description>the prior install directory during an upgrade (preserve
 ///   the existing location / user data), then</description></item>
 ///   <item><description><c>installer.install_dir</c> (manifest override), then</description></item>
 ///   <item><description>the default <c>&lt;scope root&gt;\&lt;App.Name&gt;</c>.</description></item>
@@ -34,7 +34,7 @@ public static class InstallDirResolver
     /// <summary>
     /// The default install-dir template when neither the manifest nor a
     /// <c>/D=</c> / wizard override supplies one: the scope root joined with the
-    /// app name (decision 9 / T12 scope roots).
+    /// app name.
     /// </summary>
     internal const string DefaultTemplate = "{scope_root}\\{app.name}";
 
@@ -48,14 +48,14 @@ public static class InstallDirResolver
     /// <param name="cliOverride">The parsed <c>/D=path</c> value, or null.</param>
     /// <param name="collected">The wizard-collected destination path, or null.</param>
     /// <param name="priorInstallDir">
-    /// The prior version's install directory during an upgrade / forced downgrade (P3),
+    /// The prior version's install directory during an upgrade / forced downgrade,
     /// or null. Wins over the manifest default and the scope-root default so an upgrade
     /// lands in the existing location (preserving user data), but loses to an explicit
     /// <c>/D=</c> or wizard-collected path. Absolute — carries no <c>{...}</c> tokens.
     /// </param>
     /// <exception cref="InstallDirRejectedException">
     /// The resolved directory falls outside the scope's containment root, or
-    /// reaches it through a reparse point (register row R3).
+    /// reaches it through a reparse point (R3).
     /// </exception>
     public static string Resolve(
         InstallScope scope,
@@ -74,7 +74,7 @@ public static class InstallDirResolver
     /// with an explicit containment opt-out.
     /// </summary>
     /// <param name="allowAnyRoot">
-    /// When <c>true</c>, skip the R3 scope-root containment check. This exists
+    /// When <c>true</c>, skip the scope-root containment check (R3). This exists
     /// for test fixtures that legitimately resolve to an arbitrary absolute path
     /// (the precedence suite in <c>InstallDirResolverTests</c>) — <b>never</b>
     /// pass <c>true</c> from <c>src/</c>.
@@ -134,7 +134,7 @@ public static class InstallDirResolver
 
     /// <summary>
     /// True when the resolved destination IS the directory the application is
-    /// already installed in — the <b>grandfather clause</b> for R3.
+    /// already installed in — the <b>grandfather clause</b> (R3).
     /// </summary>
     /// <remarks>
     /// <para>
@@ -145,15 +145,15 @@ public static class InstallDirResolver
     /// even when that location is out of root.
     /// </para>
     /// <para>
-    /// <b>Why this keys on the destination and not on which source won.</b> The
-    /// first cut asked "did <paramref name="priorInstallDir"/> win the
-    /// precedence?", which made the exemption unreachable through the wizard:
-    /// <c>App.axaml.cs</c> prefills the Destination screen with the prior
-    /// directory, and the install runner writes that value straight back as
+    /// <b>The exemption keys on the resolved destination, never on which source won
+    /// the precedence — do not reinstate a precedence test.</b> Asking "did
+    /// <paramref name="priorInstallDir"/> win?" makes the exemption unreachable
+    /// through the wizard: <c>App.axaml.cs</c> prefills the Destination screen with
+    /// the prior directory, and the install runner writes that value straight back as
     /// <c>collected</c> on EVERY headed run. A prefill echoed back is not a user
-    /// choice, so the source-based test saw a "chosen" path and refused the very
-    /// upgrade the ruling exists to permit — silently, since the exemption never
-    /// fired and so never logged. Keying on the destination preserves the real
+    /// choice, so a source-based test sees a "chosen" path and refuses the very
+    /// upgrade the exemption exists to permit — silently, because the exemption never
+    /// fires and so never logs. Keying on the destination preserves the real
     /// distinction ("this is where the app already is" versus "the user picked
     /// somewhere new") no matter which field carried the value.
     /// </para>
@@ -161,7 +161,7 @@ public static class InstallDirResolver
     /// <b>Why it is not a blanket exemption.</b> It grants exactly one directory:
     /// the app's current location. Any other out-of-root path — typed into the
     /// wizard, passed as <c>/D=</c>, or declared in the manifest — resolves to
-    /// something different and is refused as before. Re-installing where the app
+    /// something different and is refused. Re-installing where the app
     /// already is confers no capability an attacker does not already have: if a
     /// SYSTEM-level step target points into that directory, it does so today.
     /// </para>
@@ -169,7 +169,7 @@ public static class InstallDirResolver
     /// <b>Provenance of <paramref name="priorInstallDir"/>.</b> It is read from
     /// the ARP registry (<c>InstalledStateResolver</c>,
     /// <c>HKLM|HKCU\...\Uninstall\&lt;appId&gt;\InstallLocation</c>) — not from
-    /// lane S1's persisted state file. Machine scope is protected by the HKLM
+    /// the persisted state file. Machine scope is protected by the HKLM
     /// ACL together with <c>InstallSession</c>'s <c>FoundScope == _scope</c>
     /// guard, so a user-writable HKCU value can never satisfy a machine-scope
     /// run. User scope has no such gate but crosses no privilege boundary: a
@@ -225,8 +225,8 @@ public static class InstallDirResolver
 
     /// <summary>
     /// The scope's built-in default destination
-    /// (<c>&lt;scope root&gt;\&lt;App.Name&gt;</c>), resolved WITHOUT the R3
-    /// containment check and therefore guaranteed not to throw.
+    /// (<c>&lt;scope root&gt;\&lt;App.Name&gt;</c>), resolved WITHOUT the
+    /// containment check (R3) and therefore guaranteed not to throw.
     /// </summary>
     /// <remarks>
     /// This exists for exactly one caller — <c>InstallSession.ResolveDefaultInstallDir</c>'s
@@ -251,16 +251,16 @@ public static class InstallDirResolver
     /// <summary>
     /// True when <paramref name="resolved"/> is inside the directory every
     /// <c>install_dir</c> for <paramref name="layout"/> must stay within
-    /// (register row R3).
+    /// (R3).
     /// </summary>
     /// <remarks>
     /// The accepted roots are <see cref="ScopeLayout.InstallRoots"/> and nothing
-    /// else — see that member for why each root is on the list. Deriving them
-    /// there rather than restating them here is register row R52: before it, the
-    /// <em>permitted</em> destinations lived in this method and the
-    /// <em>default</em> destination lived in <c>ScopeLayout.InstallRoot</c>, and
-    /// the two could drift apart silently (they already had: this method accepted
-    /// <c>%ProgramFiles(x86)%</c>, which <c>ScopeLayout</c> did not model at all).
+    /// else — see that member for why each root is on the list. They are derived
+    /// there rather than restated here because a second list of <em>permitted</em>
+    /// destinations sitting beside <c>ScopeLayout.InstallRoot</c>'s <em>default</em>
+    /// destination drifts apart silently — that is how this method came to accept
+    /// <c>%ProgramFiles(x86)%</c> while <c>ScopeLayout</c> did not model it at all.
+    /// (R52)
     /// </remarks>
     internal static bool IsContained(ScopeLayout layout, string resolved)
     {

@@ -5,8 +5,8 @@ using System.Globalization;
 using System.Runtime.Versioning;
 
 /// <summary>
-/// The anchor every SYSTEM-level step target must clear (register rows R3 and
-/// R9): <c>scheduled_task_create.program</c> (<c>/RU SYSTEM</c>),
+/// The anchor every SYSTEM-level step target must clear (R3, R9):
+/// <c>scheduled_task_create.program</c> (<c>/RU SYSTEM</c>),
 /// <c>service_install.binary_path</c>, <c>com_register.path</c> (loaded into the
 /// elevated installer process) and <c>firewall_rule.program</c>.
 /// </summary>
@@ -29,8 +29,8 @@ using System.Runtime.Versioning;
 /// <para>
 /// The second check is the one that actually stops the attack. Containment alone
 /// is satisfied by any path under <c>install_dir</c>, and an <c>install_dir</c>
-/// can itself be user-writable — a per-user install root always is. R3's payload
-/// is "a SYSTEM-scheduled task pointing at a binary any user can replace", and
+/// can itself be user-writable — a per-user install root always is. The attack is
+/// a SYSTEM-scheduled task pointing at a binary any user can replace, and
 /// only the ACL predicate answers that question.
 /// </para>
 /// <para>
@@ -38,8 +38,8 @@ using System.Runtime.Versioning;
 /// four steps are machine-scope-only by construction
 /// (<see cref="SigilBuild.Core.Manifest.InstallStep.RequiresMachineScope"/>);
 /// <c>service_install</c> is not, but <c>sc create</c> needs administrator rights
-/// regardless, and a service whose binary sits in <c>%LocalAppData%</c> is
-/// precisely R3 — the user who can replace that binary gets LocalSystem code
+/// regardless, and a service whose binary sits in <c>%LocalAppData%</c> is the same
+/// attack — the user who can replace that binary gets LocalSystem code
 /// execution. Gating the ACL check on machine scope would leave that open.
 /// </para>
 /// <para>
@@ -51,9 +51,9 @@ using System.Runtime.Versioning;
 /// </para>
 /// <para>
 /// <b><c>payload://</c> targets are refused, and that is a decision rather than a
-/// side effect.</b> Register row R9 proposes "resolve privileged step targets only
-/// from <c>payload://</c> or a contained <c>{install_dir}</c>", i.e. it treats the
-/// extracted payload as a safe source. It is not one, for two independent reasons:
+/// side effect.</b> The tempting rule — "resolve privileged step targets only from
+/// <c>payload://</c> or a contained <c>{install_dir}</c>" — treats the extracted
+/// payload as a safe source. It is not one, for two independent reasons:
 /// </para>
 /// <list type="number">
 ///   <item><description>
@@ -61,7 +61,7 @@ using System.Runtime.Versioning;
 ///     <c>%TEMP%\sigil-&lt;appid&gt;-&lt;random&gt;</c>. Under an elevated install that
 ///     is the invoking user's own temp directory, which that user can write — so a
 ///     payload-rooted service binary or COM DLL is replaceable between extraction
-///     and use. That is R3's attack with a different directory, and
+///     and use. That is the same attack with a different directory, and
 ///     <see cref="StateDirectorySecurity.IsAdminOnlyWritable"/> correctly answers
 ///     false for it.
 ///   </description></item>

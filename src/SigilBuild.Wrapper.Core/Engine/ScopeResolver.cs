@@ -4,7 +4,7 @@ using SigilBuild.Core.Manifest;
 using SigilBuild.Wrapper.Cli;
 
 /// <summary>
-/// Resolves the <em>effective</em> install scope (T12, decision 9) from the
+/// Resolves the <em>effective</em> install scope from the
 /// manifest-declared scope and the command-line <c>/allusers</c> /
 /// <c>/currentuser</c> override. The result is always a concrete
 /// <see cref="InstallScope.User"/> or <see cref="InstallScope.Machine"/> — never
@@ -24,7 +24,7 @@ using SigilBuild.Wrapper.Cli;
 /// opposite scope: requesting it is a usage error (<see cref="UsageException"/>,
 /// which the entry points translate to exit code 64). A flag that <em>agrees</em>
 /// with the fixed scope is accepted as a harmless no-op. <c>auto</c> defaults to
-/// user and is freely overridable (the wizard's scope toggle, T13, sets the same
+/// user and is freely overridable (the wizard's scope toggle sets the same
 /// override the flags do).
 /// </remarks>
 public static class ScopeResolver
@@ -64,7 +64,7 @@ public static class ScopeResolver
                 {
                     ScopeOverride.AllUsers => InstallScope.Machine,
                     // auto defaults to per-user; /currentuser is the explicit form
-                    // of that default. The wizard scope toggle (T13) sets the same
+                    // of that default. The wizard scope toggle sets the same
                     // override.
                     _ => InstallScope.User,
                 };

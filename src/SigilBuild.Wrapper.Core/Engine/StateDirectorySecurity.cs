@@ -9,10 +9,9 @@ using System.Security.Principal;
 using Microsoft.Win32.SafeHandles;
 
 /// <summary>
-/// ACL provenance for the machine-scope install-state directory (register row R1),
-/// and the shared "can only a privileged principal write here?" predicate that
-/// lanes S2 and S3 gate SYSTEM-level step targets, service binaries, COM DLL loads
-/// and staging directories on.
+/// ACL provenance for the machine-scope install-state directory (R1), and the shared
+/// "can only a privileged principal write here?" predicate that gates SYSTEM-level step
+/// targets, service binaries, COM DLL loads and staging directories.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -100,10 +99,10 @@ internal static partial class StateDirectorySecurity
     /// <see cref="IsTrusted"/>, this <b>repairs</b> it: the protected admin-only DACL
     /// is re-applied over whatever was there, discarding inherited ACEs, and the
     /// repair is reported on <paramref name="progress"/>. It does not throw for that
-    /// case. Repairing rather than refusing is what closes R1 on machines that
-    /// already carry a pre-fix install, whose state directory is
-    /// <c>BUILTIN\Administrators</c>-owned (so the old owner-only check passed) but
-    /// still inherits <c>%ProgramData%</c>'s <c>BUILTIN\Users:(WD,AD)</c> grant.
+    /// case. Repairing rather than refusing is what keeps an existing install usable
+    /// when its state directory is <c>BUILTIN\Administrators</c>-owned — so an
+    /// owner-only check would pass it — but still inherits <c>%ProgramData%</c>'s
+    /// <c>BUILTIN\Users:(WD,AD)</c> grant (R1).
     /// Only a repair that itself fails raises
     /// <see cref="UnauthorizedAccessException"/>.
     /// </para>
@@ -111,8 +110,8 @@ internal static partial class StateDirectorySecurity
     /// The repair then hands ownership to <c>BUILTIN\Administrators</c>, best-effort.
     /// The DACL is the load-bearing half, but the owner of an object retains implicit
     /// <c>WRITE_DAC</c> — it can re-permission the directory at will — which is why
-    /// <see cref="IsTrusted"/> requires a trusted owner too. A repaired-but-still-
-    /// attacker-owned directory would therefore have its state refused on every later
+    /// <see cref="IsTrusted"/> requires a trusted owner too. A repaired but still
+    /// attacker-owned directory would have its state refused on every later
     /// load, turning a privilege-escalation attempt into a permanent uninstall denial
     /// for that app. Assigning an owner needs the target SID in the caller's token (or
     /// <c>SeTakeOwnership</c>/<c>SeRestorePrivilege</c>), which only an <em>elevated</em>
@@ -236,9 +235,8 @@ internal static partial class StateDirectorySecurity
     /// <summary>
     /// True when only SYSTEM, <c>BUILTIN\Administrators</c> and TrustedInstaller can
     /// write the directory <paramref name="path"/> denotes: it must be owned by one of
-    /// them and no other principal may hold a write-class right on it. Used by S2 to
-    /// gate SYSTEM-level step targets and by S3 to site its staging directories.
-    /// False on any error.
+    /// them and no other principal may hold a write-class right on it. Gates SYSTEM-level
+    /// step targets and the siting of staging directories. False on any error.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -293,13 +291,14 @@ internal static partial class StateDirectorySecurity
     /// </summary>
     /// <remarks>
     /// <para>
-    /// A trusted directory is <b>not</b> sufficient to trust the file inside it, which
-    /// is the second half of register row R1: <c>File.WriteAllText</c> truncates in
+    /// A trusted directory is <b>not</b> sufficient to trust the file inside it:
+    /// <c>File.WriteAllText</c> truncates in
     /// place, so a file an unprivileged user pre-created keeps its original owner and
     /// its original explicit ACEs even after an elevated process writes to it. The
     /// attacker remains the owner, keeps implicit <c>WRITE_DAC</c>, and can re-grant
     /// themselves write and rewrite the file at any later moment — after which the
     /// elevated uninstall replays it. Hardening the container alone leaves that open.
+    /// (R1)
     /// </para>
     /// <para>
     /// "Does not exist" answers <c>false</c>, but that never turns a first install into
@@ -331,7 +330,7 @@ internal static partial class StateDirectorySecurity
 
     /// <summary>
     /// <see cref="IsAdminOnlyWritable(string)"/> read from an already-open
-    /// <b>handle</b> rather than from a path (register row R50). Same trust decision,
+    /// <b>handle</b> rather than from a path (R50). Same trust decision,
     /// same fail-closed behaviour; only the source of the security descriptor differs.
     /// </summary>
     /// <remarks>
@@ -345,9 +344,8 @@ internal static partial class StateDirectorySecurity
     /// </para>
     /// <para>
     /// <b>This does not replace or alter <see cref="IsAdminOnlyWritable(string)"/>.</b>
-    /// That predicate is what lanes S2 and S3 gate SYSTEM-level step targets on and
-    /// what the gate-G1 attacks exercise; it is untouched. This is a sibling that
-    /// reaches the same verdict through <see cref="RawSecurityDescriptor"/> instead of
+    /// That predicate is what SYSTEM-level step targets are gated on. This is a sibling
+    /// that reaches the same verdict through <see cref="RawSecurityDescriptor"/> instead of
     /// <see cref="DirectorySecurity"/>, and
     /// <c>NativeRuntimeReclaimTests.Handle_and_path_predicates_agree</c> pins the two
     /// against each other on real directories so they cannot drift.
@@ -509,7 +507,7 @@ internal static partial class StateDirectorySecurity
         }
 
         // DACL half: an admin-OWNED object can still be user-WRITABLE — that is exactly
-        // what %ProgramData% and every pre-fix state directory under it is.
+        // what %ProgramData% is, and so is any state directory that inherits from it.
         var rules = security.GetAccessRules(
             includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier));
 

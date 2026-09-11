@@ -9,18 +9,17 @@ using System.Security.Principal;
 
 /// <summary>
 /// A private, freshly-named directory to download an executable into, plus the
-/// verify-and-hold primitive that closes the verify-&gt;launch gap of register row
-/// R12 (and is the shape R5 needs): <see cref="OpenVerified"/> re-hashes the staged
+/// verify-and-hold primitive that closes the verify-&gt;launch gap (R5, R12):
+/// <see cref="OpenVerified"/> re-hashes the staged
 /// file <em>from an open handle</em> whose sharing mode denies write and delete, and
 /// hands that handle back so the caller keeps it open across
 /// <c>Process.Start</c>.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>What was wrong.</b> <c>PrerequisiteRunner</c> and <c>UpdateRunner</c> both
-/// downloaded to <c>%TEMP%\…-{Guid}.exe</c>, verified the SHA-256 <em>inside</em> the
-/// downloader, closed the file, and only then launched it. The GUID name blocks
-/// pre-planting, but the file is created with <c>%TEMP%</c>'s default ACLs and
+/// <b>The race being closed.</b> Download to <c>%TEMP%\…-{Guid}.exe</c>, verify the
+/// SHA-256 <em>inside</em> the downloader, close the file, then launch it: the GUID name
+/// blocks pre-planting, but the file is created with <c>%TEMP%</c>'s default ACLs and
 /// <b>no handle is held</b> between the verify and the launch — so any process
 /// running as the same user (the normal split-token-admin case) that watches the
 /// directory can replace the bytes in that window and have them executed, elevated.
@@ -67,9 +66,9 @@ using System.Security.Principal;
 /// <para>
 /// <b>Why a direct child of <c>%ProgramData%</c>, and nothing named <c>Sigil</c>.</b>
 /// <c>%ProgramData%\Sigil</c> is the install-state store's root; this type must not
-/// repair it, and any unprivileged user can create it (register row R1's attack). Siting
-/// staging beneath it therefore made the refusal below into a denial of service anyone
-/// could trigger. A per-run GUID directly under <c>%ProgramData%</c> has no fixed name to
+/// repair it, and any unprivileged user can create it (R1). Siting staging beneath it
+/// would turn the refusal below into a denial of service anyone could trigger. A per-run
+/// GUID directly under <c>%ProgramData%</c> has no fixed name to
 /// squat, and <c>%ProgramData%</c> grants <c>BUILTIN\Users</c>
 /// <c>(CI)(WD,AD,WEA,WA)</c> — create-child — but not <c>DC</c>, so a non-administrator
 /// can add siblings and can neither delete nor replace one it does not own. Nothing an
@@ -87,13 +86,14 @@ using System.Security.Principal;
 /// checkable. A degraded elevated run is <em>survivable</em> as long as every caller
 /// holds the <see cref="OpenVerified"/> handle across the launch — but that is a
 /// per-call-site invariant, invisible at this type's boundary and easy for the next
-/// consumer to miss. Register row R5's own stub is exactly such a consumer: two
-/// independent steps with a gap between them. Combined with a download that wrote with
-/// <c>FileMode.Create</c>, an attacker who forced the degrade and won the create race
-/// got a write through a planted hardlink or reparse point from an elevated process.
-/// Both halves are closed here: this refuses, and <c>SigilDownloader</c> removes the
-/// destination name before creating it. With the siting above, that refusal now only
-/// fires on a genuinely broken environment, not on anything an attacker can arrange.
+/// consumer to miss. The <c>http_download</c> → <c>run_program</c> pair is exactly such
+/// a consumer: two independent steps with a gap between them (R5). Combined with a
+/// download that writes with <c>FileMode.Create</c>, an attacker who forces the degrade
+/// and wins the create race gets a write through a planted hardlink or reparse point
+/// from an elevated process. Both halves are closed here: this refuses, and
+/// <c>SigilDownloader</c> removes the destination name before creating it. With the
+/// siting above, that refusal fires only on a genuinely broken environment, not on
+/// anything an attacker can arrange.
 /// </para>
 /// <para>
 /// <b>Unelevated is not a degrade.</b> There is no admin-only location an unelevated
@@ -182,9 +182,8 @@ internal sealed class SecureStaging : IDisposable
     /// discards has to be a decision someone writes down.
     /// </para>
     /// <para>
-    /// It says "refusal", not "degrade": this type stopped degrading when register row
-    /// R5's residual was closed. There is no downgraded elevated run left to announce —
-    /// there is a refusal, and that is the line that must reach a human.
+    /// It says "refusal", not "degrade": there is no downgraded elevated run to
+    /// announce — there is a refusal, and that is the line that must reach a human.
     /// </para>
     /// </param>
     /// <param name="fallbackRoot">
@@ -360,8 +359,8 @@ internal sealed class SecureStaging : IDisposable
 
     /// <summary>
     /// The verify-and-hold primitive over an arbitrary absolute path, for a caller that
-    /// did not stage the file through a <see cref="SecureStaging"/> instance — register
-    /// row R5's <c>http_download</c> → <c>run_program</c> pair, where the download step
+    /// did not stage the file through a <see cref="SecureStaging"/> instance — the
+    /// <c>http_download</c> → <c>run_program</c> pair (R5), where the download step
     /// chose the destination and the run step must re-confirm it. Identical guarantees:
     /// <see cref="FileShare.Read"/>, and the hash taken from the returned handle rather
     /// than from the path.
@@ -443,14 +442,13 @@ internal sealed class SecureStaging : IDisposable
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Nothing named <c>Sigil</c> is created or touched here.</b> An earlier revision
-    /// sited the elevated root at <c>%ProgramData%\Sigil\staging</c> and refused when the
-    /// intermediate <c>Sigil</c> directory was not administrator-only — but that
-    /// directory is the install-state store's, must not be repaired from the staging
-    /// path, and can be created by any unprivileged user (register row R1's attack).
-    /// The refusal was therefore a denial of service anyone could trigger. Creating the
-    /// per-run directory as a <b>direct child of <c>%ProgramData%</c></b> removes the
-    /// lever entirely: there is no fixed name to squat, and
+    /// <b>Nothing named <c>Sigil</c> is created or touched here.</b> Siting the elevated
+    /// root at <c>%ProgramData%\Sigil\staging</c> and refusing when the intermediate
+    /// <c>Sigil</c> directory is not administrator-only would be a denial of service
+    /// anyone could trigger: that directory is the install-state store's, must not be
+    /// repaired from the staging path, and can be created by any unprivileged user (R1).
+    /// Creating the per-run directory as a <b>direct child of <c>%ProgramData%</c></b>
+    /// removes the lever entirely: there is no fixed name to squat, and
     /// <c>%ProgramData%</c> grants <c>BUILTIN\Users</c> <c>(CI)(WD,AD,WEA,WA)</c> —
     /// create-child — but not <c>DC</c>, so a non-administrator can add siblings and can
     /// neither delete nor replace one it does not own.
@@ -496,23 +494,23 @@ internal sealed class SecureStaging : IDisposable
         return (commonAppData, true);
     }
 
-    // NOTE — there is deliberately NO orphan sweep here, and adding one back needs more
-    // care than it looks. A previous revision swept `sigil-*` siblings older than 24 h.
-    // Two independent defects came out of it:
+    // NOTE — there is deliberately NO orphan sweep here, and adding one needs more care
+    // than it looks. Sweeping `sigil-*` siblings older than 24 h has two independent
+    // defects:
     //
-    //   * the glob also matched %ProgramData%\sigil-runtime, the native-runtime DLL cache
-    //     — so resolving {staging_dir} could recursively delete the very directory the
-    //     same process was loading Skia and ANGLE from, mid-install;
-    //   * both guards (creation time, ACL) were read THROUGH the candidate path, so a
-    //     junction planted by a user resolved to an admin-owned target and passed them,
-    //     and the age guard is attacker-settable anyway.
+    //   * the glob also matches %ProgramData%\sigil-runtime, the native-runtime DLL cache
+    //     — so resolving {staging_dir} can recursively delete the very directory the
+    //     same process is loading Skia and ANGLE from, mid-install;
+    //   * both guards (creation time, ACL) read THROUGH the candidate path, so a junction
+    //     planted by a user resolves to an admin-owned target and passes them, and the
+    //     age guard is attacker-settable anyway.
     //
-    // What it bought was hygiene, not a security property: without it, abandoned staging
+    // A sweep buys hygiene, not a security property: without one, abandoned staging
     // directories accumulate in %ProgramData% after a crash or a kill. That is a
     // housekeeping cost, and a far better trade than a delete loop next to a directory
-    // the process is executing from. If it ever comes back it must match the exact
-    // per-run shape (its own prefix plus a 32-hex GUID), never a bare `sigil-*`, must
-    // refuse to follow reparse points, and must be tested.
+    // the process is executing from. Any sweep added later must match the exact per-run
+    // shape (its own prefix plus a 32-hex GUID), never a bare `sigil-*`, must refuse to
+    // follow reparse points, and must be tested.
 
     /// <summary>Best-effort removal of a directory this call just created and rejected.</summary>
     private static void TryRemove(string directory)

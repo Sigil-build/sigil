@@ -9,8 +9,7 @@ using Microsoft.Win32.SafeHandles;
 /// <summary>
 /// An open kernel handle to a directory, opened <b>without following a reparse
 /// point</b>, together with the facts read from that one handle: whether it really is a
-/// plain directory, when it was created, and whether it carries a given marker file.
-/// Register row R50.
+/// plain directory, when it was created, and whether it carries a given marker file. (R50)
 /// </summary>
 /// <remarks>
 /// <para>

@@ -7,7 +7,7 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Engine;
 
 /// <summary>
-/// T12 scope-resolution decision table: the manifest scope × <c>/allusers</c> /
+/// The scope-resolution decision table: the manifest scope × <c>/allusers</c> /
 /// <c>/currentuser</c> flag matrix, including the exit-64 (UsageException)
 /// conflicts against a fixed manifest scope.
 /// </summary>

@@ -15,22 +15,21 @@ using SigilBuild.Wrapper.Update;
 using Xunit;
 
 /// <summary>
-/// Register rows R11 (Authenticode before every elevated launch) and R17 (revocation
-/// checking) — the policy table, the HRESULT classification, the three-state trust
-/// line, and the two launch sites that need the internal test seam.
+/// Authenticode before every elevated launch, and revocation checking — the policy
+/// table, the HRESULT classification, the three-state trust line, and the two launch
+/// sites that need the internal test seam. (R11, R17)
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>What could not be tested, and why it is here anyway.</b> R17's decisive
+/// <b>What is NOT tested here, and why it is here anyway.</b> The decisive revocation
 /// behaviours — a revoked certificate produces no trust line, an unreachable CRL
 /// distribution point produces the distinct third state — need a revoked-certificate
-/// fixture and an offline-CRL fixture. Neither is constructible on the development box
-/// (Authenticode-signing a PE needs signtool and a certificate this session cannot
-/// install, and this session is not elevated). The classification is therefore split
-/// out of the P/Invoke into <see cref="AuthenticodeVerifier.Classify"/> and its whole
-/// table asserted directly from the documented HRESULTs. That is a weaker proof than a
-/// real revoked binary and is stated as such: it proves the mapping, not the API's
-/// return value.
+/// fixture and an offline-CRL fixture, neither of which is constructible without
+/// signtool, an installable certificate and elevation. The classification is therefore
+/// split out of the P/Invoke into <see cref="AuthenticodeVerifier.Classify"/> and its
+/// whole table asserted directly from the documented HRESULTs. That is a weaker proof
+/// than a real revoked binary and is stated as such: it proves the mapping, not the
+/// API's return value. (R17)
 /// </para>
 /// <para>
 /// <b>Elevated vs unelevated.</b> Every test in this file asserts the identical thing
@@ -54,7 +53,7 @@ public sealed class DownloadedBinaryTrustTests
 {
     private const string What = "prerequisite 'Acme Redist'";
 
-    // ── 1. R17: the HRESULT classification ────────────────────────────────────
+    // ── 1. The HRESULT classification (R17) ───────────────────────────────────
 
     [Theory]
     [InlineData(0, AuthenticodeStatus.Trusted)]
@@ -79,9 +78,9 @@ public sealed class DownloadedBinaryTrustTests
     }
 
     /// <summary>
-    /// The heart of R17: "offline" is neither "trusted" nor "forged". Asserted as a
-    /// three-way separation rather than as three independent mappings, because the bug
-    /// being closed was precisely a collapse of the three into two.
+    /// The heart of it: "offline" is neither "trusted" nor "forged". Asserted as a
+    /// three-way separation rather than as three independent mappings, because the
+    /// failure mode is precisely a collapse of the three into two. (R17)
     /// </summary>
     [Fact]
     public void Revoked_offline_and_valid_are_three_distinct_verdicts()
@@ -101,14 +100,13 @@ public sealed class DownloadedBinaryTrustTests
     /// exhaustively rather than code by code.
     /// </summary>
     /// <remarks>
-    /// Fix round 1 caught <c>CRYPT_E_NO_REVOCATION_DLL</c> (0x80092011) sitting in the
-    /// <see cref="AuthenticodeStatus.Invalid"/> bucket, where it would have REFUSED a
-    /// correctly signed prerequisite on any host unable to resolve a distribution-point
-    /// scheme — anchoring which breaks real installs, arrived at through a mapping table.
-    /// An omission in a table does not fail loudly, so the defence is to walk the
-    /// contiguous range and require every member to be classified deliberately: exactly
-    /// one revocation verdict, four infrastructure answers, nothing left in the default
-    /// bucket.
+    /// <c>CRYPT_E_NO_REVOCATION_DLL</c> (0x80092011) in the
+    /// <see cref="AuthenticodeStatus.Invalid"/> bucket REFUSES a correctly signed
+    /// prerequisite on any host unable to resolve a distribution-point scheme — a broken
+    /// install arrived at through a mapping-table slip. An omission in a table does not
+    /// fail loudly, so the defence is to walk the contiguous range and require every
+    /// member to be classified deliberately: exactly one revocation verdict, four
+    /// infrastructure answers, nothing left in the default bucket.
     /// </remarks>
     [Fact]
     public void Every_code_in_the_CRYPT_E_revocation_band_is_classified_deliberately()
@@ -140,7 +138,7 @@ public sealed class DownloadedBinaryTrustTests
             AuthenticodeStatus.Invalid, "nothing in this band is a statement about the signature itself");
     }
 
-    // ── 2. R17: the trust line the wizard renders ─────────────────────────────
+    // ── 2. The trust line the wizard renders (R17) ────────────────────────────
 
     [Fact]
     public void The_trust_line_renders_a_distinct_state_when_revocation_is_unavailable()
@@ -170,7 +168,7 @@ public sealed class DownloadedBinaryTrustTests
         InstallerTrustLoader.ResolveTrustLine(false, AuthenticodeStatus.Trusted, "Acme Corp").Should().BeNull();
     }
 
-    // ── 3. R11: the launch policy ─────────────────────────────────────────────
+    // ── 3. The launch policy (R11) ────────────────────────────────────────────
 
     [Fact]
     public void An_unsigned_download_is_refused_by_default()
@@ -251,7 +249,7 @@ public sealed class DownloadedBinaryTrustTests
         report.Should().BeNull();
     }
 
-    // ── 4. R11: the prerequisite opt-out, through the production runner ────────
+    // ── 4. The prerequisite opt-out, through the production runner (R11) ───────
 
     [WindowsFact("Authenticode / WinVerifyTrust")]
     public async Task A_prerequisite_declaring_allow_unsigned_is_launched()
@@ -290,13 +288,13 @@ public sealed class DownloadedBinaryTrustTests
         prereq.AllowUnsigned.Should().BeTrue("the flag must survive the manifest graph unchanged");
     }
 
-    // ── 5. R11: the web-stub payload (run_program of a downloaded file) ────────
+    // ── 5. The web-stub payload (run_program of a downloaded file) (R11) ───────
 
     /// <summary>
     /// The web-installer stub is an <c>http_download</c> followed by a
-    /// <c>run_program</c> of the same path, running <c>requireAdministrator</c>. The
-    /// staging work in this lane made those two steps share a verified handle; this makes
-    /// the signature a condition of the launch as well.
+    /// <c>run_program</c> of the same path, running <c>requireAdministrator</c>. Those
+    /// two steps share a verified handle; this makes the signature a condition of the
+    /// launch as well.
     /// </summary>
     /// <remarks>
     /// The program is a non-PE scratch file, so the two branches are told apart without
@@ -337,9 +335,9 @@ public sealed class DownloadedBinaryTrustTests
                 "readers to ignore it");
         }
 
-        // Disarmed — the positive control. Same file, same step: the gate is no longer
-        // the reason it does not run, and the failure that remains is the OS refusing a
-        // non-PE image, not a trust refusal.
+        // Disarmed — the positive control. Same file, same step: with the gate off it is
+        // not the reason the file does not run, and the failure that remains is the OS
+        // refusing a non-PE image, not a trust refusal.
         using (DownloadedBinaryTrust.RequireForTesting(false))
         {
             var ctx = new StepContext(new Dictionary<string, object?>(StringComparer.Ordinal));
@@ -354,9 +352,9 @@ public sealed class DownloadedBinaryTrustTests
                 "with the requirement off, the Authenticode gate must not be what stops this");
             result.Error.Should().Contain("failed to start");
 
-            // Fix round 1: the disarm must be VISIBLE. An author who packs without a
-            // `sign` block reads the docs, concludes downloaded binaries are checked, and
-            // is wrong — and before this line there was nothing anywhere to tell them.
+            // The disarm must be VISIBLE. An author who packs without a `sign` block
+            // reads the docs, concludes downloaded binaries are checked, and is wrong;
+            // this line is the only thing that tells them otherwise.
             string.Join("\n", progress.Lines).Should().Contain(
                 "declared no `sign` block",
                 "a check that silently did not happen reads, in a log, exactly like a check that passed");
@@ -400,7 +398,7 @@ public sealed class DownloadedBinaryTrustTests
         }
     }
 
-    // ── 6. R11: the update package ────────────────────────────────────────────
+    // ── 6. The update package (R11) ───────────────────────────────────────────
 
     [WindowsFact("Authenticode / WinVerifyTrust")]
     public async Task An_unsigned_update_package_is_never_launched()
@@ -472,7 +470,7 @@ public sealed class DownloadedBinaryTrustTests
     private static (byte[] Manifest, byte[] Signature, string PublicKeyBase64) SignedManifest(
         string version, string sha256)
     {
-        // R13: freshness fields are required — minted now, valid for a week.
+        // Freshness fields are required — minted now, valid for a week. (R13)
         var issued = DateTimeOffset.UtcNow;
         var json =
             "{\n" +

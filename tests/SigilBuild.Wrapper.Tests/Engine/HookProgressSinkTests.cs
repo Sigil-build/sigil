@@ -12,17 +12,17 @@ using SigilBuild.Wrapper.Tests.Helpers;
 using Xunit;
 
 /// <summary>
-/// Register row R56 — a hook phase must have somewhere to report to.
+/// A hook phase must have somewhere to report to. (R56)
 /// </summary>
 /// <remarks>
 /// <c>ctx.ProgressSink</c> is the channel a step uses for the lines that are not steps:
 /// the <c>DownloadedBinaryTrust</c> disarm notice raised by <c>run_program</c>, and
 /// <c>SecureStaging</c>'s "this elevated run could not establish an administrator-only
-/// staging root". It was set by <see cref="InstallEngine"/> and by nothing else, so
-/// every one of those lines raised during a <c>pre_install</c>, <c>post_install</c> or
-/// uninstall hook went to <c>null</c>. Both are security refusals, and a refusal that is
-/// not logged reads — from the operator's side, and in the /LOG file — exactly like a
-/// silent success.
+/// staging root". If it is set by <see cref="InstallEngine"/> and by nothing else, every
+/// one of those lines raised during a <c>pre_install</c>, <c>post_install</c> or uninstall
+/// hook goes to <c>null</c>. Both are security refusals, and a refusal that is not logged
+/// reads — from the operator's side, and in the /LOG file — exactly like a silent
+/// success.
 /// </remarks>
 public class HookProgressSinkTests
 {

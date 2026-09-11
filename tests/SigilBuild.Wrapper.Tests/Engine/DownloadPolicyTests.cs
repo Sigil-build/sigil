@@ -6,17 +6,15 @@ using SigilBuild.Wrapper.Engine;
 using Xunit;
 
 /// <summary>
-/// Register rows R45 (the downloaded-binary signature policy is DECLARED, not inferred)
-/// and R46 (an unestablished revocation status can be made a refusal).
+/// The downloaded-binary signature policy is DECLARED, not inferred, and an
+/// unestablished revocation status can be made a refusal. (R45, R46)
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>These tests do NOT compile at the parent commit</b>, and that is stated here
-/// rather than left to be discovered: they name
-/// <see cref="RequireSignedDownloads"/>, which R45 introduces. The parent-failing proof
-/// for R45 is the SIG0326 parse test in <c>NetworkTrustParseTests</c>, which uses only
-/// string literals; what follows is the behavioural half that can only exist once the
-/// type does.
+/// <b>The behavioural half only.</b> These tests name
+/// <see cref="RequireSignedDownloads"/>, so they can only exist once that type does. The
+/// proof that the policy is refused at PARSE time when undeclared is the SIG0326 test in
+/// <c>NetworkTrustParseTests</c>, which uses only string literals.
 /// </para>
 /// <para>
 /// <b>Nothing here touches the host.</b> <see cref="DownloadedBinaryTrust.Decide"/> is a
@@ -27,7 +25,7 @@ public sealed class DownloadPolicyTests
 {
     private const string What = "the downloaded 2.0.0 installer";
 
-    // ── R45: the default is exactly the behaviour it replaces ─────────────────
+    // ── The default is exactly the behaviour it replaces (R45) ────────────────
 
     [Fact]
     public void The_default_policy_is_sign_declared()
@@ -62,7 +60,7 @@ public sealed class DownloadPolicyTests
         refusal.Should().BeNull();
     }
 
-    // ── R46: the opt-in hard fail ─────────────────────────────────────────────
+    // ── The opt-in hard fail (R46) ────────────────────────────────────────────
 
     [Fact]
     public void Under_always_verified_revocation_an_unreachable_responder_is_a_refusal()
@@ -123,7 +121,7 @@ public sealed class DownloadPolicyTests
         }
     }
 
-    // ── R45: `always` arms the gate for an artifact that declares no signing ──
+    // ── `always` arms the gate for an artifact that declares no signing (R45) ─
 
     [Fact]
     public void Always_arms_the_gate_for_an_artifact_that_declared_no_sign_block()

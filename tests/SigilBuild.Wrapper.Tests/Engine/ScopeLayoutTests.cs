@@ -8,7 +8,7 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Engine;
 
 /// <summary>
-/// T12 per-scope layout: the machine vs user mapping for install root, state /
+/// Per-scope layout: the machine vs user mapping for install root, state /
 /// journal root, PATH scope, and shortcut folders — the parameterization that
 /// replaces hardcoded machine paths.
 /// </summary>
@@ -72,16 +72,16 @@ public sealed class ScopeLayoutTests
     }
 
     /// <summary>
-    /// Register row R52. Containment (<c>InstallDirResolver.IsContained</c>) accepted
-    /// <c>%ProgramFiles(x86)%</c> while <see cref="ScopeLayout"/> modelled only
-    /// <c>%ProgramFiles%</c>, so the PERMITTED destinations and the DEFAULT destination
-    /// were two independently-maintained facts. This asserts they are one fact: every
-    /// root containment accepts is a root the layout itself declares.
+    /// The PERMITTED destinations and the DEFAULT destination must not be two
+    /// independently-maintained facts — containment
+    /// (<c>InstallDirResolver.IsContained</c>) accepting <c>%ProgramFiles(x86)%</c> while
+    /// <see cref="ScopeLayout"/> models only <c>%ProgramFiles%</c> is the divergence.
+    /// This asserts they are one fact: every root containment accepts is a root the
+    /// layout itself declares. (R52)
     /// </summary>
     /// <remarks>
-    /// The parent-commit form of this test replaced <c>layout.InstallRoots</c> with
-    /// <c>new[] { layout.InstallRoot }</c> — the roots <c>ScopeLayout</c> modelled
-    /// before the fix — and failed on exactly this path.
+    /// Non-vacuous: narrow <c>layout.InstallRoots</c> to <c>new[] { layout.InstallRoot }</c>
+    /// and this goes red on exactly that path.
     /// </remarks>
     [Fact]
     public void Machine_layout_declares_every_root_containment_accepts()

@@ -9,7 +9,7 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Engine;
 
 /// <summary>
-/// T12 scope threading through the shared <see cref="InstallSession"/> driver and
+/// Scope threading through the shared <see cref="InstallSession"/> driver and
 /// the exposure of the resolved scope to the expression engine.
 /// </summary>
 public sealed class ScopeInstallSessionTests
@@ -102,12 +102,11 @@ public sealed class ScopeInstallSessionTests
     }
 
     /// <summary>
-    /// Was <c>State_records_scope_and_is_honored_regardless_of_flag</c>, which asserted
-    /// that a machine-scope load falls through to the user-scope directory and adopts
-    /// the scope recorded inside the file. That is register row R1 clause (b) — the
-    /// vulnerability, not a feature — so the test now asserts the refusal instead: a
-    /// machine-scope load never reads <c>%LocalAppData%</c>, and the scope of a state
-    /// file is the scope of the directory it was found in.
+    /// A machine-scope load falling through to the user-scope directory and adopting
+    /// the scope recorded inside the file is the vulnerability, not a feature, so the
+    /// refusal is what is asserted: a machine-scope load never reads
+    /// <c>%LocalAppData%</c>, and the scope of a state file is the scope of the
+    /// directory it was found in. (R1)
     /// </summary>
     [Fact]
     public void State_is_loaded_only_from_the_requested_scopes_own_directory()

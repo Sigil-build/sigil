@@ -15,9 +15,9 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Engine;
 
 /// <summary>
-/// P6 (gaps G7/G17): files-in-use detection (declared app_mutex + Restart Manager),
-/// the silent /closeapps gate, and the setup single-instance lock. Windows-only —
-/// the Restart Manager and named mutexes have no cross-platform equivalent.
+/// Files-in-use detection (declared app_mutex + Restart Manager), the silent
+/// /closeapps gate, and the setup single-instance lock. Windows-only — the
+/// Restart Manager and named mutexes have no cross-platform equivalent. (G7, G17)
 /// </summary>
 [System.Runtime.Versioning.SupportedOSPlatform("windows")]
 public sealed class FilesInUseTests
@@ -69,15 +69,15 @@ public sealed class FilesInUseTests
     // ── Restart Manager sweep ────────────────────────────────────────────────
 
     /// <summary>
-    /// R58 — the gate's positive control: a SEPARATE process holding a file open under
-    /// the install directory is still reported. The self-exclusion this file also tests
-    /// must not cost the gate its actual job.
+    /// The gate's positive control: a SEPARATE process holding a file open under the
+    /// install directory is still reported. The self-exclusion this file also tests must
+    /// not cost the gate its actual job. (R58)
     /// </summary>
     /// <remarks>
-    /// This test used to hold the file from the CURRENT process and assert that the
-    /// current process came back as a blocker — it encoded the R58 defect as the
-    /// contract. The blocker has to be an independent process for the assertion to mean
-    /// "the Restart Manager sees somebody else", so the holder is a child
+    /// The blocker must not be the CURRENT process: asserting that the current process
+    /// comes back as a blocker encodes the defect as the contract. It has to be an
+    /// independent process for the assertion to mean "the Restart Manager sees somebody
+    /// else", so the holder is a child
     /// <c>powershell.exe</c>: its own image lives in System32, well outside the scanned
     /// directory, so the only thing tying it to the sweep is the open handle.
     /// </remarks>
@@ -109,11 +109,11 @@ public sealed class FilesInUseTests
     }
 
     /// <summary>
-    /// R58 — the second positive control, and the reason the exclusion is keyed on the
-    /// image PATH rather than on "is an ancestor of mine". The Restart Manager reports a
+    /// The second positive control, and the reason the exclusion is keyed on the image
+    /// PATH rather than on "is an ancestor of mine". The Restart Manager reports a
     /// process whose executable IMAGE merely lives under the scanned directory, even when
     /// it holds no other handle there. That is exactly how the gate catches "the app you
-    /// are upgrading is running", and it must keep doing so.
+    /// are upgrading is running", and it must keep doing so. (R58)
     /// </summary>
     [Fact]
     public async Task RestartManager_reports_an_app_running_from_inside_the_install_dir()
@@ -138,22 +138,22 @@ public sealed class FilesInUseTests
         }
     }
 
-    // ── R58: the running installer is never a blocker of itself ──────────────
+    // ── The running installer is never a blocker of itself (R58) ─────────────
 
     /// <summary>
-    /// R58 (release blocker, found at G2 check 1) — the ARP <c>UninstallString</c> is
-    /// <c>&lt;install_dir&gt;\uninstall.exe /S /Uninstall /currentuser</c>, so T15's
-    /// dropped uninstaller runs from INSIDE the directory the P6 gate sweeps. With no
-    /// self-exclusion the Restart Manager reported the uninstaller's own image and the
-    /// run was refused with exit 4 — <c>blocked by: installer (pid N)</c>, N being its
-    /// own pid — before touching anything. <c>/closeapps</c> could not rescue it either:
-    /// the Restart Manager cannot close its own caller.
+    /// The ARP <c>UninstallString</c> is
+    /// <c>&lt;install_dir&gt;\uninstall.exe /S /Uninstall /currentuser</c>, so the
+    /// dropped uninstaller runs from INSIDE the directory the files-in-use gate sweeps.
+    /// Without self-exclusion the Restart Manager reports the uninstaller's own image and
+    /// the run is refused with exit 4 — <c>blocked by: installer (pid N)</c>, N being its
+    /// own pid — before touching anything. <c>/closeapps</c> cannot rescue it either: the
+    /// Restart Manager cannot close its own caller. (R58)
     /// </summary>
     /// <remarks>
     /// The current process here plays the uninstaller: it holds a file open under the
     /// swept directory (<c>FileShare.None</c>, the strongest case) and the sweep must
-    /// come back without it. Before the fix this failed, the Restart Manager reporting
-    /// the test host by pid — precisely the production symptom.
+    /// come back without it. Without the exclusion this goes red with the Restart Manager
+    /// reporting the test host by pid — precisely the production symptom.
     /// </remarks>
     [Fact]
     public async Task Scan_never_reports_the_running_process_as_its_own_blocker()
@@ -178,9 +178,9 @@ public sealed class FilesInUseTests
     }
 
     /// <summary>
-    /// R58 — self-exclusion must leave a genuinely clear directory reading clear, not
+    /// Self-exclusion must leave a genuinely clear directory reading clear, not
     /// "blocked by something with pid 0": with nothing but this process holding the
-    /// install dir, the gate has nothing to refuse on.
+    /// install dir, the gate has nothing to refuse on. (R58)
     /// </summary>
     [Fact]
     public void Scan_is_clear_when_only_the_running_process_holds_the_install_dir()
@@ -198,15 +198,15 @@ public sealed class FilesInUseTests
     }
 
     /// <summary>
-    /// R58 — the T12 half. A machine-scope ARP uninstall runs
+    /// The elevated-relaunch half. A machine-scope ARP uninstall runs
     /// <c>&lt;install_dir&gt;\uninstall.exe /S /Uninstall /allusers</c> un-elevated;
     /// <c>Elevation.RelaunchElevatedAndWait</c> then relaunches THE SAME IMAGE elevated
     /// and blocks in <c>WaitForSingleObject</c> until the child exits. So while the
     /// elevated child runs its gate, the un-elevated parent is still alive with
     /// <c>&lt;install_dir&gt;\uninstall.exe</c> loaded as its image — which
     /// <see cref="RestartManager_reports_an_app_running_from_inside_the_install_dir"/>
-    /// proves the Restart Manager reports. Excluding only the child's own pid would have
-    /// left <c>/allusers</c> uninstalls blocked on their own parent.
+    /// proves the Restart Manager reports. Excluding only the child's own pid leaves
+    /// <c>/allusers</c> uninstalls blocked on their own parent. (R58)
     /// </summary>
     /// <remarks>
     /// The relaunch pair is simulated rather than elevated: a child process is started
@@ -243,7 +243,7 @@ public sealed class FilesInUseTests
         }
     }
 
-    /// <summary>R58 — the current process is excluded on pid alone, image path or not.</summary>
+    /// <summary>The current process is excluded on pid alone, image path or not. (R58)</summary>
     [Fact]
     public void The_current_process_is_always_recognised_as_the_running_installer()
     {
@@ -254,15 +254,15 @@ public sealed class FilesInUseTests
     }
 
     /// <summary>
-    /// R58 review finding 1 — the same-image check must compare the image FILE, not the
-    /// two path strings. Production feeds it
+    /// The same-image check must compare the image FILE, not the two path strings.
+    /// Production feeds it
     /// <see cref="Environment.ProcessPath"/> (<c>GetModuleFileNameW(NULL)</c>, which
     /// preserves the form the process was LAUNCHED with — 8.3 components, a substituted
     /// drive, a junction) on one side and <c>QueryFullProcessImageNameW(…, 0)</c> (the
     /// canonical long Win32 path) on the other. Under a string comparison those diverge,
-    /// the T12 relaunch parent stops being recognised, and a <c>/allusers</c> ARP
-    /// uninstall exits 4 again with the original R58 symptom — reachable in the field via
-    /// <c>/D=C:\PROGRA~1\Acme</c>.
+    /// the elevated-relaunch parent stops being recognised, and a <c>/allusers</c> ARP
+    /// uninstall exits 4 on its own parent again — reachable in the field via
+    /// <c>/D=C:\PROGRA~1\Acme</c>. (R58)
     /// </summary>
     /// <remarks>
     /// The process is launched normally and the ALTERNATIVE spelling is supplied as the
@@ -306,9 +306,9 @@ public sealed class FilesInUseTests
     }
 
     /// <summary>
-    /// R58 review finding 1, the other half — identity must not be confused with the file
-    /// NAME. A different file that merely shares the uninstaller's file name, in another
-    /// directory, is a stranger and stays a blocker.
+    /// The other half: identity must not be confused with the file NAME. A different
+    /// file that merely shares the uninstaller's file name, in another directory, is a
+    /// stranger and stays a blocker. (R58)
     /// </summary>
     [Fact]
     public void A_different_file_with_the_same_name_is_not_the_installers_image()
@@ -336,10 +336,10 @@ public sealed class FilesInUseTests
     }
 
     /// <summary>
-    /// R58 review finding 2 — the same-image branch is reached from <c>Scan</c>, not just
-    /// from its predicate. Replacing the self-image argument with <c>null</c> used to
-    /// leave every test green, so the wiring between <c>Scan</c> and the exclusion was
-    /// unpinned; this asserts both directions through <c>Scan</c>'s own output.
+    /// The same-image branch is reached from <c>Scan</c>, not just from its predicate.
+    /// Pinning the predicate alone leaves the wiring between <c>Scan</c> and the
+    /// exclusion unguarded — replacing the self-image argument with <c>null</c> stays
+    /// green; this asserts both directions through <c>Scan</c>'s own output. (R58)
     /// </summary>
     [Fact]
     public async Task Scan_drops_a_process_running_the_supplied_self_image_and_keeps_it_otherwise()
@@ -373,8 +373,8 @@ public sealed class FilesInUseTests
     }
 
     /// <summary>
-    /// R58 review finding 2 — and the value production supplies to that seam is the
-    /// running image, so a mutation to the two-argument overload cannot go unnoticed.
+    /// And the value production supplies to that seam is the running image, so a
+    /// mutation to the two-argument overload cannot go unnoticed. (R58)
     /// </summary>
     [Fact]
     public void The_self_image_production_scans_with_is_the_running_process_image()
@@ -385,8 +385,8 @@ public sealed class FilesInUseTests
     }
 
     /// <summary>
-    /// R58 — the image-path comparison is only as good as the cross-process lookup it
-    /// rests on, so that lookup is asserted directly against a child whose path is known.
+    /// The image-path comparison is only as good as the cross-process lookup it rests
+    /// on, so that lookup is asserted directly against a child whose path is known. (R58)
     /// </summary>
     [Fact]
     public void The_image_path_of_another_process_can_be_read()
@@ -463,9 +463,9 @@ public sealed class FilesInUseTests
                 Parameters: Array.Empty<ParameterDefinition>(),
                 InstallSteps: new InstallStep[]
                 {
-                    // R16: an OS temp directory is never install_dir, so the
-                    // out-of-tree write is declared with the production per-step
-                    // opt-out. Under test here is the files-in-use gate.
+                    // An OS temp directory is never install_dir, so the out-of-tree
+                    // write is declared with the production per-step opt-out. Under
+                    // test here is the files-in-use gate. (R16)
                     new InstallStep.DirectoryCreate("body", body, When: null, OnFailure.Fail)
                         { AllowOutsideInstallDir = true },
                 },
@@ -509,9 +509,9 @@ public sealed class FilesInUseTests
                 Parameters: Array.Empty<ParameterDefinition>(),
                 InstallSteps: new InstallStep[]
                 {
-                    // R16: an OS temp directory is never install_dir, so the
-                    // out-of-tree write is declared with the production per-step
-                    // opt-out. Under test here is the files-in-use gate.
+                    // An OS temp directory is never install_dir, so the out-of-tree
+                    // write is declared with the production per-step opt-out. Under
+                    // test here is the files-in-use gate. (R16)
                     new InstallStep.DirectoryCreate("body", body, When: null, OnFailure.Fail)
                         { AllowOutsideInstallDir = true },
                 },
@@ -609,7 +609,7 @@ public sealed class FilesInUseTests
         }
     }
 
-    // ── Single-instance lock (gap G17) ───────────────────────────────────────
+    // ── Single-instance lock (G17) ───────────────────────────────────────────
 
     [Fact]
     public void Second_setup_instance_is_refused_and_the_first_is_unaffected()
@@ -653,11 +653,11 @@ public sealed class FilesInUseTests
     }
 
     /// <summary>
-    /// R34 — the <c>NULL</c>-handle branch used to fail OPEN. <c>CreateMutexW</c> returns
-    /// <c>NULL</c> when the name cannot be created, and the code answered with a
-    /// non-owning sentinel indistinguishable from a real lock, so two installs could
-    /// proceed concurrently. <c>ERROR_ALREADY_EXISTS</c> was the only branch that failed
-    /// closed.
+    /// The <c>NULL</c>-handle branch must not fail OPEN. <c>CreateMutexW</c> returns
+    /// <c>NULL</c> when the name cannot be created; answering that with a non-owning
+    /// sentinel indistinguishable from a real lock lets two installs proceed
+    /// concurrently, leaving <c>ERROR_ALREADY_EXISTS</c> as the only branch that fails
+    /// closed. (R34)
     /// </summary>
     /// <remarks>
     /// The squat is reproduced the cheap way, which is also the realistic way: the mutex
@@ -687,15 +687,16 @@ public sealed class FilesInUseTests
             "believe they hold the lock");
     }
 
-    // ── R76: the prior-version uninstaller this installer spawns ─────────────
+    // ── The prior-version uninstaller this installer spawns (R76) ────────────
 
     /// <summary>
-    /// R76 — the defect: a per-user v1 → v2 upgrade holds
+    /// The defect this admits around: a per-user v1 → v2 upgrade holds
     /// <c>Local\sigil-setup-&lt;appId&gt;-user</c> and then runs the PRIOR version's
     /// <c>uninstall.exe /S /Uninstall /currentuser</c> for the teardown. That child
-    /// derives the SAME name, saw <c>ERROR_ALREADY_EXISTS</c>, and exited 5 — so every
-    /// unelevated upgrade and forced downgrade died with "removing the previous version
-    /// failed (uninstaller exit code 5)" and installed nothing.
+    /// derives the SAME name, so without the handoff it sees
+    /// <c>ERROR_ALREADY_EXISTS</c> and exits 5 — every unelevated upgrade and forced
+    /// downgrade dies with "removing the previous version failed (uninstaller exit
+    /// code 5)" and installs nothing. (R76)
     /// </summary>
     /// <remarks>
     /// <para>
@@ -705,8 +706,8 @@ public sealed class FilesInUseTests
     /// "the token names my parent, and the name is taken" — and it is the strongest
     /// in-process approximation available, because a genuine child would have to be a
     /// separate process. The end-to-end arbiter is
-    /// <c>UpgradeInstallTests.Upgrade_replaces_older_version_…</c> in the VM matrix
-    /// (PR #45), which is what actually runs Setup.exe v2 over an installed v1.
+    /// <c>UpgradeInstallTests.Upgrade_replaces_older_version_…</c> in the VM matrix,
+    /// which is what actually runs Setup.exe v2 over an installed v1.
     /// </para>
     /// <para>
     /// The negative half of the contract is in the tests below: nothing but a token
@@ -744,9 +745,9 @@ public sealed class FilesInUseTests
     }
 
     /// <summary>
-    /// R76 — the guard itself is unchanged for everyone else: with no handoff, a second
-    /// instance is refused exactly as before, uninstall mode included (an ARP uninstall
-    /// launched by hand while an install of the same app runs).
+    /// The guard is unchanged for everyone else: with no handoff a second instance is
+    /// refused, uninstall mode included (an ARP uninstall launched by hand while an
+    /// install of the same app runs). (R76)
     /// </summary>
     [WindowsFact]
     public void Without_a_handoff_an_uninstall_is_still_refused_while_a_setup_holds_the_guard()
@@ -763,8 +764,8 @@ public sealed class FilesInUseTests
     }
 
     /// <summary>
-    /// R76 — the forgery cases, each isolating one binding. A handoff is only ever a
-    /// claim; every field of it is checked against something the OS answers.
+    /// The forgery cases, each isolating one binding. A handoff is only ever a claim;
+    /// every field of it is checked against something the OS answers. (R76)
     /// </summary>
     [WindowsFact]
     public void A_forged_or_stale_handoff_is_refused()
@@ -820,9 +821,9 @@ public sealed class FilesInUseTests
     }
 
     /// <summary>
-    /// R76 — the payoff ceiling. The handoff is honoured for the uninstall teardown and
+    /// The payoff ceiling. The handoff is honoured for the uninstall teardown and
     /// nothing else, so no token, however obtained, can put a second CONCURRENT INSTALL
-    /// of an application onto the same state.
+    /// of an application onto the same state. (R76)
     /// </summary>
     [WindowsFact]
     public void A_handoff_never_admits_a_second_install()
@@ -850,9 +851,10 @@ public sealed class FilesInUseTests
     }
 
     /// <summary>
-    /// R76 must not reopen R34: when the guard's name is occupied by something that is
-    /// not our mutex, no exclusivity was ever established, so there is no critical
-    /// section to be admitted into. A valid handoff does not rescue that branch.
+    /// The handoff must not reopen the squatted-name hole: when the guard's name is
+    /// occupied by something that is not our mutex, no exclusivity was ever established,
+    /// so there is no critical section to be admitted into. A valid handoff does not
+    /// rescue that branch. (R34, R76)
     /// </summary>
     [WindowsFact]
     public void A_squatted_guard_name_is_not_rescued_by_a_valid_handoff()
@@ -878,9 +880,9 @@ public sealed class FilesInUseTests
     }
 
     /// <summary>
-    /// R76 — the admission is one level deep. An admitted child does not own the guard,
-    /// so it cannot mint a handoff of its own: no chain of processes can walk the
-    /// exemption outwards.
+    /// The admission is one level deep. An admitted child does not own the guard, so it
+    /// cannot mint a handoff of its own: no chain of processes can walk the exemption
+    /// outwards. (R76)
     /// </summary>
     [WindowsFact]
     public void An_admitted_child_cannot_mint_a_further_handoff()
@@ -907,10 +909,10 @@ public sealed class FilesInUseTests
     }
 
     /// <summary>
-    /// R76 — the guard name carries the scope, so a token minted for one scope must not
-    /// admit the other. This is what makes "machine scope is the same code with a
+    /// The guard name carries the scope, so a token minted for one scope must not admit
+    /// the other. This is what makes "machine scope is the same code with a
     /// <c>Global\</c> name" a tested claim rather than an inspected one: the elevated
-    /// shape reaches the identical check, and a per-user token cannot cross into it.
+    /// shape reaches the identical check, and a per-user token cannot cross into it. (R76)
     /// </summary>
     /// <remarks>
     /// Pure verification — no mutex is created, so the machine-scope half needs no

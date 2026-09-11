@@ -13,7 +13,7 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Engine;
 
 /// <summary>
-/// T8: the ENABLED built-in option components are exposed to the expression engine
+/// The ENABLED built-in option components are exposed to the expression engine
 /// as <c>option.*</c> so an auto-generated (or hand-written) step gated on
 /// <c>option.&lt;component&gt;</c> honours the resolved value. Resolution precedence:
 /// a <c>locked</c> component is fixed at its default; otherwise
@@ -91,7 +91,7 @@ public sealed class OptionFlowTests
         ctx.Evaluate("option.desktop_shortcut || true").Should().BeTrue();
     }
 
-    // ── P10 (gap G11): app-defined custom components ─────────────────────────
+    // ── App-defined custom components (G11) ──────────────────────────────────
 
     private static InstallerOptionComponent Custom(
         string name, bool @default = false, bool locked = false, string? when = null) =>
@@ -169,11 +169,11 @@ public sealed class OptionFlowTests
             Parameters: Array.Empty<ParameterDefinition>(),
             InstallSteps: new InstallStep[]
             {
-                // R16 contains file_copy's `to` to install_dir; these two copy
-                // into an OS temp directory, so the fixture declares the
+                // Containment anchors file_copy's `to` to install_dir; these two
+                // copy into an OS temp directory, so the fixture declares the
                 // out-of-tree write with the production per-step opt-out rather
                 // than relaxing the rule. What is under test here is option
-                // gating, not containment.
+                // gating, not containment. (R16)
                 new InstallStep.FileCopy("cpA", Path.Combine(srcA, "*"), dstA,
                     Overwrite: true, When: "option.feature_a", OnFailure.Fail)
                     { AllowOutsideInstallDir = true },
@@ -223,9 +223,9 @@ public sealed class OptionFlowTests
 
         var steps = new InstallStep[]
         {
-            // R16: gatedDir is in an OS temp directory, never install_dir, so the
+            // gatedDir is in an OS temp directory, never install_dir, so the
             // out-of-tree write is declared with the production per-step opt-out.
-            // Under test here is option gating, not containment.
+            // Under test here is option gating, not containment. (R16)
             new InstallStep.DirectoryCreate("g", gatedDir, When: "option.desktop_shortcut", OnFailure.Fail)
                 { AllowOutsideInstallDir = true },
         };

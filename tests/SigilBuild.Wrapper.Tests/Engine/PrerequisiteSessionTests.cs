@@ -10,7 +10,7 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Engine;
 
 /// <summary>
-/// P5 (gap G6): prerequisites wired through the <see cref="InstallSession"/> driver.
+/// Prerequisites wired through the <see cref="InstallSession"/> driver.
 /// A prerequisite failure must abort the run BEFORE the journal opens (no partial
 /// install) — verified here with a scope-required mismatch, which fails without
 /// spawning any process.

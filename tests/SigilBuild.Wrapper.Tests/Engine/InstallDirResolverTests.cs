@@ -8,16 +8,16 @@ namespace SigilBuild.Wrapper.Tests.Engine;
 
 /// <summary>
 /// Pins the <c>{install_dir}</c> default + override precedence and the
-/// <c>{scope_root}</c> / <c>{app.*}</c> token resolution (T13).
+/// <c>{scope_root}</c> / <c>{app.*}</c> token resolution.
 /// </summary>
 /// <remarks>
 /// The precedence cases below deliberately use arbitrary absolute paths
 /// (<c>C:\Tools\Acme</c>, <c>D:\Existing\Acme</c>) to make "which source won"
-/// unmistakable. Since R3 those paths are outside the scope root, so they pass
+/// unmistakable. Those paths are outside the scope root, so they pass
 /// the <c>allowAnyRoot</c> escape hatch — these fixtures test PRECEDENCE, not
 /// containment; containment has its own suite in
 /// <see cref="InstallDirContainmentTests"/>. The production rule is untouched:
-/// the hatch is <c>internal</c> and no <c>src/</c> path can reach it.
+/// the hatch is <c>internal</c> and no <c>src/</c> path can reach it. (R3)
 /// </remarks>
 public sealed class InstallDirResolverTests
 {
@@ -94,7 +94,7 @@ public sealed class InstallDirResolverTests
         resolved.Should().Be(Path.GetFullPath(wizard));
     }
 
-    // ── Prior install dir (P3 upgrade) precedence ─────────────────────────────
+    // ── Prior install dir (upgrade) precedence ────────────────────────────────
 
     [Fact]
     public void Prior_install_dir_wins_over_manifest_and_default()

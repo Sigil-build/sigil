@@ -13,11 +13,11 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Engine;
 
 /// <summary>
-/// T10 re-install / upgrade idempotency: two consecutive <c>/silent</c> installs of
+/// Re-install / upgrade idempotency: two consecutive <c>/silent</c> installs of
 /// the same app must not duplicate PATH entries, shortcuts, or ARP rows. The driver
 /// detects the prior install (recorded state / ARP) and replays its recorded
 /// uninstall before the fresh install re-lays every mutation exactly once
-/// (uninstall-then-install, per T10).
+/// (uninstall-then-install).
 /// </summary>
 /// <remarks>
 /// The PATH-duplication case is exercised against a DEDICATED, uniquely-named user
@@ -89,12 +89,12 @@ public sealed class ReinstallIdempotencyTests
         var envVarName = "SIGIL_T10_PATH_" + Guid.NewGuid().ToString("N");
         var installDir = Path.Combine(ScopeLayout.For(InstallScope.User).InstallRoot, appId);
 
-        // R54: `shortcut_create.location` is now anchored to install_dir / a Start Menu
-        // folder / a Desktop folder, so this fixture's old `%TEMP%` stand-in for "a
-        // desktop" is refused — correctly, since no real manifest writes a shortcut
-        // there. A `Shortcuts` folder inside the install directory is a real shape,
-        // exercises the same non-duplication path, and keeps the test out of the
-        // runner's own Start Menu.
+        // `shortcut_create.location` is anchored to install_dir / a Start Menu folder /
+        // a Desktop folder, so a `%TEMP%` stand-in for "a desktop" is refused —
+        // correctly, since no real manifest writes a shortcut there. A `Shortcuts`
+        // folder inside the install directory is a real shape, exercises the same
+        // non-duplication path, and keeps the test out of the runner's own Start
+        // Menu. (R54)
         var shortcutDir = Path.Combine(installDir, "Shortcuts");
         var envValue = Path.Combine(shortcutDir, "bin");
 

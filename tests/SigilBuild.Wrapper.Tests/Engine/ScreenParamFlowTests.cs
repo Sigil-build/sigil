@@ -13,7 +13,7 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Engine;
 
 /// <summary>
-/// T9: wizard-collected parameter values must reach the engine under both the
+/// Wizard-collected parameter values must reach the engine under both the
 /// <c>param.*</c> shorthand (used by the reference manifest) and the canonical
 /// <c>parameters.*</c> namespace, and a step gated on <c>param.*</c> must honour
 /// the collected value.
@@ -67,9 +67,9 @@ public sealed class ScreenParamFlowTests
 
         var steps = new InstallStep[]
         {
-            // R16: gatedDir is in an OS temp directory, never install_dir, so the
+            // gatedDir is in an OS temp directory, never install_dir, so the
             // out-of-tree write is declared with the production per-step opt-out.
-            // Under test here is parameter gating, not containment.
+            // Under test here is parameter gating, not containment. (R16)
             new InstallStep.DirectoryCreate("g", gatedDir, When: "param.autostart == true", OnFailure.Fail)
                 { AllowOutsideInstallDir = true },
         };

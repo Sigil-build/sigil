@@ -7,10 +7,10 @@ using SigilBuild.Wrapper.Engine;
 using SigilBuild.Wrapper.Tests.Helpers;
 
 /// <summary>
-/// Register row R16: containment is re-implemented three times, shared nowhere,
-/// and no step destination is checked at all. These pin the single helper the
-/// step catalog will route through — including the case that a textual
-/// <c>StartsWith</c> cannot see: a directory junction planted inside the root.
+/// Containment must not be re-implemented per call site, and every step destination
+/// must be checked. These pin the single helper the step catalog routes through —
+/// including the case that a textual <c>StartsWith</c> cannot see: a directory
+/// junction planted inside the root. (R16)
 /// </summary>
 public sealed class PathContainmentTests
 {
@@ -23,8 +23,8 @@ public sealed class PathContainmentTests
     [InlineData(@"C:\Program Files\App", @"C:\Windows\System32\a.dll", false)]
     [InlineData(@"C:\Program Files\App", @"C:\Program Files\AppEvil\a.exe", false)]
     [InlineData(@"C:\Program Files\App", @"\\server\share\a.exe", false)]
-    // A trailing separator on either side must not change the answer. /D= keeps a
-    // trailing '\' the operator typed, and S2.3 anchors on ctx.InstallDir.
+    // A trailing separator on either side must not change the answer: /D= keeps a
+    // trailing '\' the operator typed, and the step guard anchors on ctx.InstallDir.
     [InlineData(@"C:\Program Files\App\", @"C:\Program Files\App\bin\a.exe", true)]
     [InlineData(@"C:\Program Files\App\", @"C:\Program Files\App", true)]
     [InlineData(@"C:\Program Files\App", @"C:\Program Files\App\", true)]
@@ -36,8 +36,8 @@ public sealed class PathContainmentTests
     /// <summary>
     /// Win32 device-namespace spellings (<c>\\.\</c>, <c>\\?\</c>) reach the same
     /// file as the plain DOS path and pass an ACL read, so they are an alias a
-    /// containment check has to have an answer for. Raised by lane S1, which hit
-    /// the same aliasing in its trust predicate.
+    /// containment check has to have an answer for — the same aliasing the state-
+    /// directory trust predicate has to handle.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -112,7 +112,7 @@ public sealed class PathContainmentTests
             .Should().BeTrue();
     }
 
-    // ── Trailing separators (fix round 1, Important 3) ────────────────────────
+    // ── Trailing separators ───────────────────────────────────────────────────
 
     [WindowsFact("Windows directory junctions")]
     public void IsUnderWithoutTraversal_is_unaffected_by_a_trailing_separator()
@@ -148,7 +148,7 @@ public sealed class PathContainmentTests
             .Should().BeFalse();
     }
 
-    // ── IsReparsePoint exception paths (fix round 1, Important 1) ─────────────
+    // ── IsReparsePoint exception paths ────────────────────────────────────────
 
     [WindowsFact("Windows reparse points")]
     public void IsReparsePoint_is_true_only_for_an_actual_reparse_point()

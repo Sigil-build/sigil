@@ -13,23 +13,23 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Engine;
 
 /// <summary>
-/// P2 (gap G2): lifecycle hooks (<c>installer.hooks</c>) run OUTSIDE the rollback
+/// Lifecycle hooks (<c>installer.hooks</c>) run OUTSIDE the rollback
 /// journal, around the transactional body, with per-step on_failure. Driven end to
 /// end through <see cref="InstallSession"/> with /LOG so ordering and the
 /// non-rollback semantics are observable.
 /// </summary>
 public sealed class LifecycleHookTests
 {
-    // R16 contains directory_create's `path` to install_dir. These hooks create
-    // marker directories in an OS temp directory, which no real silent install
+    // Containment anchors directory_create's `path` to install_dir. These hooks
+    // create marker directories in an OS temp directory, which no real silent install
     // resolves as install_dir, so the fixture declares the out-of-tree write with
     // the production per-step opt-out rather than the rule being relaxed for it.
-    // What is under test here is hook ordering, not containment.
+    // What is under test here is hook ordering, not containment. (R16)
     private static InstallStep.DirectoryCreate Mkdir(string id, string path, OnFailure onFailure)
         => new(id, path, When: null, onFailure) { AllowOutsideInstallDir = true };
 
-    // A step that always fails (glob root does not exist), used to exercise a
-    // failing hook without needing Windows-specific programs.
+    // A step that always fails (glob root does not exist), to exercise a failing
+    // hook without needing Windows-specific programs.
     private static InstallStep.FileCopy FailingCopy(string id, string tmpRoot, OnFailure onFailure)
         => new(
             id,

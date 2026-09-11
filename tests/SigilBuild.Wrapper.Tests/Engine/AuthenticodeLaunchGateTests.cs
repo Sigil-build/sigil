@@ -20,17 +20,17 @@ using SigilBuild.Wrapper.Tests.Helpers;
 using Xunit;
 
 /// <summary>
-/// Register row R11, through the production prerequisite path: a binary this run
-/// downloaded is Authenticode-checked immediately before it is launched, and an
-/// unsigned one is refused.
+/// Through the production prerequisite path: a binary this run downloaded is
+/// Authenticode-checked immediately before it is launched, and an unsigned one is
+/// refused. (R11)
 /// </summary>
 /// <remarks>
 /// <para>
-/// This file names no type and no member the fix introduced, so it can be dropped onto
-/// the parent commit unchanged to watch it fail — on the parent the download's SHA-256
-/// is the only gate there is, so the launcher is called and the prerequisite reports
-/// success. The opt-out and the pure policy table live in
-/// <c>DownloadedBinaryTrustTests</c>, which necessarily does name new members.
+/// This file names no type and no member the Authenticode gate introduced, so it is
+/// non-vacuous against the gate's absence: with only the download's SHA-256 in the way,
+/// the launcher is called and the prerequisite reports success. The opt-out and the pure
+/// policy table live in <c>DownloadedBinaryTrustTests</c>, which necessarily does name
+/// the new members.
 /// </para>
 /// <para>
 /// <b>Elevated vs unelevated — what each test asserts on each kind of host.</b>
@@ -45,12 +45,11 @@ using Xunit;
 /// the real <c>%ProgramData%</c> on an elevated runner — CI is elevated.
 /// </para>
 /// <para>
-/// <b>Host damage — derived, per capability.</b> An earlier draft of this block claimed
-/// "nothing is written outside a <see cref="TempDir"/>", and that was <b>false</b>: the
-/// download test drives the real <c>PrerequisiteRunner</c>, which calls
-/// <c>SecureStaging.Create("prereq", …)</c> with no fallback root, so unelevated it stages
-/// under the process <c>%TEMP%</c> root — not a directory this test owns. The accurate
-/// derivation:
+/// <b>Host damage — derived, per capability.</b> Note that "nothing is written outside a
+/// <see cref="TempDir"/>" would be <b>false</b> here: the download test drives the real
+/// <c>PrerequisiteRunner</c>, which calls <c>SecureStaging.Create("prereq", …)</c> with no
+/// fallback root, so unelevated it stages under the process <c>%TEMP%</c> root — not a
+/// directory this test owns. The accurate derivation:
 /// </para>
 /// <list type="number">
 ///   <item><description>
@@ -88,9 +87,9 @@ public sealed class AuthenticodeLaunchGateTests
         Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
 
     /// <summary>
-    /// The decisive R11 case. The synthetic body is deterministically unsigned — it is
-    /// not even a PE image — so no host, network or certificate store can make this
-    /// answer differently.
+    /// The decisive case. The synthetic body is deterministically unsigned — it is not
+    /// even a PE image — so no host, network or certificate store can make this answer
+    /// differently. (R11)
     /// </summary>
     [WindowsFact("Authenticode / WinVerifyTrust")]
     public async Task An_unsigned_downloaded_prerequisite_is_never_launched()

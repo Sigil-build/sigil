@@ -5,7 +5,7 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Engine;
 
 /// <summary>
-/// T12 self-elevation helper: argument forwarding (exact command-line quoting for
+/// The self-elevation helper: argument forwarding (exact command-line quoting for
 /// the <c>runas</c> relaunch) and the elevation probe. The actual UAC relaunch is
 /// gated to the VM job — a unit test cannot elevate.
 /// </summary>

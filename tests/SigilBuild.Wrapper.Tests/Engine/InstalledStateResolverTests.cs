@@ -12,7 +12,7 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Engine;
 
 /// <summary>
-/// P3: <see cref="InstalledStateResolver"/> reads the scope-correct ARP entry into an
+/// <see cref="InstalledStateResolver"/> reads the scope-correct ARP entry into an
 /// <see cref="UpgradeState"/>. The <c>UninstallString</c> parsing is pure; the ARP
 /// round-trip runs only on Windows and cleans up after itself.
 /// </summary>
@@ -45,11 +45,11 @@ public sealed class InstalledStateResolverTests
     /// <remarks>
     /// <para>
     /// <strong>The correct answer differs by host, so this branches on the OUTCOME it
-    /// observed, never on an elevation reading.</strong> R2 made the resolver
+    /// observed, never on an elevation reading.</strong> The resolver is
     /// elevation-aware: an elevated process probes HKLM and nothing else, whatever scope
     /// it was asked for, because HKCU is writable by the unprivileged user whose
-    /// <c>UninstallString</c> the elevated installer would otherwise spawn. This test
-    /// plants in HKCU, so:
+    /// <c>UninstallString</c> the elevated installer would otherwise spawn (R2). This
+    /// test plants in HKCU, so:
     /// </para>
     /// <list type="bullet">
     ///   <item>

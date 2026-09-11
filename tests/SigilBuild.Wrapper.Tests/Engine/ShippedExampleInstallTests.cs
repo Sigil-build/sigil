@@ -16,17 +16,17 @@ using SigilBuild.Wrapper.Tests.Helpers;
 using Xunit;
 
 /// <summary>
-/// The shipped example manifests must actually install under the R3/R9/R16
-/// guards, not merely satisfy the JSON schema.
+/// The shipped example manifests must actually install under the containment and
+/// privileged-target guards, not merely satisfy the JSON schema. (R3, R9, R16)
 /// </summary>
 /// <remarks>
 /// <para>
-/// This closes the gap that let lane S2 break its own documentation. CI's example
-/// gate (<c>pr-guards.yml</c>) validates <c>examples/**</c> against
-/// <c>schemas/sigil-schema.json</c> and nothing else — the schema has no opinion
-/// about whether a resolved path lands inside <c>install_dir</c>, so every
-/// containment refusal these tests catch was invisible to it. Both examples aborted
-/// on their first <c>file_copy</c> and the suite stayed green.
+/// This closes the gap that lets a guard change break the shipped documentation. CI's
+/// example gate (<c>pr-guards.yml</c>) validates <c>examples/**</c> against
+/// <c>schemas/sigil-schema.json</c> and nothing else — the schema has no opinion about
+/// whether a resolved path lands inside <c>install_dir</c>, so a containment refusal is
+/// invisible to it and an example can abort on its first <c>file_copy</c> with the suite
+/// still green.
 /// </para>
 /// <para>
 /// What is checked here is the step of the pipeline the guards live in: parse the
@@ -64,8 +64,8 @@ public sealed class ShippedExampleInstallTests
             {
                 // Resolving is itself part of the assertion: ResolvePath throws on a
                 // path that still carries an unresolved {token}, which is how the
-                // '%ProgramFiles%' idiom used to fail — silently, as a directory
-                // named after the template text.
+                // '%ProgramFiles%' idiom fails when unresolved — silently, as a
+                // directory named after the template text.
                 var resolved = ResolveOrFail(ctx, step.Id, field, raw);
 
                 resolved.Should().NotContain("%",
@@ -87,7 +87,7 @@ public sealed class ShippedExampleInstallTests
     [WindowsFact("Windows path semantics")]
     public async Task Hello_desktop_app_copies_its_payload_into_the_resolved_install_dir()
     {
-        // The end-to-end leg for the step that used to abort. `to` is taken
+        // The end-to-end leg for the step that can abort. `to` is taken
         // verbatim from the shipped manifest — it is the field under test. `from`
         // is rebased onto a temp payload because the manifest's 'payload/**' is
         // relative to the packaging working directory, which a unit test has no
@@ -243,7 +243,7 @@ public sealed class ShippedExampleInstallTests
     }
 
     /// <summary>
-    /// The step types whose destination the R16 containment guard anchors. Mirrors
+    /// The step types whose destination the containment guard anchors (R16). Mirrors
     /// <c>ManifestParser.ContainedDestinationStepTypes</c>; <c>shortcut_create</c>
     /// is absent on purpose (its named anchors are outside install_dir by design).
     /// </summary>

@@ -12,7 +12,7 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Engine;
 
 /// <summary>
-/// P7 (gap G8): /LOG install logging. Covers the sink itself
+/// /LOG install logging. Covers the sink itself
 /// (<see cref="InstallLog"/>), and end-to-end session runs (silent + headed,
 /// success + forced failure) asserting the log is created at the explicit and
 /// default paths, carries the step / rollback / exit-code trail, and redacts
@@ -123,9 +123,9 @@ public sealed class InstallLoggingTests
             InstallSteps: new InstallStep[]
             {
                 // Step 1 succeeds and journals a RemoveDirectory (fresh dir)…
-                // R16: an OS temp directory is never install_dir, so the
-                // out-of-tree write is declared with the production per-step
-                // opt-out. Under test here is the /LOG rollback narrative.
+                // An OS temp directory is never install_dir, so the out-of-tree
+                // write is declared with the production per-step opt-out. Under
+                // test here is the /LOG rollback narrative. (R16)
                 new InstallStep.DirectoryCreate("mk", Path.Combine(tmp.Path, "sub"), When: null, OnFailure.Rollback)
                     { AllowOutsideInstallDir = true },
                 // …step 2 fails (glob root does not exist) → rollback replays step 1.
@@ -153,7 +153,7 @@ public sealed class InstallLoggingTests
         log.Should().Contain("exit code: 1");
     }
 
-    // ── P10 (gap G11): a locked component ignores an override, and logs it ────
+    // ── A locked component ignores an override, and logs it (G11) ─────────────
 
     [Fact]
     public async Task Locked_component_override_attempt_is_ignored_and_logged()
@@ -169,7 +169,7 @@ public sealed class InstallLoggingTests
             {
                 // Gated on a LOCKED option whose default is true → the step must run
                 // even though the CLI tried to force the option off.
-                // R16: gatedDir is in an OS temp directory — see the note above.
+                // gatedDir is in an OS temp directory — see the note above. (R16)
                 new InstallStep.DirectoryCreate(
                     "mk", gatedDir, When: "option.add_to_path", OnFailure.Fail)
                     { AllowOutsideInstallDir = true },
@@ -234,7 +234,7 @@ public sealed class InstallLoggingTests
         log.Should().Contain("***", "the secret occurrence in the error is redacted");
     }
 
-    // ── /Update honors the same flags (T12.4) ─────────────────────────────────
+    // ── /Update honors the same flags ─────────────────────────────────────────
 
     [Fact]
     public async Task Update_honors_LOG_flag_and_records_the_update_stage_and_exit_code()

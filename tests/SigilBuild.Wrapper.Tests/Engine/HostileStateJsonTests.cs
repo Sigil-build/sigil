@@ -12,16 +12,16 @@ using SigilBuild.Wrapper.Tests.Helpers;
 using Xunit;
 
 /// <summary>
-/// R19: a planted <c>uninstall.json</c> must fail CLOSED, not FATALLY.
+/// A planted <c>uninstall.json</c> must fail CLOSED, not FATALLY. (R19)
 /// </summary>
 /// <remarks>
 /// <para>
-/// Record rehydration sat outside <c>TryLoad</c>'s <c>catch</c>, which covered only
-/// <c>JsonSerializer.Deserialize</c>. An unknown discriminator, a null array
-/// element, or a missing required field threw out of <c>Load</c>, and nothing above
-/// it — <c>UninstallEngine.RunAsync</c>, <c>InstallSession</c> — caught it either.
-/// One planted line therefore killed every install and every uninstall of that
-/// AppId: a persistent, per-app denial of service. The read was also unbounded.
+/// Record rehydration must sit INSIDE <c>TryLoad</c>'s <c>catch</c>, not just
+/// <c>JsonSerializer.Deserialize</c>. Outside it, an unknown discriminator, a null
+/// array element, or a missing required field throws out of <c>Load</c>, and nothing
+/// above it — <c>UninstallEngine.RunAsync</c>, <c>InstallSession</c> — catches it
+/// either: one planted line kills every install and every uninstall of that AppId, a
+/// persistent per-app denial of service. The read must also be bounded.
 /// </para>
 /// <para>
 /// All fixtures are <b>user</b>-scope, under <c>%LocalAppData%</c>, keyed by a
@@ -29,14 +29,14 @@ using Xunit;
 /// here writes <c>%ProgramData%</c>, the registry, <c>PATH</c>, or any machine
 /// state. <c>[SupportedOSPlatform("windows")]</c> satisfies CA1416 for the store's
 /// Windows-attributed provenance calls; <c>[WindowsFact]</c> / <c>[WindowsTheory]</c>
-/// make these report Skipped — never vacuously Passed — off Windows (register row R6).
+/// make these report Skipped — never vacuously Passed — off Windows. (R6)
 /// </para>
 /// </remarks>
 [SupportedOSPlatform("windows")]
 public sealed class HostileStateJsonTests
 {
     /// <summary>
-    /// The three shapes register row R19 names, each throwing from a different place:
+    /// The three hostile shapes, each throwing from a different place (R19):
     /// an unknown discriminator and a missing required field throw out of
     /// <c>SerializableRollbackRecord.ToRollbackRecord</c>, a null element throws
     /// before it is even reached.
@@ -78,7 +78,7 @@ public sealed class HostileStateJsonTests
     /// <summary>
     /// The refusal must reach the operator's log, not just the return value: the store
     /// has no logger of its own and the caller's progress sink is what feeds
-    /// <c>/LOG</c>. Same channel R1's provenance refusal already uses.
+    /// <c>/LOG</c>. Same channel the provenance refusal uses. (R1)
     /// </summary>
     [WindowsFact("Windows-only state layout")]
     public void The_refusal_reason_is_reported_on_progress()
@@ -204,8 +204,8 @@ public sealed class HostileStateJsonTests
     }
 
     /// <summary>
-    /// An absence stays an absence. R19's refusal channel must not turn a first
-    /// install — no state file at all — into "state was found but refused".
+    /// An absence stays an absence. The refusal channel must not turn a first
+    /// install — no state file at all — into "state was found but refused". (R19)
     /// </summary>
     [WindowsFact("Windows-only state layout")]
     public void A_missing_state_file_is_an_absence_not_a_refusal()

@@ -13,25 +13,24 @@ using SigilBuild.Wrapper.Tests.Helpers;
 using Xunit;
 
 /// <summary>
-/// R2: the upgrade path took an executable path out of the Add/Remove-Programs
-/// registry and spawned it from an already-elevated process. Two independent
-/// defects made that reachable by any standard user, and both are asserted here.
+/// The upgrade path takes an executable path out of the Add/Remove-Programs registry
+/// and spawns it from an already-elevated process. Two independent defects can make
+/// that reachable by any standard user, and both are asserted here. (R2)
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Defect 1 — the hive.</b> A machine-scope resolve fell back to HKCU when HKLM
-/// held no entry. HKCU is writable without any privilege, so the attacker chose the
-/// <c>UninstallString</c>.
+/// <b>Defect 1 — the hive.</b> A machine-scope resolve must not fall back to HKCU
+/// when HKLM holds no entry: HKCU is writable without any privilege, so the attacker
+/// then chooses the <c>UninstallString</c>.
 /// </para>
 /// <para>
-/// <b>Defect 2 — the spawn.</b> The only gate before <c>Process.Start</c> was
-/// <c>File.Exists</c>: no signature check, no path validation.
+/// <b>Defect 2 — the spawn.</b> <c>File.Exists</c> must not be the only gate before
+/// <c>Process.Start</c>: without a signature check and path validation there is none.
 /// </para>
 /// <para>
 /// <c>[SupportedOSPlatform("windows")]</c> satisfies CA1416 for the
 /// <see cref="TestRegistry"/> call sites; <c>[WindowsFact]</c> is what makes these
-/// report Skipped — rather than pass vacuously — on a non-Windows host (register
-/// row R6).
+/// report Skipped — rather than pass vacuously — on a non-Windows host. (R6)
 /// </para>
 /// <para>
 /// <b>Nothing here writes HKLM.</b> The planted ARP entry is HKCU-only and
@@ -85,13 +84,13 @@ public sealed class PriorUninstallerTrustTests
     /// against the contract for the host this run is actually on.
     /// </summary>
     /// <remarks>
-    /// Branches on the OUTCOME observed, not on an elevation reading. The earlier shape —
-    /// <c>if (Elevation.IsProcessElevated()) …</c> — took its expectation from the same
-    /// signal <see cref="InstalledStateResolver.Resolve"/> consults, so it agreed with the
-    /// implementation by construction: had the elevation probe been broken to return
-    /// <c>false</c>, the resolver would have read HKCU and the test would have asserted
-    /// exactly that and passed. Each arm now proves the host really is the one its outcome
-    /// implies, through <see cref="ObservedElevation"/>, which uses a different API.
+    /// Branches on the OUTCOME observed, not on an elevation reading. Do not gate on
+    /// <c>if (Elevation.IsProcessElevated()) …</c>: that takes the expectation from the
+    /// same signal <see cref="InstalledStateResolver.Resolve"/> consults, so it agrees
+    /// with the implementation by construction — break the elevation probe to return
+    /// <c>false</c> and the resolver reads HKCU, which the test then asserts and passes.
+    /// Each arm proves the host really is the one its outcome implies, through
+    /// <see cref="ObservedElevation"/>, which uses a different API.
     /// </remarks>
     [WindowsFact("Windows registry")]
     public void The_same_HKCU_entry_is_readable_and_is_resolved_per_the_elevation_contract()
@@ -124,8 +123,8 @@ public sealed class PriorUninstallerTrustTests
         }
         else
         {
-            // R2's second half: an ELEVATED user-scope run is a privilege boundary
-            // too, so it must not read HKCU either.
+            // The second half: an ELEVATED user-scope run is a privilege boundary
+            // too, so it must not read HKCU either. (R2)
             ObservedElevation.IsElevated().Should().BeTrue(
                 "an unelevated per-user run legitimately reads its own hive — refusing " +
                 "that would break every per-user upgrade, so an empty result here on an " +
@@ -254,16 +253,15 @@ public sealed class PriorUninstallerTrustTests
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Every expectation here is a <b>constant</b>. The earlier version wrote
-    /// <c>.Should().Be(Elevation.IsProcessElevated())</c> — recomputing, in the
-    /// expectation, the very thing the predicate read. That asserts only "the gate
-    /// agrees with the token", which an <em>unconditional</em> gate also satisfies on
-    /// an elevated host: the Critical could have been reverted and CI would have stayed
-    /// green. Elevation is a parameter now precisely so the expectation can be a
-    /// literal.
+    /// Every expectation here is a <b>constant</b>. Do not write
+    /// <c>.Should().Be(Elevation.IsProcessElevated())</c> — that recomputes, in the
+    /// expectation, the very thing the predicate read, and asserts only "the gate agrees
+    /// with the token", which an <em>unconditional</em> gate also satisfies on an
+    /// elevated host: the gate could be deleted and CI would stay green. Elevation is a
+    /// parameter precisely so the expectation can be a literal.
     /// </para>
     /// <para>
-    /// The fourth row — <c>(User, unelevated) =&gt; false</c> — is the Critical's own
+    /// The fourth row — <c>(User, unelevated) =&gt; false</c> — is the over-refusal
     /// branch, and it is pinned on every host, including an elevated runner.
     /// </para>
     /// </remarks>
@@ -349,9 +347,9 @@ public sealed class PriorUninstallerTrustTests
     /// its own <c>Users:(M)</c> ACE — an installer that ships a world-writable binary
     /// into <c>%ProgramFiles%</c>. That fixture cannot be built without elevation (a
     /// directory this session can write to is by definition not admin-only), so it is
-    /// listed in the report as an elevated check for gate G1. Both cases are refused by
-    /// the same <c>IsTrustedFile</c> conjunct, and this one pins that conjunct is
-    /// present and load-bearing.
+    /// covered by a manual elevated check instead. Both cases are refused by the same
+    /// <c>IsTrustedFile</c> conjunct, and this one pins that conjunct is present and
+    /// load-bearing.
     /// </para>
     /// <para>
     /// The engine checks <see cref="File.Exists(string)"/> before it reaches the gate,
@@ -462,10 +460,10 @@ public sealed class PriorUninstallerTrustTests
     /// before anything is written to disk.
     /// </summary>
     /// <remarks>
-    /// This is what the existing <c>UpgradeSessionTests</c> do not do: they all inject
-    /// a non-existent <c>PriorUninstallExe</c>, so every one of them exits at the
-    /// earlier <c>File.Exists</c> branch and none has ever reached the gate. That is
-    /// why an unconditional gate broke unsigned per-user upgrades undetected.
+    /// This is what <c>UpgradeSessionTests</c> does not do: those all inject a
+    /// non-existent <c>PriorUninstallExe</c>, so every one of them exits at the
+    /// <c>File.Exists</c> branch and never reaches the gate — which is how an
+    /// unconditional gate can break unsigned per-user upgrades undetected.
     /// </remarks>
     private static async Task<InstallOutcome> RunUpgradeAsync(
         InstallScope scope, string priorInstallDir, string priorUninstallExe)

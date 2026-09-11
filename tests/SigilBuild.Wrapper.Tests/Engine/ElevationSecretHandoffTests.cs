@@ -16,11 +16,11 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Engine;
 
 /// <summary>
-/// Register row R18: a <see cref="ParameterType.Secret"/> value must not appear on
-/// the elevated (UAC) relaunch command line, where Sysmon / EDR / WMI
-/// process-creation auditing records it verbatim. The relaunch vector carries only
-/// <c>/SecretHandoff=&lt;path&gt;</c>; the values cross the elevation boundary inside
-/// a DPAPI-protected, ACL-restricted, delete-after-read envelope.
+/// A <see cref="ParameterType.Secret"/> value must not appear on the elevated (UAC)
+/// relaunch command line, where Sysmon / EDR / WMI process-creation auditing records
+/// it verbatim. The relaunch vector carries only <c>/SecretHandoff=&lt;path&gt;</c>; the
+/// values cross the elevation boundary inside a DPAPI-protected, ACL-restricted,
+/// delete-after-read envelope. (R18)
 /// </summary>
 public sealed class ElevationSecretHandoffTests
 {
@@ -257,8 +257,8 @@ public sealed class ElevationSecretHandoffTests
     public void The_envelope_grants_only_this_user_and_administrators()
     {
         // Arrange — DPAPI machine scope means any local process that can READ the
-        // blob can decrypt it, so the create-time DACL is R18's load-bearing
-        // compensating control, not decoration.
+        // blob can decrypt it, so the create-time DACL is the load-bearing compensating
+        // control, not decoration. (R18)
         var args = new[] { "/Papikey=hunter2" };
         var parsed = ParseWithSchema(args, secret: new[] { "apikey" });
         var relaunch = ElevationSecretHandoff.PrepareRelaunchArgs(args, parsed);
@@ -315,8 +315,8 @@ public sealed class ElevationSecretHandoffTests
     [WindowsFact("DPAPI (crypt32) and Windows file ACLs")]
     public void The_envelope_never_holds_the_secret_in_clear_text()
     {
-        // Arrange — M6. The roundtrip test above proves the value SURVIVES the
-        // envelope, which is equally true of a file that just writes it down. DPAPI
+        // Arrange. The roundtrip test above proves the value SURVIVES the envelope,
+        // which is equally true of a file that just writes it down. DPAPI
         // machine scope means any local process that can READ the blob can decrypt
         // it, so the ACL is the access control and the encryption is what stops a
         // stray %TEMP% backup, an AV quarantine copy or a crash dump from handing the

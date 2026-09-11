@@ -3774,3 +3774,153 @@ blob-embedded data (task T7 removed the `BrandTokens.g.json` sidecar for the sam
 reason). The install-time-parameter sidecar was never migrated with it — it was simply
 left unwired, which is why the field went dead without anything failing. The docs
 lane's "Known issue (R79)" annotations must be removed by whichever fix lands.
+
+---
+
+**R80–R81** come from the same drift audit, found by the docs lane while repointing the
+manifest surfaces. Both are **schema-versus-parser disagreements**: the JSON schema and
+the typed parser each hold their own copy of a list, the two copies differ, and
+`docs/manifest-reference.md` is generated from the schema — so the document tells the
+reader whichever version the schema happens to hold. Both are **OPEN with no owner**,
+and neither was caught by a test, for the same structural reason: the schema suite
+asserts *"this fixture validates"* and the parser suite asserts *"this YAML parses"*,
+and nothing asserts the two agree about the same document.
+
+### R80 — `installer.brand`'s snake_case colour keys validate, pack, and are never read, so a branded installer silently ships Sigil's default palette
+**Component:** Core / schema · **Effort: S** · **SHOULD-FIX**
+
+> **STATUS (2026-09-11):** **OPEN, no owner.** Found by the docs lane reading
+> `docs/manifest-reference.md:136-139` (which lists **all four** keys) against
+> `ManifestParser.ParseInstallerSection`. **The repo's own reference fixture is
+> already wrong because of it** — see the evidence below, which is the sharpest
+> available proof that no test covers this.
+
+`schemas/sigil-schema.json:493-516` declares `installer.brand` with
+`additionalProperties: false` and then explicitly lists **four** colour keys:
+
+```json
+"primaryColor":  { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
+"accentColor":   { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
+"primary_color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
+"accent_color":  { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" }
+```
+
+`ManifestParser.cs:276-277` reads **two**:
+
+```csharp
+PrimaryColor: GetScalar(brand, "primaryColor"),
+AccentColor:  GetScalar(brand, "accentColor")),
+```
+
+So a manifest that spells the keys in snake_case — the spelling the rest of Sigil's
+manifest surface uses everywhere else, and the one a reader would naturally reach for —
+passes schema validation, passes `sigil validate` with no diagnostic, packs
+successfully, and produces `InstallerBrand(PrimaryColor: null, AccentColor: null)`.
+`BrandTokenEmitter.Derive` then falls back to `DefaultPrimary = "#1F2937"` /
+`DefaultAccent = "#3B82F6"`, and the publisher ships a wizard in Sigil's neutral grey
+and blue. Nothing in the log, the diagnostics, or the produced artifact says the brand
+was dropped. Same shape as **R77**: a declared field that validates and does nothing.
+
+**The evidence that no test covers this is in the repo.**
+`tests/SigilBuild.Schema.Tests/Fixtures/valid/reference-installer-manifest.yaml:34-35`
+— the end-to-end reference manifest, the one fixture whose whole job is to exercise the
+full installer surface — writes:
+
+```yaml
+    primary_color: "#312E81"
+    accent_color:  "#4F46E5"
+```
+
+`SchemaValidationTests.ReferenceInstallerManifest_IsValidAgainstSchema` passes, because
+it asserts only that the document validates. If that fixture were ever driven through
+the parser and packer, it would produce an unbranded installer. The reference manifest
+for the branded-installer feature does not brand anything.
+
+**Why snake_case is in the schema at all** is worth establishing before choosing a fix
+— it looks like a defensive both-spellings addition that only ever reached the schema
+half. The manifest's other multi-word keys (`install_steps`, `on_failure`,
+`run_after_install`, `allow_outside_install_dir`) are snake_case, so snake_case is
+arguably the *correct* spelling here and camelCase is the anomaly.
+
+**Fix shape (not implemented here).** Two coherent options; pick before writing code:
+
+- **Read both** (leaning). `GetScalar(brand, "primaryColor") ?? GetScalar(brand, "primary_color")`,
+  and likewise for accent. Two lines, no schema change, nothing an existing manifest
+  can trip over, and it matches what the schema already promises.
+- **Reject the snake_case keys.** Remove them from the schema so a snake_case manifest
+  fails loudly against `additionalProperties: false`. A lockstep change (schema →
+  `docs/manifest-reference.md` → `examples/**` → `tests/SigilBuild.Schema.Tests/`
+  fixtures; use the `schema-change` skill), and it makes the naming *less* consistent
+  with the rest of the manifest.
+
+Either way the deliverable is **two tests**: a parser test asserting the colours reach
+`InstallerBrand` (or that the manifest is refused), and a fixture in
+`tests/SigilBuild.Schema.Tests` pinning the decision. **Fix the reference fixture in the
+same change** — whichever option wins, `reference-installer-manifest.yaml:34-35` is
+wrong today.
+
+### R81 — Hooks accept 14 step types in the schema and 18 in the parser, and the generated reference documents neither
+**Component:** Core / schema · **Effort: M** · **SHOULD-FIX**
+
+> **STATUS (2026-09-11):** **OPEN, no owner.** Found by the docs lane comparing the
+> `HookPhase` definition against `ParseHooks`. **Not a validation bypass** — schema
+> validation runs first (`ManifestLoader.cs:29,48`) and the validator does enforce
+> `enum` (`SchemaValidator.cs:75`), so the four extra types are genuinely refused.
+> The defect is that two lists disagree, the parser carries unreachable arms, and the
+> refusal is undocumented and therefore baffling.
+
+`schemas/sigil-schema.json:235-239` gives `HookPhase.items.type` an enum of **14**
+step types. The root `InstallStep` enum (`:69-73`) has **18**. The four in the catalog
+but not admitted in a hook:
+
+> `http_download`, `ini_write`, `json_edit`, `xml_edit`
+
+`ParseHooks` (`ManifestParser.cs:609-612`) routes all four phases through
+`ParseInstallSteps`, whose type switch (`:1376-1397`) accepts **all 18**. So the parser
+carries four arms for hooks that the schema guarantees it will never see — dead code
+that reads as intentional support.
+
+**Why it matters despite not being a bypass.** `docs/guides/install-steps.md` documents
+one catalog of 18 and never says hooks are narrower. A publisher who puts
+`http_download` in a `post_install` hook — a plausible thing to want, fetching a
+config after install — gets a schema enum error, with nothing anywhere explaining that
+hooks have their own catalog or why. And the generated reference cannot help, which is
+the compounding half:
+
+`docs/manifest-reference.md:155-158` renders all four hook phases as
+
+```
+| `pre_install` | HookPhase | - | - | _(undocumented)_ |
+```
+
+because `generate-manifest-reference.ps1:50` renders a `$ref` as the bare definition
+name and the definition's `description` is not pulled into the row. So the reference
+documents **neither** 14 nor 18 — it names an opaque type and stops. A reader cannot
+discover the hook step catalog from the reference at all.
+
+**Was the narrowing deliberate?** Possibly — the four excluded types are exactly the
+ones whose destination is subject to `install_dir` containment (the same four named in
+`allow_outside_install_dir`'s description), and hooks run **outside the rollback
+journal**, so an unjournaled write into the install tree is a defensible thing to
+refuse. But nothing records that reasoning, and if it is the reason then
+`run_program` — which can do anything at all — being *admitted* makes the line
+arbitrary. **Do not settle this by widening the enum to 18 without deciding which
+story is true.**
+
+**Fix shape (not implemented here).** Settle it in code, one list, one source of truth:
+the parser's hook-phase allow-list should be **derived from the same table the schema
+enum is generated from**, rather than both being hand-maintained. Then:
+
+1. Decide and record whether hooks are narrower than `install_steps`, and why. If they
+   are, the narrowing belongs in `docs/guides/install-steps.md` and in the `HookPhase`
+   `description` (which is what would make it reach the reference).
+2. Give the parser a hook-specific rejection with a real diagnostic naming the phase,
+   so the refusal is legible even when the schema is not the thing doing the refusing.
+3. Fix `generate-manifest-reference.ps1` to render a `$ref`'d definition's own
+   `description`, or the reference will keep saying `_(undocumented)_` for every hook
+   phase whatever else is done.
+4. Regenerate `docs/manifest-reference.md` (the `docs.yml` drift check enforces this).
+
+Cross-references **R60** (the validator's `additionalProperties`-as-subschema form is
+never applied) — same family: a schema whose authority over a document is partly
+theoretical, and a second, divergent copy of the rules living in the parser.

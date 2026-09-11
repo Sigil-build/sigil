@@ -30,7 +30,7 @@ public class FileDeleteStepTests
 
         // Success path: no rollback runs, so mirror the install commit and reclaim
         // the transient rollback stash so this test leaves no %TEMP%\sigil-fd-*
-        // residue (regression guard for T17 temp-dir cleanliness).
+        // residue (regression guard for temp-dir cleanliness).
         var stash = ((RollbackRecord.RestoreDeletedFile)journal.Records[0]).StashPath;
         journal.DiscardTransientStashes();
         File.Exists(stash).Should().BeFalse("the transient file_delete stash must be reclaimed on commit");

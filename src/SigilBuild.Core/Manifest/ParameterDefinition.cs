@@ -5,8 +5,7 @@ namespace SigilBuild.Core.Manifest;
 /// <summary>
 /// Declarative description of an install-time / pack-time parameter, parsed from
 /// the manifest's <c>parameters:</c> block. Consumed by the wrapper installer
-/// (Sprint 5c) to render UI inputs and to validate values before they reach
-/// install steps.
+/// to render UI inputs and to validate values before they reach install steps.
 /// </summary>
 public sealed record ParameterDefinition(
     string Name,

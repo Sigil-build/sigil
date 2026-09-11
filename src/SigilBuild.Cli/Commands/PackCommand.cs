@@ -17,11 +17,10 @@ public static class PackCommand
     {
         var pathArg = new Argument<string>("path", () => "sigil.yaml", "Path to the manifest");
         var outOpt = new Option<string>("--out", () => "./dist", "Output directory");
-        // P12 (T12.5): the exe format's payload delivery mode. "embedded" (default)
-        // is the original, unchanged behavior — the app payload is stamped straight
-        // into the Setup.exe. "web" instead emits the normal full package (hosted at
-        // --package-url) PLUS a small stub Setup.exe whose only install action
-        // downloads + runs it (Burn/NSIS-style web installer).
+        // The exe format's payload delivery mode. "embedded" (default) stamps the
+        // app payload straight into the Setup.exe. "web" instead emits the normal
+        // full package (hosted at --package-url) PLUS a small stub Setup.exe whose
+        // only install action downloads + runs it (Burn/NSIS-style web installer).
         var payloadOpt = new Option<string>(
             "--payload", () => "embedded", "Exe payload delivery: embedded | web");
         var packageUrlOpt = new Option<string?>(
@@ -49,7 +48,7 @@ public static class PackCommand
             var packageUrl = ctx.ParseResult.GetValueForOption(packageUrlOpt);
             var isWebPayload = string.Equals(payloadRaw, "web", StringComparison.OrdinalIgnoreCase);
 
-            // T12.5: `--payload web` requires a resolvable (https-only) package URL —
+            // `--payload web` requires a resolvable (https-only) package URL —
             // that is where the stub's synthesized http_download step fetches the full
             // package from at install time. Fail fast, before touching the manifest.
             if (isWebPayload &&
@@ -135,7 +134,7 @@ public static class PackCommand
                     if (result.Artifact is null) { ctx.ExitCode = 1; return; }
                     Console.Out.WriteLine($"  {result.Artifact.Path}  ({result.Artifact.SizeBytes} bytes, sha256 {result.Artifact.Sha256[..12]}…)");
 
-                    // T12.5: `--payload web` emits a second artifact — the small stub
+                    // `--payload web` emits a second artifact — the small stub
                     // whose only install action downloads + runs the artifact just
                     // printed above. Its absence (with web payload requested on the
                     // exe format) is itself a failure, not a silent no-op.

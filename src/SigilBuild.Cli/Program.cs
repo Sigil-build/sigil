@@ -9,11 +9,11 @@ namespace SigilBuild.Cli;
 
 public static class Program
 {
-    // R24: single source of truth is Directory.Build.props' <Version> element.
-    // The SDK stamps it onto AssemblyInformationalVersionAttribute (plus a
-    // "+<git-sha>" source-revision suffix); strip that suffix so `sigil
-    // --version` reports the clean semver the build declared rather than a
-    // value that changes on every commit.
+    // Single source of truth is Directory.Build.props' <Version> element. The SDK
+    // stamps it onto AssemblyInformationalVersionAttribute (plus a "+<git-sha>"
+    // source-revision suffix); strip that suffix so `sigil --version` reports the
+    // clean semver the build declared rather than a value that changes on every
+    // commit. (R24)
     public static readonly string Version =
         typeof(Program).Assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()!
@@ -30,7 +30,8 @@ public static class Program
         root.AddCommand(PackCommand.Build());
         root.AddCommand(SignCommand.Build());
 
-        // Custom --version handling so the existing exact-match tests still pass.
+        // Custom --version handling: the output is the bare version string, with
+        // none of System.CommandLine's own framing around it.
         if (args.Length > 0 && (args[0] == "--version" || args[0] == "-v" || args[0] == "version"))
         {
             System.Console.WriteLine(Version);

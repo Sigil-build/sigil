@@ -3,7 +3,7 @@ using System.Collections.Generic;
 namespace SigilBuild.Core.Manifest;
 
 /// <summary>
-/// Lifecycle hooks (P2, gap G2) parsed from <c>installer.hooks</c>. Each phase is
+/// Lifecycle hooks parsed from <c>installer.hooks</c>. Each phase is
 /// an ordered list of ordinary step records (typically <c>run_program</c>) that
 /// run <em>outside</em> the rollback journal, around the transactional install /
 /// uninstall body.
@@ -38,7 +38,7 @@ public sealed record InstallerHooks(
     IReadOnlyList<InstallStep>? PostUninstall = null);
 
 /// <summary>
-/// The <c>installer.run_after_install</c> target (P2, gap G4): the program the
+/// The <c>installer.run_after_install</c> target: the program the
 /// Done screen's checked-by-default "Launch &lt;App&gt;" checkbox starts, and the
 /// program a headless <c>/silent /launch</c> run starts. Always launched
 /// <em>unelevated</em> (de-elevated when the installer itself ran as admin).

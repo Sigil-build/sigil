@@ -4,7 +4,7 @@ using System.Collections.Generic;
 namespace SigilBuild.Core.Manifest;
 
 /// <summary>
-/// Dependency analysis for <c>installer.vars</c> (P1). A var expression may
+/// Dependency analysis for <c>installer.vars</c>. A var expression may
 /// reference other vars via the <c>var.&lt;name&gt;</c> identifier, so the set of
 /// vars forms a directed graph; the values must be evaluated in dependency order
 /// (a referenced var before the var that references it), and a reference cycle is

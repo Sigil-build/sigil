@@ -7,7 +7,7 @@ using SigilBuild.Core.Manifest;
 namespace SigilBuild.Packaging.ExeWrapper;
 
 /// <summary>
-/// Pack-time generator for the built-in configurable Options (T8, decision 5).
+/// Pack-time generator for the built-in configurable Options.
 /// Each <em>enabled</em> component (<c>desktop_shortcut</c>, <c>start_menu</c>,
 /// <c>add_to_path</c>, <c>file_associations</c>) is turned into its install
 /// step(s), gated on <c>option.&lt;component&gt;</c> so the runtime honours the
@@ -51,7 +51,7 @@ internal static class OptionStepGenerator
         }
 
         // A best-effort default target for the generated shortcuts: the app's exe
-        // under the install dir. `{install_dir}` is pinned by T13; a manifest author
+        // under the install dir. `{install_dir}` resolves at install time; a manifest author
         // who needs an exact target writes a hand-authored shortcut_create step.
         var target = "{install_dir}\\" + app.Name + ".exe";
 
@@ -97,7 +97,7 @@ internal static class OptionStepGenerator
                 Id: "option_" + AddToPath,
                 Name: "PATH",
                 Value: "{install_dir}",
-                // "auto" defers to the resolved install scope (user vs machine PATH, T12).
+                // "auto" defers to the resolved install scope (user vs machine PATH).
                 Scope: "auto",
                 Action: "append",
                 Separator: ";",
@@ -136,7 +136,7 @@ internal static class OptionStepGenerator
             }
         }
 
-        // P10 (gap G11): app-defined custom components. They generate NO step of
+        // App-defined custom components. They generate NO step of
         // their own — a custom component exists only as `option.<name>` in the
         // expression engine, gating steps the author wrote (via their `when`). They
         // are appended AFTER the built-ins, in declared order, so the Options screen

@@ -13,7 +13,7 @@ namespace SigilBuild.Packaging.Installer;
 /// Derives the full light + dark installer palette from the two-color brand
 /// (<c>primary_color</c> + <c>accent_color</c>) at pack time — Avalonia cannot
 /// <c>color-mix</c> at runtime, so every token is resolved here and travels
-/// inside the WrapperBlob (see decision 11).
+/// inside the WrapperBlob.
 /// </summary>
 /// <remarks>
 /// The token derivation ports the wizard prototype's <c>colors()</c> function
@@ -158,7 +158,7 @@ public static class BrandTokenEmitter
         ["ghostHover"] = "#21242D",
     };
 
-    // ── Legacy flat JSON emit (still consumed by the MSIX host bundler, T16) ──
+    // ── Legacy flat JSON emit (still consumed by the MSIX host bundler) ───────
 
     public static EmitResult EmitWithDiagnostics(SigilManifest manifest)
     {

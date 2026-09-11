@@ -10,7 +10,7 @@ namespace SigilBuild.Packaging.ExeWrapper;
 /// that <see cref="ExeWrapperPackager"/> stamps with a step blob and payload.
 /// </summary>
 /// <remarks>
-/// The runtime is supplied by build-time wiring (spec T3): the
+/// The runtime is supplied by build-time wiring: the
 /// <c>scripts/publish-installer-runtime.ps1</c> script (invoked by CI and local
 /// pack) runs
 /// <c>dotnet publish src/SigilBuild.Installer.Host -c Release -r &lt;rid&gt; -p:PublishAot=true</c>
@@ -28,7 +28,7 @@ internal static class WrapperRuntimeLocator
     /// <summary>
     /// Sub-folder under <c>runtimes/&lt;rid&gt;/</c> that holds the AOT publish's
     /// sibling native dependencies (Skia/ANGLE/HarfBuzz) — staged by
-    /// <c>scripts/publish-installer-runtime.ps1</c> (T18) so the packager can embed
+    /// <c>scripts/publish-installer-runtime.ps1</c> so the packager can embed
     /// them in the stamped Setup.exe as <c>SIGIL_RUNTIME_V1</c>.
     /// </summary>
     internal const string NativeDepsFolderName = "native";
@@ -74,8 +74,8 @@ internal static class WrapperRuntimeLocator
     /// <paramref name="baseDirectory"/>. Returns the DLL paths sorted (ordinal) for
     /// deterministic packaging, or an <b>empty</b> list when the native folder is
     /// absent — a dev/staging layout without staged natives still packs (the
-    /// resulting Setup.exe simply carries no <c>SIGIL_RUNTIME_V1</c> resource and,
-    /// as before T18, cannot launch the GUI standalone). Distinct from
+    /// resulting Setup.exe simply carries no <c>SIGIL_RUNTIME_V1</c> resource and
+    /// cannot launch the GUI standalone). Distinct from
     /// <see cref="Locate"/>, which resolves the single host exe.
     /// </summary>
     public static IReadOnlyList<string> LocateNativeDeps(

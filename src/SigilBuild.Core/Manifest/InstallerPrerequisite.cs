@@ -3,10 +3,10 @@ using System.Collections.Generic;
 namespace SigilBuild.Core.Manifest;
 
 /// <summary>
-/// A first-class prerequisite unit (P5, gap G6) parsed from
+/// A first-class prerequisite unit parsed from
 /// <c>installer.prerequisites[]</c> — the declarative equivalent of Burn's
 /// <c>ExePackage</c> + <c>DetectCondition</c>. Prerequisites run sequentially
-/// BEFORE the transactional install body and the P2 <c>pre_install</c> hooks (and
+/// BEFORE the transactional install body and the <c>pre_install</c> hooks (and
 /// before the rollback journal opens): each one's <see cref="Detect"/> expression is
 /// evaluated (skip when already satisfied), otherwise the <see cref="Source"/>
 /// installer is acquired and run, and <see cref="Detect"/> is re-evaluated to confirm
@@ -37,10 +37,10 @@ namespace SigilBuild.Core.Manifest;
 /// <param name="TimeoutSeconds">Optional per-prerequisite run timeout, in seconds.</param>
 /// <param name="AllowUnsigned">Opt out of the Authenticode gate that otherwise refuses
 /// to launch a <em>downloaded</em> prerequisite installer whose signature does not
-/// establish trust (register row R11). Unsigned redistributables are common and
-/// legitimate, so this exists — but it never waives a <em>revoked</em> certificate, and
-/// the <c>sha256</c> is enforced regardless. Ignored for a <c>payload://</c> source,
-/// which is not gated at all: its integrity comes from the package's own signature.</param>
+/// establish trust. Unsigned redistributables are common and legitimate, so this
+/// exists — but it never waives a <em>revoked</em> certificate, and the <c>sha256</c>
+/// is enforced regardless (R11). Ignored for a <c>payload://</c> source, which is not
+/// gated at all: its integrity comes from the package's own signature.</param>
 public sealed record InstallerPrerequisite(
     string Name,
     string Detect,

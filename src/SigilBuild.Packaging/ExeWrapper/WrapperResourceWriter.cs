@@ -20,11 +20,11 @@ namespace SigilBuild.Packaging.ExeWrapper;
 ///   </item>
 ///   <item>
 ///     <c>SIGIL_PAYLOAD_V2</c> — the user payload bytes as the deterministic
-///     zstd container of the manifest's <c>SourceDirectory</c> (T6, see
+///     zstd container of the manifest's <c>SourceDirectory</c> (see
 ///     <c>SigilBuild.Wrapper.Codec.PayloadCodec</c>).
 ///   </item>
 ///   <item>
-///     <c>SIGIL_RUNTIME_V1</c> — (T18) the host's native dependencies
+///     <c>SIGIL_RUNTIME_V1</c> — the host's native dependencies
 ///     (Skia/ANGLE/HarfBuzz) as a deterministic zip, embedded only when native
 ///     deps were staged, so a standalone stamped <c>Setup.exe</c> can extract
 ///     and load them before the GUI wizard starts.
@@ -51,14 +51,13 @@ internal static partial class WrapperResourceWriter
 
     private const string BlobResourceName = "SIGIL_BLOB_V1";
 
-    // T6: bumped from SIGIL_PAYLOAD_V1 (deterministic Deflate zip) to
-    // SIGIL_PAYLOAD_V2 (deterministic zstd container, see PayloadCodec). The
+    // SIGIL_PAYLOAD_V2 is the deterministic zstd container (see PayloadCodec). The
     // decode side (WrapperBlob.LoadPayloadBytes / PayloadExtraction) is gated on
-    // this exact marker, so a V1 blob is treated as "no payload" rather than
-    // mis-parsed.
+    // this exact marker, so the older SIGIL_PAYLOAD_V1 Deflate zip is treated as
+    // "no payload" rather than mis-parsed.
     private const string PayloadResourceName = "SIGIL_PAYLOAD_V2";
 
-    // T18: the host's native dependencies (Skia/ANGLE/HarfBuzz) archived so a
+    // The host's native dependencies (Skia/ANGLE/HarfBuzz) archived so a
     // standalone stamped Setup.exe can extract + load them before the GUI starts.
     private const string RuntimeResourceName = "SIGIL_RUNTIME_V1";
 
@@ -106,7 +105,7 @@ internal static partial class WrapperResourceWriter
                 UpdateOne(hUpdate, payloadNamePtr, payload, PayloadResourceName);
             }
 
-            // T18: only stamp the native-runtime resource when there is one to
+            // Only stamp the native-runtime resource when there is one to
             // stamp. An empty archive (no native deps staged) leaves SIGIL_RUNTIME_V1
             // absent, so the host bootstrap correctly no-ops as an un-stamped run.
             if (runtime.Length > 0)

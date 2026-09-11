@@ -52,10 +52,10 @@ public static class ManifestParser
         var loc = new SourceLocation(file, (int)root.Start.Line, (int)root.Start.Column);
         var app = MapApp(GetMapping(root, "app", required: true)!);
         // Parameters are parsed before the installer block so declared custom
-        // screens (T9) can resolve their field references against them.
+        // screens can resolve their field references against them.
         var parameters = ParseParameters(GetMapping(root, "parameters"), diagnostics, file);
         var installer = MapInstaller(GetMapping(root, "installer"), app, parameters, diagnostics, file);
-        // P11: installer.scope is fully resolved by MapInstaller above (default
+        // installer.scope is fully resolved by MapInstaller above (default
         // Auto when the block is absent), so every root-level step collection
         // parsed below can thread it straight into ParseInstallStep, which
         // guards each step (SIG0310) at its own precise node location — see
@@ -157,10 +157,10 @@ public static class ManifestParser
         var manifestUrl = GetScalar(node, "manifestUrl");
         var signingKey = GetScalar(node, "signingKey");
 
-        // R14: the schema's own description called this an "HTTPS URL" while
-        // constraining only `format: uri`. The `.sig` URL is this string + ".sig"
-        // (UpdateRunner), so a cleartext manifestUrl drags the signature fetch onto
-        // cleartext with it. Re-checked before the fetch at update runtime.
+        // The schema constrains only `format: uri`, so https is enforced here: the
+        // `.sig` URL is this string + ".sig" (UpdateRunner), so a cleartext
+        // manifestUrl drags the signature fetch onto cleartext with it. Re-checked
+        // before the fetch at update runtime. (R14)
         if (!string.IsNullOrWhiteSpace(manifestUrl)
             && !manifestUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
         {
@@ -172,12 +172,10 @@ public static class ManifestParser
                 "https://docs.sigil.build/diagnostics/SIG0324"));
         }
 
-        // R30: the field is the update runtime's trust anchor, and it was passed
-        // through unvalidated all the way to the stamped blob. Validate the shape
-        // it is documented to have — base64 X.509 SubjectPublicKeyInfo DER of an
-        // ECDSA P-256 PUBLIC key — so a private-key file path (which is what
-        // `sigil init --template full` itself used to emit) fails at pack time
-        // instead of at every update attempt on every installed machine.
+        // The field is the update runtime's trust anchor. Validate the shape it is
+        // documented to have — base64 X.509 SubjectPublicKeyInfo DER of an ECDSA
+        // P-256 PUBLIC key — so a private-key file path fails at pack time instead
+        // of at every update attempt on every installed machine. (R30)
         if (!string.IsNullOrWhiteSpace(signingKey) && !IsP256SpkiBase64(signingKey))
         {
             diagnostics.Add(new Diagnostic(
@@ -206,9 +204,9 @@ public static class ManifestParser
     /// </summary>
     /// <remarks>
     /// The curve is checked, not just the import: a P-384 SPKI imports fine and would
-    /// then fail every signature verification at runtime with SIG0321, which is the
-    /// same ship-then-discover failure R30 is about. Any exception from the import path
-    /// is a "no" — this is a shape check on publisher input, not a place to throw.
+    /// then fail every signature verification at runtime with SIG0321 — discovered on
+    /// installed machines rather than at pack time (R30). Any exception from the import
+    /// path is a "no" — this is a shape check on publisher input, not a place to throw.
     /// </remarks>
     private static bool IsP256SpkiBase64(string value)
     {
@@ -265,7 +263,7 @@ public static class ManifestParser
         var brand = GetMapping(node, "brand");
         var screens = ParseScreens(
             GetSequenceOfMappings(node, "screens"), app, parameters, diagnostics, fileName);
-        // P11: resolve scope before installer.hooks is parsed so each hook step
+        // Resolve scope before installer.hooks is parsed so each hook step
         // can be guarded (SIG0310) at its own precise node location, same as the
         // root-level step collections in MapManifest.
         var scope = ParseScope(node, diagnostics, fileName);
@@ -275,71 +273,68 @@ public static class ManifestParser
                 Hero: GetScalar(brand, "hero"),
                 PrimaryColor: GetScalar(brand, "primaryColor"),
                 AccentColor: GetScalar(brand, "accentColor")),
-            // T8: built-in configurable components (desktop_shortcut, start_menu,
+            // Built-in configurable components (desktop_shortcut, start_menu,
             // add_to_path, file_associations). Each is a shorthand true/false or an
             // object { enabled, default, locked, ...component keys }. Pack time turns
             // each ENABLED component into its gated install step(s).
             Options: ParseOptions(GetMapping(node, "options"), parameters, diagnostics, fileName),
             Screens: screens,
-            // T14 / P9 (gap G10): capture the license path(s) only, as a
-            // LocalizedText — a plain string or a `{en: ..., uk: ...}` map of
-            // per-language file paths, through the same ParseLocalizedText path
-            // as title/subtitle/description. The actual file read + embed
-            // happens at PACK time (ExeWrapperPackager.ReadLicenseText), which
-            // resolves each path against the pack source dir and emits SIG0250
-            // (non-fatal, per entry) / SIG0290 (fatal, on the post-read map) —
-            // see design §5.3. Retyping this from `string?` closes a silent-null
-            // window: previously GetScalar returned null with zero diagnostic for
-            // any manifest that declared `license:` as a map, and the License
-            // screen would vanish without a trace.
+            // Capture the license path(s) only, as a LocalizedText — a plain
+            // string or a `{en: ..., uk: ...}` map of per-language file paths,
+            // through the same ParseLocalizedText path as title/subtitle/
+            // description. The actual file read + embed happens at PACK time
+            // (ExeWrapperPackager.ReadLicenseText), which resolves each path
+            // against the pack source dir and emits SIG0250 (non-fatal, per
+            // entry) / SIG0290 (fatal, on the post-read map). The type must not
+            // be `string?`: GetScalar returns null with zero diagnostic for a
+            // `license:` map, and the License screen vanishes without a trace.
             License: ParseLocalizedText(node, "license", loc, diagnostics),
-            // T12: install scope (user | machine | auto, default auto). The schema
+            // Install scope (user | machine | auto, default auto). The schema
             // enum is the hard gate; here we map the string leniently and emit a
             // non-fatal diagnostic on an unrecognized value, falling back to auto.
             Scope: scope,
-            // T13: optional install-dir override. Captured verbatim as a template;
+            // Optional install-dir override. Captured verbatim as a template;
             // the engine resolves its {scope_root} / {app.*} tokens at install time
             // (StepContext), against the resolved scope. A blank value is treated as
             // absent so the default (<scope root>\<App.Name>) applies.
             InstallDir: string.IsNullOrWhiteSpace(GetScalar(node, "install_dir"))
                 ? null
                 : GetScalar(node, "install_dir"),
-            // PR #8: optional custom installer-exe icon (.ico) path. Null falls
+            // Optional custom installer-exe icon (.ico) path. Null falls
             // back to the bundled default installer icon at pack time.
             Icon: GetScalar(node, "icon"),
-            // P1 (gap G1): declarative variables. Each is `name: <expression>`;
+            // Declarative variables. Each is `name: <expression>`;
             // evaluated once at install-session start, in dependency order,
             // exposed as var.<name>. Cycles/malformed expressions are diagnosed
             // here (SIG0270) so a broken manifest fails the pack.
             Vars: ParseVars(GetMapping(node, "vars"), diagnostics, fileName),
-            // P2 (gap G2): lifecycle hooks that run OUTSIDE the rollback journal.
+            // Lifecycle hooks that run OUTSIDE the rollback journal.
             // Per-phase on_failure defaults: fail for pre_*, continue for post_*.
             Hooks: ParseHooks(GetMapping(node, "hooks"), scope, diagnostics, fileName),
-            // P2 (gap G4): the Done-screen "Launch <App>" target.
+            // The Done-screen "Launch <App>" target.
             RunAfterInstall: ParseRunAfterInstall(GetMapping(node, "run_after_install")),
-            // P5 (gap G6): first-class prerequisite units (detect → install → re-detect),
+            // First-class prerequisite units (detect → install → re-detect),
             // run before the journaled body. An https source without a sha256 is refused here.
             Prerequisites: ParsePrerequisites(GetSequenceOfMappings(node, "prerequisites"), diagnostics, fileName),
-            // P6 (gap G7): named mutexes the running app holds; setup probes them
+            // Named mutexes the running app holds; setup probes them
             // before touching the install dir (Inno AppMutex equivalent).
             AppMutex: GetSequence(node, "app_mutex"),
-            // P9 (gap G10): optional fixed installer language. Stored verbatim
+            // Optional fixed installer language. Stored verbatim
             // (schema is permissive); an invalid tag is diagnosed (SIG0291) but
             // otherwise doesn't block the parse — the resolver chain simply
             // won't match a value that fails LanguageTag.IsValid.
             Language: ParseInstallerLanguage(node, diagnostics, fileName),
-            // R45: the downloaded-binary signature policy, declared rather than
-            // inferred from the presence of a `sign` block.
+            // The downloaded-binary signature policy, declared rather than
+            // inferred from the presence of a `sign` block. (R45)
             RequireSignedDownloads: ParseRequireSignedDownloads(node, diagnostics, fileName));
     }
 
     /// <summary>
-    /// Parse <c>installer.require_signed_downloads</c> (R45/R46). Absent or blank is
-    /// <see cref="RequireSignedDownloads.SignDeclared"/> — the pre-R45 behaviour — so
-    /// no existing manifest changes meaning. An unrecognized value is SIG0326 rather
-    /// than a silent fallback: this governs whether a downloaded binary is checked
-    /// before it runs elevated, and quietly ignoring a typo in it would be the same
-    /// class of silent-disarm the row exists to close.
+    /// Parse <c>installer.require_signed_downloads</c>. Absent or blank is
+    /// <see cref="RequireSignedDownloads.SignDeclared"/>, so no existing manifest
+    /// changes meaning. An unrecognized value is SIG0326 rather than a silent
+    /// fallback: this governs whether a downloaded binary is checked before it runs
+    /// elevated, and quietly ignoring a typo in it is a silent disarm. (R45, R46)
     /// </summary>
     private static RequireSignedDownloads ParseRequireSignedDownloads(
         YamlMappingNode node, List<Diagnostic> diagnostics, string fileName)
@@ -371,7 +366,7 @@ public static class ManifestParser
     }
 
     /// <summary>
-    /// Parse the manifest's <c>installer.language</c> scalar (P9, gap G10): the
+    /// Parse the manifest's <c>installer.language</c> scalar: the
     /// first link in the language-preference chain (installer.language -&gt; /lang
     /// -&gt; OS list -&gt; en). Emits <see cref="DiagnosticCodes.InvalidLanguageTag"/>
     /// (SIG0291, Error) when present but not a valid BCP-47-subset tag per
@@ -401,7 +396,7 @@ public static class ManifestParser
 
     /// <summary>
     /// Parse a manifest field that may be authored either as a plain string or as
-    /// a <c>{ en: ..., uk: ... }</c> map (P9, gap G10 — <see cref="LocalizedText"/>).
+    /// a <c>{ en: ..., uk: ... }</c> map (<see cref="LocalizedText"/>).
     /// A plain string normalizes to <c>{"en": value}</c>. A map is carried
     /// verbatim; each key is validated as a language tag
     /// (<see cref="DiagnosticCodes.InvalidLanguageTag"/>, SIG0291) and the whole
@@ -446,10 +441,10 @@ public static class ManifestParser
             }
             else
             {
-                // Silent-drop guard: a non-scalar value (e.g. a nested sequence
-                // or mapping under a language key) used to collapse to "" here
-                // with zero diagnostic — the same silent-blank-rendering shape
-                // SIG0290 exists to prevent, just one language key at a time.
+                // Silent-drop guard: without this, a non-scalar value (e.g. a
+                // nested sequence or mapping under a language key) collapses to
+                // "" with zero diagnostic — the same silent-blank-rendering
+                // shape SIG0290 exists to prevent, one language key at a time.
                 values[tag] = string.Empty;
                 diagnostics.Add(new Diagnostic(
                     DiagnosticSeverity.Error,
@@ -485,7 +480,7 @@ public static class ManifestParser
     }
 
     /// <summary>
-    /// Parse the <c>installer.prerequisites</c> block (P5, gap G6). Each entry needs a
+    /// Parse the <c>installer.prerequisites</c> block. Each entry needs a
     /// <c>name</c>, a <c>detect</c> expression, and a <c>source</c> (<c>payload://</c> or
     /// <c>https://</c>); an <c>https://</c> source additionally requires a <c>sha256</c>
     /// integrity checksum (a download without one is refused — SIG0280). Optional
@@ -576,9 +571,9 @@ public static class ManifestParser
                 ExitCodesOk: GetIntSequence(node, "exit_codes_ok"),
                 ScopeRequired: scopeRequired,
                 TimeoutSeconds: GetNullableInt(node, "timeout_seconds"),
-                // R11: opts this prerequisite out of the Authenticode gate in front of a
-                // downloaded installer's launch. Defaults false — the gate is the default
-                // and the waiver has to be written down.
+                // Opts this prerequisite out of the Authenticode gate in front of a
+                // downloaded installer's launch. Defaults false — the gate is the
+                // default and the waiver has to be written down. (R11)
                 AllowUnsigned: GetBool(node, "allow_unsigned", defaultValue: false)));
         }
 
@@ -594,7 +589,7 @@ public static class ManifestParser
             "https://docs.sigil.build/diagnostics/SIG0280"));
 
     /// <summary>
-    /// Parse the <c>installer.hooks</c> block (P2). Each phase reuses the ordinary
+    /// Parse the <c>installer.hooks</c> block. Each phase reuses the ordinary
     /// step parser but with a phase-specific default <c>on_failure</c>: <c>fail</c>
     /// for the pre_* phases (a failed pre-hook aborts before the journal opens /
     /// before the uninstall replays) and <c>continue</c> for the post_* phases (the
@@ -619,7 +614,7 @@ public static class ManifestParser
     }
 
     /// <summary>
-    /// Parse the <c>installer.run_after_install</c> block (P2): a required
+    /// Parse the <c>installer.run_after_install</c> block: a required
     /// <c>path</c> and optional <c>args</c>. Returns <c>null</c> when absent or the
     /// path is blank (the Done screen then shows no launch checkbox).
     /// </summary>
@@ -635,7 +630,7 @@ public static class ManifestParser
     }
 
     /// <summary>
-    /// Parse the manifest's <c>installer.vars</c> block (P1). Each entry is
+    /// Parse the manifest's <c>installer.vars</c> block. Each entry is
     /// <c>name: &lt;expression&gt;</c>. Emits <see cref="DiagnosticCodes.InvalidInstallerVar"/>
     /// (SIG0270, Error) for a non-scalar/empty value, a grossly malformed
     /// expression, or a reference cycle among the vars. Declaration order is
@@ -764,7 +759,7 @@ public static class ManifestParser
 
     /// <summary>
     /// Map the manifest's <c>installer.scope</c> scalar into
-    /// <see cref="InstallScope"/> (T12). Recognizes <c>user</c> / <c>machine</c> /
+    /// <see cref="InstallScope"/>. Recognizes <c>user</c> / <c>machine</c> /
     /// <c>auto</c> case-insensitively; an absent value defaults to
     /// <see cref="InstallScope.Auto"/>; an out-of-enum value falls back to
     /// <see cref="InstallScope.Auto"/> with a non-fatal
@@ -796,11 +791,11 @@ public static class ManifestParser
     }
 
     /// <summary>
-    /// Parse the manifest's <c>installer.options</c> block (T8). Each of the four
+    /// Parse the manifest's <c>installer.options</c> block. Each of the four
     /// built-in components (<c>desktop_shortcut</c>, <c>start_menu</c>,
     /// <c>add_to_path</c>, <c>file_associations</c>) is either a shorthand boolean
     /// or an object <c>{ enabled, default, locked, ...component keys }</c>. The
-    /// shorthand maps onto the M0 records: <c>true</c> →
+    /// shorthand maps onto the records: <c>true</c> →
     /// <c>{ Enabled = true, Default = true }</c>; <c>false</c> →
     /// <c>{ Enabled = false }</c>. An absent component stays <c>null</c> (its
     /// built-in default: not declared, so nothing is generated). Returns
@@ -838,8 +833,8 @@ public static class ManifestParser
     };
 
     /// <summary>
-    /// Parse the <c>installer.options.components[]</c> sequence (P10, gap G11) —
-    /// app-defined custom components. Each entry is
+    /// Parse the <c>installer.options.components[]</c> sequence — app-defined
+    /// custom components. Each entry is
     /// <c>{ name, label, description?, default?, locked?, when? }</c>. Emits
     /// <see cref="DiagnosticCodes.InvalidCustomComponent"/> (SIG0300, Error) for a
     /// name that is not a bare identifier, collides with a built-in component or a
@@ -987,7 +982,7 @@ public static class ManifestParser
         };
     }
 
-    // Interpolation tokens permitted in a screen Title / Subtitle (T9). Kept in
+    // Interpolation tokens permitted in a screen Title / Subtitle. Kept in
     // sync with the substitution surface the wizard resolves at render time.
     private static readonly string[] KnownScreenTokens =
         { "app.name", "app.id", "app.version", "app.publisher" };
@@ -1243,12 +1238,12 @@ public static class ManifestParser
                 }
                 else if (!url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
                 {
-                    // R8: this was the only HTTP consumer in the tree with no scheme
-                    // check. The fetched values become parameter values, and parameter
+                    // The fetched values become parameter values, and parameter
                     // values are substituted into step fields — paths, registry
-                    // coordinates, arguments — that run elevated. Mirrors SIG0235.
-                    // Re-checked at install time in HttpOptionsLoader.LoadAsync, since
-                    // a URL assembled from tokens is not knowable here.
+                    // coordinates, arguments — that run elevated, so the scheme is
+                    // gated here. Mirrors SIG0235. Re-checked at install time in
+                    // HttpOptionsLoader.LoadAsync, since a URL assembled from
+                    // tokens is not knowable here. (R8)
                     diagnostics.Add(new Diagnostic(
                         DiagnosticSeverity.Error,
                         DiagnosticCodes.ParameterSourceInsecure,
@@ -1281,14 +1276,14 @@ public static class ManifestParser
 
     // Per-step "known field" allowlists. Hoisted to static readonly fields so the
     // analyzer (CA1861) doesn't fault us for allocating them on every step parse.
-    // R16: `allow_outside_install_dir` is accepted only by the step types whose
+    // `allow_outside_install_dir` is accepted only by the step types whose
     // destination is contained — the ones that actually write somewhere. On any
     // other type it stays an unrecognized field (SIG0231) AND is not applied, so a
     // manifest that expects it to relax e.g. a scheduled_task_create target is
     // told so rather than silently ignored — or, worse, silently honoured.
     // `ContainedDestinationStepTypes` below must list exactly the types whose
     // field array contains the key; `AllowOutsideInstallDirIsOnlyAcceptedWhereItApplies`
-    // pins the two against each other.
+    // pins the two against each other. (R16)
     private static readonly string[] ContainedDestinationStepTypes =
     {
         "file_copy", "directory_create", "file_delete", "directory_delete",
@@ -1368,7 +1363,7 @@ public static class ManifestParser
 
         var when = GetScalar(node, "when");
         // An absent on_failure uses the caller's phase default (Fail for the
-        // journaled bodies; per-phase for P2 lifecycle hooks). An explicit value
+        // journaled bodies; per-phase for lifecycle hooks). An explicit value
         // is always honored.
         var onFailureRaw = GetScalar(node, "on_failure");
         var onFailure = onFailureRaw is null ? defaultOnFailure : ParseOnFailure(onFailureRaw);
@@ -1396,9 +1391,9 @@ public static class ManifestParser
             _ => ReportUnknownStepType(id!, typeStr!, loc, diagnostics),
         };
 
-        // R16: the destination-containment opt-out is a common envelope field,
-        // parsed here alongside `when` / `on_failure` rather than in each of the
-        // eight Build* methods that would otherwise have to repeat it.
+        // The destination-containment opt-out is a common envelope field, parsed
+        // here alongside `when` / `on_failure` rather than in each of the eight
+        // Build* methods that would otherwise have to repeat it. (R16)
         //
         // Gated on the step type actually accepting the key. Applying it to every
         // type would make SIG0231 lie: that diagnostic tells the author the
@@ -1412,7 +1407,7 @@ public static class ManifestParser
             step = step with { AllowOutsideInstallDir = true };
         }
 
-        // P11: guard machine-scope-only steps (SIG0310) right here, at the same
+        // Guard machine-scope-only steps (SIG0310) right here, at the same
         // call site that already holds this step's own precise node `loc` — the
         // same location the SIG0230/SIG0231/SIG0232 diagnostics above use.
         if (step is not null)
@@ -1457,7 +1452,7 @@ public static class ManifestParser
         "name", "program", "arguments", "trigger", "run_level",
     };
 
-    /// <summary><c>json_edit.value_type</c> (register row R35).</summary>
+    /// <summary><c>json_edit.value_type</c> (R35).</summary>
     private static readonly string[] JsonEditValueTypeValues = { "string", "json" };
 
     private static readonly string[] ScheduledTaskTriggerValues = { "logon", "daily", "onstart" };
@@ -1498,7 +1493,7 @@ public static class ManifestParser
     };
 
     /// <summary>
-    /// P11 (T11.2): <c>com_register</c> — self-registers a COM DLL via its
+    /// <c>com_register</c> — self-registers a COM DLL via its
     /// exported <c>DllRegisterServer</c> at install time. Only <c>path</c> is
     /// required (missing → SIG0232); there are no enum-valued fields, so SIG0233
     /// does not apply here. The step is machine-scope-only (SIG0310), enforced by
@@ -1526,20 +1521,17 @@ public static class ManifestParser
     private static readonly string[] FirewallProtocolValues = { "tcp", "udp" };
 
     /// <summary>
-    /// P11 (T11.3): <c>firewall_rule</c> — creates a Windows Defender Firewall
+    /// <c>firewall_rule</c> — creates a Windows Defender Firewall
     /// rule via <c>netsh advfirewall firewall add rule</c>. <c>name</c>,
     /// <c>direction</c>, and <c>action</c> are required (missing → SIG0232);
     /// <c>direction</c>/<c>action</c>/<c>protocol</c> are enum-valued fields —
     /// a value outside their allowed set is SIG0233.
     /// </summary>
     /// <remarks>
-    /// Port/protocol validation rule (documented per the brief, "keep it
-    /// simple"): netsh's <c>localport=</c> needs an accompanying
-    /// <c>protocol=</c>, so when <c>port</c> is given and <c>protocol</c> is
-    /// absent, the parser defaults <c>protocol</c> to <c>tcp</c> rather than
-    /// forcing every manifest author to spell out the common case. An
-    /// explicitly-given <c>protocol</c> is still validated against the
-    /// tcp/udp enum regardless of whether <c>port</c> is set.
+    /// netsh's <c>localport=</c> needs an accompanying <c>protocol=</c>, so when
+    /// <c>port</c> is given and <c>protocol</c> is absent the parser defaults
+    /// <c>protocol</c> to <c>tcp</c>. An explicitly-given <c>protocol</c> is still
+    /// validated against the tcp/udp enum regardless of whether <c>port</c> is set.
     /// </remarks>
     private static InstallStep.FirewallRule? BuildFirewallRule(
         YamlMappingNode node, string id, string? when, OnFailure onFailure,
@@ -1572,8 +1564,6 @@ public static class ManifestParser
             return null;
         }
 
-        // See the remarks on this method: default protocol=tcp when a port is
-        // given but the author left protocol unset.
         if (port is not null && protocol is null)
         {
             protocol = "tcp";
@@ -1812,11 +1802,11 @@ public static class ManifestParser
         var value = GetScalar(node, "value") ?? string.Empty;
         var createIfMissing = GetBool(node, "create_if_missing", defaultValue: false);
 
-        // R35: how `value` is interpreted after substitution. Omitted means `string` —
-        // the safe default; the prior "parse it and keep whatever comes back" behaviour
-        // is now the explicit `json` opt-in. A bad value is an Error, not a silent
-        // fallback to either mode, for the same reason as the other enum step fields:
-        // the runtime shape of the written node would otherwise be a guess.
+        // How `value` is interpreted after substitution. Omitted means `string` —
+        // the safe default; `json` is the explicit opt-in to parsing the value.
+        // A bad value is an Error, not a silent fallback to either mode, for the
+        // same reason as the other enum step fields: the runtime shape of the
+        // written node would otherwise be a guess. (R35)
         var rawValueType = GetScalar(node, "value_type");
         var valueType = JsonValueType.Text;
         if (rawValueType is not null)
@@ -1868,7 +1858,7 @@ public static class ManifestParser
     }
 
     /// <summary>
-    /// P11: an enum-valued step field (e.g. <c>scheduled_task_create.trigger</c> /
+    /// An enum-valued step field (e.g. <c>scheduled_task_create.trigger</c> /
     /// <c>run_level</c>) holds a value outside its allowed set. Unlike
     /// <see cref="ReportUnknownStepFields"/>'s unrecognized-key warning, a bad
     /// enum value makes the step's runtime behavior undefined (there is no safe

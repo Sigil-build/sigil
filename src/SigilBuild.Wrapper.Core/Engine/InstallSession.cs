@@ -38,63 +38,63 @@ public sealed class InstallSession
     private readonly WrapperMode _mode;
     private readonly UpgradePlan _plan;
 
-    // P7: the install log for this run, opened lazily the first time a run path
+    // The install log for this run, opened lazily the first time a run path
     // executes when /LOG (or /LOG=path) was supplied. Null when logging was not
     // requested or the target could not be created (best-effort).
     private InstallLog? _log;
 
-    // P9 (gap G10): recorded by ResolveSessionLanguage when the manifest's fixed
+    // Recorded by ResolveSessionLanguage when the manifest's fixed
     // installer.language pin overrides a conflicting /lang flag. Flushed as a log
-    // line by EnsureLog the first time the /LOG sink opens (see the design note on
-    // ResolveSessionLanguage for why this is "logged", not fatal).
+    // line by EnsureLog the first time the /LOG sink opens (see the note on
+    // ResolveSessionLanguage for why this is logged, not fatal).
     private string? _languageConflictNote;
 
     /// <summary>
     /// The dedicated non-zero exit code returned by the silent path when a newer
-    /// version is already installed and <c>/force-downgrade</c> was not supplied
-    /// (P3, gap G3). Distinct from 1 (step failure), 2 (cancelled), and 64 (usage).
+    /// version is already installed and <c>/force-downgrade</c> was not supplied.
+    /// Distinct from 1 (step failure), 2 (cancelled), and 64 (usage).
     /// The wizard maps the same value onto <c>InstallerOutcomeCode.DowngradeBlocked</c>.
     /// </summary>
     public const int DowngradeBlockedExitCode = 3;
 
-    // P5: set when a prerequisite installer returned exit code 3010 during this run.
+    // Set when a prerequisite installer returned exit code 3010 during this run.
     // Surfaced on the Done screen and as the silent success exit code 3010.
     private bool _rebootRequired;
 
     /// <summary>
-    /// True when a prerequisite (P5, gap G6) installed during this run reported
+    /// True when a prerequisite installed during this run reported
     /// reboot-required (exit code 3010). The wizard's Done screen shows a reboot
     /// notice and the silent path returns exit code 3010 (success-but-reboot). Only
     /// meaningful after a successful <see cref="RunInstallAsync(IProgress{StepProgress}, CancellationToken)"/>.
     /// </summary>
     public bool RebootRequired => _rebootRequired;
 
-    /// <summary>The dedicated silent exit code for a successful install that needs a reboot (P5).</summary>
+    /// <summary>The dedicated silent exit code for a successful install that needs a reboot.</summary>
     public const int RebootRequiredExitCode = 3010;
 
     /// <summary>
     /// The dedicated non-zero exit code returned by the silent path when running
     /// applications hold the install directory open and <c>/closeapps</c> was not
-    /// supplied (P6, gap G7). The log names each blocker. Distinct from 1 (step
-    /// failure), 2 (cancelled), 3 (downgrade blocked), and 64 (usage).
+    /// supplied. The log names each blocker. Distinct from 1 (step failure),
+    /// 2 (cancelled), 3 (downgrade blocked), and 64 (usage).
     /// </summary>
     public const int FilesInUseExitCode = 4;
 
     /// <summary>
     /// The dedicated non-zero exit code returned when another setup instance for this
-    /// app+scope is already running (P6, gap G17). The first instance is unaffected.
+    /// app+scope is already running. The first instance is unaffected.
     /// </summary>
     public const int AlreadyRunningExitCode = 5;
 
     /// <summary>
-    /// <c>/Update</c> (P12, T12.3): the installer is not update-enabled — the manifest
+    /// <c>/Update</c>: the installer is not update-enabled — the manifest
     /// declared no <c>updates.manifestUrl</c>, so there is nothing to check. Distinct
     /// from 64 (which stays reserved for a genuinely-malformed invocation).
     /// </summary>
     public const int UpdateNotConfiguredExitCode = 6;
 
     /// <summary>
-    /// <c>/Update</c> (P12, T12.3): "could not check for updates / could not apply".
+    /// <c>/Update</c>: "could not check for updates / could not apply".
     /// A network failure fetching the channel manifest or its signature, a malformed
     /// channel manifest (SIG0320), an implausible package checksum, or a failed
     /// package download / child spawn. An operational failure — nothing was changed.
@@ -102,7 +102,7 @@ public sealed class InstallSession
     public const int UpdateCheckFailedExitCode = 7;
 
     /// <summary>
-    /// <c>/Update</c> (P12, T12.3): the channel manifest's detached signature did not
+    /// <c>/Update</c>: the channel manifest's detached signature did not
     /// verify against <c>updates.signingKey</c> (SIG0321). A HARD security reject — a
     /// tampered or unsigned channel manifest is never acted on. Kept distinct from
     /// <see cref="UpdateCheckFailedExitCode"/> so a tampering event is unambiguous.
@@ -110,14 +110,14 @@ public sealed class InstallSession
     public const int UpdateManifestRejectedExitCode = 8;
 
     /// <summary>
-    /// <c>/Update</c> (P12, T12.3): a newer version is advertised but the installed
+    /// <c>/Update</c>: a newer version is advertised but the installed
     /// version is below the channel manifest's <c>minFromVersion</c> floor, so it
     /// cannot update via this path. Distinct from "up to date" (exit 0) — an update
     /// exists, it just cannot be taken from the current version.
     /// </summary>
     public const int UpdateNotEligibleExitCode = 9;
 
-    // P6: set when the files-in-use gate refused the run, so the headless path can
+    // Set when the files-in-use gate refused the run, so the headless path can
     // map the generic failure onto FilesInUseExitCode.
     private bool _blockedByFilesInUse;
 
@@ -131,7 +131,7 @@ public sealed class InstallSession
     }
 
     /// <summary>
-    /// The resolved <c>/LOG</c> file path for this run (P7), or <c>null</c> when
+    /// The resolved <c>/LOG</c> file path for this run, or <c>null</c> when
     /// logging was not requested. Explicit <c>/LOG=path</c> wins; bare <c>/LOG</c>
     /// resolves to <c>%TEMP%\sigil-&lt;appid&gt;.log</c>. Exposed so the wizard's
     /// Failed screen can offer to open the log.
@@ -180,21 +180,20 @@ public sealed class InstallSession
     }
 
     /// <summary>
-    /// A log-only progress sink (R1). The state store reports its provenance
-    /// decisions — a refused machine-scope load, a repaired state-directory DACL —
-    /// on an <see cref="IProgress{T}"/>, so every call site that has no user-facing
-    /// progress stream of its own still has to hand it something or the refusal is
-    /// written to nowhere. Mirrors the existing sink built at
-    /// <see cref="RunUninstallAsync"/>: nothing reaches the console or the wizard,
-    /// but the <c>/LOG</c> file records it. <c>null</c> when <c>/LOG</c> was not
-    /// requested, in which case there is no sink to write to at all.
+    /// A log-only progress sink. The state store reports its provenance decisions —
+    /// a refused machine-scope load, a repaired state-directory DACL — on an
+    /// <see cref="IProgress{T}"/>, so a call site with no user-facing progress
+    /// stream of its own must still hand it something or the refusal is written to
+    /// nowhere. Nothing reaches the console or the wizard, but the <c>/LOG</c> file
+    /// records it. <c>null</c> when <c>/LOG</c> was not requested — there is then no
+    /// sink to write to at all. (R1)
     /// </summary>
     private IProgress<StepProgress>? StateProgress =>
         _log is null ? null : new LoggingProgress(null, _log);
 
     /// <summary>
     /// Resolve the effective operating mode. The survivable <c>uninstall.exe</c>
-    /// (T15) is a byte-for-byte copy of the setup exe, so double-clicking it — with
+    /// is a byte-for-byte copy of the setup exe, so double-clicking it — with
     /// no <c>/Uninstall</c> flag — must still uninstall. When no explicit mode flag
     /// was parsed and the running image is named <c>uninstall.exe</c>, imply
     /// <see cref="WrapperMode.Uninstall"/>. The ARP <c>UninstallString</c> path
@@ -223,7 +222,7 @@ public sealed class InstallSession
     /// <summary>
     /// Build a session for the running exe: read the embedded blob, parse
     /// <paramref name="args"/> against its parameter schema, and resolve the
-    /// effective install scope (T12) from the manifest scope + <c>/allusers</c> /
+    /// effective install scope from the manifest scope + <c>/allusers</c> /
     /// <c>/currentuser</c> flags.
     /// </summary>
     /// <exception cref="UsageException">
@@ -240,7 +239,7 @@ public sealed class InstallSession
     }
 
     /// <summary>
-    /// P10 (gap G11): write a log line for each locked component that a CLI
+    /// Write a log line for each locked component that a CLI
     /// <c>/P</c> override tried to change — the override is ignored (the component
     /// stays at its default), so the author gets told rather than silently confused.
     /// The override key is the bare <c>&lt;name&gt;</c> for a built-in and the
@@ -271,7 +270,7 @@ public sealed class InstallSession
     }
 
     /// <summary>
-    /// P10 (gap G11): the declared app-defined custom component names, handed to the
+    /// The declared app-defined custom component names, handed to the
     /// CLI parser so the namespaced <c>/Poption.&lt;name&gt;=value</c> form validates
     /// against the closed set. <c>null</c> when the blob declares no custom component.
     /// </summary>
@@ -294,39 +293,36 @@ public sealed class InstallSession
     }
 
     /// <summary>
-    /// P9 (gap G10): resolve this session's chrome language — <c>installer.language</c>
-    /// (fixed, wins) -&gt; <c>/lang</c> -&gt; the OS UI-language preference list -&gt;
+    /// Resolve this session's chrome language — <c>installer.language</c> (fixed,
+    /// wins) -&gt; <c>/lang</c> -&gt; the OS UI-language preference list -&gt;
     /// <c>en</c> — and set <see cref="SessionLanguage.Current"/>. Deliberately NOT
-    /// called from <see cref="Create"/>: both stamped entry points call this
-    /// exactly once, immediately after <c>Create</c> succeeds and BEFORE any UI is
+    /// called from <see cref="Create"/>: each stamped entry point calls it exactly
+    /// once, immediately after <c>Create</c> succeeds and BEFORE any UI is
     /// constructed (including the pre-Avalonia single-instance <c>MessageBoxW</c>,
     /// itself a catalog string) — the resolver depends only on the blob and Win32,
-    /// never on Avalonia, so this ordering is available. Kept out of <c>Create</c>
-    /// so the hundreds of engine tests that call it never mutate the process-wide
+    /// never on Avalonia, so that ordering is available. Keeping it out of
+    /// <c>Create</c> also stops the engine tests mutating the process-wide
     /// <see cref="SessionLanguage"/> singleton as a side effect.
     /// </summary>
     /// <remarks>
-    /// Design §2.1: a fixed manifest language beats a conflicting <c>/lang</c> —
-    /// the flag is IGNORED, not fatal (exit code stays 0). This deliberately does
-    /// NOT mirror T12's fixed-scope-vs-<c>/allusers</c> rule (exit 64): scope is a
-    /// trust/consequence boundary, language is a display preference, and failing
-    /// an install over a cosmetic preference would be hostile. The conflict, if
-    /// any, is recorded on <see cref="LanguageConflictNote"/> and flushed into the
-    /// <c>/LOG</c> sink the first time it opens (<see cref="EnsureLog"/>); the
-    /// entry point may also log it immediately through its own channel.
+    /// A fixed manifest language beats a conflicting <c>/lang</c>: the flag is
+    /// IGNORED, not fatal (exit code stays 0). A scope flag conflicting with a fixed
+    /// manifest scope does exit 64 — scope is a trust/consequence boundary, language
+    /// is a display preference, and failing an install over a cosmetic preference
+    /// would be hostile. The conflict, if any, is recorded on
+    /// <see cref="LanguageConflictNote"/> and flushed into the <c>/LOG</c> sink the
+    /// first time it opens (<see cref="EnsureLog"/>).
     /// </remarks>
     public Lang ResolveSessionLanguage()
     {
-        // P9: SessionLanguage.OnUninitializedRead is the Release-mode safety net
-        // fired when something reads .Current before Set below has run (a
-        // startup-ordering bug — exactly what Task 13 hit). It is otherwise DEAD:
-        // nothing subscribes. Wire it here, at session start, to the SAME /LOG
-        // sink this session owns (EnsureLog) — the one place that owns both the
-        // log and the session-language singleton — so the fallback stops being
-        // silent. Idempotent: re-wiring on every call is harmless (no test/run
-        // constructs more than one session concurrently), and this keeps the
-        // hook alive for the lifetime of the static SessionLanguage type without
-        // a separate bootstrap step.
+        // SessionLanguage.OnUninitializedRead is the Release-mode safety net fired
+        // when something reads .Current before Set below has run (a startup-ordering
+        // bug); nothing else subscribes to it. Wire it here, at session start, to the
+        // SAME /LOG sink this session owns (EnsureLog) — the one place that owns both
+        // the log and the session-language singleton — so the fallback stops being
+        // silent. Idempotent: re-wiring on every call is harmless (no run constructs
+        // more than one session concurrently), and it keeps the hook alive for the
+        // lifetime of the static SessionLanguage type without a separate bootstrap.
         SessionLanguage.OnUninitializedRead = () => EnsureLog()?.WriteLine(
             "language: SessionLanguage.Current read before resolution — falling back to en (startup-ordering bug)");
 
@@ -346,18 +342,18 @@ public sealed class InstallSession
         return chrome;
     }
 
-    // P9 (Step 3b): the ordered preference list ResolveSessionLanguage resolved
-    // the chrome language from — installer.language (fixed) -> /lang -> OS
-    // preferences -> en. Stashed so the license map (which is NOT part of the
-    // generated chrome catalog and therefore can't go through MatchChrome) is
-    // resolved against the EXACT SAME list, never a freshly recomputed one.
+    // The ordered preference list ResolveSessionLanguage resolved the chrome
+    // language from — installer.language (fixed) -> /lang -> OS preferences -> en.
+    // Stashed so the license map (which is NOT part of the generated chrome catalog
+    // and therefore can't go through MatchChrome) is resolved against the EXACT SAME
+    // list, never a freshly recomputed one.
     private IReadOnlyList<string>? _languagePreferences;
 
     /// <summary>
     /// The ordered language-preference list <see cref="ResolveSessionLanguage"/>
     /// resolved (installer.language fixed -&gt; /lang -&gt; OS preferences -&gt; en).
     /// Empty until <see cref="ResolveSessionLanguage"/> has run. Exposed so the
-    /// host can resolve the embedded license map (Step 3b) against the SAME list
+    /// host can resolve the embedded license map against the SAME list
     /// the chrome language used, rather than recomputing it and risking drift.
     /// </summary>
     public IReadOnlyList<string> LanguagePreferences => _languagePreferences ?? Array.Empty<string>();
@@ -371,7 +367,7 @@ public sealed class InstallSession
     /// </summary>
     public string? LanguageConflictNote => _languageConflictNote;
 
-    // Registry-backed installed-state probe (P3). Off Windows there is no ARP, so the
+    // Registry-backed installed-state probe. Off Windows there is no ARP, so the
     // run is always fresh. The un-stamped Empty blob is short-circuited in Build.
     private static UpgradeState DefaultStateResolver(string appId, InstallScope tentativeScope)
         => OperatingSystem.IsWindows()
@@ -379,7 +375,7 @@ public sealed class InstallSession
             : UpgradeState.None;
 
     /// <summary>
-    /// Resolve the effective scope + version-aware plan (P3) from the blob, parsed CLI,
+    /// Resolve the effective scope + version-aware plan from the blob, parsed CLI,
     /// and an installed-state probe, then construct the session. Shared by
     /// <see cref="Create"/> (real registry probe) and the test seams (injected state).
     /// </summary>
@@ -424,7 +420,7 @@ public sealed class InstallSession
     }
 
     /// <summary>
-    /// Test seam for the P3 version-aware paths: build a session with an INJECTED
+    /// Test seam for the version-aware paths: build a session with an INJECTED
     /// installed state (no real registry probe), so a test can drive the fresh /
     /// same / upgrade / downgrade decision and its scope-wins effect deterministically.
     /// </summary>
@@ -440,19 +436,19 @@ public sealed class InstallSession
     /// The effective operating mode (install / update / uninstall). Normally the
     /// parsed CLI mode; upgraded to <see cref="WrapperMode.Uninstall"/> when the
     /// running image is the copied <c>uninstall.exe</c> even without an explicit
-    /// <c>/Uninstall</c> flag (T15 self-detection).
+    /// <c>/Uninstall</c> flag (self-detection).
     /// </summary>
     public WrapperMode Mode => _mode;
 
     /// <summary>
-    /// R76 — the single-instance guard this process holds, set by the entry point right
+    /// The single-instance guard this process holds, set by the entry point right
     /// after it takes the lock (both hosts). The upgrade teardown needs it so it can
     /// hand the prior version's <c>uninstall.exe</c> a handoff naming this process as
     /// the holder; without it that child derives the same app+scope mutex name, is
     /// refused as a second instance, and the whole upgrade aborts with exit 5.
     /// <c>null</c> whenever no lock is held — a unit-test session, or the
     /// <see cref="SetupInstanceLock.SetupLockRefusal.GuardUnavailable"/> run — and the
-    /// teardown then mints nothing rather than asserting a guard it does not hold.
+    /// teardown then mints nothing rather than asserting a guard it does not hold. (R76)
     /// </summary>
     internal SetupInstanceLock? InstanceLock { get; set; }
 
@@ -465,11 +461,11 @@ public sealed class InstallSession
     /// <summary>The install's application id (the ARP subkey / state-store key).</summary>
     public string AppId => _blob.AppId;
 
-    /// <summary>The declared install-time parameter schema (for the wizard's Configure screens, Task T9).</summary>
+    /// <summary>The declared install-time parameter schema (for the wizard's Configure screens).</summary>
     public IReadOnlyList<ParameterDefinition> Parameters => _blob.Parameters;
 
     /// <summary>
-    /// The ENABLED built-in option components (T8) the wizard renders on the
+    /// The ENABLED built-in option components the wizard renders on the
     /// Options screen (one checkbox each; <c>locked</c> ones disabled). Empty when
     /// the manifest declared no options — the host then omits the Options screen.
     /// </summary>
@@ -480,7 +476,7 @@ public sealed class InstallSession
     public ParsedCommandLine CommandLine => _parsed;
 
     /// <summary>
-    /// The effective install scope (T12) resolved from the manifest scope and the
+    /// The effective install scope resolved from the manifest scope and the
     /// <c>/allusers</c> / <c>/currentuser</c> flags. Always
     /// <see cref="InstallScope.User"/> or <see cref="InstallScope.Machine"/>.
     /// </summary>
@@ -488,7 +484,7 @@ public sealed class InstallSession
 
     /// <summary>
     /// True when this install needs an elevated relaunch: a per-machine scope was
-    /// resolved but the current process is not elevated (T12). The entry point
+    /// resolved but the current process is not elevated. The entry point
     /// relaunches itself via <see cref="Elevation.RelaunchElevatedAndWait"/> and
     /// propagates the child's exit code. Per-user (and auto-user) installs are
     /// always <c>false</c>, so they stay prompt-free.
@@ -497,12 +493,12 @@ public sealed class InstallSession
         _scope == InstallScope.Machine && !Elevation.IsProcessElevated();
 
     /// <summary>
-    /// R18: the argument vector to hand <see cref="Elevation.RelaunchElevatedAndWait"/>,
+    /// The argument vector to hand <see cref="Elevation.RelaunchElevatedAndWait"/>,
     /// with any secret parameter value moved off the command line into a
     /// DPAPI-protected handoff envelope. Identical to <paramref name="originalArgs"/>
     /// when this run carries no secret value. Both entry points MUST relaunch with
     /// this rather than with raw argv, and hand the result to
-    /// <see cref="ElevationSecretHandoff.CleanUp"/> once the child has exited.
+    /// <see cref="ElevationSecretHandoff.CleanUp"/> once the child has exited. (R18)
     /// </summary>
     /// <exception cref="UsageException">
     /// The handoff envelope could not be written; the run refuses rather than
@@ -515,7 +511,7 @@ public sealed class InstallSession
     /// Run to completion without any UI. Routes by mode, echoing the engine's
     /// log lines to <paramref name="output"/>. Returns the process exit code:
     /// <c>0</c> ok, <c>1</c> step failure (rolled back), <c>2</c> cancelled
-    /// (rolled back), <c>3010</c> success but a prerequisite needs a reboot (P5),
+    /// (rolled back), <c>3010</c> success but a prerequisite needs a reboot,
     /// <c>64</c> unsupported mode.
     /// </summary>
     public async Task<int> RunHeadlessAsync(TextWriter output, TextWriter error, CancellationToken ct = default)
@@ -523,7 +519,7 @@ public sealed class InstallSession
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(error);
 
-        // P7: open the /LOG sink (header) before any work, so even an early exit
+        // Open the /LOG sink (header) before any work, so even an early exit
         // (e.g. /Update → 64) still produces a log, and write the final exit code
         // as the last line.
         EnsureLog();
@@ -534,9 +530,9 @@ public sealed class InstallSession
         }
         catch (InstallDirRejectedException ex)
         {
-            // R3: a refused install_dir is a user-input error, not a crash. The
-            // silent path renders it as a plain failure (exit 1) with nothing
-            // installed — the resolver throws before any journal is opened.
+            // A refused install_dir is a user-input error, not a crash. The silent
+            // path renders it as a plain failure (exit 1) with nothing installed —
+            // the resolver throws before any journal is opened. (R3)
             _log?.WriteLine($"result: refused — {ex.Message}");
             error.WriteLine(ex.Message);
             code = 1;
@@ -558,7 +554,7 @@ public sealed class InstallSession
 
             case WrapperMode.Install:
             default:
-                // P3: refuse a downgrade to an older version when a newer one is
+                // Refuse a downgrade to an older version when a newer one is
                 // installed and /force-downgrade was not supplied — dedicated exit code,
                 // nothing installed (the journal is never opened).
                 if (_plan.Action == UpgradeAction.DowngradeBlocked)
@@ -573,29 +569,29 @@ public sealed class InstallSession
                     var outcome = await RunInstallAsync(progress, ct).ConfigureAwait(false);
                     if (outcome.Success)
                     {
-                        // P2 (gap G4): a silent install starts the run_after_install
-                        // target only when /launch was given (default-on is a wizard
-                        // affordance, not a silent one). Launched unelevated.
+                        // A silent install starts the run_after_install target only
+                        // when /launch was given (default-on is a wizard affordance,
+                        // not a silent one). Launched unelevated.
                         if (_parsed.Launch)
                         {
                             LaunchAppUnelevated();
                             if (LastLaunchOutcome == LaunchOutcome.SkippedDeElevationUnavailable)
                             {
-                                // R29: /launch asked for a process and did not get one.
+                                // /launch asked for a process and did not get one.
                                 // The install still succeeded, so the exit code is
-                                // unchanged — but the operator is told why.
+                                // unchanged — but the operator is told why. (R29)
                                 error.WriteLine(SkippedLaunchNotice);
                             }
                         }
-                        // P5: success-but-reboot-required → dedicated exit code 3010.
+                        // Success-but-reboot-required → dedicated exit code 3010.
                         return _rebootRequired ? RebootRequiredExitCode : 0;
                     }
                     if (outcome.Error is not null)
                     {
                         error.WriteLine(outcome.Error);
                     }
-                    // P6 (gap G7): running apps held the install dir and /closeapps was
-                    // not supplied — dedicated exit code, nothing was changed.
+                    // Running apps held the install dir and /closeapps was not
+                    // supplied — dedicated exit code, nothing was changed.
                     return _blockedByFilesInUse ? FilesInUseExitCode : 1;
                 }
                 catch (OperationCanceledException)
@@ -614,18 +610,18 @@ public sealed class InstallSession
     /// cancellation propagates as <see cref="OperationCanceledException"/> after
     /// the engine has rolled back.
     /// </summary>
-    // Wizard-collected parameter values (T9), bound into the engine context on the
+    // Wizard-collected parameter values, bound into the engine context on the
     // next RunInstall* call. Null on the console/silent path. Set once, before the
     // single install run — the host is a single-install process.
     private IReadOnlyDictionary<string, string>? _collectedValues;
 
-    // Wizard-collected option checkbox states (T8), bound into `option.*` on the
+    // Wizard-collected option checkbox states, bound into `option.*` on the
     // next RunInstall* call. Null on the console/silent path (options then resolve
     // to their manifest defaults, subject to any CLI `/P<name>` override).
     private IReadOnlyDictionary<string, bool>? _collectedOptions;
 
     /// <summary>
-    /// The wizard-collected destination path (T13), set by the host's Destination
+    /// The wizard-collected destination path, set by the host's Destination
     /// screen before the single install run. It takes precedence over <c>/D=</c>
     /// and the manifest <c>install_dir</c> when the effective install dir is
     /// resolved, so the <c>{install_dir}</c> token expands to what the user chose.
@@ -635,7 +631,7 @@ public sealed class InstallSession
 
     /// <summary>
     /// Resolve the install directory the wizard's Destination screen should
-    /// pre-fill (T13) for <paramref name="scope"/> (the current scope toggle
+    /// pre-fill for <paramref name="scope"/> (the current scope toggle
     /// selection, or <see cref="ResolvedScope"/> when the toggle is hidden). Honors
     /// a <c>/D=</c> override and the manifest <c>install_dir</c>, resolving their
     /// <c>{scope_root}</c> / <c>{app.*}</c> tokens; falls back to
@@ -643,18 +639,18 @@ public sealed class InstallSession
     /// collected path, so re-toggling scope recomputes a clean default.
     /// </summary>
     /// <summary>
-    /// R3 grandfather clause: a recovered <c>priorInstallDir</c> that resolves
+    /// The grandfather clause: a recovered <c>priorInstallDir</c> that resolves
     /// outside the scope root is HONOURED (an install predating the containment
     /// rule must stay upgradable and cleanly removable), but the exemption is
-    /// recorded in the <c>/LOG</c> naming the directory. A quiet allowance is how
-    /// an exemption becomes the norm.
+    /// recorded in the <c>/LOG</c> naming the directory — a quiet allowance is how
+    /// an exemption becomes the norm. (R3)
     /// </summary>
     /// <remarks>
     /// Only the app's EXISTING location is exempt. Any other out-of-root
     /// destination — typed into the wizard, passed as <c>/D=</c>, or declared in
     /// the manifest — is still refused, so pairing an out-of-root prior install
-    /// with <c>/D=C:\Users\Public\evil</c> does not become a bypass. Because the
-    /// test keys on the destination rather than on which source supplied it, the
+    /// with <c>/D=C:\Users\Public\evil</c> is not a bypass. The test keys on the
+    /// resolved destination rather than on which source supplied it, so the
     /// exemption (and this line) also fire on the headed path, where the wizard
     /// echoes the prefilled prior directory back as the collected value.
     /// </remarks>
@@ -687,25 +683,23 @@ public sealed class InstallSession
                 manifestInstallDir: _blob.InstallDir,
                 cliOverride: _parsed.InstallDir,
                 collected: null,
-                // P3: an upgrade pre-fills the prior install dir so the Destination screen
+                // An upgrade pre-fills the prior install dir so the Destination screen
                 // defaults to the existing location (preserving user data).
                 priorInstallDir: PriorInstallDirDefault);
         }
         catch (InstallDirRejectedException ex)
         {
-            // R3: this is the wizard's PRE-FILL, computed by App before any window
-            // exists — a throw here would take the process down instead of showing
-            // a failure. Fall back to the scope default so the Destination screen
-            // opens on a legal path (visible to the user), and record the refusal
-            // in the /LOG. The rule itself is not weakened: whatever the user
-            // finally confirms is re-resolved through the checking path in
-            // RunInstallCoreAsync, which refuses it there.
-            //
-            // ScopeDefault, NOT the checking overload: <InstallRoot>\<AppName> is
-            // itself junction-able, so re-entering Resolve here could throw a
-            // SECOND rejection straight out of the catch that exists to stop the
-            // first one — and App.axaml.cs has no try/catch, so the wizard would
-            // die with no window at all. ScopeDefault cannot throw.
+            // This is the wizard's PRE-FILL, computed by App before any window exists
+            // — a throw here takes the process down instead of showing a failure. Fall
+            // back to the scope default so the Destination screen opens on a legal
+            // path, and record the refusal in the /LOG. The rule is not weakened:
+            // whatever the user finally confirms is re-resolved through the checking
+            // path in RunInstallCoreAsync and refused there. ScopeDefault, NOT the
+            // checking overload: <InstallRoot>\<AppName> is itself junction-able, so
+            // re-entering Resolve here could throw a SECOND rejection straight out of
+            // the catch that exists to stop the first one — and App.axaml.cs has no
+            // try/catch, so the wizard would die with no window at all. ScopeDefault
+            // cannot throw. (R3)
             _log?.WriteLine($"install dir: {ex.Message} Falling back to the scope default.");
             return InstallDirResolver.ScopeDefault(effective, _blob.AppName, _blob.AppId);
         }
@@ -714,14 +708,14 @@ public sealed class InstallSession
     /// <summary>
     /// True when the effective scope is <see cref="InstallScope.Auto"/>-derived and
     /// the manifest did not fix it — i.e. the wizard should show the user/machine
-    /// scope toggle on the Destination screen (T12/T13). A manifest that fixes
+    /// scope toggle on the Destination screen. A manifest that fixes
     /// <c>scope: user</c> or <c>scope: machine</c> hides the toggle.
     /// </summary>
     public bool ScopeIsSelectable => _blob.Scope == InstallScope.Auto;
 
     /// <summary>
     /// True when a prior install of this <see cref="AppId"/> is already recorded in
-    /// the resolved scope (T10 re-install / upgrade detection). The wizard surfaces a
+    /// the resolved scope (re-install / upgrade detection). The wizard surfaces a
     /// repair/reinstall notice (v1: uninstall-then-install), and every install path
     /// (silent and GUI) first replays the recorded uninstall so a second consecutive
     /// install re-lays each mutation exactly once — no duplicate PATH entries,
@@ -730,10 +724,10 @@ public sealed class InstallSession
     /// </summary>
     /// <remarks>
     /// Memoized. The answer requires a full load — file read, size check, deserialize,
-    /// rehydrate — and reports an R1 provenance refusal on the log sink as a side effect,
-    /// so evaluating it per access made the wizard and the core run each re-read the state
-    /// and emit the refusal line twice. The scope and app id are fixed for the lifetime of
-    /// a session, so the answer cannot change under us within one.
+    /// rehydrate — and reports a provenance refusal on the log sink as a side effect, so
+    /// evaluating it per access makes the wizard and the core run each re-read the state
+    /// and emit the refusal line twice. The scope and app id are fixed for the lifetime
+    /// of a session, so the answer cannot change under us within one. (R1)
     /// </remarks>
     public bool ExistingInstallDetected =>
         _existingInstallDetected ??= ComputeExistingInstallDetected();
@@ -746,14 +740,14 @@ public sealed class InstallSession
         {
             return false;
         }
-        // R1: pass the log sink. Without it a refused machine-scope load would
-        // make this property answer false with no trace anywhere — literally
-        // "no prior install", which is the reading the brief forbids.
+        // Pass the log sink: without it a refused machine-scope load would make this
+        // property answer false with no trace anywhere — literally "no prior
+        // install", which is the one reading it must never silently produce. (R1)
         return UninstallStateStore.TryLoad(_blob.AppId, _scope, StateProgress) is not null;
     }
 
     /// <summary>
-    /// The version-aware classification for this run (P3, gap G3): fresh / same /
+    /// The version-aware classification for this run: fresh / same /
     /// upgrade / downgrade-blocked / downgrade-forced, resolved once at session start
     /// from the scope-correct ARP entry vs the packed version.
     /// </summary>
@@ -775,10 +769,10 @@ public sealed class InstallSession
 
     /// <summary>
     /// The prior install directory to honor as the default destination during an
-    /// upgrade / forced downgrade (P3) — the install lands in the existing location so
+    /// upgrade / forced downgrade — the install lands in the existing location so
     /// non-journaled user data is preserved. <c>null</c> for fresh / same installs,
     /// and for a cross-scope re-install (the prior dir belongs to the OTHER scope, so
-    /// the new scope's own default is used instead), where the normal T13 precedence applies.
+    /// the new scope's own default is used instead), where the normal precedence applies.
     /// </summary>
     private string? PriorInstallDirDefault =>
         _plan.RemovesPriorVersion
@@ -794,29 +788,26 @@ public sealed class InstallSession
     /// <remarks>
     /// <para>
     /// Deliberately NOT <see cref="PriorInstallDirDefault"/>, which additionally
-    /// requires <c>_plan.RemovesPriorVersion</c>. That is an upgrade concept: an
-    /// uninstall run sees the installed version equal to the packed one, so
-    /// <see cref="UpgradePlanner"/> classifies it <c>UpgradeAction.Same</c> and
-    /// <c>RemovesPriorVersion</c> is false — which would make the argument always
-    /// <c>null</c> here, and the grandfather fix inert on this path.
+    /// requires <c>_plan.RemovesPriorVersion</c> — an upgrade concept. An uninstall run
+    /// sees the installed version equal to the packed one and is classified
+    /// <c>UpgradeAction.Same</c>, so that property would leave the argument permanently
+    /// <c>null</c> and the grandfather clause inert on this path.
     /// </para>
     /// <para>
-    /// It matters because <c>ctx.InstallDir</c> at uninstall does two jobs, and both
-    /// silently targeted the WRONG directory for a grandfathered install (one living
-    /// outside the scope root because it predates containment): the P6/G7
-    /// files-in-use gate scans it, so a running app went undetected and the journal
-    /// replay proceeded against files in use; and <c>{install_dir}</c> in
-    /// <c>uninstall:</c> steps and pre/post-uninstall hooks expanded to a default
-    /// location that does not exist. The resolver does not throw for that — the
-    /// default IS contained — so it failed quietly, which is the worse failure.
+    /// It matters because for a grandfathered install (one outside the scope root
+    /// because it predates containment) both jobs <c>ctx.InstallDir</c> does at
+    /// uninstall silently target the WRONG directory: the files-in-use gate scans it,
+    /// so a running app goes undetected and the replay proceeds against files in use;
+    /// and <c>{install_dir}</c> in <c>uninstall:</c> steps and pre/post-uninstall hooks
+    /// expands to a default location that does not exist. The resolver does not throw
+    /// for that — the default IS contained — so it fails quietly.
     /// </para>
     /// <para>
-    /// Provenance and blast radius are the same as the install-side grandfather
-    /// clause, and it carries the same human-partner ruling: the value is the app's
-    /// own recorded <c>InstallLocation</c> from ARP (HKLM for machine scope, which is
-    /// ACL-protected; HKCU for user scope, which crosses no privilege boundary), and
-    /// it exempts exactly that one directory. <c>uninstall.exe /D=&lt;out-of-root&gt;</c>
-    /// still resolves to a DIFFERENT destination and is still refused.
+    /// The value is the app's own recorded <c>InstallLocation</c> from ARP (HKLM for
+    /// machine scope, which is ACL-protected; HKCU for user scope, which crosses no
+    /// privilege boundary), and it exempts exactly that one directory.
+    /// <c>uninstall.exe /D=&lt;out-of-root&gt;</c> resolves to a DIFFERENT destination
+    /// and is still refused. (R3)
     /// </para>
     /// </remarks>
     private string? RecordedInstallDirForUninstall =>
@@ -825,13 +816,10 @@ public sealed class InstallSession
             ? _plan.PriorInstallDir
             : null;
 
-    // P9 design D2: NOT migrated to the catalog. This feeds the console/silent path
-    // (RunHeadlessAsync's stderr) — the headless twin of the wizard's localized
-    // DowngradeBlocked notice screen (InstallerViewModel.cs, which correctly stays on
-    // Strings.DowngradeBody). It names the English CLI flag /force-downgrade, the same
-    // reason BuildBlockerMessage above stays English: a console/silent message that
-    // tells the operator which literal flag to pass must not be translated out from
-    // under them.
+    // Not localized. This feeds the console/silent path (RunHeadlessAsync's stderr) —
+    // the headless twin of the wizard's localized DowngradeBlocked notice screen — and
+    // it names the English CLI flag /force-downgrade: a console message that tells the
+    // operator which literal flag to pass must not be translated out from under them.
     private string DowngradeBlockedMessage()
     {
         var name = string.IsNullOrWhiteSpace(_blob.DisplayName) ? _blob.AppId : _blob.DisplayName!;
@@ -844,7 +832,7 @@ public sealed class InstallSession
         => RunInstallCoreAsync(WrapperBlob.LoadPayloadBytes(), progress, ct);
 
     /// <summary>
-    /// GUI entry point (T9): run the install pipeline binding the wizard-collected
+    /// GUI entry point: run the install pipeline binding the wizard-collected
     /// parameter values into <c>param.*</c> / <c>parameters.*</c> for the engine,
     /// so a step <c>when: "param.autostart == true"</c> observes what the user
     /// picked on the custom screens. Values are keyed by canonical parameter name;
@@ -860,7 +848,7 @@ public sealed class InstallSession
     }
 
     /// <summary>
-    /// GUI entry point (T8 + T9): run the install pipeline binding both the
+    /// GUI entry point: run the install pipeline binding both the
     /// wizard-collected parameter values (<c>param.*</c> / <c>parameters.*</c>) and
     /// the wizard-collected option checkbox states (<c>option.*</c>) into the engine
     /// context, so an auto-generated step gated on <c>when: option.desktop_shortcut</c>
@@ -904,20 +892,20 @@ public sealed class InstallSession
     {
         ArgumentNullException.ThrowIfNull(payloadBytes);
 
-        // P7: ensure the /LOG sink is open (idempotent — the headless path may have
+        // Ensure the /LOG sink is open (idempotent — the headless path may have
         // opened it already; the GUI path opens it here).
         EnsureLog();
 
-        // P10 (gap G11): a locked component is always applied at its default, so a
-        // CLI override for it is silently ineffective — surface that in the log
-        // rather than letting the author wonder why /P had no effect.
+        // A locked component is always applied at its default, so a CLI override for
+        // it is silently ineffective — surface that in the log rather than letting
+        // the author wonder why /P had no effect.
         WarnIgnoredLockedOverrides();
 
-        // R3 grandfather clause: an upgrade whose prior install lives outside the
-        // scope root is honoured rather than refused, but never silently.
+        // Grandfather clause: an upgrade whose prior install lives outside the scope
+        // root is honoured rather than refused, but never silently. (R3)
         WarnGrandfatheredPriorInstallDir(CollectedInstallDir);
 
-        // P3 downgrade guard (defense-in-depth): the headless path already exits with
+        // Downgrade guard (defense-in-depth): the headless path already exits with
         // DowngradeBlockedExitCode and the wizard routes to a notice screen instead of
         // calling this — but never run a blocked downgrade if something reaches here.
         if (_plan.Action == UpgradeAction.DowngradeBlocked)
@@ -941,35 +929,35 @@ public sealed class InstallSession
             {
                 ctx = StepContext.From(
                     _blob, _parsed, payloadRoot, _collectedValues, _scope, _collectedOptions, CollectedInstallDir,
-                    // P3: an upgrade installs into the prior location (default destination).
+                    // An upgrade installs into the prior location (default destination).
                     priorInstallDir: PriorInstallDirDefault);
             }
             catch (InstallDirRejectedException ex)
             {
-                // R3: refuse before anything is laid down. Both the wizard's
-                // Failed screen and the silent path render this as an install
-                // failure rather than letting it escape unhandled.
+                // Refuse before anything is laid down. Both the wizard's Failed
+                // screen and the silent path render this as an install failure
+                // rather than letting it escape unhandled. (R3)
                 _log?.WriteLine($"result: refused — {ex.Message}");
                 return new InstallOutcome(false, ex.Message);
             }
 
-            // P7: hand the run's secrets to the log for redaction, and tee the
-            // engine's progress (step + rollback lines) into the /LOG file.
+            // Hand the run's secrets to the log for redaction, and tee the engine's
+            // progress (step + rollback lines) into the /LOG file.
             _log?.SetSecrets(ctx.SecretValues);
             var effectiveProgress = _log is null ? progress : new LoggingProgress(progress, _log);
 
-            // P6 (gap G7): files-in-use gate. The destination is now resolved, so scan
-            // the declared app mutexes + Restart Manager over it. Runs FIRST — before
-            // prerequisites download anything, before the prior version is torn down,
-            // and before the journal opens — so a blocked run changes nothing.
+            // Files-in-use gate. The destination is now resolved, so scan the declared
+            // app mutexes + Restart Manager over it. Runs FIRST — before prerequisites
+            // download anything, before the prior version is torn down, and before the
+            // journal opens — so a blocked run changes nothing.
             var blocked = CheckFilesInUse(ctx, ctx.InstallDir, effectiveProgress);
             if (blocked is not null)
             {
                 return blocked;
             }
 
-            // P5: prerequisites (detect → install → re-detect) run OUTSIDE and BEFORE
-            // the pre_install hooks AND before the journal opens — and BEFORE the T10
+            // Prerequisites (detect → install → re-detect) run OUTSIDE and BEFORE the
+            // pre_install hooks AND before the journal opens — and BEFORE the
             // re-install cleanup below, so a prerequisite failure aborts with the prior
             // install still intact (no data loss). An accepted 3010 sets the session
             // reboot flag (Done-screen notice + silent exit 3010). Prereqs are never journaled.
@@ -982,16 +970,16 @@ public sealed class InstallSession
             }
             _rebootRequired = prereq.RebootRequired;
 
-            // Prior-version teardown. Ordering reconciles P3 and P5: it runs AFTER
-            // prerequisites succeed (P5 — a failed prereq must never tear down a
-            // working prior install) and BEFORE the journal opens (P3 — a teardown
-            // failure must leave NO partial install). Two shapes:
-            //  • P3 UPGRADE (older installed) or FORCED DOWNGRADE — remove the prior
+            // Prior-version teardown. The ordering is forced from both sides: it runs
+            // AFTER prerequisites succeed (a failed prereq must never tear down a
+            // working prior install) and BEFORE the journal opens (a teardown failure
+            // must leave NO partial install). Two shapes:
+            //  • UPGRADE (older installed) or FORCED DOWNGRADE — remove the prior
             //    version by running ITS uninstall.exe /S /Uninstall, requiring exit 0.
-            //  • Otherwise — the unchanged T10 re-install cleanup: a no-op for a fresh
-            //    install, and the uninstall-then-install repair path for the SAME
-            //    version (replays the recorded uninstall so the reinstall re-lays each
-            //    mutation exactly once — no duplicate PATH entries, shortcuts, ARP rows).
+            //  • Otherwise — the re-install cleanup: a no-op for a fresh install, and
+            //    the uninstall-then-install repair path for the SAME version (replays
+            //    the recorded uninstall so the reinstall re-lays each mutation exactly
+            //    once — no duplicate PATH entries, shortcuts, ARP rows).
             if (_plan.RemovesPriorVersion)
             {
                 var priorRemoval = await RunPriorUninstallAsync(effectiveProgress, ct).ConfigureAwait(false);
@@ -1006,7 +994,7 @@ public sealed class InstallSession
                 await PerformReinstallCleanupAsync(ctx.InstallDir, ct).ConfigureAwait(false);
             }
 
-            // P2: pre_install hooks run OUTSIDE and BEFORE the journal opens. A hook
+            // pre_install hooks run OUTSIDE and BEFORE the journal opens. A hook
             // that fails (default on_failure: fail) aborts here — the InstallEngine,
             // and therefore the rollback journal, never runs.
             var preHook = await HookRunner.RunAsync(
@@ -1041,26 +1029,25 @@ public sealed class InstallSession
                 return new InstallOutcome(false, result.Error);
             }
 
-            // P12 (T12.5): a web-installer stub is a pure delegating trampoline —
-            // its own "install" is just http_download + run_program of the full
-            // package, which ALREADY ran its own complete PersistCompletion (ARP
-            // register, uninstall.exe copy, UninstallStateStore.Save) for this
-            // SAME AppId/scope by the time run_program returns. Persisting AGAIN
-            // here would clobber the child's real uninstall.json/uninstall.exe
-            // with the stub's own trivial two-step journal, leaving an ARP row
-            // that can never actually uninstall the app. Skip ONLY this
-            // success-path bookkeeping call — the steps above still ran (and any
-            // in-flight rollback on a step FAILURE still works normally via the
-            // journal); this is the one call site PersistCompletion has.
+            // A web-installer stub is a pure delegating trampoline — its own "install"
+            // is just http_download + run_program of the full package, which has
+            // ALREADY run its own complete PersistCompletion (ARP register,
+            // uninstall.exe copy, UninstallStateStore.Save) for this SAME AppId/scope
+            // by the time run_program returns. Persisting again here would clobber the
+            // child's real uninstall.json/uninstall.exe with the stub's own trivial
+            // two-step journal, leaving an ARP row that can never actually uninstall
+            // the app. Only this success-path bookkeeping call is skipped: the steps
+            // above still ran, and an in-flight rollback on a step FAILURE still works
+            // normally via the journal.
             if (!_blob.IsDelegatingStub)
             {
-                // R1: PersistCompletion runs AFTER every filesystem/registry mutation
-                // has committed and after the uninstaller copy, but BEFORE the ARP
+                // PersistCompletion runs AFTER every filesystem/registry mutation has
+                // committed and after the uninstaller copy, but BEFORE the ARP
                 // registration. An exception escaping here — e.g. a machine state
                 // directory an unprivileged user pre-created whose DACL cannot be
                 // repaired — would leave a fully installed app with no ARP row and no
                 // uninstall state: unremovable, and triggerable by any unprivileged
-                // user. Route it through the normal failure path instead.
+                // user. Route it through the normal failure path instead. (R1)
 #pragma warning disable CA1031 // A completion failure must become a typed install failure, never an escape.
                 try
                 {
@@ -1074,8 +1061,8 @@ public sealed class InstallSession
                     _log?.WriteLine($"result: failed — {ctx.Redact(err)}");
                     Report(effectiveProgress, ctx, $"error: {err}", isError: true);
                     // Best-effort by construction: UndoAsync swallows individual record
-                    // failures, so only cancellation can escape it. InProcess (R1): this
-                    // is the journal this run just built, not one read back from disk.
+                    // failures, so only cancellation can escape it. InProcess: this is
+                    // the journal this run just built, not one read back from disk. (R1)
                     await result.Journal
                         .UndoAsync(ReplayAnchorage.InProcess, effectiveProgress, ct)
                         .ConfigureAwait(false);
@@ -1090,10 +1077,10 @@ public sealed class InstallSession
             // uninstall journal, so discarding them changes no post-install state).
             result.Journal.DiscardTransientStashes();
 
-            // P2: post_install hooks run OUTSIDE and AFTER the journal commits,
-            // before the Done screen. The install is already committed, so a hook
-            // failure is never rolled back — it is logged (P7); on_failure only
-            // controls whether the remaining post hooks in the phase still run.
+            // post_install hooks run OUTSIDE and AFTER the journal commits, before the
+            // Done screen. The install is already committed, so a hook failure is never
+            // rolled back — it is logged; on_failure only controls whether the
+            // remaining post hooks in the phase still run.
             await HookRunner.RunAsync(
                 "post_install", _blob.HookPostInstall, ctx, effectiveProgress, ct).ConfigureAwait(false);
 
@@ -1109,16 +1096,15 @@ public sealed class InstallSession
     }
 
     /// <summary>
-    /// T10 re-install / upgrade cleanup: when a prior install of this AppId is
-    /// recorded in the resolved scope, drive <see cref="UninstallEngine"/> to replay
-    /// its persisted journal in reverse (restoring the prior PATH, deleting the prior
+    /// Re-install / upgrade cleanup: when a prior install of this AppId is recorded
+    /// in the resolved scope, drive <see cref="UninstallEngine"/> to replay its
+    /// persisted journal in reverse (restoring the prior PATH, deleting the prior
     /// shortcut / files, removing the prior ARP row + state) before the fresh install
-    /// re-applies everything. Because the earlier PATH append is undone first, the
-    /// reinstall appends the install dir exactly once — the double-install case no
-    /// longer duplicates PATH entries, shortcuts, or ARP rows. A best-effort step: a
-    /// failed prior-uninstall (e.g. missing state) must not block the reinstall, so
-    /// the outcome is intentionally ignored. No-op for the un-stamped runtime and
-    /// off Windows.
+    /// re-applies everything. Because the earlier PATH append is undone first, a
+    /// double install appends the install dir exactly once and duplicates no
+    /// shortcut or ARP row. A best-effort step: a failed prior-uninstall (e.g.
+    /// missing state) must not block the reinstall, so the outcome is intentionally
+    /// ignored. No-op for the un-stamped runtime and off Windows.
     /// </summary>
     private async Task PerformReinstallCleanupAsync(string? resolvedInstallDir, CancellationToken ct)
     {
@@ -1128,66 +1114,49 @@ public sealed class InstallSession
         }
         // UndoAsync + ARP.Remove + state delete. User-facing progress is suppressed —
         // the reinstall's own progress stream begins with the fresh install below —
-        // but the log-only sink is still passed so an R1 refusal (which would make
-        // this cleanup silently do nothing) is recorded in the /LOG file.
+        // but the log-only sink is still passed so a provenance refusal (which would
+        // make this cleanup silently do nothing) is recorded in the /LOG file.
         //
-        // This is only the FALLBACK anchor (R1 clause (c)): the prior install recorded
-        // where it actually landed, and UninstallEngine prefers that. This value —
-        // the destination THIS run resolved — is used only for state written before
-        // the recorded field existed.
+        // This is only the FALLBACK anchor: the prior install recorded where it
+        // actually landed and UninstallEngine prefers that, so this value — the
+        // destination THIS run resolved — is used only for state written before the
+        // recorded field existed. (R1)
         var fallback = string.IsNullOrWhiteSpace(resolvedInstallDir)
             ? Path.Combine(ScopeLayout.For(_scope).InstallRoot, _blob.AppId)
             : resolvedInstallDir;
 
-        // R53 — "should an ELEVATED process replay USER-scope state at all?" Decided:
-        // YES, it stays as it is, and here is why rather than a shrug.
+        // An ELEVATED process DOES replay USER-scope state, deliberately: _scope is
+        // genuinely User and the process happens to hold an admin token, so every
+        // replayed record runs with privileges the state's author does not have. That
+        // is safe here because there is no privilege to gain — a user-scope replay
+        // reads a journal out of the user's OWN profile and acts inside anchored roots
+        // the user already controls (install dir, this app's own state directory, that
+        // scope's shortcut folders), and the primitives that WOULD be escalations are
+        // closed independently of scope: ReplayAnchor.OwnedByThisInstall additionally
+        // requires an admin-only-writable target for a machine execution mapping and
+        // for a machine PATH entry, and the state file passes its provenance gate
+        // first. Refusing instead would break the ordinary elevated user-scope run —
+        // an admin repairing an app from an elevated shell, an MDM or CI agent, a
+        // `scope: auto` user-scope install launched from an elevated console — leaving
+        // the prior install's PATH entry, shortcuts and ARP row in place while the
+        // fresh install adds its own: duplicated state, and the exact "unremovable"
+        // end state this is meant to prevent. Dropping the token for this one call is
+        // not free either — a second process, a second state read, and a new trust
+        // boundary between them. What would change the answer is a user-scope record
+        // type that acts OUTSIDE the user's own reach; there is none today, and the
+        // reasoning above is the only thing holding this. (R15, R53)
         //
-        // The question is real. R1 clause (b) stopped a MACHINE operation crossing into
-        // %LocalAppData%; this is the different shape where _scope is genuinely User and
-        // the process happens to hold an admin token, so every replayed record runs with
-        // privileges the state's author (the user) does not have. The instinct is to
-        // refuse. Three things say otherwise:
-        //
-        //  1. There is no privilege to gain. A user-scope replay reads a journal out of
-        //     the user's OWN profile and acts inside anchored roots that the user already
-        //     controls — install dir, this app's own state directory, that scope's
-        //     shortcut folders. Everything an attacker could aim it at is something they
-        //     could already write directly. The primitives that WOULD be escalations are
-        //     closed independently of scope: ReplayAnchor.OwnedByThisInstall additionally
-        //     requires an admin-only-writable target for a machine execution mapping and
-        //     for a machine PATH entry, and the state file itself passes S1's provenance
-        //     gate before any of this runs.
-        //
-        //  2. Refusing would break the case it is meant to protect. The scope here is the
-        //     scope the CURRENT run resolved, and an elevated user-scope run is ordinary:
-        //     an admin repairing an app from an elevated shell, an MDM or CI agent, a
-        //     `scope: auto` manifest whose user-scope install is launched from an already
-        //     elevated console. Refusing the reinstall cleanup for those leaves the prior
-        //     install's PATH entry, shortcuts and ARP row in place while the fresh install
-        //     adds its own — duplicated state, and the exact "unremovable" end state R15
-        //     exists to prevent, produced by the fix rather than the bug.
-        //
-        //  3. Dropping the token instead is not free. De-elevating this one call means a
-        //     second process, a second state read, and a new trust boundary between them
-        //     — more attack surface than the asymmetry it removes, for no reachable gain
-        //     under (1).
-        //
-        // What would change the answer: a user-scope record type that acts OUTSIDE the
-        // user's own reach. There is none today; if one is added, revisit this with the
-        // row, because the reasoning above is the only thing holding it.
-        //
-        // R44/R51: the declarations come from THIS build's blob, because at a reinstall
-        // this process has no access to the blob the PRIOR version was packed with — its
-        // exe is about to be overwritten and was never a trusted input anyway.
-        //
-        // The residual is disclosed rather than hidden: if v2's manifest drops a declared
+        // The declarations come from THIS build's blob, because at a reinstall this
+        // process has no access to the blob the PRIOR version was packed with — its
+        // exe is about to be overwritten and was never a trusted input anyway. The
+        // residual is disclosed rather than hidden: if v2's manifest drops a declared
         // out-of-tree destination (or a registry step) that v1 had, v1's records for it
         // are refused during the reinstall cleanup and that content stays on disk. Every
         // one of those refusals is reported per record through StateProgress into the
         // /LOG file, and none of them aborts the reinstall — a stranded file is bad, a
-        // bricked upgrade is worse. S5's R15 work makes that guarantee structural rather
-        // than conventional: retention and the non-Ok result key on FailedRecords alone,
-        // and this call ignores the outcome entirely.
+        // bricked upgrade is worse. That guarantee is structural rather than
+        // conventional: retention and the non-Ok result key on FailedRecords alone, and
+        // this call ignores the outcome entirely. (R44, R51)
         await new UninstallEngine()
             .RunAsync(
                 _blob.AppId,
@@ -1200,7 +1169,7 @@ public sealed class InstallSession
     }
 
     /// <summary>
-    /// P3 upgrade / forced-downgrade pre-body phase: run the PRIOR version's own
+    /// Upgrade / forced-downgrade pre-body phase: run the PRIOR version's own
     /// <c>uninstall.exe /S /Uninstall &lt;scope&gt;</c> and require exit code 0. The prior
     /// uninstaller (not this build's <see cref="UninstallEngine"/>) is used because it owns
     /// the prior version's rollback journal and knows how to reverse it. Runs before the
@@ -1226,12 +1195,11 @@ public sealed class InstallSession
                 $"cannot upgrade: the previous version's uninstaller was not found at '{exe}'. No changes were made.");
         }
 
-        // R2: `exe` came out of an ARP UninstallString — registry data — and the spawn
-        // below inherits this process's token. File.Exists is not a trust decision.
-        // Refuse loudly rather than continue silently: silently continuing is exactly
-        // the behaviour that made this exploitable.
-        //
-        // Gated on "privilege is actually at stake" — see PriorUninstallerNeedsTrust.
+        // `exe` came out of an ARP UninstallString — registry data — and the spawn
+        // below inherits this process's token, so File.Exists is not a trust decision.
+        // Continuing silently is what makes an untrusted uninstaller exploitable:
+        // refuse loudly instead. Gated on "privilege is actually at stake" — see
+        // PriorUninstallerNeedsTrust. (R2)
         if (PriorUninstallerNeedsTrust(_scope, Elevation.IsProcessElevated()))
         {
             var verdict = ClassifyPriorUninstaller(exe);
@@ -1289,20 +1257,20 @@ public sealed class InstallSession
 
     /// <summary>
     /// The spawn description for the prior version's uninstaller: the ARP
-    /// <c>UninstallString</c>'s own <c>/S /Uninstall &lt;scope&gt;</c> shape, plus the R76
+    /// <c>UninstallString</c>'s own <c>/S /Uninstall &lt;scope&gt;</c> shape, plus the
     /// single-instance handoff when this process actually holds the guard the child is
-    /// about to contend with.
+    /// about to contend with. (R76)
     /// </summary>
     /// <remarks>
     /// The handoff goes on the CHILD's environment block only — never on this process's
     /// own environment, so nothing else this installer spawns (hooks, prerequisites)
     /// inherits it, and the child clears it as it reads it. It carries no secret (pid,
-    /// creation time and the guard name are all public), so unlike R18's elevation
-    /// envelope there is nothing here that must be kept off a process listing; its
-    /// strength is the binding checked in <see cref="SetupInstanceLock.HandoffAdmits"/>.
-    /// When no lock is held, no token is minted and the child contends normally: the
-    /// upgrade fails exactly as it did before R76 rather than proceeding on an
-    /// unbacked claim.
+    /// creation time and the guard name are all public), so unlike the elevation
+    /// envelope (R18) there is nothing here that must be kept off a process listing;
+    /// its strength is the binding checked in
+    /// <see cref="SetupInstanceLock.HandoffAdmits"/>. When no lock is held, no token is
+    /// minted and the child contends normally — the upgrade fails rather than
+    /// proceeding on an unbacked claim.
     /// </remarks>
     internal System.Diagnostics.ProcessStartInfo BuildPriorUninstallStartInfo(string exe, string scopeFlag)
     {
@@ -1329,50 +1297,44 @@ public sealed class InstallSession
     }
 
     /// <summary>
-    /// R2: is a trust check on the prior uninstaller required for this run at all?
-    /// True when <paramref name="scope"/> is machine — which either is or is about to
-    /// become an elevated process — or when this process is already elevated.
+    /// Is a trust check on the prior uninstaller required for this run at all? True
+    /// when <paramref name="scope"/> is machine — which either is or is about to
+    /// become an elevated process — or when this process is already elevated. (R2)
     /// </summary>
     /// <remarks>
     /// <para>
     /// This gate exists to stop an <em>unprivileged</em> user choosing what runs
-    /// <em>privileged</em>. When the run is unelevated and per-user, that boundary does
-    /// not exist: the uninstaller runs with exactly the token of the user who owns the
-    /// directory it sits in, so verifying it buys nothing an attacker could not already
-    /// do directly. Applying it unconditionally cost real functionality instead — an
-    /// unsigned per-user install, whose <c>uninstall.exe</c> lives in
-    /// <c>%LocalAppData%\Programs\&lt;App&gt;</c>, could satisfy neither half of
-    /// <see cref="IsPriorUninstallerTrusted"/> and so could never be upgraded at all.
-    /// Register row R2 words the condition as "when the effective scope is machine (or
-    /// the process is elevated)"; this is that wording.
-    /// </para>
-    /// <para>
-    /// The elevation half is what makes it safe to keep the check narrow: a per-user
-    /// install launched with Run as administrator, or from an elevated shell, or by
-    /// Intune as SYSTEM, IS a privilege boundary and IS gated. Widening the condition
-    /// is safe; narrowing it is not.
+    /// <em>privileged</em>. An unelevated per-user run has no such boundary: the
+    /// uninstaller runs with exactly the token of the user who owns the directory it
+    /// sits in, so verifying it buys nothing an attacker could not do directly, and
+    /// gating it costs real functionality — an unsigned per-user install, whose
+    /// <c>uninstall.exe</c> lives in <c>%LocalAppData%\Programs\&lt;App&gt;</c>,
+    /// satisfies neither half of <see cref="IsPriorUninstallerTrusted"/> and could
+    /// never be upgraded at all. The elevation half keeps it safe to stay narrow: a
+    /// per-user install launched with Run as administrator, from an elevated shell, or
+    /// by Intune as SYSTEM IS a privilege boundary and IS gated. Widening this
+    /// condition is safe; narrowing it is not.
     /// </para>
     /// <para>
     /// <paramref name="elevated"/> is a PARAMETER, not an internal
     /// <see cref="Elevation.IsProcessElevated"/> call, and that is load-bearing rather
-    /// than stylistic. When the predicate read the token itself, the only test that
-    /// could be written had to recompute <c>IsProcessElevated()</c> in its own
-    /// expectation — which made it assert "the gate agrees with the token", a
-    /// statement an <em>unconditional</em> gate also satisfies on an elevated host. The
-    /// test could not fail, and the whole point of this method could have been reverted
-    /// green through CI. Taking elevation as an argument lets both branches be pinned
-    /// as literals on any host, elevated or not.
+    /// than stylistic. A predicate that reads the token itself can only be tested
+    /// against an expectation that recomputes <c>IsProcessElevated()</c> — which
+    /// asserts "the gate agrees with the token", something an <em>unconditional</em>
+    /// gate also satisfies on an elevated host, so the test cannot fail and this
+    /// method could be reverted green through CI. Taking elevation as an argument lets
+    /// both branches be pinned as literals on any host.
     /// </para>
     /// </remarks>
     internal static bool PriorUninstallerNeedsTrust(InstallScope scope, bool elevated) =>
         scope == InstallScope.Machine || elevated;
 
     /// <summary>
-    /// R2: may this run spawn <paramref name="exe"/>, a path that came from an
+    /// May this run spawn <paramref name="exe"/>, a path that came from an
     /// Add/Remove-Programs <c>UninstallString</c>? True only when the file is
     /// Authenticode-valid <em>or</em> is a file that only administrators can write.
     /// Consulted only when <see cref="PriorUninstallerNeedsTrust"/> says privilege is
-    /// at stake.
+    /// at stake. (R2)
     /// </summary>
     /// <remarks>
     /// <para>
@@ -1385,59 +1347,55 @@ public sealed class InstallSession
     /// <b>What the Authenticode half does and does not establish.</b>
     /// <see cref="AuthenticodeVerifier.VerifyFile"/> asks <c>WinVerifyTrust</c> whether
     /// the file is intact and chains to a root this machine trusts. It is <b>not</b>
-    /// publisher pinning: it does not compare the subject to this installer's own
+    /// publisher pinning — the subject is never compared to this installer's own
     /// publisher, and the trusted-root set includes
     /// <c>HKCU\SOFTWARE\Microsoft\SystemCertificates\Root</c>, which an unprivileged
-    /// user can add to. A user who plants a self-signed root and signs their own binary
-    /// with it therefore passes this half. It also runs with
-    /// <c>WTD_REVOKE_NONE</c> (register row R17), so a revoked certificate still
-    /// verifies. Pinning the subject and enabling chain policy is lane S3's Authenticode
-    /// work (R11 / R17) — deliberately not duplicated here. Until it lands, the file
-    /// half below is the load-bearing check for a hostile local user, and the hard-coded
-    /// <see cref="System.Diagnostics.ProcessStartInfo.ArgumentList"/> at the call site
-    /// (no attacker-controlled arguments are ever forwarded) is what keeps the residual
-    /// exposure to "runs a binary the attacker could already run as themselves".
+    /// user can add to, so planting a self-signed root and signing your own binary with
+    /// it passes this half. It also runs with <c>WTD_REVOKE_NONE</c>, so a revoked
+    /// certificate still verifies. Subject pinning and chain policy belong to the
+    /// Authenticode work and are deliberately not duplicated here, which leaves the
+    /// file half below as the load-bearing check against a hostile local user; the
+    /// hard-coded <see cref="System.Diagnostics.ProcessStartInfo.ArgumentList"/> at the
+    /// call site (no attacker-controlled arguments are ever forwarded) keeps the
+    /// residual exposure to "a binary the attacker could already run as themselves".
+    /// (R11, R17)
     /// </para>
     /// <para>
     /// <b>The file half checks the file, not just its folder.</b>
     /// <see cref="StateDirectorySecurity.IsAdminOnlyWritable"/> inspects the CONTAINING
-    /// DIRECTORY, so a file carrying its own <c>Users:(M)</c> ACE inside an admin-only
-    /// directory would pass it — an installer that ships a world-writable
-    /// <c>uninstall.exe</c> into <c>%ProgramFiles%</c> is exactly that, and the attacker
-    /// then rewrites the file in place without ever needing the directory. Both are
+    /// DIRECTORY, so an <c>uninstall.exe</c> shipped into <c>%ProgramFiles%</c> with its
+    /// own <c>Users:(M)</c> ACE would pass it and be rewritten in place. Both checks are
     /// therefore required: <see cref="StateDirectorySecurity.IsTrustedFile"/> for the
     /// file's own owner and DACL, and <c>IsAdminOnlyWritable</c> for the directory,
     /// because directory write alone lets an attacker delete and replace the file
-    /// wholesale. This is the same both-objects rule
-    /// <see cref="UninstallStateStore"/> applies to <c>uninstall.json</c> (R1); the two
-    /// shared predicates are consumed, never reimplemented.
+    /// wholesale. Same both-objects rule <see cref="UninstallStateStore"/> applies to
+    /// <c>uninstall.json</c>; the shared predicates are consumed, never reimplemented.
+    /// (R1)
     /// </para>
     /// <para>
-    /// <b>Remote paths are refused outright, and this is load-bearing rather than
-    /// defence in depth.</b> Both halves are answered by the far end of a network hop:
+    /// <b>Remote paths are refused outright, and that is load-bearing rather than
+    /// defence in depth.</b> Both halves are answered by the far end of a network hop —
     /// an SMB server reports the ACL, and <c>BUILTIN\Administrators</c> is a
-    /// machine-independent SID, so a server the attacker controls can claim any owner
-    /// and any DACL it likes. Measured with the check removed, on an unelevated box:
+    /// machine-independent SID — so a server the attacker controls can claim any owner
+    /// and DACL it likes. Measured with the check removed, on an unelevated box,
     /// <c>\\127.0.0.1\C$\Windows\System32\cmd.exe</c> and
-    /// <c>\\.\C:\Windows\System32\cmd.exe</c> both classified <b>Trusted</b> — the
-    /// device-namespace form is a straight local alias that reaches the same file, and
-    /// the loopback admin share resolved and passed the ACL read. Without this check
-    /// those paths would be spawned. There is no legitimate case for an elevated
-    /// installer launching a prior uninstaller off a share or through a device alias,
-    /// so both are refused on shape before anything is read from them.
+    /// <c>\\.\C:\Windows\System32\cmd.exe</c> both classified <b>Trusted</b>: the
+    /// device-namespace form is a local alias reaching the same file, and the loopback
+    /// admin share passed the ACL read. No legitimate run launches a prior uninstaller
+    /// off a share or through a device alias, so both are refused on shape before
+    /// anything is read from them.
     /// </para>
     /// <para>
     /// A TOCTOU window remains between this check and
-    /// <see cref="System.Diagnostics.Process.Start(System.Diagnostics.ProcessStartInfo)"/>:
+    /// <see cref="System.Diagnostics.Process.Start(System.Diagnostics.ProcessStartInfo)"/>;
     /// closing it needs the file opened with a deny-write share and launched from that
-    /// handle, which is register row R12's fix and is not in scope here. This check
-    /// still removes the entire trivially-reachable attack — an attacker who can win
-    /// that race can already write the file or its directory.
+    /// handle, which is out of scope here. This check still removes the entire
+    /// trivially-reachable attack — winning that race requires already being able to
+    /// write the file or its directory. (R12)
     /// </para>
     /// <para>
     /// <c>internal</c> is the test seam (<c>InternalsVisibleTo</c>): it lets the
-    /// refusal <em>and</em> the acceptance be asserted without a process ever being
-    /// started. It is not part of the public engine surface.
+    /// refusal <em>and</em> the acceptance be asserted without starting a process.
     /// </para>
     /// </remarks>
     internal static bool IsPriorUninstallerTrusted(string exe) =>
@@ -1447,14 +1405,14 @@ public sealed class InstallSession
     /// Why <see cref="IsPriorUninstallerTrusted"/> answered as it did.
     /// </summary>
     /// <remarks>
-    /// The reason is carried, not collapsed to a bool, for two reasons. It gives the
-    /// operator a message that names the actual problem — "on a network location" and
-    /// "not signed and not admin-only" call for different responses. And it makes the
-    /// remote refusal <b>falsifiable</b>: with a bool return, deleting the
-    /// <see cref="IsRemotePath"/> check changes nothing observable for any fixture an
-    /// unelevated test can build, because a UNC path an unprivileged process cannot
-    /// read the ACL of answers "untrusted" either way. Distinguishing the two verdicts
-    /// is what lets a test fail when the check is removed.
+    /// The reason is carried rather than collapsed to a bool so the operator gets a
+    /// message naming the actual problem — "on a network location" and "not signed and
+    /// not admin-only" call for different responses — and so the remote refusal stays
+    /// <b>falsifiable</b>: with a bool return, deleting the <see cref="IsRemotePath"/>
+    /// check changes nothing observable for any fixture an unelevated test can build,
+    /// because a UNC path an unprivileged process cannot read the ACL of answers
+    /// "untrusted" either way. Distinguishing the two verdicts is what lets a test fail
+    /// when the check is removed.
     /// </remarks>
     internal enum PriorUninstallerVerdict
     {
@@ -1555,22 +1513,20 @@ public sealed class InstallSession
     /// </summary>
     /// <remarks>
     /// The DisplayName/Version/Publisher/size values are the real
-    /// <c>manifest.App.*</c> fields and the packed size, threaded through the blob
-    /// at pack time (T10). The ARP hive, state-store location, and
-    /// uninstall-string scope flag all follow the resolved scope (T12). The
-    /// <c>UninstallString</c> points at the copied <c>uninstall.exe</c> (T15), never
-    /// at <see cref="Environment.ProcessPath"/> — so uninstall survives deletion of
-    /// the downloaded setup exe. No-ops for an un-stamped runtime (the dev/smoke
-    /// <see cref="WrapperBlob.Empty"/>) and off Windows.
+    /// <c>manifest.App.*</c> fields and the packed size, threaded through the blob at
+    /// pack time. The ARP hive, state-store location, and uninstall-string scope flag
+    /// all follow the resolved scope. The <c>UninstallString</c> points at the copied
+    /// <c>uninstall.exe</c>, never at <see cref="Environment.ProcessPath"/> — so
+    /// uninstall survives deletion of the downloaded setup exe. No-ops for an
+    /// un-stamped runtime (<see cref="WrapperBlob.Empty"/>) and off Windows.
     /// </remarks>
     /// <param name="resolvedInstallDir">
-    /// The SINGLE install directory T13's <see cref="InstallDirResolver"/> computed
-    /// for this run (<see cref="StepContext.InstallDir"/>) — the exact directory the
-    /// steps installed into. <c>uninstall.exe</c> is copied here and the ARP
-    /// <c>UninstallString</c> targets it, so the uninstaller can never diverge from
-    /// where the files landed (honoring <c>/D=</c> / manifest / wizard / default).
-    /// <c>null</c> only for a context built without a resolved dir (the un-stamped
-    /// runtime, which already returned early above); it then falls back to the legacy
+    /// The SINGLE install directory <see cref="InstallDirResolver"/> computed for this
+    /// run (<see cref="StepContext.InstallDir"/>). <c>uninstall.exe</c> is copied here
+    /// and the ARP <c>UninstallString</c> targets it, so the uninstaller can never
+    /// diverge from where the files landed (honoring <c>/D=</c> / manifest / wizard /
+    /// default). <c>null</c> only for a context built without a resolved dir (the
+    /// un-stamped runtime, which already returned early above); it then falls back to
     /// <c>&lt;scope root&gt;\&lt;AppId&gt;</c> so completion never crashes.
     /// </param>
     private void PersistCompletion(
@@ -1587,16 +1543,16 @@ public sealed class InstallSession
             return;
         }
 
-        // Unify on the single resolved install dir (T13): uninstall.exe is copied
-        // into the SAME directory the steps installed to, so ARP's UninstallString
-        // never diverges from the files. Fall back to the legacy scope-root + AppId
-        // location only if the resolved dir is somehow absent (never on a real
-        // stamped install — Empty already returned early above).
+        // Unify on the single resolved install dir: uninstall.exe is copied into the
+        // SAME directory the steps installed to, so ARP's UninstallString never
+        // diverges from the files. Fall back to the scope-root + AppId location only
+        // if the resolved dir is somehow absent (never on a real stamped install —
+        // Empty already returned early above).
         var uninstallDir = string.IsNullOrEmpty(resolvedInstallDir)
             ? Path.Combine(ScopeLayout.For(_scope).InstallRoot, _blob.AppId)
             : resolvedInstallDir;
 
-        // T15 final install step: copy the running installer into the install dir
+        // Final install step: copy the running installer into the install dir
         // as uninstall.exe and journal its removal (so the persisted journal — and a
         // rollback — reverse it). ARP's UninstallString then targets this copy.
         var uninstallerPath =
@@ -1604,35 +1560,34 @@ public sealed class InstallSession
             ?? Environment.ProcessPath
             ?? ".";
 
-        // Redact any secret value from the persisted uninstall state (decision 6).
-        // The scope is recorded so uninstall runs in the same scope (T12). Saved
-        // AFTER the uninstaller-copy step is journaled so the RemoveUninstaller
-        // record is part of the persisted, replay-on-uninstall journal.
-        // StateProgress carries the R1 hardening trail (a repaired state-directory
-        // DACL) into the /LOG file; without a sink the repair would be invisible.
-        // uninstallDir is recorded in the state so the uninstall anchors its replay to
-        // where the files ACTUALLY landed (R1 clause (c)). Recomputing a default at
-        // uninstall time would refuse every file record of a /D= or wizard-chosen
-        // install and leave the app unremovable.
-        // R28: the install has committed, so the `<file>.sigil-bak` copies FileCopyStep
-        // and HttpDownloadStep left beside every file they overwrote have finished their
+        // Redact any secret value from the persisted uninstall state, and record the
+        // scope so uninstall runs in the same one. Saved AFTER the uninstaller-copy
+        // step is journaled, so the RemoveUninstaller record is part of the persisted,
+        // replay-on-uninstall journal. StateProgress carries the hardening trail (a
+        // repaired state-directory DACL) into the /LOG file; without a sink the repair
+        // would be invisible. uninstallDir is recorded in the state so the uninstall
+        // anchors its replay to where the files ACTUALLY landed: recomputing a default
+        // at uninstall time would refuse every file record of a /D= or wizard-chosen
+        // install and leave the app unremovable. (R1)
+        //
+        // The install has committed, so the `<file>.sigil-bak` copies FileCopyStep and
+        // HttpDownloadStep leave beside every file they overwrite have finished their
         // mid-install job. They are NOT discarded — each one is the pre-existing content
         // of a file this install replaced, and it is what makes uninstall able to put
         // that file back — but they must not spend the app's whole lifetime sitting in
         // Program Files next to the files they shadow. Move them into the per-app state
         // directory (created hardened FIRST, so a copy lands inside the right DACL
         // rather than inheriting one afterwards) and rewrite the records before they are
-        // persisted, so uninstall.json points at where the stashes actually are.
+        // persisted, so uninstall.json points at where the stashes actually are. (R28)
         UninstallStateStore.EnsureDirectory(_blob.AppId, _scope, StateProgress);
         journal.RelocateCommittedStashes(
             UninstallStateStore.StashDirectoryFor(_blob.AppId, _scope));
 
         UninstallStateStore.Save(
             _blob.AppId, journal, _scope, secretValues, StateProgress, uninstallDir);
-        // T10: register the REAL manifest.App.* fields + packed size threaded through
-        // the blob, not the former AppId / "1.0.0" / "Unknown" / 0 placeholders. The
-        // fallbacks only fire for a (theoretical) blob that omitted them — a real
-        // packed blob always carries them.
+        // Register the REAL manifest.App.* fields + packed size threaded through the
+        // blob. The fallbacks only fire for a (theoretical) blob that omitted them —
+        // a real packed blob always carries them.
         ArpRegistration.Register(new ArpRegistration.Entry(
             AppId: _blob.AppId,
             DisplayName: string.IsNullOrWhiteSpace(_blob.DisplayName) ? _blob.AppId : _blob.DisplayName,
@@ -1640,17 +1595,17 @@ public sealed class InstallSession
             Publisher: string.IsNullOrWhiteSpace(_blob.Publisher) ? "Unknown" : _blob.Publisher,
             UninstallString: ArpRegistration.BuildUninstallString(uninstallerPath, _scope),
             EstimatedSizeBytes: _blob.EstimatedSizeBytes,
-            // P3: write InstallLocation so a later upgrade can recover the install dir.
+            // Write InstallLocation so a later upgrade can recover the install dir.
             InstallLocation: uninstallDir),
             _scope);
     }
 
     /// <summary>
-    /// P12 (T12.3): the headless <c>/Update</c> flow. Reads the <c>updates:</c>
-    /// metadata threaded into the blob, then hands off to <see cref="UpdateRunner"/>
-    /// with the production I/O seams (HTTP fetch over the shared client, P4 verified
-    /// download, a real child-process launch) and a scope-correct installed-version
-    /// probe (P3 <see cref="InstalledStateResolver"/>). Every stage is logged into the
+    /// The headless <c>/Update</c> flow. Reads the <c>updates:</c> metadata threaded
+    /// into the blob, then hands off to <see cref="UpdateRunner"/> with the production
+    /// I/O seams (HTTP fetch over the shared client, verified download, a real
+    /// child-process launch) and a scope-correct installed-version probe
+    /// (<see cref="InstalledStateResolver"/>). Every stage is logged into the
     /// already-open <c>/LOG</c> sink and echoed to the console; the runner returns the
     /// process exit code (see the <c>Update*ExitCode</c> constants, or the child
     /// installer's own code when a newer version is installed).
@@ -1664,18 +1619,18 @@ public sealed class InstallSession
         }
 
         var runner = BuildUpdateRunner(Report);
-        // T12.3 (unchanged): the headless path launches the downloaded child
-        // Setup.exe /silent, forwarding only the scope.
+        // The headless path launches the downloaded child Setup.exe /silent,
+        // forwarding only the scope.
         var request = BuildUpdateRequest(silentChild: true);
         return await runner.RunAsync(request, ct).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// GUI entry point (T12.4): a HEADED, non-silent <c>/Update</c> run. Drives the
+    /// GUI entry point: a HEADED, non-silent <c>/Update</c> run. Drives the
     /// SAME <see cref="UpdateRunner"/> decision logic as the headless
     /// <see cref="RunUpdateAsync"/> — nothing is duplicated — but reports each stage
     /// through a UI-bound callback instead of a <see cref="TextWriter"/>, and
-    /// launches the downloaded child Setup.exe HEADED (no <c>/silent</c>, gap G-Update)
+    /// launches the downloaded child Setup.exe HEADED (no <c>/silent</c>)
     /// so the user sees the new version's own install wizard, unlike the headless
     /// path's silent child. Mirrors <see cref="RunUninstallInteractiveAsync"/>'s shape
     /// for the headed uninstall flow. Returns the SAME exit code the headless path
@@ -1686,7 +1641,7 @@ public sealed class InstallSession
     {
         ArgumentNullException.ThrowIfNull(report);
 
-        // P7: the headed /Update run logs the same stage trail as the headless path.
+        // The headed /Update run logs the same stage trail as the headless path.
         EnsureLog();
 
         void Report(string message, bool isError)
@@ -1703,9 +1658,9 @@ public sealed class InstallSession
     }
 
     /// <summary>
-    /// Wire the production I/O seams (HTTP fetch over the shared client, P4
-    /// verified download, a real child-process launch) and a scope-correct
-    /// installed-version probe (P3 <see cref="InstalledStateResolver"/>) into a
+    /// Wire the production I/O seams (HTTP fetch over the shared client, verified
+    /// download, a real child-process launch) and a scope-correct
+    /// installed-version probe (<see cref="InstalledStateResolver"/>) into a
     /// fresh <see cref="UpdateRunner"/> reporting through <paramref name="report"/>.
     /// Shared by the headless and headed <c>/Update</c> entry points so neither
     /// duplicates this wiring.
@@ -1715,7 +1670,7 @@ public sealed class InstallSession
             fetcher: new HttpUpdateResourceFetcher(TimeSpan.FromSeconds(60)),
             downloader: new SigilPackageDownloader(TimeSpan.FromMinutes(30), maxAttempts: 3, report),
             launcher: new ProcessChildInstallerLauncher(),
-            // P3: read the installed version from the scope-correct ARP entry. Off
+            // Read the installed version from the scope-correct ARP entry. Off
             // Windows there is no ARP, so nothing is installed and any channel version
             // reads as newer (the same short-circuit the install path uses).
             installedStateProbe: () => OperatingSystem.IsWindows()
@@ -1725,9 +1680,9 @@ public sealed class InstallSession
 
     /// <summary>
     /// Build the <see cref="UpdateRequest"/> for this session's blob + scope, with
-    /// <paramref name="silentChild"/> threaded through (T12.4) rather than hard-coded —
-    /// <c>true</c> for the headless path (T12.3, unchanged), <c>false</c> for the
-    /// headed path so the launched child shows its own wizard.
+    /// <paramref name="silentChild"/> threaded through rather than hard-coded —
+    /// <c>true</c> for the headless path, <c>false</c> for the headed path so the
+    /// launched child shows its own wizard.
     /// </summary>
     private UpdateRequest BuildUpdateRequest(bool silentChild) =>
         new(
@@ -1741,12 +1696,12 @@ public sealed class InstallSession
 
     private async Task<int> RunUninstallAsync(TextWriter error, CancellationToken ct)
     {
-        // P7: uninstall.exe honors /LOG too — tee the reversal trail into the log.
+        // uninstall.exe honors /LOG too — tee the reversal trail into the log.
         var progress = _log is null ? null : new LoggingProgress(null, _log);
         var ctx = BuildUninstallContext();
 
-        // P6 (gap G7): uninstall.exe inherits the same parser, so it honors the same
-        // gate — a running app would block the journal replay from deleting its files.
+        // uninstall.exe inherits the same parser, so it honors the same gate — a
+        // running app would block the journal replay from deleting its files.
         // /closeapps closes them; otherwise refuse before anything is removed.
         var blocked = CheckFilesInUse(ctx, ctx.InstallDir, progress);
         if (blocked is not null)
@@ -1755,7 +1710,7 @@ public sealed class InstallSession
             return FilesInUseExitCode;
         }
 
-        // P2: pre_uninstall hooks run BEFORE the journal replays. A failure (default
+        // pre_uninstall hooks run BEFORE the journal replays. A failure (default
         // on_failure: fail) aborts the uninstall.
         var preHook = await HookRunner.RunAsync(
             "pre_uninstall", _blob.HookPreUninstall, ctx, progress, ct).ConfigureAwait(false);
@@ -1767,10 +1722,10 @@ public sealed class InstallSession
             return 1;
         }
 
-        // R1 clause (c): ctx.InstallDir is resolved from the signed blob / manifest /
-        // command line and anchors the replay of the persisted journal. R44/R51: the
-        // declared out-of-tree destinations and registry keys come from the same signed
-        // blob — never from the journal being replayed.
+        // ctx.InstallDir is resolved from the signed blob / manifest / command line and
+        // anchors the replay of the persisted journal; the declared out-of-tree
+        // destinations and registry keys come from that same signed blob — never from
+        // the journal being replayed. (R1, R44, R51)
         var result = await new UninstallEngine()
             .RunAsync(
                 _blob.AppId,
@@ -1790,7 +1745,7 @@ public sealed class InstallSession
             return 1;
         }
 
-        // P2: post_uninstall hooks run AFTER the journal replays (best-effort
+        // post_uninstall hooks run AFTER the journal replays (best-effort
         // cleanup; failures are logged but never fail the completed uninstall).
         await HookRunner.RunAsync(
             "post_uninstall", _blob.HookPostUninstall, ctx, progress, ct).ConfigureAwait(false);
@@ -1805,12 +1760,12 @@ public sealed class InstallSession
     /// apply at uninstall; the install dir resolves to the manifest / CLI / default.
     /// </summary>
     /// <remarks>
-    /// <c>priorInstallDir</c> is threaded through for the R3 grandfather clause, and
+    /// <c>priorInstallDir</c> is threaded through for the grandfather clause, and
     /// it comes from <see cref="RecordedInstallDirForUninstall"/> rather than
     /// <see cref="PriorInstallDirDefault"/> — the latter is gated on an upgrade
     /// concept that is never true on this path, which would leave the argument
-    /// permanently <c>null</c> and the fix inert. See that property for what
-    /// silently breaks without it.
+    /// permanently <c>null</c> and the clause inert. See that property for what
+    /// silently breaks without it. (R3)
     /// </remarks>
     private StepContext BuildUninstallContext() =>
         StepContext.From(
@@ -1820,15 +1775,14 @@ public sealed class InstallSession
     /// <summary>
     /// Test seam for <see cref="BuildUninstallContext"/>. It exists so the
     /// grandfather pin drives the REAL method rather than reconstructing its
-    /// arguments by hand — a hand-built equivalent stays green when the argument is
-    /// deleted, which is exactly how the first version of that pin failed to guard
-    /// anything.
+    /// arguments by hand: a hand-built equivalent stays green when the argument is
+    /// deleted, and so guards nothing.
     /// </summary>
     internal StepContext BuildUninstallContextForTesting() => BuildUninstallContext();
 
     /// <summary>
-    /// The LAST-RESORT anchor for a persisted-journal replay (R1 clause (c)): the
-    /// destination this run resolved from the manifest and command line.
+    /// The LAST-RESORT anchor for a persisted-journal replay: the destination this
+    /// run resolved from the manifest and command line. (R1)
     /// </summary>
     /// <remarks>
     /// <para>
@@ -1836,15 +1790,15 @@ public sealed class InstallSession
     /// state file and then the ARP <c>InstallLocation</c>; this value is reached only
     /// when neither exists. It is a DEFAULT destination — <see cref="BuildUninstallContext"/>
     /// resolves <c>InstallDir</c> with no collected value and no prior dir, and the ARP
-    /// <c>UninstallString</c> carries no <c>/D=</c> — so it is right for an install that
-    /// took the default and wrong for one that did not. That is why it is last.
+    /// <c>UninstallString</c> carries no <c>/D=</c> — right for an install that took
+    /// the default and wrong for one that did not, which is why it is last.
     /// </para>
     /// <para>
     /// Deliberately NOT the directory of the running image. <c>setup.exe /Uninstall</c>
     /// is a documented flow (<c>docs/guides/uninstaller.md</c>) and the user typically
     /// runs that exe from their downloads folder; anchoring there would refuse every
-    /// file record of every pre-fix install and leave the app unremovable — the exact
-    /// failure mode this clause exists to prevent.
+    /// file record of an install that landed anywhere else and leave the app
+    /// unremovable — the exact failure mode this clause exists to prevent.
     /// </para>
     /// </remarks>
     private string UninstallAnchorFallback(StepContext ctx) =>
@@ -1853,7 +1807,7 @@ public sealed class InstallSession
             : ctx.InstallDir;
 
     /// <summary>
-    /// GUI entry point for the interactive uninstall flow (T15): drive
+    /// GUI entry point for the interactive uninstall flow: drive
     /// <see cref="UninstallEngine"/> for this session's app, forwarding
     /// <paramref name="progress"/> so the wizard's uninstall progress screen can
     /// grow its reversal log (<c>unlink</c> / <c>path -</c> / <c>reg -</c> /
@@ -1865,7 +1819,7 @@ public sealed class InstallSession
     public async Task<InstallOutcome> RunUninstallInteractiveAsync(
         IProgress<StepProgress>? progress, CancellationToken ct = default)
     {
-        // P7: the interactive uninstall (uninstall.exe /LOG, double-clicked) logs
+        // The interactive uninstall (uninstall.exe /LOG, double-clicked) logs
         // the same reversal trail as the headless path.
         EnsureLog();
         var effectiveProgress = _log is null ? progress : new LoggingProgress(progress, _log);
@@ -1877,13 +1831,13 @@ public sealed class InstallSession
         }
         catch (InstallDirRejectedException ex)
         {
-            // R3: `uninstall.exe /D=<out-of-root>` reaches the same resolver.
-            // Surface it on the wizard's failure screen, not as a crash.
+            // `uninstall.exe /D=<out-of-root>` reaches the same resolver. Surface it
+            // on the wizard's failure screen, not as a crash. (R3)
             _log?.WriteLine($"result: uninstall refused — {ex.Message}");
             return new InstallOutcome(false, ex.Message);
         }
 
-        // P2: pre_uninstall hooks (abort on failure) around the journal replay.
+        // pre_uninstall hooks (abort on failure) around the journal replay.
         var preHook = await HookRunner.RunAsync(
             "pre_uninstall", _blob.HookPreUninstall, ctx, effectiveProgress, ct).ConfigureAwait(false);
         if (!preHook.Success)
@@ -1893,8 +1847,8 @@ public sealed class InstallSession
             return new InstallOutcome(false, msg);
         }
 
-        // R1 clause (c): anchored to the install dir resolved from the signed blob, and
-        // (R44/R51) widened only by what that same signed blob declares.
+        // Anchored to the install dir resolved from the signed blob, and widened only
+        // by what that same signed blob declares. (R1, R44, R51)
         var result = await new UninstallEngine()
             .RunAsync(
                 _blob.AppId,
@@ -1915,10 +1869,10 @@ public sealed class InstallSession
         return new InstallOutcome(result.Success, result.Error);
     }
 
-    // --- P6 (gaps G7/G17): files-in-use ---
+    // --- files-in-use ---
 
     /// <summary>
-    /// Scan for anything blocking this run (P6): a declared <c>installer.app_mutex</c>
+    /// Scan for anything blocking this run: a declared <c>installer.app_mutex</c>
     /// that is held, or a process the Restart Manager reports holding a file open
     /// under <paramref name="installDir"/> (defaults to the destination this run would
     /// use). Empty means clear. Used by the wizard's "Close applications" screen and,
@@ -1929,7 +1883,7 @@ public sealed class InstallSession
 
     /// <summary>
     /// Ask the Restart Manager to gracefully close the applications holding the
-    /// install directory (P6) — the wizard's "Close for me" and the silent
+    /// install directory — the wizard's "Close for me" and the silent
     /// <c>/closeapps</c> path. No restart is attempted and nothing is force-killed;
     /// the caller re-scans to confirm the blockers are gone.
     /// </summary>
@@ -1940,7 +1894,7 @@ public sealed class InstallSession
     private string EffectiveInstallDir() => CollectedInstallDir ?? ResolveDefaultInstallDir();
 
     /// <summary>
-    /// The files-in-use gate (P6, gap G7). Runs after the destination is known and
+    /// The files-in-use gate. Runs after the destination is known and
     /// BEFORE prerequisites, the prior-version teardown, and the rollback journal — so
     /// a blocked run changes nothing at all. With <c>/closeapps</c> the blockers are
     /// closed via the Restart Manager and re-scanned; without it the run is refused
@@ -1978,11 +1932,9 @@ public sealed class InstallSession
         return new InstallOutcome(false, message);
     }
 
-    // P9 design D2: NOT migrated. Lowercase-prefixed (not sentence-cased) — the
-    // same tell that marks every log-convention line in this file as staying
-    // English — and it names the CLI-only /closeapps flag, mirroring the
-    // "blocked by: ..." / "close-apps: ..." progress lines around its call site
-    // that are log convention for the same reason.
+    // Not localized: lowercase-prefixed log convention, and it names the CLI-only
+    // /closeapps flag — like the "blocked by: ..." / "close-apps: ..." progress lines
+    // around its call site, it stays English.
     private static string BuildBlockerMessage(IReadOnlyList<AppBlocker> blockers)
     {
         var names = new List<string>(blockers.Count);
@@ -1999,7 +1951,7 @@ public sealed class InstallSession
     private static void Report(IProgress<StepProgress>? progress, StepContext ctx, string message, bool isError)
         => progress?.Report(new StepProgress(0, 0, ctx.Redact(message), isError));
 
-    // --- P2 (gap G4): run-after-install launch ---
+    // --- run-after-install launch ---
 
     /// <summary>True when the manifest declares an <c>installer.run_after_install</c> target.</summary>
     public bool HasRunAfterInstall => !string.IsNullOrEmpty(_blob.RunAfterInstallPath);
@@ -2010,7 +1962,7 @@ public sealed class InstallSession
             _blob.AppName ?? _blob.DisplayName ?? Strings.BrandAppFallback(SessionLanguage.Current));
 
     /// <summary>
-    /// Start the <c>run_after_install</c> target UNELEVATED (P2, gap G4), resolving
+    /// Start the <c>run_after_install</c> target UNELEVATED, resolving
     /// its <c>{install_dir}</c> / <c>{var.*}</c> tokens against the same context the
     /// install used. Best-effort: returns false and never throws when the target is
     /// absent, unresolvable, or fails to start.
@@ -2026,10 +1978,10 @@ public sealed class InstallSession
         {
             // priorInstallDir matches what RunInstallCoreAsync used. Without it a
             // GRANDFATHERED install — one that legitimately lives outside the scope
-            // root, which R3's exemption exists to keep working — makes
+            // root, which the exemption exists to keep working — makes
             // InstallDirResolver refuse here, the throw lands in the blanket catch
             // below, and the Done screen's "Launch <app>" button silently does
-            // nothing. The install succeeded; only the launch was lost.
+            // nothing. The install succeeded; only the launch was lost. (R3)
             var ctx = StepContext.From(
                 _blob, _parsed, payloadRoot: null, collected: _collectedValues,
                 scope: _scope, collectedOptions: _collectedOptions, collectedInstallDir: CollectedInstallDir,
@@ -2051,9 +2003,9 @@ public sealed class InstallSession
             LastLaunchOutcome = outcome;
             if (outcome == LaunchOutcome.SkippedDeElevationUnavailable)
             {
-                // R29: never silent. Launching from an elevated installer without
+                // Never silent. Launching from an elevated installer without
                 // de-elevation would give the application the installer's admin token
-                // for the rest of its lifetime; skipping costs the user one double-click.
+                // for the rest of its lifetime; skipping costs one double-click. (R29)
                 _log?.WriteLine(SkippedLaunchNotice);
             }
             return outcome == LaunchOutcome.Started;
@@ -2068,25 +2020,25 @@ public sealed class InstallSession
     }
 
     /// <summary>
-    /// What the last <see cref="LaunchAppUnelevated"/> did (R29). The bool return says
+    /// What the last <see cref="LaunchAppUnelevated"/> did. The bool return says
     /// only "no process exists"; this says whether that was a spawn failure or a
-    /// deliberate refusal to hand the application the installer's administrator token.
+    /// deliberate refusal to hand the application the installer's administrator
+    /// token. (R29)
     /// </summary>
     public LaunchOutcome LastLaunchOutcome { get; private set; } = LaunchOutcome.NothingToLaunch;
 
     /// <summary>
     /// The operator-facing line for a launch skipped because de-elevation was
-    /// unavailable (R29).
+    /// unavailable. (R29)
     /// </summary>
     /// <remarks>
-    /// <strong>Why this is not a Done-screen control.</strong> The plan asked for a
-    /// notice on the Done screen; the wizard cannot host one, because
-    /// <c>InstallerViewModel.LaunchIfRequested</c> fires as the window CLOSES — by the
-    /// time the outcome is known there is no Done screen left to render it on, and
-    /// moving the launch earlier changes when the application starts relative to the
-    /// user's last click, which is a UX decision outside this row. So the notice goes
-    /// where it can actually be read: the always-on diagnostic log, the <c>/LOG</c> file,
-    /// and stderr on the silent path.
+    /// <strong>Why this is not a Done-screen control.</strong> The wizard cannot host
+    /// one: <c>InstallerViewModel.LaunchIfRequested</c> fires as the window CLOSES, so
+    /// by the time the outcome is known there is no Done screen left to render it on,
+    /// and moving the launch earlier would change when the application starts relative
+    /// to the user's last click. The notice therefore goes where it can actually be
+    /// read: the always-on diagnostic log, the <c>/LOG</c> file, and stderr on the
+    /// silent path.
     /// </remarks>
     internal const string SkippedLaunchNotice =
         "launch: SKIPPED — this installer is running elevated and could not drop to the " +

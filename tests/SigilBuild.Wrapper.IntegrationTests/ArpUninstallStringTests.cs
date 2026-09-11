@@ -12,38 +12,18 @@ using Xunit;
 namespace SigilBuild.Wrapper.IntegrationTests;
 
 /// <summary>
-/// R58 (release blocker found at the G2 gate check) — the end-to-end proof that the
-/// registered Add/Remove Programs <c>UninstallString</c> actually completes. Installs a
-/// fixture, deletes the original <c>Setup.exe</c> (T15), then runs the ARP string
-/// <em>verbatim</em> out of the registry, which means running
-/// <c>&lt;install_dir&gt;\uninstall.exe</c> from INSIDE the directory the P6 files-in-use
-/// gate sweeps.
+/// End-to-end proof that the registered ARP <c>UninstallString</c> completes: installs a
+/// fixture, deletes the original <c>Setup.exe</c>, then runs the ARP string verbatim from
+/// the registry — <c>&lt;install_dir&gt;\uninstall.exe</c>, launched from INSIDE the
+/// directory the files-in-use gate sweeps (R58). Uninstalling through the original packed
+/// exe instead (as <see cref="WixClassInstallUninstallTests"/> does) never trips this gate,
+/// since that exe lives outside <c>install_dir</c>.
 /// </summary>
 /// <remarks>
-/// <para><b>Why this test did not exist.</b> The matrix looked like it covered this and
-/// did not. <see cref="WixClassInstallUninstallTests"/> uninstalls through the ORIGINAL
-/// packed exe and says so in a comment that calls it "the same code path the ARP
-/// UninstallString invokes" — which is exactly the assumption R58 broke: the original
-/// setup exe lives outside <c>install_dir</c>, so it never trips the gate, while the
-/// dropped <c>uninstall.exe</c> always does. And
-/// <c>wrapper-vm-tests.yml</c>'s <c>SIGIL_VM_UNINSTALL_SURVIVE</c> toggle, declared for
-/// this very T15 scenario, was read by no test at all. Result: exit 4,
-/// <c>blocked by: installer (pid N)</c> with N the uninstaller's own pid, on a shipped
-/// installer whose user no longer has the original Setup.exe.</para>
-///
-/// <para><b>Where it runs.</b> The VM matrix only
-/// (<see cref="VmUninstallSurviveFactAttribute"/>: Windows + <c>SIGIL_VM_TESTS=1</c> +
-/// <c>SIGIL_VM_UNINSTALL_SURVIVE=1</c> + the staged AOT host runtime). It reports a
-/// genuine Skipped result otherwise (register row R6) and cannot run on a dev box
-/// without the staged runtime. The unit-level claim — that the Restart Manager sweep
-/// never reports the running installer, while still reporting every other holder,
-/// including an app whose image lives in the install dir — is covered by
-/// <c>FilesInUseTests</c>, which runs everywhere.</para>
-///
-/// <para>Per-user scope throughout, so nothing here needs elevation or touches HKLM. The
-/// machine-scope half of R58 (the un-elevated <c>ShellExecuteExW</c> relaunch parent,
-/// alive with the same image loaded while the elevated child gates) is asserted at the
-/// unit level instead; reproducing it end-to-end would require a UAC prompt.</para>
+/// VM matrix only (<see cref="VmUninstallSurviveFactAttribute"/>: Windows +
+/// <c>SIGIL_VM_TESTS=1</c> + <c>SIGIL_VM_UNINSTALL_SURVIVE=1</c> + staged AOT runtime),
+/// reporting a genuine Skip otherwise (R6). Per-user scope only; the machine-scope
+/// relaunch-parent half is asserted at the unit level in <c>FilesInUseTests</c>.
 /// </remarks>
 public sealed class ArpUninstallStringTests
 {
@@ -59,8 +39,8 @@ public sealed class ArpUninstallStringTests
         var installDir = Path.Combine(sandbox.Root, "app");
         try
         {
-            // Arrange — install, then take away the original setup exe (T15's premise:
-            // the user has deleted their download and only the dropped copy remains).
+            // Arrange — install, then take away the original setup exe (the user has
+            // deleted their download and only the dropped copy remains).
             var setupExe = await PackFixtureAsync(sandbox, appId, installDir).ConfigureAwait(false);
             (await sandbox.RunAsync(setupExe, "/S", "/currentuser").ConfigureAwait(false))
                 .Should().Be(0, "the fixture must install before its uninstall can be judged");
@@ -153,33 +133,27 @@ public sealed class ArpUninstallStringTests
     }
 
     /// <summary>
-    /// A schema-valid unique app id for one run. R66: mirroring
-    /// <c>UpgradeInstallTests</c>, this used to be <c>"com.sigil.r58." + Guid("N")</c>,
-    /// whose trailing hex segment usually starts with a digit — which <c>app.id</c>'s
-    /// letter-led-segment pattern rejects. This test has never run on a VM (it landed
-    /// in PR #39, after the run that exposed the same defect in its siblings), so the
-    /// same rot was already baked in before its first execution.
+    /// A schema-valid unique app id for one run. The <c>r</c> prefix keeps the trailing
+    /// hex segment letter-led, since <c>app.id</c>'s schema pattern rejects a digit-led
+    /// segment (R66).
     /// </summary>
     internal static string NewAppId() => "com.sigil.r58.r" + Guid.NewGuid().ToString("N");
 
     /// <summary>
     /// Build the fixture manifest YAML. Pure: no sandbox, no disk, no packer — so the
     /// always-on <see cref="VmFixtureManifestTests"/> can validate the exact string
-    /// this VM leg packs without a staged runtime (register row R66).
+    /// this VM leg packs without a staged runtime (R66).
     /// </summary>
     internal static string BuildManifestYaml(string appId, string installDir)
     {
         // $$ raw string: {{...}} interpolates, single braces ({install_dir}) are literal.
-        // Sigil.YamlQuote emits a single-quoted scalar, so the install dir's backslashes
-        // need no hand-doubling — and cannot become an unknown-escape parse error (R66).
+        // Sigil.YamlQuote emits a single-quoted scalar, so install-dir backslashes need no
+        // hand-doubling and cannot produce an unknown-escape parse error (R66).
         //
-        // `to:` is a destination DIRECTORY, never a file name — FileCopyStep does
-        // Directory.CreateDirectory(to) and then Path.Combine(to, <relative path>) per
-        // match, with no single-source-to-single-file branch. This fixture used to say
-        // `to: '{install_dir}\app.txt'`, which made app.txt a DIRECTORY holding
-        // app.txt\app.txt: exit 0, correct ARP row, and File.Exists below false against
-        // a directory. Guarded now by
-        // VmFixtureManifestTests.Vm_fixture_file_copy_destinations_are_directories.
+        // `to:` is a destination DIRECTORY, never a file name: FileCopyStep does
+        // Directory.CreateDirectory(to) then Path.Combine(to, <relative path>) per match,
+        // with no single-source-to-single-file branch (see
+        // VmFixtureManifestTests.Vm_fixture_file_copy_destinations_are_directories).
         return $$"""
 spec: v1.0
 

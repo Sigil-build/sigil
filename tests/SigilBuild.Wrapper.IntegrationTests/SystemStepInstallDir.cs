@@ -9,7 +9,7 @@ using SigilBuild.Wrapper.Cli;
 using SigilBuild.Wrapper.Engine;
 
 /// <summary>
-/// A real, resolved <c>install_dir</c> for the elevated P11 system-step legs
+/// A real, resolved <c>install_dir</c> for the elevated system-step legs
 /// (<c>scheduled_task_create</c>, <c>com_register</c>) plus the
 /// <see cref="StepContext"/> anchored on it — built through the same
 /// <see cref="StepContext.From"/> / <see cref="InstallDirResolver"/> path
@@ -17,18 +17,14 @@ using SigilBuild.Wrapper.Engine;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Why this exists (register row R67).</b> Those two legs were written in P11
-/// against <see cref="StepContext.Empty"/> and system binaries
+/// <b>Why this exists (R67).</b> These two legs were originally written against
+/// <see cref="StepContext.Empty"/> and system binaries
 /// (<c>%SystemRoot%\System32\cmd.exe</c>, <c>kernel32.dll</c>) chosen because they
-/// are "present on every Windows host". Stage 1 lane S2 (rows R3/R9/R16) then
-/// anchored every SYSTEM-level step target to the run's resolved
-/// <c>install_dir</c>, so on the matrix's first real run both legs failed at
-/// <see cref="PrivilegedTargetGuard"/> — one on "this run has no resolved
-/// install_dir, so the target cannot be anchored", one on the same for its DLL.
-/// The product behaviour is correct and is not negotiated here: the harness was
-/// wrong twice over (no anchor at all, and a target outside any anchor), and both
-/// halves are fixed by giving the run a genuine anchor and putting the target
-/// inside it — the shape <c>docs/guides/install-steps.md</c> prescribes
+/// are "present on every Windows host". Anchoring every SYSTEM-level step target to
+/// the run's resolved <c>install_dir</c> (R3, R9, R16) made both legs fail at
+/// <see cref="PrivilegedTargetGuard"/> — no resolved <c>install_dir</c> to anchor
+/// against. Both halves are fixed by giving the run a genuine anchor and putting the
+/// target inside it — the shape <c>docs/guides/install-steps.md</c> prescribes
 /// ("sequence a <c>file_copy</c> into <c>install_dir</c> first, then point the
 /// privileged step at the copied location").
 /// </para>
@@ -38,10 +34,11 @@ using SigilBuild.Wrapper.Engine;
 /// editors. <c>docs/manifest-reference.md</c> and the guide both state it does not
 /// relax the privileged-target rule on <c>service_install</c> /
 /// <c>scheduled_task_create</c> / <c>com_register</c> / <c>firewall_rule</c> — on
-/// those step types it is an unrecognized field (<c>SIG0231</c>). Stage 2 lane S7
-/// (R44/R51) widened the <em>uninstall replay</em> anchor with the signed blob's
-/// declared roots (<see cref="SignedDeclarations"/>); it did not touch this guard
-/// either. There is therefore no opt-out to mirror, and no fixture here uses one.
+/// those step types it is an unrecognized field (<c>SIG0231</c>). The
+/// <em>uninstall replay</em> anchor was separately widened with the signed blob's
+/// declared roots (<see cref="SignedDeclarations"/>, R44, R51); that did not touch
+/// this guard either. There is therefore no opt-out to mirror, and no fixture here
+/// uses one.
 /// </para>
 /// <para>
 /// <b>Why <c>%ProgramFiles%</c> and not <c>%TEMP%</c>.</b> The guard has two arms,

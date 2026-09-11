@@ -62,22 +62,14 @@ internal static class Sigil
     /// quoting style in which a Windows path is safe to interpolate.
     /// </summary>
     /// <remarks>
-    /// <para>Register row <b>R66</b>. Every fixture writer in this project used to
-    /// interpolate paths and registry keys into <em>double</em>-quoted scalars
-    /// (<c>detect: "registry_exists('HKCU', '{key}', 'Installed')"</c>). In a
-    /// double-quoted YAML scalar <c>\</c> is an escape character, so
-    /// <c>Software\SigilPrereqTest\…</c> is read as the escapes <c>\S</c> and
-    /// <c>\s</c> and the parse dies with <em>"While scanning a quoted scalar, found
-    /// unknown escape character"</em> — which is exactly how the first real VM run
-    /// failed, on a runner whose temp root is <c>D:\a\_temp\…</c>. Some writers
-    /// hand-doubled the backslashes instead, which works but has to be remembered at
-    /// every call site, and was not.</para>
-    /// <para>In a single-quoted scalar there are no escapes at all: the only special
-    /// sequence is <c>''</c> for a literal apostrophe. So doubling apostrophes is the
-    /// complete encoding, backslashes need no treatment, and a value that would
-    /// otherwise look like a YAML token (<c>{install_dir}</c>, <c>*</c>, <c>&amp;</c>,
-    /// a leading digit) stays a plain string. Every interpolated scalar in this
-    /// project's fixtures goes through here.</para>
+    /// A double-quoted YAML scalar treats <c>\</c> as an escape character, so a Windows
+    /// path like <c>Software\SigilPrereqTest\…</c> fails to parse ("While scanning a
+    /// quoted scalar, found unknown escape character") — every interpolated fixture
+    /// scalar in this project goes through here rather than being hand-doubled or
+    /// double-quoted (R66). In a single-quoted scalar the only escape is <c>''</c> for a
+    /// literal apostrophe: backslashes need no treatment, and a value that would
+    /// otherwise look like a YAML token (<c>{install_dir}</c>, <c>*</c>, <c>&amp;</c>, a
+    /// leading digit) stays a plain string.
     /// </remarks>
     public static string YamlQuote(string value)
     {

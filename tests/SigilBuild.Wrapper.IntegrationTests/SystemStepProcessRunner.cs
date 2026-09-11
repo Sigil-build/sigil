@@ -4,7 +4,7 @@ using System.Diagnostics;
 using System.Threading.Tasks;
 
 /// <summary>
-/// Tiny process-runner shared by the P11 system-step VM integration tests
+/// Tiny process-runner shared by the system-step VM integration tests
 /// (<c>scheduled_task_create</c> / <c>firewall_rule</c>): both verify the live
 /// effect of their step by shelling out to the same OS query tools an operator
 /// would use (<c>schtasks.exe /Query</c>, <c>netsh advfirewall firewall show

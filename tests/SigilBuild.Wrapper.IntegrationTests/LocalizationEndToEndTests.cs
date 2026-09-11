@@ -15,33 +15,28 @@ using Xunit;
 namespace SigilBuild.Wrapper.IntegrationTests;
 
 /// <summary>
-/// Task 16 (P9) end-to-end fixtures: the silent-path invariance and fixed-
-/// manifest-language legs of the localization mechanism (Tasks 1-15), packed
-/// and run through a REAL spawned setup.exe — mirroring
-/// <see cref="MultiEditionInstallTests"/> and <see cref="UpgradeInstallTests"/>
+/// End-to-end fixtures for the silent-path invariance and fixed-manifest-language legs of
+/// the localization mechanism, packed and run through a REAL spawned setup.exe —
+/// mirroring <see cref="MultiEditionInstallTests"/> and <see cref="UpgradeInstallTests"/>
 /// rather than inventing a new harness.
 /// </summary>
 /// <remarks>
-/// <para><b>Layer exercised:</b> the full stack — <see cref="Sigil.PackAsync"/>
-/// (the real <c>ExeWrapperPackager</c>, the same code path <c>sigil pack</c>
-/// uses) produces an actual <c>Setup.exe</c>, which <see cref="VmSandbox"/>
-/// then spawns as a real child process via <c>/silent</c>. This is the
-/// genuinely end-to-end leg (unlike
-/// <c>SigilBuild.Installer.Host.Tests.Localization.LocalizationEndToEndTests</c>,
-/// which stops at the VM-render layer).</para>
-/// <para><b>Gating</b> reports a genuine Skipped result (via
-/// <see cref="VmFactAttribute"/>, register row R6) exactly like
-/// <see cref="MultiEditionInstallTests"/>: not Windows, <c>SIGIL_VM_TESTS=1</c>
-/// not set, or the Native-AOT-published <c>SigilBuild.Installer.Host</c>
-/// runtime is not staged under <c>runtimes/win-x64/</c>
-/// (<c>scripts/publish-installer-runtime.ps1</c> — requires the MSVC C++ Native
-/// AOT linker, absent on this dev box). <see cref="TestEnvironment.IsRuntimeAvailable"/>
-/// gates it exactly like the existing T13 VM-style tests.</para>
-/// <para><b>Fixtures</b>: <c>localized-uk</c> (also used by the VM-render leg)
-/// and <c>localized-uk-fixed</c> (the same manifest plus a fixed
+/// <para>Exercises the full stack: <see cref="Sigil.PackAsync"/> (the real
+/// <c>ExeWrapperPackager</c>, the same code path <c>sigil pack</c> uses) produces an
+/// actual <c>Setup.exe</c>, which <see cref="VmSandbox"/> then spawns as a real child
+/// process via <c>/silent</c> — unlike
+/// <c>SigilBuild.Installer.Host.Tests.Localization.LocalizationEndToEndTests</c>, which
+/// stops at the VM-render layer.</para>
+/// <para>Reports a genuine Skipped result (via <see cref="VmFactAttribute"/>, R6) exactly
+/// like <see cref="MultiEditionInstallTests"/>: not Windows, <c>SIGIL_VM_TESTS=1</c> not
+/// set, or the Native-AOT-published <c>SigilBuild.Installer.Host</c> runtime not staged
+/// under <c>runtimes/win-x64/</c> (<c>scripts/publish-installer-runtime.ps1</c> — requires
+/// the MSVC C++ Native AOT linker, absent on this dev box).</para>
+/// <para>Fixtures: <c>localized-uk</c> (also used by the VM-render leg) and
+/// <c>localized-uk-fixed</c> (the same manifest plus a fixed
 /// <c>installer.language: en</c>), both under
-/// <c>tests/SigilBuild.Packaging.IntegrationTests/Fixtures/</c> so both test
-/// layers share one manifest source.</para>
+/// <c>tests/SigilBuild.Packaging.IntegrationTests/Fixtures/</c> so both test layers share
+/// one manifest source.</para>
 /// </remarks>
 public class LocalizationEndToEndTests
 {
@@ -79,7 +74,7 @@ public class LocalizationEndToEndTests
     /// fixture are two independent applications rather than one application installed
     /// twice. Pure (no sandbox, no packer) apart from reading the fixture, so the
     /// always-on <see cref="VmFixtureManifestTests"/> validates the exact string this
-    /// leg packs (register row R66).
+    /// leg packs (R66).
     /// </summary>
     internal static string BuildManifestYaml(string appId)
     {
@@ -172,26 +167,15 @@ public class LocalizationEndToEndTests
     /// not need translation).
     /// </summary>
     /// <remarks>
-    /// <para><b>Why the two runs get different app ids.</b> This test installs the same
-    /// fixture twice, into two different <c>/D=</c> roots, and then compares the two
-    /// installed trees. Packed once under ONE app id, that is not two independent
-    /// installs: the second run finds the first run's record in the per-user state store
-    /// (<c>%LocalAppData%\Sigil\&lt;appId&gt;</c>) and takes the re-install path, whose
-    /// cleanup replays the FIRST run's recorded uninstall — deleting the files at the
-    /// path the first run used. The first root is emptied while the second is populated,
-    /// and the comparison fails with the expectation side (<c>enFiles</c>) as the empty
-    /// one:
-    /// <c>Expected root to be a collection with 0 item(s) … but {"app.txt",
-    /// "uninstall.exe"} contains 2 item(s)</c>. The <c>/LOG</c> of the second run names
-    /// it outright — <c>delete …\install-en\app.txt</c> before its own copy step.</para>
-    /// <para>Nothing about that is <c>/lang</c>-specific or elevation-specific; it is the
-    /// harness sharing one application identity between two installs that are supposed to
-    /// be independent. The invariant under test is real and stays exactly as it was — the
-    /// installed outcome must not depend on <c>/lang</c> — so the fix is to give each run
-    /// its own identity (a per-run unique app id, as the sibling VM legs already do)
-    /// rather than to reorder or weaken the assertion. The app id is stripped from the
-    /// log comparison anyway: it appears only on the <c>=== sigil install log …</c>
-    /// header line, which <see cref="StripTimestampsAndArgsHeader"/> drops.</para>
+    /// The two runs use distinct app ids: packed under ONE id, the second run's
+    /// per-user state-store record for the first run would trigger the re-install-cleanup
+    /// path instead of a fresh install, replaying the FIRST run's uninstall — deleting the
+    /// first root's files and comparing an emptied tree against a populated one. Nothing
+    /// about the invariant under test is <c>/lang</c>-specific: the installed outcome must
+    /// not depend on <c>/lang</c>, so each run gets its own identity instead. The app id
+    /// is stripped from the log comparison anyway — it appears only on the
+    /// <c>=== sigil install log …</c> header line, which
+    /// <see cref="StripTimestampsAndArgsHeader"/> drops.
     /// </remarks>
     [VmFact]
     [SupportedOSPlatform("windows")]
@@ -287,7 +271,7 @@ public class LocalizationEndToEndTests
     /// <summary>
     /// Design §2.1: a manifest that fixes <c>installer.language</c> wins over a
     /// conflicting <c>/lang</c> flag — the flag is IGNORED and the conflict is
-    /// LOGGED, never fatal. Exit code stays 0 (unlike T12's fixed-scope-vs-
+    /// LOGGED, never fatal. Exit code stays 0 (unlike the fixed-scope-vs-
     /// <c>/allusers</c> rule, which exits 64 — scope is a trust boundary,
     /// language is a display preference).
     /// </summary>

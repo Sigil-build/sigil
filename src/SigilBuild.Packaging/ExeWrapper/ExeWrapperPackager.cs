@@ -512,7 +512,7 @@ public sealed class ExeWrapperPackager : IPackager
 
         if (texts.Count == 0)
         {
-            return null; // T14: no readable text -> no License screen. Not a SIG0290 case.
+            return null; // no readable text -> no License screen. Not a SIG0290 case.
         }
 
         if (!texts.ContainsKey("en"))

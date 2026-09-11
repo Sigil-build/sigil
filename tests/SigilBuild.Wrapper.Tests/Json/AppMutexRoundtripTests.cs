@@ -7,7 +7,7 @@ using Xunit;
 
 namespace SigilBuild.Wrapper.Tests.Json;
 
-/// <summary>P6: installer.app_mutex survives the blob wire form (M0 discipline).</summary>
+/// <summary>installer.app_mutex survives the blob wire form.</summary>
 public class AppMutexRoundtripTests
 {
     private static WrapperBlob Blob(string[]? appMutex) => new(

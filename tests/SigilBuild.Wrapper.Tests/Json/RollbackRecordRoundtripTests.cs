@@ -8,7 +8,7 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Json;
 
 /// <summary>
-/// T11.1 (P11): <see cref="RollbackRecord.DeleteScheduledTask"/> — the inverse
+/// <see cref="RollbackRecord.DeleteScheduledTask"/> — the inverse
 /// journaled by <c>scheduled_task_create</c> BEFORE the create (mirrors
 /// <see cref="RollbackRecord.RemoveService"/>) — survives the flat
 /// <see cref="SerializableRollbackRecord"/> converter and the full
@@ -63,7 +63,7 @@ public class RollbackRecordRoundtripTests
             .Which.Type.Should().Be("delete_scheduled_task");
     }
 
-    // ---- T11.2 (P11): RollbackRecord.UnregisterCom — the inverse journaled by
+    // ---- RollbackRecord.UnregisterCom — the inverse journaled by
     // com_register BEFORE the register (calls DllUnregisterServer on undo,
     // mirrors RemoveService). Carries the DLL PATH only — no secrets, no
     // registry contents. ----
@@ -114,7 +114,7 @@ public class RollbackRecordRoundtripTests
             .Which.Type.Should().Be("unregister_com");
     }
 
-    // ---- T11.3 (P11): RollbackRecord.DeleteFirewallRule — the inverse
+    // ---- RollbackRecord.DeleteFirewallRule — the inverse
     // journaled by firewall_rule BEFORE the add (calls netsh advfirewall
     // firewall delete rule on undo, mirrors RemoveService/DeleteScheduledTask).
     // Carries the rule NAME only — no secrets, no resolved program path. ----

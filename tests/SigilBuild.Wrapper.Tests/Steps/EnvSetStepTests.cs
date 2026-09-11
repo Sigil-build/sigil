@@ -17,7 +17,7 @@ public class EnvSetStepTests
     // Explicit user/machine is authoritative regardless of install scope.
     [InlineData("user", InstallScope.Machine, "user")]
     [InlineData("machine", InstallScope.User, "machine")]
-    // "auto" (and empty) defer to the resolved install scope (T12).
+    // "auto" (and empty) defer to the resolved install scope.
     [InlineData("auto", InstallScope.Machine, "machine")]
     [InlineData("auto", InstallScope.User, "user")]
     [InlineData("", InstallScope.Machine, "machine")]

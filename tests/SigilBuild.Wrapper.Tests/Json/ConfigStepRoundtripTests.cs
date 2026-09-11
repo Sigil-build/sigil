@@ -6,7 +6,7 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Json;
 
 /// <summary>
-/// P8: the three config-edit steps survive the SerializableInstallStep converter
+/// The three config-edit steps survive the SerializableInstallStep converter
 /// (AOT-safe wire form) in both directions.
 /// </summary>
 public class ConfigStepRoundtripTests
@@ -41,9 +41,10 @@ public class ConfigStepRoundtripTests
     }
 
     /// <summary>
-    /// Register row R35. A blob written before <c>JsonEditValueType</c> existed carries
+    /// A blob written before <c>JsonEditValueType</c> existed carries
     /// no such property, and it must decode to the SAFE mode rather than to the
     /// inferring one — otherwise the fix would apply only to freshly packed installers.
+    /// (R35)
     /// </summary>
     [Fact]
     public void JsonEdit_from_a_blob_with_no_value_type_decodes_as_string()

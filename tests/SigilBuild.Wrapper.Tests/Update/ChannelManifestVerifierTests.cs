@@ -8,7 +8,7 @@ using SigilBuild.Wrapper.Update;
 namespace SigilBuild.Wrapper.Tests.Update;
 
 /// <summary>
-/// Tests for T12.2's <see cref="ChannelManifestVerifier"/>: detached ECDSA
+/// Tests for <see cref="ChannelManifestVerifier"/>: detached ECDSA
 /// P-256 signature verification of a fetched channel manifest against
 /// <c>updates.signingKey</c>, per the locked encoding documented on
 /// <see cref="ChannelManifest"/> (base64 IEEE-P1363 r‖s signature at

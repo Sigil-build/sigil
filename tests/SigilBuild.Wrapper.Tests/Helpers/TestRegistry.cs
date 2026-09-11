@@ -70,8 +70,8 @@ internal sealed class TestRegistryKey : IDisposable
 /// <summary>
 /// A planted Add/Remove-Programs entry under
 /// <c>HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\&lt;appId&gt;</c> — the
-/// exact key register row R2's attacker writes, and the exact key
-/// <c>InstalledStateResolver</c> must not read on a machine-scope resolve.
+/// exact key an attacker writes, and the exact key
+/// <c>InstalledStateResolver</c> must not read on a machine-scope resolve. (R2)
 /// </summary>
 /// <remarks>
 /// <para>

@@ -7,19 +7,20 @@ using SigilBuild.Wrapper.Update;
 namespace SigilBuild.Wrapper.Tests.Update;
 
 /// <summary>
-/// Tests for the P12 (T12.1) channel-manifest contract: the
+/// Tests for the channel-manifest contract: the
 /// <see cref="ChannelManifest"/> record, its source-generated
 /// <see cref="ChannelManifestJsonContext"/>, and <see cref="ChannelManifestParser"/>'s
-/// SIG0320 malformed-manifest handling. Signature verification (T12.2) and the
-/// <c>/Update</c> runtime (T12.3) are out of scope here.
+/// SIG0320 malformed-manifest handling. Signature verification and the
+/// <c>/Update</c> runtime are out of scope here.
 /// </summary>
 public class ChannelManifestParserTests
 {
     /// <summary>
-    /// R13 made <c>issuedAt</c>/<c>expiresAt</c>/<c>sequence</c> required, so the
+    /// <c>issuedAt</c>/<c>expiresAt</c>/<c>sequence</c> are required, so the
     /// baseline fixture carries them. The window is far-future because these tests are
     /// about parse/shape, not freshness — the freshness window itself is exercised by
     /// <see cref="UpdateRunnerTests"/> against <c>UpdateRunner.EvaluateFreshness</c>.
+    /// (R13)
     /// </summary>
     private const string ValidJson = """
         {

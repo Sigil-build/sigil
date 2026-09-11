@@ -15,7 +15,7 @@ using Xunit;
 /// <summary>
 /// Tests for the <c>shortcut_create</c> step. The full <c>IShellLinkW</c>
 /// read-back round trip is intentionally omitted (see <c>ShellLink</c>'s
-/// remarks on the Task 16 deferral) — we verify success by the .lnk file
+/// remarks on the deferral) — we verify success by the .lnk file
 /// existing, having content, and starting with the canonical Shell Link
 /// Header magic <c>4C 00 00 00</c>.
 /// </summary>
@@ -164,14 +164,14 @@ public class ShortcutCreateStepTests
         File.Exists(Path.Combine(nested, "Sigil.lnk")).Should().BeTrue();
     }
 
-    // ── R54: the explicit-path branch of `location` ──────────────────────────
+    // ── The explicit-path branch of `location` (R54) ──────────────────────────
 
     /// <summary>
-    /// Register row R54. The named anchors are contained by construction; an
+    /// The named anchors are contained by construction; an
     /// explicit path was contained by nothing, so an elevated run would create a
     /// directory tree anywhere on the volume, write a <c>.lnk</c> into it, and
     /// journal a <see cref="RollbackRecord.DeleteShortcut"/> that unlinks that
-    /// path unconditionally at rollback or uninstall.
+    /// path unconditionally at rollback or uninstall. (R54)
     /// </summary>
     [WindowsFact("writes a .lnk through the real ShellLink COM path")]
     public async Task Explicit_location_outside_every_shortcut_root_is_refused()
@@ -231,11 +231,11 @@ public class ShortcutCreateStepTests
     }
 
     /// <summary>
-    /// The over-refusal guard for R54. These are the destinations a real manifest
+    /// The over-refusal guard. These are the destinations a real manifest
     /// asks for, and every one of them must still be accepted. Asserted through
     /// the predicate rather than by running the step: CI runs elevated, and
     /// writing into the runner's own Start Menu or Desktop to prove a point is
-    /// exactly the kind of host mutation this track is trying to stop.
+    /// exactly the kind of host mutation this is trying to stop. (R54)
     /// </summary>
     [WindowsFact("resolves real shell folders")]
     public void Legitimate_shortcut_destinations_are_all_still_accepted()

@@ -11,10 +11,10 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Expressions;
 
 /// <summary>
-/// P1 (gap G1) data-retrieval functions: <c>registry_read</c>, <c>env</c>,
+/// Data-retrieval functions: <c>registry_read</c>, <c>env</c>,
 /// <c>file_version</c>, <c>installed_version</c>. All are read-only, AOT-safe, and
 /// total — they return <c>""</c> on the absent / denied / bad-input path rather
-/// than throwing (ADR-008 §1.2/§1.3).
+/// than throwing (ADR-008 §1.2/§1.3). (G1)
 /// </summary>
 public class DataRetrievalFunctionsTests
 {
@@ -68,7 +68,7 @@ public class DataRetrievalFunctionsTests
 }
 
 /// <summary>
-/// Windows-only legs of the P1 data-retrieval functions — they touch the real
+/// Windows-only legs of the data-retrieval functions — they touch the real
 /// registry (HKCU scratch keys, no admin needed) and a versioned system file.
 /// </summary>
 [SupportedOSPlatform("windows")]

@@ -5,7 +5,7 @@ using System.IO;
 using FluentAssertions;
 
 /// <summary>
-/// Creates real NTFS directory junctions for the R16 containment tests.
+/// Creates real NTFS directory junctions for the containment tests. (R16)
 /// </summary>
 /// <remarks>
 /// <c>Directory.CreateSymbolicLink</c> is deliberately NOT used: it throws for an

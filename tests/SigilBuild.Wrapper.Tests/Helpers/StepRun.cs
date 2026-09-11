@@ -8,7 +8,7 @@ using SigilBuild.Wrapper.Steps;
 
 /// <summary>
 /// Runs a single step against a fresh rollback journal and enforces the
-/// lane-wide safety invariant centrally, so it cannot be forgotten by the next
+/// safety invariant centrally, so it cannot be forgotten by the next
 /// test someone adds.
 /// </summary>
 /// <remarks>

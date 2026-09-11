@@ -13,33 +13,24 @@ using SigilBuild.Wrapper.Steps;
 using SigilBuild.Wrapper.Tests.Helpers;
 
 /// <summary>
-/// Register rows R3 and R9: the four steps that hand a manifest-supplied path to
-/// something running with SYSTEM-level authority — <c>scheduled_task_create</c>
-/// (<c>/RU SYSTEM</c>), <c>service_install</c>, <c>com_register</c>
-/// (<c>LoadLibrary</c> inside the elevated installer) and <c>firewall_rule</c>.
-/// Each must refuse a target that is not anchored inside <c>install_dir</c> and
-/// not sited in an admin-only-writable directory.
+/// The four steps that hand a manifest-supplied path to something running with
+/// SYSTEM-level authority — <c>scheduled_task_create</c> (<c>/RU SYSTEM</c>),
+/// <c>service_install</c>, <c>com_register</c> (<c>LoadLibrary</c> inside the
+/// elevated installer), and <c>firewall_rule</c> — must each refuse a target not
+/// anchored inside <c>install_dir</c> and not sited in an admin-only-writable
+/// directory. (R3, R9)
 /// </summary>
 /// <remarks>
-/// <para>
-/// <b>No test in this file can create a scheduled task, a service, a COM
-/// registration or a firewall rule.</b> Every case here is a REFUSAL case: the
-/// guard returns before <c>schtasks.exe</c> / <c>sc.exe</c> / <c>netsh.exe</c> is
-/// started and before <c>LoadLibraryEx</c> is called, and each test asserts the
-/// rollback journal is still empty — which is only true if the step returned
-/// before the code that mutates anything. The accept side is proved against the
-/// pure <see cref="PrivilegedTargetGuard"/> seam in
-/// <c>PrivilegedTargetGuardTests</c>, precisely so no test ever runs one of these
-/// steps to completion on an elevated CI runner.
-/// </para>
-/// <para>
-/// Both entry paths are covered. Lane S2 has twice shipped a rule that was
-/// correct on the silent path and broken on the headed one, because <c>/D=</c>
-/// arrives as <c>ParsedCommandLine.InstallDir</c> while the wizard's value
-/// arrives as <c>collectedInstallDir</c>. The guard anchors on
-/// <c>ctx.InstallDir</c>, so the fields are proved to converge here rather than
-/// assumed to.
-/// </para>
+/// Every case here is a REFUSAL: no test can create a real scheduled task,
+/// service, COM registration, or firewall rule, since each asserts an empty
+/// rollback journal, true only if the step returned before
+/// <c>schtasks.exe</c> / <c>sc.exe</c> / <c>netsh.exe</c> / <c>LoadLibraryEx</c>
+/// ran. The accept side is proved separately against the pure
+/// <see cref="PrivilegedTargetGuard"/> seam in <c>PrivilegedTargetGuardTests</c>,
+/// so no test here runs one of these steps to completion on an elevated CI
+/// runner. Both entry paths converge here: the silent path's <c>/D=</c> arrives
+/// as <c>ParsedCommandLine.InstallDir</c> while the wizard's arrives as
+/// <c>collectedInstallDir</c>, and the guard anchors on <c>ctx.InstallDir</c>.
 /// </remarks>
 [SupportedOSPlatform("windows")]
 public sealed class PrivilegedStepContainmentTests
@@ -249,15 +240,13 @@ public sealed class PrivilegedStepContainmentTests
     [WindowsFact("Windows ACL APIs")]
     public async Task A_payload_rooted_task_program_is_refused()
     {
-        // Register row R9 proposes payload:// as a SAFE source for a privileged
-        // target. It is not. PayloadExtraction extracts to
-        // %TEMP%\sigil-<appid>-<random>, which under an elevated install is the
-        // invoking user's own temp directory — user-writable, therefore
-        // replaceable between extraction and use — and InstallSession DELETES it
-        // when the run ends, which would leave a SYSTEM task pointing at a path
-        // that no longer exists. This pins that the refusal is a decision rather
-        // than an accident; the supported shape is file_copy into install_dir
-        // first.
+        // payload:// is not a SAFE source for a privileged target. PayloadExtraction
+        // extracts to %TEMP%\sigil-<appid>-<random>, which under an elevated install is
+        // the invoking user's own temp directory — user-writable, therefore replaceable
+        // between extraction and use — and InstallSession DELETES it when the run ends,
+        // which would leave a SYSTEM task pointing at a path that no longer exists. This
+        // pins that the refusal is a decision rather than an accident; the supported
+        // shape is file_copy into install_dir first. (R9)
         using var payload = new TempDir();
         using var installDir = new TempDir();
         File.WriteAllText(Path.Combine(payload.Path, "heartbeat.exe"), "not really an exe");

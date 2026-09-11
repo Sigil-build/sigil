@@ -12,29 +12,23 @@ using SigilBuild.Wrapper.Steps.Win32;
 using Xunit;
 
 /// <summary>
-/// T11.2 (P11): the <c>com_register</c> step and its native invocation
-/// primitive (<see cref="ComRegistration"/>). The AOT-safe unmanaged
-/// function-pointer path is exercised through two failure modes that need
-/// neither admin nor a real self-registering DLL, and are therefore runnable
-/// locally on Windows:
-/// <list type="bullet">
-/// <item>a non-existent path → <see cref="ComRegistration.ComExportOutcome.LoadFailed"/>;</item>
-/// <item>a real system DLL with no <c>DllRegisterServer</c> export
-/// (<c>kernel32.dll</c>) → <see cref="ComRegistration.ComExportOutcome.ExportMissing"/>.</item>
-/// </list>
-/// The live register→assert-HKCR-CLSID→unregister leg needs a real
+/// The <c>com_register</c> step and its native invocation primitive
+/// (<see cref="ComRegistration"/>), exercised locally through two failure modes
+/// needing neither admin nor a real self-registering DLL:
+/// <see cref="ComRegistration.ComExportOutcome.LoadFailed"/> (non-existent path)
+/// and <see cref="ComRegistration.ComExportOutcome.ExportMissing"/>
+/// (<c>kernel32.dll</c>, a real system DLL with no <c>DllRegisterServer</c>
+/// export). The live register→assert-HKCR-CLSID→unregister leg needs a real
 /// self-registering COM DLL plus admin and is verified on the CI VM
 /// (AGENTS.md §2).
 /// <para>
-/// Both failure modes also pin the <b>journal</b> contract, in both directions —
-/// the R15 follow-up. A register whose undo cannot be called leaves NO
-/// <c>UnregisterCom</c> record behind (see
-/// <see cref="Step_maps_LoadFailed_to_a_failed_result_and_journals_nothing"/> for why
-/// the pre-existing "still journals the inverse first" assertion became a guaranteed
-/// uninstall failure); a register that ran and failed KEEPS its record (see
+/// Both failure modes also pin the <b>journal</b> contract in both directions: an
+/// undo that cannot be called leaves NO <c>UnregisterCom</c> record behind (see
+/// <see cref="Step_maps_LoadFailed_to_a_failed_result_and_journals_nothing"/>),
+/// while a register that ran and failed KEEPS its record (see
 /// <see cref="Step_keeps_the_journaled_undo_when_DllRegisterServer_ran_and_failed"/>,
-/// which needs <see cref="ComRegistration.ComExportInvoker"/> because that outcome
-/// is otherwise unreachable without the absent fixture DLL).
+/// which needs <see cref="ComRegistration.ComExportInvoker"/> since that outcome
+/// is otherwise unreachable without the absent fixture DLL). (R15)
 /// </para>
 /// </summary>
 [SupportedOSPlatform("windows")]
@@ -76,16 +70,13 @@ public class ComRegisterStepTests
     /// journaled <c>DllUnregisterServer</c> could never be called — the journal must
     /// come out EMPTY.
     /// <para>
-    /// This test previously asserted the opposite ("still journals the inverse
-    /// first"), on the reasoning that journal-before-act is always safe because the
-    /// undo tolerates a target that was never created. Since R15 that is false for
-    /// this one record: <c>DllUnregisterServer</c> is the only probe a COM
+    /// Do not journal the inverse before the undo is known callable: journal-before-act
+    /// is not safe here, because <c>DllUnregisterServer</c> is the only probe a COM
     /// registration has, so a failure there is reported as "still registered" and
-    /// fails the rollback and every subsequent uninstall attempt. A record kept here
-    /// is a guaranteed <c>UndoFailedException</c> issued on the strength of a probe
-    /// that never ran. The step now withdraws it. (Note the bar is the undo's
-    /// feasibility, not proof that nothing was written: <c>LoadLibraryEx</c> reports
-    /// failure when <c>DllMain</c> returns FALSE, after <c>DllMain</c> executed.)
+    /// fails the rollback and every subsequent uninstall attempt on a probe that never
+    /// ran. The bar is the undo's feasibility, not proof that nothing was written —
+    /// <c>LoadLibraryEx</c> reports failure when <c>DllMain</c> returns FALSE, after
+    /// <c>DllMain</c> executed. (R15)
     /// </para>
     /// </summary>
     [Fact]
@@ -96,10 +87,10 @@ public class ComRegisterStepTests
             return;
         }
 
-        // R3/R9: com_register anchors its path to install_dir and requires an
+        // com_register anchors its path to install_dir and requires an
         // admin-only-writable directory, so the arrangement uses System32 — a real
         // admin-only directory — with a file that does not exist in it. The DLL is
-        // never loaded and nothing is ever registered.
+        // never loaded and nothing is ever registered. (R3, R9)
         var dll = Path.Combine(Environment.SystemDirectory, "sigil-does-not-exist-nope.dll");
         var spec = new InstallStep.ComRegister("reg", dll, When: null, OnFailure: OnFailure.Continue);
         var journal = new RollbackJournal();
@@ -245,9 +236,9 @@ public class ComRegisterStepTests
 
     /// <summary>
     /// A context anchored on <c>%WINDIR%\System32</c> — an existing, real
-    /// admin-only-writable directory — so the R3/R9 privileged-target guard
+    /// admin-only-writable directory — so the privileged-target guard
     /// admits the arrangement and the step reaches the outcome under test.
-    /// Refusal cases live in <c>PrivilegedStepContainmentTests</c>.
+    /// Refusal cases live in <c>PrivilegedStepContainmentTests</c>. (R3, R9)
     /// </summary>
     private static StepContext SystemDirContext() =>
         new(new System.Collections.Generic.Dictionary<string, object?>(),

@@ -13,12 +13,12 @@ using SigilBuild.Wrapper.Tests.Helpers;
 using Xunit;
 
 /// <summary>
-/// Register row R16: no step destination was contained. A config edit could name
-/// an absolute path anywhere, walk out with <c>..</c>, or follow a directory
-/// junction planted inside the install tree — and <c>File.WriteAllText</c>
-/// truncates an existing target in place, so it keeps whatever access control
-/// list the attacker's placeholder had. A brace token that never resolved was
-/// left literal, so a typo created a directory named <c>{var.x}</c>.
+/// No step destination was contained: a config edit could name an absolute path
+/// anywhere, walk out with <c>..</c>, or follow a directory junction planted
+/// inside the install tree — and <c>File.WriteAllText</c> truncates an existing
+/// target in place, so it keeps whatever access control list the attacker's
+/// placeholder had. A brace token that never resolved was left literal, so a
+/// typo created a directory named <c>{var.x}</c>. (R16)
 /// </summary>
 public sealed class StepDestinationContainmentTests
 {

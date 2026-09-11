@@ -29,7 +29,7 @@ public class DirectoryDeleteStepTests
 
         // Success path: no rollback runs, so mirror the install commit and reclaim
         // the transient rollback stash so this test leaves no %TEMP%\sigil-dd-*
-        // residue (regression guard for T17 temp-dir cleanliness).
+        // residue (regression guard for temp-dir cleanliness).
         journal.DiscardTransientStashes();
         AssertNoStashResidue(journal);
     }

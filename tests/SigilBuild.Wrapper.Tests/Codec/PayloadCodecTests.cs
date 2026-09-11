@@ -10,7 +10,7 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Codec;
 
 /// <summary>
-/// Unit coverage for the shared zstd <see cref="PayloadCodec"/> (T6): the
+/// Unit coverage for the shared zstd <see cref="PayloadCodec"/>: the
 /// <c>SIGIL_PAYLOAD_V2</c> container round-trips, is deterministic (byte-identical
 /// across encodes and independent of input order), and rejects malformed input.
 /// </summary>

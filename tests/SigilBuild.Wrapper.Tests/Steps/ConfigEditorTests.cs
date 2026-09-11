@@ -11,7 +11,7 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Steps;
 
 /// <summary>
-/// P8: pure transform tests for the INI / JSON / XML editors — no filesystem. The
+/// Pure transform tests for the INI / JSON / XML editors — no filesystem. The
 /// step wrappers add snapshot/journal/write around these.
 /// </summary>
 public class ConfigEditorTests
@@ -65,9 +65,9 @@ public class ConfigEditorTests
 
     // ── JSON ─────────────────────────────────────────────────────────────────
 
-    // The written value is a string in each of these: R35 made `value_type: string`
-    // the default, so `"2"` rather than `2` is the expected shape unless the step
-    // opts in with `value_type: json`.
+    // The written value is a string in each of these: `value_type: string` is the
+    // default, so `"2"` rather than `2` is the expected shape unless the step
+    // opts in with `value_type: json`. (R35)
     [Fact]
     public void Json_edits_an_existing_pointer()
         => JsonEditor.Set("""{"a":{"b":1}}""", "/a/b", "2").Should().Contain("\"b\": \"2\"");
@@ -91,11 +91,12 @@ public class ConfigEditorTests
     // ── JSON: value typing (R35) ─────────────────────────────────────────────
 
     /// <summary>
-    /// Register row R35. The step used to run every resolved value through
+    /// The step used to run every resolved value through
     /// <c>JsonNode.Parse</c> and keep whatever came back, so a value sourced from a
     /// wizard field, a <c>registry_read</c> var or <c>/P&lt;name&gt;=</c> chose the
     /// SHAPE of the node written into the application's own configuration. The
     /// default is now <c>string</c>, and the old inference is the <c>json</c> opt-in.
+    /// (R35)
     /// </summary>
     [Theory]
     [InlineData("true", "\"true\"")]
@@ -194,11 +195,11 @@ public class ConfigEditorTests
     // ── XML: XXE posture (R33) ───────────────────────────────────────────────
 
     /// <summary>
-    /// Register row R33. The internal DTD subset was parsed with no expansion cap, so
-    /// a config file the elevated installer edits could bill it for an unbounded
-    /// entity expansion (billion laughs) before a single byte was written. This is the
-    /// test that fails at the parent commit: the resolver default already blocked
-    /// EXTERNAL entities there, so only the DTD assertion proves anything.
+    /// The internal DTD subset was parsed with no expansion cap, so a config file the
+    /// elevated installer edits could bill it for an unbounded entity expansion
+    /// (billion laughs) before a single byte was written. EXTERNAL entities are
+    /// already blocked by the resolver's default, so only the DTD assertion is
+    /// non-vacuous against the gate this test proves. (R33)
     /// </summary>
     [Fact]
     public void Xml_edit_refuses_a_document_declaring_an_internal_dtd_subset()

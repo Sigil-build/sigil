@@ -11,10 +11,10 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Localization;
 
 /// <summary>
-/// Task 14: resolution at session start (design §4.6). Before this task nothing
+/// Resolution at session start (design §4.6). Before this, nothing
 /// called <see cref="LanguageResolver"/> — <see cref="SessionLanguage.Current"/>
 /// was only ever the <see cref="Lang.En"/> default. These tests cover the resolver
-/// chain itself (given, Task 7), the session-start wiring
+/// chain itself, the session-start wiring
 /// (<see cref="InstallSession.ResolveSessionLanguage"/>), the Step 3b license-map
 /// resolution, and the <see cref="SessionLanguage.OnUninitializedRead"/> wiring.
 /// </summary>
@@ -35,7 +35,7 @@ public sealed class SessionResolutionTests : IDisposable
     public void FixedManifestLanguage_OverridesLangFlag_WithoutFailing()
     {
         // Design §2.1: language is a display preference, not a trust boundary,
-        // so this does NOT mirror T12's fixed-scope vs /allusers exit 64.
+        // so this does NOT mirror the fixed-scope vs /allusers exit 64.
         var prefs = LanguageResolver.Preferences(manifestLanguage: "en", langFlag: "uk", osPreferences: new[] { "uk-UA" });
 
         LanguageResolver.MatchChrome(prefs).Should().Be(Lang.En);
@@ -122,7 +122,7 @@ public sealed class SessionResolutionTests : IDisposable
         var session = InstallSession.Create(new[] { "/silent", $"/LOG={logPath}" });
         session.ResolveSessionLanguage();
 
-        // Simulate the Task-13-style bug: something reads .Current after a reset,
+        // Simulate the bug: something reads .Current after a reset,
         // i.e. before resolution has (yet again) happened.
         SessionLanguage.ResetForTesting();
 

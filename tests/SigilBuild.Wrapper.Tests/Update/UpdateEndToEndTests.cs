@@ -20,9 +20,9 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Update;
 
 /// <summary>
-/// T12.6: the <c>/Update</c> runtime's PRODUCTION I/O seams
+/// The <c>/Update</c> runtime's PRODUCTION I/O seams
 /// (<see cref="HttpUpdateResourceFetcher"/> + <see cref="SigilPackageDownloader"/>,
-/// T12.3's <c>UpdateSeams</c> — the SAME classes <c>InstallSession.BuildUpdateRunner</c>
+/// <c>UpdateSeams</c> — the SAME classes <c>InstallSession.BuildUpdateRunner</c>
 /// wires in production) driven end-to-end against a REAL local HTTPS server
 /// (mirroring <c>HttpDownloadIntegrationTests</c>' pattern) and a REAL ECDSA P-256
 /// signature generated in-test: fetch -&gt; parse (SIG0320) -&gt; verify (SIG0321) -&gt;
@@ -33,7 +33,7 @@ namespace SigilBuild.Wrapper.Tests.Update;
 /// (<see cref="IChildInstallerLauncher"/>), not a real spawned Setup.exe — this
 /// class proves the update DECISION table plus the real network + crypto +
 /// checksum legs. A real child Setup.exe execution (the full cross-process
-/// upgrade) is CI-VM-only; see the P12 job appended to
+/// upgrade) is CI-VM-only; see the job appended to
 /// <c>.github/workflows/wrapper-vm-tests.yml</c>. The recording launcher reads
 /// the downloaded file's bytes itself (before <c>UpdateRunner</c>'s <c>finally</c>
 /// deletes it) and hashes them, so the test can assert the ACTUAL bytes that
@@ -60,7 +60,7 @@ public sealed class UpdateEndToEndTests
         string version, string packageUrl, string sha256, string? minFromVersion = null)
     {
         var minPart = minFromVersion is null ? string.Empty : $",\n  \"minFromVersion\": \"{minFromVersion}\"";
-        // R13: freshness fields are required — minted now, valid for a week.
+        // Freshness fields are required — minted now, valid for a week. (R13)
         var issued = DateTimeOffset.UtcNow;
         var json =
             "{\n" +

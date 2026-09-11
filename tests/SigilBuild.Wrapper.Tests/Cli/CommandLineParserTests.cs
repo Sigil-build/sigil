@@ -85,7 +85,7 @@ public class CommandLineParserTests
         act.Should().Throw<UsageException>().WithMessage("*foo*neither a declared parameter nor a built-in option*");
     }
 
-    // ── Built-in option overrides (T8 model; parsed + stored here) ─────────────
+    // ── Built-in option overrides (parsed + stored here) ────────────────────────
 
     [Fact]
     public void Known_option_override_is_stored_not_rejected()
@@ -97,7 +97,7 @@ public class CommandLineParserTests
         parsed.Options["add_to_path"].Should().Be("true");
     }
 
-    // ── P10 (gap G11): namespaced custom-component overrides ──────────────────
+    // ── Namespaced custom-component overrides (G11) ────────────────────────────
 
     [Fact]
     public void Namespaced_custom_option_override_is_stored_under_the_option_key()
@@ -172,7 +172,7 @@ public class CommandLineParserTests
         parsed.Scope.Should().Be(expected);
     }
 
-    // ── /force-downgrade (P3) ─────────────────────────────────────────────────
+    // ── /force-downgrade ────────────────────────────────────────────────────────
 
     [Theory]
     [InlineData("/force-downgrade")]
@@ -253,7 +253,7 @@ public class CommandLineParserTests
         audit.Should().Contain("/PLicense=***");
     }
 
-    // ── /LOG install logging (P7) ─────────────────────────────────────────────
+    // ── /LOG install logging ────────────────────────────────────────────────────
 
     [Theory]
     [InlineData("/LOG")]
@@ -308,7 +308,7 @@ public class CommandLineParserTests
         bare.AuditSafeRendering().Should().Contain("/LOG");
     }
 
-    // ── /launch run-after-install (P2) ────────────────────────────────────────
+    // ── /launch run-after-install ─────────────────────────────────────────────────
 
     [Theory]
     [InlineData("/launch")]
@@ -333,7 +333,7 @@ public class CommandLineParserTests
             .AuditSafeRendering().Should().Contain("/launch");
     }
 
-    // ── /closeapps files-in-use (P6) ──────────────────────────────────────────
+    // ── /closeapps files-in-use ─────────────────────────────────────────────────
 
     [Theory]
     [InlineData("/closeapps")]
@@ -370,10 +370,10 @@ public class CommandLineParserTests
         act.Should().Throw<UsageException>();
     }
 
-    // ── R26: the docs used to teach a silent-install line the parser rejects ──
-    // (docs/guides/installer-wizard.md, docs/guides/parameters.md,
-    // docs/guides/packaging-formats.md). This pins the failure mode and the
-    // corrected line so the docs example can never silently regress again.
+    // ── The docs used to teach a silent-install line the parser rejects. Pins
+    // the failure mode and the corrected line (docs/guides/installer-wizard.md,
+    // docs/guides/parameters.md, docs/guides/packaging-formats.md) so the docs
+    // example can never silently regress. (R26)
 
     [Fact]
     public void The_formerly_documented_bare_Name_equals_value_line_still_fails()

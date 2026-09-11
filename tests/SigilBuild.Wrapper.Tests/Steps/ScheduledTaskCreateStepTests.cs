@@ -10,7 +10,7 @@ using SigilBuild.Wrapper.Steps;
 using Xunit;
 
 /// <summary>
-/// T11.1 (P11): the <c>scheduled_task_create</c> step. The exact
+/// The <c>scheduled_task_create</c> step. The exact
 /// <c>schtasks.exe /Create</c> argument construction — the part that matters
 /// for correctness and for the DAILY determinism question — is proven via the
 /// pure <see cref="ScheduledTaskCreateStep.BuildCreateArgs"/> seam, which needs
@@ -96,22 +96,18 @@ public class ScheduledTaskCreateStepTests
     [Fact]
     public async Task An_unanchored_program_is_refused_before_schtasks_is_ever_started()
     {
-        // Was `Journal_records_DeleteScheduledTask_before_attempting_the_create`.
-        // R3/R9 changed what this arrangement means: a context with no resolved
-        // install_dir now fails the containment guard, so the step returns before
-        // the journal entry AND before schtasks.exe is started. That is strictly
-        // the safer local assertion — the old shape issued a real
-        // `schtasks /Create … /RU SYSTEM` that only failed because this sandbox is
-        // unelevated, and would have created a live SYSTEM task on an elevated
-        // runner.
+        // A context with no resolved install_dir fails the containment guard, so the
+        // step returns before the journal entry AND before schtasks.exe is started —
+        // the old shape issued a real `schtasks /Create … /RU SYSTEM` that only failed
+        // because this sandbox is unelevated, and would have created a live SYSTEM
+        // task on an elevated runner. (R3, R9)
         //
-        // What is asserted locally now is the invariant that replaced it: this
-        // step journals NOTHING on any path that does not reach schtasks.exe —
-        // here, in every case in PrivilegedStepContainmentTests, and in
-        // StepValueInjectionTests' quote refusal. Journal-BEFORE-exec ordering on
-        // the success path is verified end-to-end on the CI VM by
-        // ScheduledTaskCreateInstallTests, which is the only place it can be
-        // observed without creating a real SYSTEM task.
+        // The invariant asserted locally: this step journals NOTHING on any path that
+        // does not reach schtasks.exe — here, in every case in
+        // PrivilegedStepContainmentTests, and in StepValueInjectionTests' quote
+        // refusal. Journal-BEFORE-exec ordering on the success path is verified
+        // end-to-end on the CI VM by ScheduledTaskCreateInstallTests, which is the only
+        // place it can be observed without creating a real SYSTEM task.
         if (!OperatingSystem.IsWindows())
         {
             return;

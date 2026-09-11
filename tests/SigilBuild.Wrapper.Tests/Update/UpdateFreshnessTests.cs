@@ -15,27 +15,19 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Update;
 
 /// <summary>
-/// Register row R13: freshness and replay protection on the signed channel manifest.
+/// Freshness and replay protection on the signed channel manifest. (R13)
 /// </summary>
 /// <remarks>
-/// <para>
-/// <b>The threat.</b> The signature proves WHO minted the document, never WHEN. Before
-/// this row there was no timestamp, expiry, nonce or sequence anywhere in the manifest,
-/// and the only monotonicity check was against the locally installed version. So an
-/// on-path attacker or a compromised CDN could replay yesterday's correctly signed
-/// manifest forever — the client reports "up to date" and exits 0 while a security fix
-/// exists (a freeze attack) — or replay a signed manifest for an intermediate
-/// <em>vulnerable</em> version that is still newer than installed, which the client then
-/// installs.
-/// </para>
-/// <para>
-/// <b>Which of these fail at the parent commit, and how.</b> The parser tests below
-/// name only <see cref="ChannelManifestParser.Parse"/> and string literals, so they
-/// compile at <c>b62de86</c> and fail there because the parser accepts a manifest with
-/// no freshness fields at all. The end-to-end window test uses the FIVE-argument
-/// <see cref="UpdateRunner"/> constructor deliberately, for the same reason — see the
-/// note on that test.
-/// </para>
+/// The signature proves WHO minted the document, never WHEN: with no timestamp,
+/// expiry, nonce or sequence, and monotonicity checked only against the locally
+/// installed version, an on-path attacker or compromised CDN could replay
+/// yesterday's correctly signed manifest forever (a freeze attack — "up to date",
+/// exit 0, while a fix exists) or replay a signed vulnerable intermediate version
+/// still newer than installed. The parser tests below name only
+/// <see cref="ChannelManifestParser.Parse"/> and string literals, so they are
+/// non-vacuous against a parser that accepted no freshness fields at all; the
+/// end-to-end window test uses the FIVE-argument <see cref="UpdateRunner"/>
+/// constructor deliberately, for the same reason.
 /// </remarks>
 public class UpdateFreshnessTests
 {
@@ -121,7 +113,7 @@ public class UpdateFreshnessTests
     [Fact]
     public void A_manifest_carrying_all_three_freshness_fields_parses()
     {
-        // The positive control: the R13 fix must accept a well-formed fresh manifest.
+        // The positive control: the freshness fix must accept a well-formed fresh manifest. (R13)
         var result = ChannelManifestParser.Parse(ManifestJson());
 
         result.Success.Should().BeTrue();

@@ -11,17 +11,17 @@ using System.Text;
 using SigilBuild.Wrapper.Cli;
 
 /// <summary>
-/// Register row R18 — keep <see cref="SigilBuild.Core.Manifest.ParameterType.Secret"/>
-/// parameter values off the elevated (UAC) relaunch command line.
+/// Keeps <see cref="SigilBuild.Core.Manifest.ParameterType.Secret"/>
+/// parameter values off the elevated (UAC) relaunch command line. (R18)
 /// </summary>
 /// <remarks>
 /// <para>
 /// <see cref="Elevation.RelaunchElevatedAndWait"/> re-emits the original argv to the
-/// elevated child, so a <c>/P&lt;secret&gt;=&lt;value&gt;</c> token used to appear
+/// elevated child, so an unfiltered <c>/P&lt;secret&gt;=&lt;value&gt;</c> token appears
 /// verbatim in a second process's command line — which Sysmon, EDR agents, WMI
 /// <c>Win32_Process</c> pollers and the plain Task Manager column all record. The
-/// value was already redacted from Sigil's own logs and journal (decision 6 / T9);
-/// the relaunch was the one channel that published it anyway.
+/// value is redacted from Sigil's own logs and journal, so the relaunch is the one
+/// channel that would publish it anyway.
 /// </para>
 /// <para>
 /// <b>Mechanism.</b> The un-elevated parent writes the secret name/value pairs to a

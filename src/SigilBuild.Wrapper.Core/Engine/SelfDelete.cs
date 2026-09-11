@@ -20,17 +20,17 @@ public enum SelfDeleteOutcome
     /// The file could not be deleted now (it is the running <c>uninstall.exe</c>
     /// image, or otherwise locked). Deletion was scheduled for the next reboot via
     /// <c>MoveFileExW(target, NULL, MOVEFILE_DELAY_UNTIL_REBOOT)</c> — the v1
-    /// self-deletion fallback (spec T15).
+    /// self-deletion fallback.
     /// </summary>
     ScheduledForReboot,
 }
 
 /// <summary>
 /// Deletes a file that may be the currently-running executable image — the
-/// self-deletion problem for the survivable <c>uninstall.exe</c> (spec T15,
-/// decision 8). A running Windows process holds an exclusive lock on its own
-/// image, so <c>uninstall.exe</c> cannot delete itself while it runs. The v1
-/// mechanism (per the spec): if the target is <em>not</em> the running image,
+/// self-deletion problem for the survivable <c>uninstall.exe</c>. A running
+/// Windows process holds an exclusive lock on its own
+/// image, so <c>uninstall.exe</c> cannot delete itself while it runs. The
+/// mechanism: if the target is <em>not</em> the running image,
 /// delete it directly; if it <em>is</em>, schedule removal at the next reboot via
 /// <c>MoveFileExW(path, NULL, MOVEFILE_DELAY_UNTIL_REBOOT)</c>.
 /// </summary>

@@ -8,7 +8,7 @@ using SigilBuild.Core.Manifest;
 using SigilBuild.Wrapper.Steps;
 
 /// <summary>
-/// Outcome of running one lifecycle-hook phase (P2). <see cref="Success"/> is
+/// Outcome of running one lifecycle-hook phase. <see cref="Success"/> is
 /// false only when a hook step with <c>on_failure: fail</c> failed; the offending
 /// step id / error are carried for the caller's abort message + log.
 /// </summary>
@@ -19,7 +19,7 @@ internal readonly record struct HookOutcome(bool Success, string? FailedStepId, 
 }
 
 /// <summary>
-/// Runs a lifecycle-hook phase (P2, gap G2) — an ordered list of ordinary step
+/// Runs a lifecycle-hook phase — an ordered list of ordinary step
 /// records — <em>outside</em> the rollback journal. Honors each step's
 /// <c>when</c> and <c>on_failure</c>:
 /// <list type="bullet">
@@ -48,22 +48,21 @@ internal static class HookRunner
             return HookOutcome.Ok();
         }
 
-        // R56: give this phase the run's progress channel. ctx.ProgressSink used to be
-        // set by InstallEngine and nothing else, so every intra-step line a hook raised
-        // was reported to nothing — including the two that are security refusals: the
-        // DownloadedBinaryTrust disarm notice (RunProgramStep) and SecureStaging's
-        // "this elevated run could not establish an administrator-only staging root".
-        // A refusal that is not logged is, from the operator's side, indistinguishable
-        // from a silent success — the exact failure mode R1 and R19 were fixed to
-        // remove, surviving in the one phase nobody checked (pre_install, post_install,
-        // and both uninstall hook phases all run through here).
+        // Give this phase the run's progress channel. With ctx.ProgressSink set only by
+        // InstallEngine, every intra-step line a hook raises is reported to nothing —
+        // including the two that are security refusals: the DownloadedBinaryTrust disarm
+        // notice (RunProgramStep) and SecureStaging's "this elevated run could not
+        // establish an administrator-only staging root". A refusal that is not logged is,
+        // from the operator's side, indistinguishable from a silent success, and every
+        // hook phase (pre_install, post_install and both uninstall phases) runs through
+        // here. (R56)
         //
         // Set, not saved-and-restored: InstallEngine sets the identical sink on the same
         // context moments later, and the uninstall hook phases have nothing after them.
         // Leaving it set cannot lose a line; clearing it could.
         ctx.ProgressSink = progress;
 
-        // Never replayed — hooks get no rollback (P2). Present only because IStep
+        // Never replayed — hooks get no rollback. Present only because IStep
         // takes a journal; run_program (the common hook) records nothing anyway.
         var discard = new RollbackJournal();
 
@@ -118,10 +117,11 @@ internal static class HookRunner
         {
             // A post_install / post_uninstall hook phase runs on the SAME StepContext
             // after InstallEngine's own finally has already released this run's
-            // {staging_dir}. A hook resolving the token there used to create a second
-            // SecureStaging that nobody owned and nothing ever disposed — a hardened
-            // directory leaked per install, in %ProgramData% on an elevated run. This
-            // gives that directory the same phase-bounded lifetime the install body's has.
+            // {staging_dir}. A hook resolving the token there creates a SECOND
+            // SecureStaging that nobody owns; without this release nothing disposes it and
+            // a hardened directory leaks per install, in %ProgramData% on an elevated run.
+            // This gives that directory the same phase-bounded lifetime the install
+            // body's has.
             // A no-op for a phase that resolved no token, and a no-op for a pre_install
             // phase, which runs BEFORE the engine and whose staging the engine still owns.
             ctx.ReleasePostRunStaging();

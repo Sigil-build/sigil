@@ -7,7 +7,7 @@ namespace SigilBuild.Wrapper.Engine;
 
 /// <summary>
 /// What <c>WinVerifyTrust</c> concluded about a file. Three-valued on purpose
-/// (register row R17): with revocation checking switched on, "could not establish
+/// (R17): with revocation checking switched on, "could not establish
 /// whether this certificate is still valid" is a real and common answer — an
 /// air-gapped machine, a blocked CRL distribution point, a captive portal — and it is
 /// neither <see cref="Trusted"/> nor <see cref="Revoked"/>. Collapsing it into either
@@ -60,7 +60,7 @@ public enum AuthenticodeStatus
 }
 
 /// <summary>
-/// AOT-safe Authenticode self-verification (T11 / decision 7). Wraps
+/// AOT-safe Authenticode self-verification. Wraps
 /// <c>WinVerifyTrust</c> (wintrust.dll) via a source-generated
 /// <see cref="LibraryImportAttribute"/> P/Invoke — no reflection, no runtime IL
 /// stubs — so it publishes clean under <c>PublishAot=true</c> and
@@ -86,7 +86,7 @@ public enum AuthenticodeStatus
 /// one, and nothing in this type or its callers should be read as pinning a publisher.
 /// Closing that needs an authenticated identity to pin <em>against</em> — a subject or
 /// public-key hash carried in the pack-time manifest — plus chain inspection this file
-/// does not do. Deliberately out of scope here; see the lane report.
+/// does not do. Deliberately out of scope here.
 /// </para>
 /// </remarks>
 public static partial class AuthenticodeVerifier
@@ -95,9 +95,9 @@ public static partial class AuthenticodeVerifier
     private const uint WTD_UI_NONE = 2;
 
     // WINTRUST_DATA.fdwRevocationChecks — check the WHOLE chain's revocation state
-    // (register row R17; was WTD_REVOKE_NONE = 0). A revoked publisher certificate is
+    // (R17). A revoked publisher certificate is
     // exactly the case the trust line and the launch gate exist to catch, and skipping
-    // the check made both of them assert something they had not looked at. This does
+    // the check makes both of them assert something they never looked at. This does
     // reach the network for CRL / OCSP retrieval when the answer is not already in the
     // local cache; that is accepted, and an unreachable responder surfaces as the
     // distinct AuthenticodeStatus.RevocationUnavailable rather than as trust or as

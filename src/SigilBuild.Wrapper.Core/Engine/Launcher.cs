@@ -8,7 +8,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 
 /// <summary>
-/// Launches the <c>run_after_install</c> target (P2, gap G4) <b>unelevated</b>.
+/// Launches the <c>run_after_install</c> target <b>unelevated</b>.
 /// </summary>
 /// <remarks>
 /// When the installer process is not elevated (a per-user install), a normal
@@ -48,15 +48,15 @@ public static partial class Launcher
     /// <see cref="Launch"/>.
     /// </summary>
     /// <remarks>
-    /// <strong>R29 — there is no fall-through from the elevated branch, and there must
-    /// not be one.</strong> This used to try the de-elevated launch and, on any failure,
-    /// call <see cref="TryLaunchDirect"/> anyway — which hands the launched application
-    /// the INSTALLER'S ADMIN TOKEN, with no log line and no user-visible signal. That is
-    /// the exact bug class this whole class exists to prevent, and it silently undid
-    /// P2's own acceptance criterion ("launch checkbox starts the app unelevated"). The
+    /// <strong>There is no fall-through from the elevated branch, and there must not be
+    /// one.</strong> Trying the de-elevated launch and, on any failure, calling
+    /// <see cref="TryLaunchDirect"/> anyway hands the launched application
+    /// the INSTALLER'S ADMIN TOKEN, with no log line and no user-visible signal — the
+    /// exact bug class this whole class exists to prevent, and a silent breach of the
+    /// promise that the launch checkbox starts the app unelevated. The
     /// user losing a convenience launch is a smaller harm than the user's editor, browser
     /// or game silently inheriting administrator rights for the rest of its lifetime, so
-    /// the launch is skipped and reported.
+    /// the launch is skipped and reported. (R29)
     /// </remarks>
     internal static LaunchOutcome LaunchCore(
         string path,

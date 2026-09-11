@@ -11,7 +11,7 @@ using SigilBuild.Wrapper.Core.Localization;
 using SigilBuild.Wrapper.Expressions;
 
 /// <summary>
-/// Outcome of the prerequisite phase (P5, gap G6). <see cref="Success"/> is false
+/// Outcome of the prerequisite phase. <see cref="Success"/> is false
 /// when a prerequisite could not be satisfied — the caller aborts BEFORE the
 /// rollback journal opens, so no partial install results. <see cref="RebootRequired"/>
 /// is set when any prerequisite installer returned exit code 3010.
@@ -23,8 +23,8 @@ public readonly record struct PrerequisiteOutcome(bool Success, string? Error, b
 }
 
 /// <summary>
-/// Runs <c>installer.prerequisites[]</c> (P5, gap G6) sequentially, BEFORE the
-/// transactional install body and the P2 <c>pre_install</c> hooks (and before the
+/// Runs <c>installer.prerequisites[]</c> sequentially, BEFORE the
+/// transactional install body and the <c>pre_install</c> hooks (and before the
 /// rollback journal opens) — the declarative equivalent of Burn's ExePackage +
 /// DetectCondition. Per prerequisite: evaluate <c>detect</c> (skip when already
 /// satisfied), else acquire the source (a bundled <c>payload://</c> file or a
@@ -119,7 +119,7 @@ public static class PrerequisiteRunner
             int exitCode;
             try
             {
-                // b2. R11: Authenticode, immediately before the launch and from inside the
+                // b2. Authenticode (R11), immediately before the launch and from inside the
                 //     window where the verified handle is already held, so the bytes being
                 //     judged are the bytes that will be executed. Only a DOWNLOADED
                 //     prerequisite is gated: a payload:// source came out of this very
@@ -233,7 +233,7 @@ public static class PrerequisiteRunner
     /// </summary>
     /// <param name="Downloaded">
     /// True when the bytes came off the network rather than out of the package's own
-    /// payload. Only a download is Authenticode-gated (register row R11) — a
+    /// payload. Only a download is Authenticode-gated (R11) — a
     /// <c>payload://</c> source is already covered by the artifact's own signature.
     /// </param>
     private readonly record struct AcquiredSource(
@@ -271,7 +271,7 @@ public static class PrerequisiteRunner
         // Downloaded: resolve {var.*} tokens, enforce https + sha256, stage into a
         // private per-run directory, then RE-verify from an open, write-and-delete-
         // denying handle. Everything up to that open is the download's own business;
-        // from the open to Process.Start there is no window left (register row R12).
+        // from the open to Process.Start there is no window left (R12).
         var url = ctx.Resolve(source);
         if (!url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
         {
@@ -307,7 +307,7 @@ public static class PrerequisiteRunner
         {
             var temp = staging.PathFor(StagedInstallerName);
             var timeout = TimeSpan.FromSeconds(p.TimeoutSeconds is int t and > 0 ? t : DefaultTimeoutSeconds);
-            // R10: bounded by the absolute file-download backstop. A prerequisite is a
+            // Bounded by the absolute file-download backstop (R10). A prerequisite is a
             // redistributable — tens of megabytes at the top end — so the ceiling only
             // ever fires on an origin that is misbehaving.
             var result = await SigilDownloader.DownloadVerifiedAsync(

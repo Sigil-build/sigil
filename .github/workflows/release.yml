@@ -1,7 +1,7 @@
 name: release
 
-# REL.5 (R7): tag-triggered signed release. Runs the full VM matrix first —
-# a release whose install/uninstall matrix did not run is not a release.
+# Tag-triggered signed release. Runs the full VM matrix first — a release
+# whose install/uninstall matrix did not run is not a release. (R7)
 on:
   push:
     tags: ['v*']
@@ -31,8 +31,8 @@ jobs:
         with:
           global-json-file: global.json
 
-      # M1: both refusals run FIRST — before any restore, publish or signing.
-      # A release that cannot be signed, or whose tag disagrees with the one
+      # Both refusals run FIRST — before any restore, publish or signing. A
+      # release that cannot be signed, or whose tag disagrees with the one
       # version literal, should fail in seconds rather than after two Native
       # AOT publishes and a 45 MB host stage.
       - name: require signing secrets
@@ -48,29 +48,29 @@ jobs:
       - name: tag matches Directory.Build.props version
         shell: pwsh
         run: |
-          # R24 / I5: Directory.Build.props' <Version> is the ONE source of
-          # truth. The tag does NOT inject the version (there is no
-          # -p:Version= anywhere in this workflow); it must AGREE with the
-          # committed value. Bump <Version> in Directory.Build.props, commit,
-          # then tag v<Version>.
+          # Directory.Build.props' <Version> is the ONE source of truth. The
+          # tag does NOT inject the version (there is no -p:Version= anywhere
+          # in this workflow); it must AGREE with the committed value. Bump
+          # <Version> in Directory.Build.props, commit, then tag v<Version>.
+          # (R24)
           $expected = "v" + (Select-Xml -Path "Directory.Build.props" -XPath "//Version").Node.InnerText.Trim()
           $tag = "${{ github.ref_name }}"
           if ($tag -ne $expected) { throw "tag '$tag' does not match Directory.Build.props version '$expected' (R24: one source of truth — bump <Version> in Directory.Build.props before tagging)" }
 
       - name: restore (locked)
-        # R23a / I3: this covers the RID-specific graphs too, because
-        # SigilBuild.Cli and SigilBuild.Installer.Host declare
+        # This covers the RID-specific graphs too, because SigilBuild.Cli and
+        # SigilBuild.Installer.Host declare
         # <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers> and their
         # packages.lock.json files now carry net10.0/win-x64 and
         # net10.0/win-arm64 sections. Both CLI publishes below therefore run
         # --no-restore and cannot silently resolve a package outside the
-        # committed lock set.
+        # committed lock set. (R23a)
         run: dotnet restore Sigil.slnx --locked-mode
 
       - name: aot publish CLI (win-x64)
         run: dotnet publish src/SigilBuild.Cli -c Release -r win-x64 -p:PublishAot=true --no-restore -o publish/win-x64
 
-      # I4: arm64 mirrors ci.yml's tolerance. Whether the runner image carries
+      # arm64 mirrors ci.yml's tolerance. Whether the runner image carries
       # the "MSVC v143 C++ ARM64 build tools" component is not under our
       # control, and a missing arm64 leg must not sink an otherwise good x64
       # release. Every arm64 step below is gated on this step's outcome; the
@@ -94,7 +94,7 @@ jobs:
           Write-Host "sigil.exe (win-x64): $sizeMb MB"
           if ($size -gt 15MB) { throw "sigil.exe is $sizeMb MB, exceeds the 15 MB budget" }
 
-      # M2: the arm64 CLI is held to the same 15 MB budget as x64 — an
+      # The arm64 CLI is held to the same 15 MB budget as x64 — an
       # unbudgeted second shipping RID is how a size gate quietly stops
       # meaning anything.
       - name: size gate (win-arm64)
@@ -106,16 +106,16 @@ jobs:
           Write-Host "sigil.exe (win-arm64): $sizeMb MB"
           if ($size -gt 15MB) { throw "sigil.exe (win-arm64) is $sizeMb MB, exceeds the 15 MB budget" }
 
-      # C1 — the release zips MUST carry the installer-host runtime. `sigil
-      # pack --format exe` resolves runtimes/<rid>/SigilBuild.Installer.Host.exe
-      # relative to the CLI's own directory (WrapperRuntimeLocator.Locate) and
-      # throws FileNotFoundException otherwise, so a CLI-only zip cannot build
-      # an exe installer at all. Stage BOTH host RIDs once, outside publish/,
-      # then fan the whole runtimes/ tree into each CLI publish directory: a
-      # win-x64 sigil must be able to pack arm64 installers and vice versa.
-      # This runs before signing (so the host exes and their native deps are
-      # signed too) and before the PDB strip / archiving. Same -SizeGateMb 45
-      # gate ci.yml uses.
+      # The release zips MUST carry the installer-host runtime. `sigil pack
+      # --format exe` resolves runtimes/<rid>/SigilBuild.Installer.Host.exe
+      # relative to the CLI's own directory (WrapperRuntimeLocator.Locate)
+      # and throws FileNotFoundException otherwise, so a CLI-only zip cannot
+      # build an exe installer at all. Stage BOTH host RIDs once, outside
+      # publish/, then fan the whole runtimes/ tree into each CLI publish
+      # directory: a win-x64 sigil must be able to pack arm64 installers and
+      # vice versa. This runs before signing (so the host exes and their
+      # native deps are signed too) and before the PDB strip / archiving.
+      # Same -SizeGateMb 45 gate ci.yml uses.
       - name: aot publish + stage installer host runtimes (win-x64, win-arm64)
         shell: pwsh
         run: |
@@ -155,7 +155,7 @@ jobs:
             Write-Host "::warning::the win-arm64 installer host runtime is absent; the win-arm64 sigil in this release cannot pack arm64 exe installers."
           }
 
-      # M3: files-folder-filter deliberately includes `dll`, which re-signs the
+      # files-folder-filter deliberately includes `dll`, which re-signs the
       # vendored native redistributables we ship — libSkiaSharp.dll and
       # libsodium.dll beside sigil.exe, plus the Skia/ANGLE/HarfBuzz set under
       # runtimes/<rid>/native/. That is intentional: everything Sigil
@@ -197,13 +197,13 @@ jobs:
           Copy-Item THIRD-PARTY-NOTICES.md publish/win-arm64/
           Compress-Archive -Path publish/win-arm64/* -DestinationPath "dist/sigil-${{ github.ref_name }}-win-arm64.zip"
 
-      # R42 / SUP.3 (applied by PR #42, commit 81584de): the SBOM
-      # must describe exactly what got signed and released, so it runs after
-      # signing + packaging (dist/ already exists by this point, created by
-      # the win-x64 archive step above) and before SHA256SUMS / the release
+      # The SBOM must describe exactly what got signed and released, so it
+      # runs after signing + packaging (dist/ already exists by this point,
+      # created by the win-x64 archive step above) and before SHA256SUMS /
+      # the release (R42)
       # asset upload, so the SBOM itself gets checksummed and attached like
       # every other dist/* asset. No continue-on-error: an SBOM that silently
-      # failed to generate is a release-integrity gap, not a warning.
+      # failed to generate is a release-integrity gap, not a warning. (R42)
       - name: install CycloneDX SBOM tool
         shell: pwsh
         run: |
@@ -246,9 +246,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
-          # I2: PowerShell does NOT glob arguments for native executables, so
-          # the previous literal `dist/*` reached gh as the string "dist/*" and
-          # uploaded nothing at all. Expand the list here and splat it.
+          # PowerShell does NOT glob arguments for native executables, so a
+          # literal `dist/*` argument reaches gh as the string "dist/*" and
+          # uploads nothing. Expand the list here and splat it.
           $assets = Get-ChildItem dist -File | ForEach-Object { $_.FullName }
           if (@($assets).Count -lt 1) { throw "no release assets found in dist/" }
           Write-Host "uploading $(@($assets).Count) asset(s):"

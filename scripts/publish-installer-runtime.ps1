@@ -2,7 +2,7 @@
 <#
 .SYNOPSIS
     Publishes the Native-AOT SigilBuild.Installer.Host runtime and stages it as
-    the exe-wrapper runtime the packager stamps (spec T3).
+    the exe-wrapper runtime the packager stamps.
 
 .DESCRIPTION
     For each requested RID this runs
@@ -41,10 +41,9 @@
     exceeds this many MB. Default: 45.
     Measured win-x64 footprint: ~42 MB (exe ~24 MB + Skia/ANGLE/HarfBuzz native
     libs ~18 MB). 25 MB is unattainable — those native libs alone are ~19 MB in
-    every variant. Re-pinned 40 -> 45 for P9 (localization added ~2.26 MB over
-    main's 39.8 MB, which was already at the old 40 MB gate's edge;
-    InvariantGlobalization stays on — no ICU/globalization data pulled in). ~3 MB
-    headroom. See docs/architecture/adr-avalonia-aot.md and adr-008 §5.2.
+    every variant. InvariantGlobalization stays on — no ICU/globalization data
+    pulled in. ~3 MB headroom. See docs/architecture/adr-avalonia-aot.md and
+    adr-008 §5.2.
 
 .PARAMETER RequireAll
     Treat a per-RID publish failure as fatal (used by CI legs that provision all
@@ -155,7 +154,7 @@ foreach ($rid in $Rids) {
     $destExe = Join-Path $destDir $runtimeFileName
     Copy-Item -Path $producedExe -Destination $destExe -Force
 
-    # T18: the AOT publish emits the host's native dependencies (Skia/ANGLE/
+    # The AOT publish emits the host's native dependencies (Skia/ANGLE/
     # HarfBuzz — ~18 MB) as loose *.dll BESIDE installer.exe. Stage them under
     # runtimes/<rid>/native/ so ExeWrapperPackager can archive them into the
     # stamped Setup.exe's SIGIL_RUNTIME_V1 resource, making the wizard installer

@@ -9,7 +9,7 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Cli;
 
 /// <summary>
-/// T12 ARP-hive parameterization: a per-user install writes HKCU only (zero HKLM
+/// ARP-hive parameterization: a per-user install writes HKCU only (zero HKLM
 /// writes), a per-machine install targets HKLM, and the uninstall string carries
 /// the scope flag so uninstall re-resolves to the same scope.
 /// </summary>

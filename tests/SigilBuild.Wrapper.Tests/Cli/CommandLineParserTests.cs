@@ -85,7 +85,7 @@ public class CommandLineParserTests
         act.Should().Throw<UsageException>().WithMessage("*foo*neither a declared parameter nor a built-in option*");
     }
 
-    // ── Built-in option overrides (T8 model; parsed + stored here) ─────────────
+    // ── Built-in option overrides (parsed + stored here) ────────────────────────
 
     [Fact]
     public void Known_option_override_is_stored_not_rejected()

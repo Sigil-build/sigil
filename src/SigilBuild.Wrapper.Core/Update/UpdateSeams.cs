@@ -9,11 +9,11 @@ using SigilBuild.Wrapper.Engine;
 
 namespace SigilBuild.Wrapper.Update;
 
-// The three I/O boundaries of the /Update runtime (T12.3), factored behind small
-// seams so the fetch → verify → compare → download → run-child decision logic in
+// The three I/O boundaries of the /Update runtime, factored behind small seams so
+// the fetch → verify → compare → download → run-child decision logic in
 // UpdateRunner is unit-testable with plain test doubles (no mocking framework) and
 // no real network / child process. The production implementations here are the
-// CI-VM-only live legs (their end-to-end coverage is T12.6's job).
+// CI-VM-only live legs.
 
 /// <summary>Fetches the raw bytes of an HTTP(S) resource — the channel manifest and its detached <c>.sig</c>.</summary>
 internal interface IUpdateResourceFetcher
@@ -69,9 +69,8 @@ internal sealed class HttpUpdateResourceFetcher : IUpdateResourceFetcher
     /// byte accepted here is therefore accepted on the say-so of whoever answered the
     /// request — a hostile origin, a proxy, or anyone holding the DNS name. That makes
     /// an unbounded read here a memory-exhaustion primitive reachable by an
-    /// unauthenticated party, which is register row R10's actual point, and it is why
-    /// this cap is three orders of magnitude below
-    /// <see cref="SigilDownloader.DefaultMaxBytes"/> rather than merely smaller.
+    /// unauthenticated party, which is why this cap is three orders of magnitude below
+    /// <see cref="SigilDownloader.DefaultMaxBytes"/> rather than merely smaller (R10).
     /// </para>
     /// <para>
     /// The signature verification cannot be moved earlier: it is computed over the
@@ -94,9 +93,8 @@ internal sealed class HttpUpdateResourceFetcher : IUpdateResourceFetcher
         try
         {
             // ResponseHeadersRead, not ResponseContentRead: the latter buffers the whole
-            // body inside HttpClient before this method regains control, which is the
-            // unbounded pre-authentication read being closed. Headers first, then a
-            // metered copy.
+            // body inside HttpClient before this method regains control, which would be
+            // an unbounded pre-authentication read. Headers first, then a metered copy.
             using var resp = await SigilHttpClient.Shared
                 .GetAsync(url, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode)
@@ -159,7 +157,7 @@ internal sealed class HttpUpdateResourceFetcher : IUpdateResourceFetcher
     }
 }
 
-/// <summary>Production downloader delegating to the shared P4 <see cref="SigilDownloader"/> (retry + sha256 verify).</summary>
+/// <summary>Production downloader delegating to the shared <see cref="SigilDownloader"/> (retry + sha256 verify).</summary>
 internal sealed class SigilPackageDownloader : IUpdatePackageDownloader
 {
     private readonly TimeSpan _timeout;
@@ -176,10 +174,10 @@ internal sealed class SigilPackageDownloader : IUpdatePackageDownloader
     public async Task<UpdatePackageDownloadResult> DownloadAsync(
         string url, string destination, string sha256, CancellationToken ct)
     {
-        // R10: the update package is bounded by the absolute file-download backstop. Its
+        // The update package is bounded by the absolute file-download backstop. Its
         // sha256 comes from a SIGNED channel manifest, so its integrity is authenticated —
         // but the size is not declared anywhere, and the bytes arrive before the hash can
-        // say anything, so an unbounded transfer is still an unbounded transfer.
+        // say anything, so an unbounded transfer is still an unbounded transfer (R10).
         var result = await SigilDownloader
             .DownloadVerifiedAsync(
                 url, destination, sha256, _timeout, _maxAttempts, SigilDownloader.DefaultMaxBytes, _report, ct)
@@ -192,7 +190,7 @@ internal sealed class SigilPackageDownloader : IUpdatePackageDownloader
 
 /// <summary>
 /// Production child-process launcher: spawn the downloaded Setup.exe with no window
-/// and wait for it, so its exit code (the P3 upgrade's own result — 0 / 3010 / a
+/// and wait for it, so its exit code (the upgrade's own result — 0 / 3010 / a
 /// failure code) can be propagated as this process's exit code.
 /// </summary>
 internal sealed class ProcessChildInstallerLauncher : IChildInstallerLauncher

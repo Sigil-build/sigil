@@ -10,7 +10,7 @@ using SigilBuild.Core.Manifest;
 using SigilBuild.Wrapper.Engine;
 
 /// <summary>
-/// P11 (T11.1) machine-scope-only <c>scheduled_task_create</c> step. Creates a
+/// Machine-scope-only <c>scheduled_task_create</c> step. Creates a
 /// Windows Scheduled Task via <c>schtasks.exe /Create</c>, running the task as
 /// <c>SYSTEM</c> — which is why the step overrides
 /// <see cref="InstallStep.RequiresMachineScope"/> to <c>true</c> (see
@@ -41,11 +41,8 @@ using SigilBuild.Wrapper.Engine;
 /// <c>onstart</c> triggers need no start time.
 /// </para>
 /// <para>
-/// <c>/F</c> forces overwrite so a repeat run (reinstall / repair) is
-/// idempotent, mirroring the idempotency other steps aim for. Non-zero exit is
-/// surfaced via <see cref="StepResult.Failed(string)"/> with schtasks.exe's
-/// stderr (falling back to stdout) so operators can diagnose without
-/// re-running under a debugger.
+/// A non-zero exit surfaces through <see cref="StepResult.Failed(string)"/> with
+/// schtasks.exe's stderr, falling back to stdout.
 /// </para>
 /// </remarks>
 [SupportedOSPlatform("windows")]
@@ -80,12 +77,12 @@ internal sealed class ScheduledTaskCreateStep : IStep
             return StepResult.Failed("scheduled_task_create: program is empty after substitution");
         }
 
-        // R3/R9: /RU SYSTEM is hardcoded below, so the task's executable must be
-        // anchored inside install_dir AND sit somewhere no unprivileged user can
-        // rewrite it. Refused BEFORE the journal entry: nothing was created, so
-        // there is nothing to undo — and journaling a DeleteScheduledTask here
-        // would make an on_failure: continue run tear down a same-named task this
-        // installer never owned.
+        // /RU SYSTEM is hardcoded below, so the task's executable must be anchored
+        // inside install_dir AND sit somewhere no unprivileged user can rewrite it.
+        // Refused BEFORE the journal entry: nothing was created, so there is nothing
+        // to undo — and journaling a DeleteScheduledTask here would make an
+        // on_failure: continue run tear down a same-named task this installer never
+        // owned (R3, R9).
         var refusal = PrivilegedTargetGuard.Check(
             "scheduled_task_create", "program", ctx.InstallDir, program);
         if (refusal is not null)
@@ -93,16 +90,15 @@ internal sealed class ScheduledTaskCreateStep : IStep
             return StepResult.Failed(refusal);
         }
 
-        // R31: build the argument list — which is where a double quote in `program`
-        // is rejected — BEFORE the journal entry. BuildCreateArgs is pure and
-        // starts no process, so ordering the validation first costs nothing and
-        // keeps every refusal path identical to the containment refusal above:
-        // nothing attempted, nothing journaled. Journaling first would let an
-        // `on_failure: continue` run with a quote typo queue a delete of a
-        // same-named, PRE-EXISTING SYSTEM task that this installer never created —
-        // a quote survives Path.GetFullPath and IsAdminOnlyWritable inspects the
-        // containing directory, so the refusal is genuinely reachable with an
-        // otherwise valid, contained path.
+        // Build the argument list — which is where a double quote in `program` is
+        // rejected — BEFORE the journal entry. BuildCreateArgs is pure and starts no
+        // process, so ordering the validation first costs nothing and keeps every
+        // refusal path identical to the containment refusal above: nothing attempted,
+        // nothing journaled. Journaling first would let an `on_failure: continue` run
+        // with a quote typo queue a delete of a same-named, PRE-EXISTING SYSTEM task
+        // that this installer never created — a quote survives Path.GetFullPath and
+        // IsAdminOnlyWritable inspects the containing directory, so the refusal is
+        // genuinely reachable with an otherwise valid, contained path (R31).
         List<string> args;
         try
         {
@@ -135,24 +131,24 @@ internal sealed class ScheduledTaskCreateStep : IStep
     /// values. A pure, side-effect-free seam so the exact argument construction —
     /// including the DAILY <c>/ST</c> determinism default — is unit-testable
     /// without executing schtasks.exe or requiring admin rights. The live
-    /// create+query+delete leg (which needs <c>/RU SYSTEM</c> elevation) is
-    /// verified on the CI VM (see AGENTS.md §2).
+    /// create+query+delete leg (which needs <c>/RU SYSTEM</c> elevation) runs on
+    /// the CI VM (AGENTS.md §2).
     /// </summary>
     /// <exception cref="ArgumentException">
-    /// <paramref name="program"/> contains a double quote (register row R31).
+    /// <paramref name="program"/> contains a double quote (R31).
     /// </exception>
     internal static List<string> BuildCreateArgs(
         string name, string program, string? arguments, string trigger, string runLevel)
     {
-        // R31: the /TR value is the one concatenated command fragment in the
-        // privileged-step set, and `program` is manifest-substitutable. An
-        // embedded " re-tokenizes the task's own command line, so which token
-        // Task Scheduler treats as the executable is no longer the one the
-        // publisher wrote. Rejected rather than escaped: `program` is authored at
-        // pack time, so a hard failure puts the mistake in front of the publisher
-        // instead of silently rewriting it. (`arguments` is deliberately NOT
-        // checked — quotes there are ordinary and necessary, e.g. a spaced path
-        // in a flag value, and it cannot displace the executable token.)
+        // The /TR value is the one concatenated command fragment in the
+        // privileged-step set, and `program` is manifest-substitutable. An embedded "
+        // re-tokenizes the task's own command line, so which token Task Scheduler
+        // treats as the executable is no longer the one the publisher wrote. Rejected
+        // rather than escaped: `program` is authored at pack time, so a hard failure
+        // puts the mistake in front of the publisher instead of silently rewriting it.
+        // (`arguments` is deliberately NOT checked — quotes there are ordinary and
+        // necessary, e.g. a spaced path in a flag value, and it cannot displace the
+        // executable token.) (R31)
         if (program.Contains('"', StringComparison.Ordinal))
         {
             throw new ArgumentException(

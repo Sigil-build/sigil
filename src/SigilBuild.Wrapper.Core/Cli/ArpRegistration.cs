@@ -10,15 +10,15 @@ using SigilBuild.Core.Manifest;
 /// Writes and removes the per-app entry under
 /// <c>…\Microsoft\Windows\CurrentVersion\Uninstall</c> so the installation
 /// surfaces in Windows' "Add or Remove Programs" UI. The hive follows the
-/// install scope (T12): HKLM for a per-machine install, HKCU for a per-user
+/// install scope: HKLM for a per-machine install, HKCU for a per-user
 /// install. The wrapper exe (the copied <c>uninstall.exe</c>) is the binary the
 /// OS calls back into for uninstall — see <see cref="BuildUninstallString"/>.
 /// </summary>
 /// <remarks>
 /// Writes target the 64-bit registry view by default (the .NET registry
 /// API on a 64-bit process does the right thing for us). 32-bit
-/// installations writing into the WoW64 view are deferred to a later
-/// task — Task 19 only covers the headline x64 case.
+/// installations writing into the WoW64 view are not covered — only the
+/// headline x64 case is.
 /// </remarks>
 [SupportedOSPlatform("windows")]
 [System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage(Justification = "Writes/removes …\\Microsoft\\Windows\\CurrentVersion\\Uninstall entries; exercised only via Windows installer integration tests.")]
@@ -45,7 +45,7 @@ internal static class ArpRegistration
     /// <param name="InstallLocation">The resolved install directory, written as the
     /// standard ARP <c>InstallLocation</c> value. Read back by
     /// <see cref="SigilBuild.Wrapper.Engine.InstalledStateResolver"/> to resolve the
-    /// prior install dir for a P3 upgrade. Empty → the value is not written.</param>
+    /// prior install dir for an upgrade. Empty → the value is not written.</param>
     public sealed record Entry(
         string AppId,
         string DisplayName,
@@ -57,7 +57,7 @@ internal static class ArpRegistration
 
     /// <summary>
     /// Create or update the ARP key for <paramref name="entry"/> in the
-    /// scope-correct hive (T12). A per-machine install writes HKLM (requires the
+    /// scope-correct hive. A per-machine install writes HKLM (requires the
     /// elevated relaunch); a per-user install writes HKCU (no elevation).
     /// </summary>
     public static void Register(Entry entry, InstallScope scope)
@@ -73,7 +73,7 @@ internal static class ArpRegistration
         key.SetValue("Publisher", entry.Publisher);
         key.SetValue("UninstallString", entry.UninstallString);
         // Standard ARP InstallLocation — surfaces the install dir to Windows and lets
-        // a later P3 upgrade recover the prior install directory (InstalledStateResolver).
+        // a later upgrade recover the prior install directory (InstalledStateResolver).
         if (!string.IsNullOrEmpty(entry.InstallLocation))
         {
             key.SetValue("InstallLocation", entry.InstallLocation);
@@ -92,12 +92,12 @@ internal static class ArpRegistration
     /// cannot be read.
     /// </summary>
     /// <remarks>
-    /// R1 clause (c): this is the second-best source of the directory an install
-    /// actually used, after the directory recorded in <c>uninstall.json</c> itself. It
-    /// matters for state written before that field existed — the installed base — where
-    /// the alternative is recomputing a DEFAULT destination that is wrong for every
-    /// <c>/D=</c> or wizard-chosen install. For machine scope the value lives in HKLM
-    /// and is therefore admin-authored, the same trust level as the machine state file.
+    /// The second-best source of the directory an install actually used, after the
+    /// directory recorded in <c>uninstall.json</c> itself. It matters for state written
+    /// before that field existed — the installed base — where the alternative is
+    /// recomputing a DEFAULT destination that is wrong for every <c>/D=</c> or
+    /// wizard-chosen install. For machine scope the value lives in HKLM and is
+    /// therefore admin-authored, the same trust level as the machine state file (R1).
     /// Read-only and best-effort: the caller treats <c>null</c> as "fall through".
     /// </remarks>
     public static string? TryGetInstallLocation(string appId, InstallScope scope)
@@ -120,7 +120,7 @@ internal static class ArpRegistration
 
     /// <summary>
     /// Best-effort delete of the ARP key for <paramref name="appId"/> from the
-    /// scope-correct hive (T12). Missing keys are silently ignored.
+    /// scope-correct hive. Missing keys are silently ignored.
     /// </summary>
     public static void Remove(string appId, InstallScope scope)
     {
@@ -141,7 +141,7 @@ internal static class ArpRegistration
     /// <summary>
     /// Construct the <c>UninstallString</c> the OS calls when the user clicks
     /// "Uninstall" in Add or Remove Programs. Points at <em>this</em> wrapper
-    /// exe with <c>/S /Uninstall</c> and the scope flag appended (T12): a
+    /// exe with <c>/S /Uninstall</c> and the scope flag appended: a
     /// per-machine install emits <c>/allusers</c>, a per-user install
     /// <c>/currentuser</c>, so the uninstall re-resolves to the same scope it was
     /// installed with regardless of the manifest default (HKLM vs HKCU ARP,

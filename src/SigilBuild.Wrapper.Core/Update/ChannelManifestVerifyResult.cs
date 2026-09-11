@@ -2,7 +2,7 @@ namespace SigilBuild.Wrapper.Update;
 
 /// <summary>
 /// Typed outcome of <see cref="ChannelManifestVerifier.Verify(byte[], string?, string?)"/>.
-/// Sibling of <see cref="ChannelManifestParseResult"/> (T12.1): same
+/// Sibling of <see cref="ChannelManifestParseResult"/>: same
 /// success/diagnosticCode/error shape, but signature verification has no
 /// payload to carry on success — <see cref="ChannelManifestParseResult"/>
 /// requires a non-null <see cref="ChannelManifest"/> on <c>Ok</c>, which

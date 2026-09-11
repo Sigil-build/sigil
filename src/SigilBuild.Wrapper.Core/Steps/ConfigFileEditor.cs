@@ -5,7 +5,7 @@ using System.IO;
 using SigilBuild.Wrapper.Engine;
 
 /// <summary>
-/// Shared scaffold for the P8 config-file edit steps (<c>ini_write</c> /
+/// Shared scaffold for the config-file edit steps (<c>ini_write</c> /
 /// <c>json_edit</c> / <c>xml_edit</c>). It journals the ENTIRE prior file (or its
 /// absence) for byte-exact rollback, then applies a format-specific transform and
 /// writes the result. A missing file with <c>create_if_missing=false</c> fails.
@@ -20,7 +20,7 @@ internal static class ConfigFileEditor
     /// </param>
     /// <param name="stepType">
     /// The manifest step type (<c>ini_write</c> / <c>json_edit</c> /
-    /// <c>xml_edit</c>), used to name the step in an R16 containment refusal.
+    /// <c>xml_edit</c>), used to name the step in a containment refusal (R16).
     /// </param>
     /// <param name="allowOutsideInstallDir">
     /// The step's <c>allow_outside_install_dir</c> opt-out (R16).
@@ -34,11 +34,11 @@ internal static class ConfigFileEditor
 
         var path = ctx.ResolvePath(rawPath);
 
-        // R16: File.WriteAllText below traverses reparse points and truncates an
+        // File.WriteAllText below traverses reparse points and truncates an
         // existing target in place, keeping its DACL — so an attacker-planted
         // placeholder outside install_dir stays attacker-writable after the
         // elevated installer writes to it — and Directory.CreateDirectory would
-        // materialize the whole tree. Refused before the file is even stat'ed.
+        // materialize the whole tree. Refused before the file is even stat'ed (R16).
         var refusal = StepDestinationGuard.Check(
             ctx.InstallDir, stepType, "path", path, allowOutsideInstallDir);
         if (refusal is not null)

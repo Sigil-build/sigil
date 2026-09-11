@@ -17,15 +17,14 @@ internal sealed class DirectoryCreateStep : IStep
 
     public Task<StepResult> RunAsync(StepContext ctx, RollbackJournal journal, CancellationToken ct)
     {
-        // ResolvePath refuses a path that still carries an unresolved {token} —
-        // this step materializing a directory literally named "{var.typo}" is the
-        // symptom register row R16 leads with.
+        // ResolvePath refuses a path that still carries an unresolved {token}, so
+        // this step cannot materialize a directory literally named "{var.typo}" (R16).
         var path = ctx.ResolvePath(_spec.Path);
 
-        // R16: Directory.CreateDirectory builds the whole tree, so an unanchored
-        // path lets a manifest create directories anywhere the elevated installer
-        // can reach. Refused before the journal entry: nothing was created, so
-        // there is nothing to remove on rollback.
+        // Directory.CreateDirectory builds the whole tree, so an unanchored path
+        // lets a manifest create directories anywhere the elevated installer can
+        // reach. Refused before the journal entry: nothing was created, so there is
+        // nothing to remove on rollback (R16).
         var refusal = StepDestinationGuard.Check(
             ctx.InstallDir, "directory_create", "path", path, _spec.AllowOutsideInstallDir);
         if (refusal is not null)

@@ -9,7 +9,7 @@ using SigilBuild.Core.Manifest;
 using SigilBuild.Wrapper.Engine;
 
 /// <summary>
-/// <c>xml_edit</c> step (P8, gap G9): set the element (or an <c>attribute</c> on it)
+/// <c>xml_edit</c> step: set the element (or an <c>attribute</c> on it)
 /// selected by <c>xpath</c> in an XML file. Uses <see cref="XmlDocument"/> with the
 /// AOT-safe XPath subset. When the node is absent and <c>create_if_missing</c> is
 /// set, a <em>simple absolute element path</em> (<c>/a/b/c</c>) is created; a
@@ -40,39 +40,31 @@ internal sealed class XmlEditStep : IStep
 internal static class XmlEditor
 {
     /// <summary>
-    /// The XXE posture of every <c>xml_edit</c> parse, stated rather than inherited
-    /// (register row R33).
+    /// The XXE posture of every <c>xml_edit</c> parse, stated rather than inherited (R33).
     /// </summary>
     /// <remarks>
     /// <para>
     /// <b><see cref="XmlReaderSettings.XmlResolver"/> = <c>null</c>.</b> On .NET 10 this
     /// is already the default for both <see cref="XmlDocument"/> and
     /// <see cref="XmlReaderSettings"/>, so external-entity file disclosure and SSRF are
-    /// blocked today whether we say so or not. Saying so is the point: an unasserted
-    /// framework default can be revoked by a future framework, an
-    /// <c>AppContext</c> switch, or a runtimeconfig knob, and this parse runs inside an
-    /// elevated process over a file the manifest chose. It is set on the document too,
-    /// not only the reader, because the document is what would resolve anything on a
-    /// later <c>Save</c>/validate path.
+    /// blocked whether we say so or not. Saying so is the point: an unasserted framework
+    /// default can be revoked by a future framework, an <c>AppContext</c> switch, or a
+    /// runtimeconfig knob, and this parse runs inside an elevated process over a file the
+    /// manifest chose. It is set on the document too, not only the reader, because the
+    /// document is what would resolve anything on a later <c>Save</c>/validate path.
     /// </para>
     /// <para>
-    /// <b><see cref="DtdProcessing.Prohibit"/>.</b> The resolver default never covered
-    /// the <em>internal</em> DTD subset, which was parsed and expanded with no cap — the
-    /// billion-laughs shape (<c>&lt;!ENTITY lol2 "&amp;lol;&amp;lol;&amp;lol;…"&gt;</c>)
-    /// costs the elevated installer memory and time before any edit happens, and per
-    /// register row R16 the target file can sit somewhere an attacker writes. Prohibit
-    /// makes a document that so much as declares a <c>&lt;!DOCTYPE&gt;</c> an
+    /// <b><see cref="DtdProcessing.Prohibit"/>.</b> The resolver default does not cover
+    /// the <em>internal</em> DTD subset, which parses and expands with no cap — the
+    /// billion-laughs shape costs the elevated installer memory and time before any edit
+    /// happens, over a target file that can sit somewhere an attacker writes (R16).
+    /// Prohibit makes a document that so much as declares a <c>&lt;!DOCTYPE&gt;</c> an
     /// <see cref="XmlException"/>, which <c>ConfigFileEditor</c> surfaces as a step
-    /// failure with the file untouched.
-    /// </para>
-    /// <para>
-    /// <b>Prohibit rather than a capped Parse</b> is a deliberate strictness choice: no
-    /// shipped example, and no configuration format the guides teach editing, declares a
-    /// DTD, so the refusal costs nothing real, and "no DTD reaches this parser" is an
-    /// invariant a reviewer can check by reading one line. A capped
+    /// failure with the file untouched. Prohibit rather than a capped
     /// <see cref="DtdProcessing.Parse"/> with
-    /// <see cref="XmlReaderSettings.MaxCharactersFromEntities"/> would accept more
-    /// documents at the cost of a number to tune and a bound to argue about.
+    /// <see cref="XmlReaderSettings.MaxCharactersFromEntities"/> is deliberate: nothing
+    /// this tool documents editing declares a DTD, so the refusal costs nothing real and
+    /// the invariant is one readable line instead of a bound to tune.
     /// </para>
     /// <para>
     /// <see cref="XmlReaderSettings.IgnoreWhitespace"/> stays <c>false</c> (the default),

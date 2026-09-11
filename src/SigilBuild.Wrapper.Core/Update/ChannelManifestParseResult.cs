@@ -2,7 +2,7 @@ namespace SigilBuild.Wrapper.Update;
 
 /// <summary>
 /// Typed outcome of <see cref="ChannelManifestParser.Parse(string)"/>. The
-/// update runtime call path (T12.3) has no pack-time diagnostics list to
+/// update runtime call path has no pack-time diagnostics list to
 /// append to, so a malformed manifest is surfaced as a result the caller logs
 /// and maps to a process exit code, rather than a thrown exception — mirroring
 /// <c>StepResult</c> / <c>EngineResult</c> in <c>SigilBuild.Wrapper.Engine</c>.

@@ -20,21 +20,19 @@ internal sealed record UpdateRequest(
     InstallScope Scope,
     string AppId,
     string TempDirectory,
-    // T12.4: whether the downloaded child Setup.exe is launched silently.
-    // Headless /Update (T12.3, unchanged) launches it /silent, forwarding only
-    // the scope flag's twin; a headed, non-silent /Update launches it WITHOUT
-    // /silent so the user sees the new version's own install wizard. Defaults to
-    // true so every T12.3-era call site (and test) keeps its original behavior
-    // without having to name this argument.
+    // Whether the downloaded child Setup.exe is launched silently. Headless
+    // /Update launches it /silent, forwarding only the scope flag's twin; a
+    // headed, non-silent /Update launches it WITHOUT /silent so the user sees
+    // the new version's own install wizard.
     bool SilentChild = true);
 
 /// <summary>
-/// The core of P12 (T12.3): the headless <c>/Update</c> flow — fetch the signed
+/// The headless <c>/Update</c> flow — fetch the signed
 /// channel manifest + its detached signature, parse (SIG0320) and verify (SIG0321,
 /// a HARD reject), compare the advertised version against the installed one reusing
-/// the P3 upgrade decision, and — only when a strictly-newer package is available —
+/// the upgrade decision, and — only when a strictly-newer package is available —
 /// download the new version's stamped Setup.exe and run it SILENTLY, forwarding the
-/// current scope, so that child installer performs the actual version-aware P3
+/// current scope, so that child installer performs the actual version-aware
 /// upgrade (uninstall-old-then-install, preserving the install dir). This process
 /// re-implements no install logic; it propagates the child's exit code.
 /// </summary>
@@ -43,7 +41,7 @@ internal sealed record UpdateRequest(
 /// the <see cref="IUpdateResourceFetcher"/> / <see cref="IUpdatePackageDownloader"/>
 /// / <see cref="IChildInstallerLauncher"/> seams, and the installed version is read
 /// through an injected probe, so the decision table is exercised by unit tests with
-/// plain doubles. The live fetch → download → run-child leg is CI-VM-only (T12.6).
+/// plain doubles. The live fetch → download → run-child leg is CI-VM-only.
 /// </remarks>
 internal sealed class UpdateRunner
 {
@@ -55,9 +53,9 @@ internal sealed class UpdateRunner
     private readonly IUpdateSequenceStore _sequences;
 
     /// <param name="sequences">
-    /// R13's replay high water mark. Defaults to the real machine-scope file store;
-    /// tests MUST pass an in-memory one, because the default reads and writes a real
-    /// <c>%ProgramData%</c> path and CI runs elevated.
+    /// The replay high water mark (R13). Defaults to the real machine-scope file
+    /// store; tests MUST pass an in-memory one, because the default reads and writes a
+    /// real <c>%ProgramData%</c> path and CI runs elevated.
     /// </param>
     public UpdateRunner(
         IUpdateResourceFetcher fetcher,
@@ -87,11 +85,11 @@ internal sealed class UpdateRunner
             return InstallSession.UpdateNotConfiguredExitCode;
         }
 
-        // R14: re-check the scheme before anything is fetched. SIG0324 catches this at
-        // pack time; this is the runtime half, and it is not redundant — the `.sig` URL
-        // is this string + ".sig", so a cleartext manifestUrl silently drags the
-        // signature fetch onto cleartext too, and an installer stamped before SIG0324
-        // existed is still out there.
+        // Re-check the scheme before anything is fetched. SIG0324 catches this at pack
+        // time; this is the runtime half, and it is not redundant — the `.sig` URL is
+        // this string + ".sig", so a cleartext manifestUrl silently drags the signature
+        // fetch onto cleartext too, and an installer stamped before SIG0324 existed is
+        // still out there (R14).
         if (!request.ManifestUrl!.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
         {
             _report(
@@ -125,11 +123,9 @@ internal sealed class UpdateRunner
 
         // 3. Verify the detached signature over the exact bytes FIRST (SIG0321). A
         //    tampered or unsigned channel manifest is a HARD reject — never acted on,
-        //    and now never even parsed. R39: verification used to run after the parse.
-        //    Nothing parsed was consumed before verification, so that ordering was not
-        //    exploitable — but it exposed the JSON parser to unverified network input
-        //    and let whoever answered the request choose which diagnostic the user saw.
-        //    Verify-then-parse is the cheaper invariant to keep true as this grows.
+        //    and never even parsed. Verify-then-parse keeps the JSON parser off
+        //    unverified network input and stops whoever answered the request choosing
+        //    which diagnostic the user sees (R39).
         var signatureBase64 = Encoding.UTF8.GetString(signatureFetch.Bytes).Trim();
         var verify = ChannelManifestVerifier.Verify(manifestBytes, signatureBase64, request.SigningKey);
         if (!verify.Success)
@@ -147,11 +143,11 @@ internal sealed class UpdateRunner
         }
         var channel = parse.Manifest;
 
-        // 4b. R13: freshness. The signature proves WHO minted this document, not WHEN.
+        // 4b. Freshness. The signature proves WHO minted this document, not WHEN.
         //     Without this gate an on-path attacker or compromised CDN replays a
         //     correctly signed older manifest indefinitely — freezing updates while a
         //     security fix exists, or steering the client onto an intermediate version
-        //     that is newer than installed and known-vulnerable.
+        //     that is newer than installed and known-vulnerable (R13).
         var lastSequence = _sequences.Read(request.AppId, request.Scope);
         var freshness = EvaluateFreshness(channel, lastSequence, DateTimeOffset.UtcNow);
         if (freshness is not null)
@@ -170,7 +166,7 @@ internal sealed class UpdateRunner
             _sequences.Record(request.AppId, request.Scope, seen, _report);
         }
 
-        // 5. Compare the advertised version against the installed one, reusing the P3
+        // 5. Compare the advertised version against the installed one, reusing the
         //    upgrade decision (dotted-version comparison; malformed installed treated
         //    as older). Same/older → up to date (clean exit 0).
         var state = _installedStateProbe();
@@ -203,12 +199,12 @@ internal sealed class UpdateRunner
             }
             else
             {
-                // R37: an installed version that cannot be compared against the floor is
-                // NOT eligible. This used to log and proceed, which let anything that
-                // could make the recorded version unparseable — for a user-scope install
-                // that is a value in the user's own HKCU — skip a floor the publisher
-                // declared. Fail closed: a floor that is unenforceable is not a floor
-                // that has been satisfied.
+                // An installed version that cannot be compared against the floor is NOT
+                // eligible. Logging and proceeding would let anything that can make the
+                // recorded version unparseable — for a user-scope install that is a value
+                // in the user's own HKCU — skip a floor the publisher declared. Fail
+                // closed: a floor that is unenforceable is not a floor that has been
+                // satisfied (R37).
                 _report(
                     $"update: cannot update to {channel.Version} — this package declares a minimum " +
                     $"{channel.MinFromVersion} it updates from, and the installed version " +
@@ -219,8 +215,8 @@ internal sealed class UpdateRunner
         }
 
         // 6. Validate the checksum is a plausible SHA-256 hex digest before spending a
-        //    download on it (T12.1 left Sha256 permissive). A bad-format checksum fails
-        //    cleanly here rather than surfacing later as a confusing "sha256 mismatch".
+        //    download on it. A bad-format checksum fails cleanly here rather than
+        //    surfacing later as a confusing "sha256 mismatch".
         if (!IsPlausibleSha256Hex(channel.Sha256))
         {
             _report("update: channel manifest sha256 is not a 64-character hex digest — refusing to download", true);
@@ -232,8 +228,8 @@ internal sealed class UpdateRunner
         // 7. Download the new version's stamped Setup.exe into a private, per-run
         //    staging directory and run it in the current scope. The staged file is
         //    re-verified from an OPEN, write-and-delete-denying handle that is held
-        //    across the child launch — register row R12: verifying and then launching a
-        //    file nobody is holding leaves a window in which the bytes can be swapped.
+        //    across the child launch — verifying and then launching a file nobody is
+        //    holding leaves a window in which the bytes can be swapped (R12).
         //    Disposing the staging directory cleans up regardless of outcome.
         var stagedName = $"sigil-update-{SanitizeSegment(request.AppId)}.exe";
 
@@ -282,7 +278,7 @@ internal sealed class UpdateRunner
 
         using (handle)
         {
-            // R11: Authenticode, immediately before the launch and from inside the window
+            // Authenticode, immediately before the launch and from inside the window
             // where the verified handle is already held. The channel manifest's signature
             // authenticates the sha256, and the sha256 authenticates the bytes — but only
             // against the manifest, and this process is about to run those bytes with the
@@ -291,7 +287,7 @@ internal sealed class UpdateRunner
             // demand one of its own successor, and would simply lose /Update entirely.
             // When it is NOT armed, RefusalForArtifactDownload says so on this same report
             // channel rather than passing quietly — an absent check nobody is told about is
-            // indistinguishable, in a log, from a check that passed.
+            // indistinguishable, in a log, from a check that passed (R11).
             var trustRefusal = DownloadedBinaryTrust.RefusalForArtifactDownload(
                 dest, $"the downloaded {channel.Version} installer", _report);
             if (trustRefusal is not null)
@@ -301,9 +297,9 @@ internal sealed class UpdateRunner
             }
 
             var scopeFlag = request.Scope == InstallScope.Machine ? "/allusers" : "/currentuser";
-            // T12.4: headless /Update (SilentChild true, T12.3 unchanged) launches the
-            // child /silent; a headed, non-silent /Update launches it WITHOUT /silent so
-            // the user sees the new version's own install wizard.
+            // Headless /Update (SilentChild true) launches the child /silent; a headed,
+            // non-silent /Update launches it WITHOUT /silent so the user sees the new
+            // version's own install wizard.
             var args = request.SilentChild ? new[] { scopeFlag, "/silent" } : new[] { scopeFlag };
             var argsDescription = request.SilentChild ? $"{scopeFlag} /silent" : scopeFlag;
             _report($"update: installing {channel.Version} (running the downloaded setup {argsDescription})", false);
@@ -327,8 +323,8 @@ internal sealed class UpdateRunner
     }
 
     /// <summary>
-    /// Clock-skew tolerance applied to both ends of the validity window (register row
-    /// R13, ADR-011).
+    /// Clock-skew tolerance applied to both ends of the validity window (R13,
+    /// ADR-011).
     /// </summary>
     /// <remarks>
     /// A window with no skew allowance breaks on any misconfigured clock, and a machine
@@ -341,7 +337,7 @@ internal sealed class UpdateRunner
 
     /// <summary>
     /// Maximum age accepted from <c>issuedAt</c>, independently of <c>expiresAt</c>
-    /// (register row R13, ADR-011).
+    /// (R13, ADR-011).
     /// </summary>
     /// <remarks>
     /// <c>expiresAt</c> is publisher-chosen, so a publisher who sets it to the year 3000
@@ -353,8 +349,8 @@ internal sealed class UpdateRunner
     internal static readonly TimeSpan MaxManifestAge = TimeSpan.FromDays(30);
 
     /// <summary>
-    /// The R13 freshness decision, pure and unit-testable: returns the refusal reason, or
-    /// <c>null</c> when <paramref name="channel"/> is fresh enough to act on.
+    /// The freshness decision, pure and unit-testable: returns the refusal reason, or
+    /// <c>null</c> when <paramref name="channel"/> is fresh enough to act on (R13).
     /// </summary>
     /// <param name="channel">The verified, parsed channel manifest.</param>
     /// <param name="lastSequence">
@@ -427,7 +423,7 @@ internal sealed class UpdateRunner
 
     /// <summary>
     /// True when <paramref name="value"/> is exactly 64 hexadecimal characters — the
-    /// shape of a SHA-256 digest the P4 downloader compares against (it hex-encodes
+    /// shape of a SHA-256 digest the downloader compares against (it hex-encodes
     /// the computed hash). Anything else (base64, wrong length, non-hex) is rejected
     /// up front so a malformed checksum fails cleanly instead of always mismatching.
     /// </summary>

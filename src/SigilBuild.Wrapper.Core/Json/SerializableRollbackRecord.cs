@@ -68,19 +68,19 @@ internal sealed record SerializableRollbackRecord
     // so an interrupted install still tears the service down.
     public string? ServiceName { get; init; }
 
-    // DeleteScheduledTask (P11, T11.1): name of the Scheduled Task to
+    // DeleteScheduledTask: name of the Scheduled Task to
     // schtasks /Delete on rollback / uninstall. Recorded by
     // scheduled_task_create BEFORE the create so an interrupted install
     // still tears the task down. Name only — no secrets.
     public string? TaskName { get; init; }
 
-    // UnregisterCom (P11, T11.2): path of the COM DLL to DllUnregisterServer
+    // UnregisterCom: path of the COM DLL to DllUnregisterServer
     // on rollback / uninstall. Recorded by com_register BEFORE the register
     // so an interrupted install still unwinds the COM registration. Path
     // only — no secrets, no registry contents.
     public string? ComDllPath { get; init; }
 
-    // DeleteFirewallRule (P11, T11.3): name of the Windows Defender Firewall
+    // DeleteFirewallRule: name of the Windows Defender Firewall
     // rule to netsh delete on rollback / uninstall. Recorded by firewall_rule
     // BEFORE the add so an interrupted install still tears the rule down.
     // Name only — no secrets, no resolved program path.
@@ -181,7 +181,7 @@ internal static class SerializableRollbackRecordExtensions
                 StashPath = r.StashPath,
             },
 
-            // P8: a null StashPath means "the edit created this file" (undo deletes it).
+            // A null StashPath means "the edit created this file" (undo deletes it).
             RollbackRecord.RestoreConfigFile r => new SerializableRollbackRecord
             {
                 Type = "restore_config_file",
@@ -268,7 +268,7 @@ internal static class SerializableRollbackRecordExtensions
                 s.OriginalPath ?? throw MissingField("restore_deleted_directory", "originalPath"),
                 s.StashPath ?? throw MissingField("restore_deleted_directory", "stashPath")),
 
-            // P8: StashPath is nullable (null = created file → undo deletes it).
+            // StashPath is nullable (null = created file → undo deletes it).
             "restore_config_file" => new RollbackRecord.RestoreConfigFile(
                 s.OriginalPath ?? throw MissingField("restore_config_file", "originalPath"),
                 s.StashPath),

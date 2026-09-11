@@ -18,7 +18,7 @@ namespace SigilBuild.Wrapper.Json;
 /// All per-type fields are nullable optional. <see cref="Type"/> is the
 /// step-kind discriminator (mirrors the YAML <c>type:</c> values:
 /// <c>file_copy</c>, <c>directory_create</c>, etc.). When extending this
-/// DTO for a new step type (Tasks 15–17) add the matching arms in
+/// DTO for a new step type add the matching arms in
 /// <see cref="SerializableInstallStepConverter.ToInstallStep"/> and
 /// <see cref="SerializableInstallStepConverter.FromInstallStep"/>.
 /// </remarks>
@@ -30,7 +30,7 @@ internal sealed record SerializableInstallStep
     public string OnFailure { get; init; } = "fail";
 
     /// <summary>
-    /// R16 destination-containment opt-out. Envelope field like
+    /// Destination-containment opt-out (R16). Envelope field like
     /// <see cref="When"/> / <see cref="OnFailure"/>, not per-step, so the
     /// converters carry it in one place at the end of each switch. Nullable so an
     /// older blob (which has no such property) deserializes to "not set" rather
@@ -100,13 +100,13 @@ internal sealed record SerializableInstallStep
     public int[]? ExpectedExitCodes { get; init; }
     public int? TimeoutSeconds { get; init; }
 
-    // http_download (P4). TimeoutSeconds above is shared with run_program.
+    // http_download. TimeoutSeconds above is shared with run_program.
     public string? HttpUrl { get; init; }
     public string? HttpDest { get; init; }
     public string? Sha256 { get; init; }
     public int? HttpRetries { get; init; }
 
-    // ini_write / json_edit / xml_edit (P8). Path (above) is shared.
+    // ini_write / json_edit / xml_edit. Path (above) is shared.
     public bool? CreateIfMissing { get; init; }
     public string? Section { get; init; }
     public string? IniKey { get; init; }
@@ -115,9 +115,9 @@ internal sealed record SerializableInstallStep
     public string? JsonEditValue { get; init; }
 
     /// <summary>
-    /// <c>json_edit.value_type</c> (register row R35): <c>"string"</c> or <c>"json"</c>.
-    /// Absent means <c>"string"</c> — the safe default — so a blob written before this
-    /// field existed decodes to the guarded behaviour rather than the old inferring one.
+    /// <c>json_edit.value_type</c>: <c>"string"</c> or <c>"json"</c>. Absent means
+    /// <c>"string"</c> — the safe default — so a blob written before this field existed
+    /// decodes to the guarded behaviour rather than to literal inference (R35).
     /// </summary>
     public string? JsonEditValueType { get; init; }
     public string? Xpath { get; init; }
@@ -133,7 +133,7 @@ internal sealed record SerializableInstallStep
     public string? ServiceAccount { get; init; }
     public bool? StartAfterInstall { get; init; }
 
-    // scheduled_task_create (P11, T11.1). Program/ProgramArgs above belong to
+    // scheduled_task_create. Program/ProgramArgs above belong to
     // run_program; the task's executable + args get their own fields since a
     // task also carries a Trigger/RunLevel that run_program has no concept of.
     public string? TaskName { get; init; }
@@ -142,7 +142,7 @@ internal sealed record SerializableInstallStep
     public string? TaskTrigger { get; init; }
     public string? TaskRunLevel { get; init; }
 
-    // firewall_rule (P11, T11.3). Fresh field names (rather than reusing the
+    // firewall_rule. Fresh field names (rather than reusing the
     // generic Name/Program slots above) avoid ambiguity with the other step
     // types that already use those names — mirrors TaskName/TaskProgram's
     // reasoning for scheduled_task_create.
@@ -167,7 +167,7 @@ internal static class SerializableInstallStepConverter
 
         var step = ToTypedStep(s, onFailure);
 
-        // R16: the envelope opt-out, applied once rather than in all 18 arms.
+        // The envelope opt-out, applied once rather than in all 18 arms (R16).
         return s.AllowOutsideInstallDir == true
             ? step with { AllowOutsideInstallDir = true }
             : step;
@@ -357,9 +357,9 @@ internal static class SerializableInstallStepConverter
 
         var dto = ToDto(step);
 
-        // R16: the envelope opt-out, applied once rather than in all 18 arms.
-        // Written only when set, so a manifest that never used it produces the
-        // same blob bytes it always did — pack output stays byte-stable.
+        // The envelope opt-out, applied once rather than in all 18 arms (R16).
+        // Written only when set, so a manifest that never used it produces unchanged
+        // blob bytes — pack output stays byte-stable.
         return step.AllowOutsideInstallDir ? dto with { AllowOutsideInstallDir = true } : dto;
     }
 
@@ -606,11 +606,11 @@ internal static class SerializableInstallStepConverter
     };
 
     /// <summary>
-    /// Register row R35. An absent or unrecognized value decodes to
-    /// <see cref="JsonValueType.Text"/>: the safe direction, and the one a blob
-    /// written before the field existed must take. Unlike the parser, this cannot
-    /// report a diagnostic — the manifest is long gone by blob-decode time — so it
-    /// falls back rather than throwing, exactly as <see cref="ParseOnFailure"/> does.
+    /// An absent or unrecognized value decodes to <see cref="JsonValueType.Text"/>:
+    /// the safe direction, and the one a blob written before the field existed must
+    /// take. Unlike the parser, this cannot report a diagnostic — the manifest is long
+    /// gone by blob-decode time — so it falls back rather than throwing, exactly as
+    /// <see cref="ParseOnFailure"/> does (R35).
     /// </summary>
     private static JsonValueType ParseJsonValueType(string? raw) => raw switch
     {
@@ -647,7 +647,7 @@ internal static class SerializableInstallStepConverter
     /// <summary>
     /// Convert a registry-write <see cref="JsonElement"/> back to the
     /// <c>object?</c> shape <see cref="InstallStep.RegistryWrite.Value"/>
-    /// expects. We honour the four scalar shapes the Sprint 5a parser
+    /// expects. We honour the four scalar shapes the parser
     /// produces (<see cref="string"/>, <see cref="int"/>/<see cref="long"/>,
     /// <see cref="bool"/>) plus <c>null</c>; arrays/objects fall through to
     /// the raw <see cref="JsonElement"/> for forward-compatibility.

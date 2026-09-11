@@ -8,7 +8,7 @@ using SigilBuild.Core.Manifest;
 using SigilBuild.Wrapper.Engine;
 
 /// <summary>
-/// Install-time <c>http_download</c> step (P4, gap G5): streams an HTTPS URL to a
+/// Install-time <c>http_download</c> step: streams an HTTPS URL to a
 /// destination file, verifies its SHA-256, and journals the write so a rollback
 /// deletes the download. HTTPS-only; the system proxy is honored (shared
 /// <see cref="SigilHttpClient"/>). Transient failures (network / timeout / 5xx)
@@ -32,11 +32,11 @@ internal sealed class HttpDownloadStep : IStep
         var url = ctx.Resolve(_spec.Url);
         var dest = ctx.ResolvePath(_spec.Dest);
 
-        // R16: contain the download destination before anything is created. The
+        // Contain the download destination before anything is created. The
         // web-installer stub legitimately downloads outside install_dir — it lands
         // in the per-run staging directory, which resolves from its own token, so
         // the token check passes and the containment check is the one the stub's
-        // synthesized step opts out of.
+        // synthesized step opts out of (R16).
         var refusal = StepDestinationGuard.Check(
             ctx.InstallDir, "http_download", "dest", dest, _spec.AllowOutsideInstallDir);
         if (refusal is not null)
@@ -80,13 +80,12 @@ internal sealed class HttpDownloadStep : IStep
         }
         journal.Append(new RollbackRecord.RestoreFile(dest, existedBefore, backup));
 
-        // Shared verified-download plumbing (P4/P5): retry + hash-verify over the one
+        // Shared verified-download plumbing: retry + hash-verify over the one
         // proxy-aware HttpClient. This step owns the journaling above; the helper owns
         // the transfer. A genuine user cancel propagates for the engine's rollback.
-        // R10: an install payload is bounded by the absolute file-download backstop. The
-        // manifest carries no per-step size, so this is the only ceiling there is — its
-        // job is to stop an unbounded slow-drip body filling the disk, not to second-guess
-        // a legitimate package.
+        // The manifest carries no per-step size, so the absolute file-download backstop
+        // is the only ceiling there is — its job is to stop an unbounded slow-drip body
+        // filling the disk, not to second-guess a legitimate package (R10).
         var result = await SigilDownloader.DownloadVerifiedAsync(
             url, dest, expected, timeout, maxAttempts, SigilDownloader.DefaultMaxBytes,
             report: (msg, isErr) => ctx.ProgressSink?.Report(new StepProgress(0, 0, msg, isErr)),
@@ -94,10 +93,10 @@ internal sealed class HttpDownloadStep : IStep
 
         if (result.Success)
         {
-            // R5: hand the confirmed digest to the context so that a later run_program of
+            // Hand the confirmed digest to the context so that a later run_program of
             // this exact path re-checks it under a held handle instead of trusting that
-            // nothing touched the file in between. The SHA-256 above protected the
-            // download; on its own it protects nothing about the execution.
+            // nothing touched the file in between: the SHA-256 above protected the
+            // download, and on its own it protects nothing about the execution (R5).
             ctx.RecordVerifiedDownload(dest, expected);
             ctx.ProgressSink?.Report(new StepProgress(0, 0, $"download: verified {Path.GetFileName(dest)}", false));
             return new StepResult(true, null);

@@ -38,8 +38,8 @@ public enum WrapperMode
 }
 
 /// <summary>
-/// Install-scope override requested on the command line. The concrete
-/// scope/elevation behaviour is Task T12 — T2 only parses and stores the flag.
+/// Install-scope override requested on the command line. This records the
+/// request only; the scope/elevation behaviour lives in the engine.
 /// </summary>
 public enum ScopeOverride
 {
@@ -80,21 +80,21 @@ public sealed class ParsedCommandLine
 
     /// <summary>
     /// Built-in-option overrides (<c>desktop_shortcut</c>, <c>add_to_path</c>, …):
-    /// canonical option name → raw value. The option model itself lands in
-    /// Task T8; T2 parses and stores the values so <c>/Pdesktop_shortcut=false</c>
-    /// is accepted rather than rejected as an unknown token.
+    /// canonical option name → raw value. Parsed and stored here so
+    /// <c>/Pdesktop_shortcut=false</c> is accepted rather than rejected as an unknown
+    /// token; the option model itself lives elsewhere.
     /// </summary>
     public IReadOnlyDictionary<string, string> Options { get; init; } =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Install-dir override from <c>/D=path</c>; <c>null</c> if not supplied. Stored only (Task T13).</summary>
+    /// <summary>Install-dir override from <c>/D=path</c>; <c>null</c> if not supplied. Stored only.</summary>
     public string? InstallDir { get; init; }
 
-    /// <summary>Scope override from <c>/allusers</c> / <c>/currentuser</c>. Stored only (Task T12).</summary>
+    /// <summary>Scope override from <c>/allusers</c> / <c>/currentuser</c>. Stored only.</summary>
     public ScopeOverride Scope { get; init; } = ScopeOverride.None;
 
     /// <summary>
-    /// True when <c>/force-downgrade</c> was supplied (P3): install an older version
+    /// True when <c>/force-downgrade</c> was supplied: install an older version
     /// over an installed newer one instead of blocking. Ignored for fresh / same /
     /// upgrade runs.
     /// </summary>
@@ -105,7 +105,7 @@ public sealed class ParsedCommandLine
 
     /// <summary>
     /// True when <c>/LOG</c> or <c>/LOG=path</c> was supplied — the run writes a
-    /// timestamped install log (P7). Applies to install, uninstall, and update
+    /// timestamped install log. Applies to install, uninstall, and update
     /// modes alike (the ARP <c>UninstallString</c> can carry <c>/LOG</c> too).
     /// </summary>
     public bool LogRequested { get; init; }
@@ -118,14 +118,14 @@ public sealed class ParsedCommandLine
     public string? LogPath { get; init; }
 
     /// <summary>
-    /// True when <c>/launch</c> was supplied (P2, gap G4). A headless
+    /// True when <c>/launch</c> was supplied. A headless
     /// (<c>/silent</c>) install starts the <c>run_after_install</c> target only when
     /// this is set; the interactive wizard uses the Done-screen checkbox instead.
     /// </summary>
     public bool Launch { get; init; }
 
     /// <summary>
-    /// True when <c>/closeapps</c> was supplied (P6, gap G7). A headless run whose
+    /// True when <c>/closeapps</c> was supplied. A headless run whose
     /// install directory is held open by running applications closes them via the
     /// Restart Manager instead of refusing; without it the run exits with
     /// <c>InstallSession.FilesInUseExitCode</c>. The wizard uses the "Close
@@ -136,8 +136,8 @@ public sealed class ParsedCommandLine
     /// <summary>
     /// Requested wizard language from /lang=&lt;tag&gt;. A fixed installer.language
     /// overrides this (design §2.1) — language is a display preference, so a
-    /// conflict is logged and ignored rather than being a usage error like
-    /// T12's fixed-scope vs /allusers.
+    /// conflict is logged and ignored rather than being a usage error like the
+    /// fixed-scope vs /allusers conflict.
     /// </summary>
     public string? Lang { get; init; }
 
@@ -269,28 +269,28 @@ public sealed class ParsedCommandLine
 /// installer convention):
 /// <list type="bullet">
 ///   <item><description><c>/silent</c> (alias <c>/S</c>) — headless install. Implies
-///   acceptance of the license (T14): the headless path never shows the License
+///   acceptance of the license: the headless path never shows the License
 ///   screen, so a silent install proceeds without an interactive accept gate.</description></item>
 ///   <item><description><c>/verysilent</c> — headless install with suppressed progress.</description></item>
 ///   <item><description><c>/Update</c> — run <c>update_steps</c> instead of <c>install_steps</c>.</description></item>
 ///   <item><description><c>/Uninstall</c> — run the auto-derived uninstall sequence.</description></item>
-///   <item><description><c>/allusers</c> / <c>/currentuser</c> — scope override (stored only; Task T12).</description></item>
-///   <item><description><c>/force-downgrade</c> — install an older version over an installed newer one (P3).</description></item>
-///   <item><description><c>/D=path</c> — install-dir override (stored only; Task T13).</description></item>
+///   <item><description><c>/allusers</c> / <c>/currentuser</c> — scope override (stored only).</description></item>
+///   <item><description><c>/force-downgrade</c> — install an older version over an installed newer one.</description></item>
+///   <item><description><c>/D=path</c> — install-dir override (stored only).</description></item>
 ///   <item><description><c>/LOG</c> — write a timestamped install log to
-///   <c>%TEMP%\sigil-&lt;appid&gt;.log</c>; <c>/LOG=path</c> — write it to <c>path</c> (P7).</description></item>
+///   <c>%TEMP%\sigil-&lt;appid&gt;.log</c>; <c>/LOG=path</c> — write it to <c>path</c>.</description></item>
 ///   <item><description><c>/closeapps</c> — when the install directory is held open
 ///   by running applications, close them via the Restart Manager instead of refusing
-///   the silent run (P6).</description></item>
+///   the silent run.</description></item>
 ///   <item><description><c>/launch</c> — after a silent install, start the
-///   <c>run_after_install</c> target unelevated (P2). Ignored without <c>/silent</c>
+///   <c>run_after_install</c> target unelevated. Ignored without <c>/silent</c>
 ///   (the wizard uses the Done-screen checkbox).</description></item>
-///   <item><description><c>/lang=tag</c> — request wizard language (P10). <c>tag</c> is a
+///   <item><description><c>/lang=tag</c> — request wizard language. <c>tag</c> is a
 ///   language tag like <c>en</c>, <c>uk</c>, or <c>pt-BR</c>.</description></item>
 ///   <item><description><c>/?</c> (alias <c>/help</c>) — show help text.</description></item>
 ///   <item><description><c>/P&lt;Name&gt;=&lt;Value&gt;</c> — override a declared parameter or a built-in option.</description></item>
 ///   <item><description><c>/Poption.&lt;Name&gt;=true|false</c> — override an app-defined custom
-///   component (P10). Namespaced under <c>option.</c> so a component and a declared
+///   component. Namespaced under <c>option.</c> so a component and a declared
 ///   parameter may share a name without ambiguity.</description></item>
 ///   <item><description><c>/SecretHandoff=&lt;path&gt;</c> — <b>reserved</b>, not
 ///   user-facing: the elevated relaunch's secret channel (R18). Consumed before
@@ -303,9 +303,9 @@ public sealed class ParsedCommandLine
 public static class CommandLineParser
 {
     /// <summary>
-    /// Built-in installer options (Task T8). T2 accepts and stores overrides for
-    /// them so <c>/Pdesktop_shortcut=false</c> parses rather than exit-64s; the
-    /// option model and generated steps land in T8.
+    /// Built-in installer options. Overrides for them are accepted and stored so
+    /// <c>/Pdesktop_shortcut=false</c> parses rather than exit-64s; the option model
+    /// and generated steps live elsewhere.
     /// </summary>
     private static readonly HashSet<string> KnownOptions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -331,7 +331,7 @@ public static class CommandLineParser
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(schema);
 
-        // P10 (gap G11): the app-defined custom component names accepted in the
+        // The app-defined custom component names accepted in the
         // namespaced `/Poption.<name>=value` form. Empty when the blob declares no
         // custom component (a bare token that isn't a param or built-in still errors).
         var customSet = customOptions is null
@@ -364,12 +364,12 @@ public static class CommandLineParser
         var closeApps = false;
         string? lang = null;
 
-        // R18: the reserved /SecretHandoff=<path> switch is consumed BEFORE the token
-        // loop, and its decrypted pairs are seeded into `values` through the same
+        // The reserved /SecretHandoff=<path> switch is consumed BEFORE the token loop,
+        // and its decrypted pairs are seeded into `values` through the same
         // canonical-casing binding a /P token uses. Seeding first (rather than merging
         // after) preserves the loop's last-wins semantics: an explicit /P token later
         // in the same vector still overrides the handoff, exactly as a second /P token
-        // overrides the first.
+        // overrides the first (R18).
         var effectiveArgs = ConsumeSecretHandoff(args, byName, values);
 
         foreach (var rawArg in effectiveArgs)
@@ -451,7 +451,7 @@ public static class CommandLineParser
                 continue;
             }
 
-            // /LOG or /LOG=path — install log (P7). Bare /LOG defaults the path to
+            // /LOG or /LOG=path — install log. Bare /LOG defaults the path to
             // %TEMP%\sigil-<appid>.log (resolved by the session, which knows the AppId).
             if (body.Length >= 3 &&
                 (body[0] == 'L' || body[0] == 'l') &&
@@ -506,7 +506,7 @@ public static class CommandLineParser
             }
 
             // /PName=Value — declared parameter or built-in option override.
-            // /Poption.Name=Value — namespaced app-defined custom component (P10).
+            // /Poption.Name=Value — namespaced app-defined custom component.
             if (body.Length >= 1 && (body[0] == 'P' || body[0] == 'p'))
             {
                 ParsePValue(rawArg, body.Substring(1), byName, values, options, customSet);
@@ -525,7 +525,7 @@ public static class CommandLineParser
         // Silent install must be fully specified up-front: a required parameter
         // (declared, install-time, no default) that was not supplied cannot be
         // collected from the wizard, so fail loudly and name it. The interactive
-        // path skips this — the wizard collects the values (Task T9).
+        // path skips this — the wizard collects the values.
         if (silent && mode == WrapperMode.Install)
         {
             var missing = schema
@@ -559,12 +559,11 @@ public static class CommandLineParser
     }
 
     /// <summary>
-    /// R18: consume every <c>/SecretHandoff=&lt;path&gt;</c> token, seeding its
-    /// decrypted name→value pairs into <paramref name="values"/> as if they had
-    /// arrived as <c>/P&lt;name&gt;</c> tokens, and return the argument vector with
-    /// those tokens removed. Returns the input list untouched (no copy) when the
-    /// switch is absent, which is every run that did not come through an elevated
-    /// relaunch.
+    /// Consume every <c>/SecretHandoff=&lt;path&gt;</c> token, seeding its decrypted
+    /// name→value pairs into <paramref name="values"/> as if they had arrived as
+    /// <c>/P&lt;name&gt;</c> tokens, and return the argument vector with those tokens
+    /// removed. Returns the input list untouched (no copy) when the switch is absent,
+    /// which is every run that did not come through an elevated relaunch (R18).
     /// </summary>
     /// <remarks>
     /// <para>
@@ -646,7 +645,7 @@ public static class CommandLineParser
     private const string SecretHandoffUnreadable =
         "elevated relaunch secret handoff could not be read — re-run the installer";
 
-    // P10: the namespace prefix for app-defined custom component overrides —
+    // The namespace prefix for app-defined custom component overrides —
     // `/Poption.<name>=value`. Namespacing keeps a custom component name from
     // colliding with a same-named declared parameter (`/P<name>` still binds the
     // parameter). The stored key keeps the full `option.<name>` so the audit
@@ -671,7 +670,7 @@ public static class CommandLineParser
         var inputName = nameEqValue.Substring(0, eq);
         var value = nameEqValue.Substring(eq + 1);
 
-        // Namespaced custom-component override: /Poption.<name>=value (P10). Checked
+        // Namespaced custom-component override: /Poption.<name>=value. Checked
         // before the parameter table so a component and a param can share a name.
         if (inputName.StartsWith(CustomOptionPrefix, StringComparison.OrdinalIgnoreCase))
         {

@@ -9,8 +9,8 @@ using SigilBuild.Wrapper.Engine;
 using SigilBuild.Wrapper.Steps.Win32;
 
 /// <summary>
-/// P11 (T11.2) machine-scope-only <c>com_register</c> step — the one AOT-risk
-/// step in P11. Self-registers a COM DLL by loading it and invoking its exported
+/// Machine-scope-only <c>com_register</c> step, and the one AOT-risk step in the
+/// catalog. Self-registers a COM DLL by loading it and invoking its exported
 /// <c>HRESULT DllRegisterServer(void)</c> through a C# unmanaged function
 /// pointer (see <see cref="ComRegistration"/>). Because <c>DllRegisterServer</c>
 /// writes machine-global registration (<c>HKLM\Software\Classes</c> /
@@ -31,7 +31,7 @@ using SigilBuild.Wrapper.Steps.Win32;
 /// the undo record. This step's job is only to resolve the path, journal the
 /// inverse, and map the <see cref="ComRegistration.ComInvocationResult"/> onto a
 /// <see cref="StepResult"/>. The live register→assert-HKCR-CLSID→unregister leg
-/// needs a real self-registering DLL plus admin and is verified on the CI VM
+/// needs a real self-registering DLL plus admin and runs on the CI VM
 /// (AGENTS.md §2); the load-failure and missing-export mappings are unit-tested
 /// locally on Windows without admin.
 /// </para>
@@ -40,9 +40,9 @@ using SigilBuild.Wrapper.Steps.Win32;
 /// <c>RemoveService</c>, <c>DeleteScheduledTask</c> and <c>DeleteFirewallRule</c>
 /// can each ask the OS at undo time whether their object exists — so an intent
 /// record for a mutation that never happened replays as a silent no-op —
-/// <see cref="RollbackRecord.UnregisterCom"/> cannot: since R15 its only probe is
+/// <see cref="RollbackRecord.UnregisterCom"/> cannot: its only probe is
 /// <c>DllUnregisterServer</c> itself, and a failure there is reported as "the
-/// registration is still in place". So when that probe <em>cannot be called at
+/// registration is still in place" (R15). So when that probe <em>cannot be called at
 /// all</em> — <see cref="ComRegistration.ComExportOutcome.LoadFailed"/> (the module
 /// will not load) or <see cref="ComRegistration.ComExportOutcome.ExportMissing"/>
 /// (it exports no such function) — the record is withdrawn via
@@ -104,12 +104,12 @@ internal sealed class ComRegisterStep : IStep
             return Task.FromResult(StepResult.Failed("com_register: path is empty after substitution"));
         }
 
-        // R3/R9: this DLL is loaded into the ELEVATED installer process and its
+        // This DLL is loaded into the ELEVATED installer process and its
         // DllRegisterServer export is invoked, so a user-writable path here is
-        // straight code execution as administrator. Anchored inside install_dir
-        // and required to sit in an admin-only-writable directory, before the
-        // journal entry — a refused step must not queue an UnregisterCom for a
-        // registration it never made.
+        // straight code execution as administrator. Anchored inside install_dir and
+        // required to sit in an admin-only-writable directory, before the journal
+        // entry — a refused step must not queue an UnregisterCom for a registration
+        // it never made (R3, R9).
         var refusal = PrivilegedTargetGuard.Check("com_register", "path", ctx.InstallDir, path);
         if (refusal is not null)
         {
@@ -129,30 +129,27 @@ internal sealed class ComRegisterStep : IStep
         // ExportMissing: no DllRegisterServer export, hence near-certainly no
         // DllUnregisterServer either.
         //
-        // Since R15 the undo no longer swallows its outcome: DllUnregisterServer
-        // is the ONLY way to probe a COM registration, so a failure there means
-        // "still registered" and fails the rollback/uninstall. For these two
-        // outcomes that failure is guaranteed and content-free — a report of an
-        // unremovable machine-global registration issued on the strength of a
-        // probe that never ran.
-        //
-        // NOT claimed: that nothing was written. Both outcomes can have executed
-        // DllMain as administrator first (LoadLibraryEx returns NULL precisely
-        // when DllMain returns FALSE, after running). The bar is the undo's
-        // feasibility, not the mutation's absence. HResultFailure stays journaled:
-        // the export ran, may have written part of its registration, and its
-        // DllUnregisterServer IS callable.
+        // DllUnregisterServer is the ONLY way to probe a COM registration, so a
+        // failure there means "still registered" and fails the rollback/uninstall
+        // (R15). For these two outcomes that failure is guaranteed and content-free —
+        // a report of an unremovable machine-global registration issued on the
+        // strength of a probe that never ran. NOT claimed: that nothing was written;
+        // both outcomes can have executed DllMain as administrator first
+        // (LoadLibraryEx returns NULL precisely when DllMain returns FALSE, after
+        // running). The bar is the undo's feasibility, not the mutation's absence.
+        // HResultFailure stays journaled: the export ran, may have written part of
+        // its registration, and its DllUnregisterServer IS callable.
         if (result.Outcome is ComRegistration.ComExportOutcome.LoadFailed
             or ComRegistration.ComExportOutcome.ExportMissing)
         {
             // A false return is unreachable today — Append and RetractLast bracket
             // one synchronous stretch with no other journal writer in between — but
-            // it IS exactly the regression this fix exists to prevent: the record
-            // survives, and then every uninstall of this app fails on a registration
-            // that was never made. So it must never be silent. Loud in Debug (a
-            // future interleaving breaks the test run), reported on the run's own
-            // diagnostic channel in Release, where it reaches the wizard log pane
-            // and the /LOG file.
+            // it IS exactly the regression this guard prevents: the record survives,
+            // and then every uninstall of this app fails on a registration that was
+            // never made. So it must never be silent. Loud in Debug (a future
+            // interleaving breaks the test run), reported on the run's own diagnostic
+            // channel in Release, where it reaches the wizard log pane and the /LOG
+            // file.
             const string RetractionFailed =
                 "com_register: internal error — the UnregisterCom rollback record could not be " +
                 "withdrawn after a register whose undo cannot be called. Uninstall may report a " +

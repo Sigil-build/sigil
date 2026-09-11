@@ -18,18 +18,16 @@ internal sealed class FileCopyStep : IStep
     public Task<StepResult> RunAsync(StepContext ctx, RollbackJournal journal, CancellationToken ct)
     {
         // Source may be a payload:// URI (rebased onto the extracted payload
-        // root); destination is always a real install-side path.
-        //
-        // R16: `to` went through ctx.Resolve, not ctx.ResolvePath — so it bypassed
-        // even the payload:// traversal guard every other path-taking step gets.
-        // It is a path field and now resolves like one.
+        // root); destination is always a real install-side path. `to` is a path
+        // field, so it resolves through ResolvePath — which applies the payload://
+        // traversal guard every path-taking step gets — not plain Resolve (R16).
         var from = ctx.ResolvePath(_spec.From);
         var to = ctx.ResolvePath(_spec.To);
 
-        // R16: contain the destination BEFORE Directory.CreateDirectory, which
-        // would otherwise materialize a whole tree outside install_dir — and,
-        // where the manifest carried an unresolved token, a tree whose top
-        // directory is literally named "{var.typo}".
+        // Contain the destination BEFORE Directory.CreateDirectory, which would
+        // otherwise materialize a whole tree outside install_dir — and, where the
+        // manifest carried an unresolved token, a tree whose top directory is
+        // literally named "{var.typo}" (R16).
         var refusal = StepDestinationGuard.Check(
             ctx.InstallDir, "file_copy", "to", to, _spec.AllowOutsideInstallDir);
         if (refusal is not null)

@@ -6,7 +6,7 @@ namespace SigilBuild.Wrapper.Core.Localization;
 
 /// <summary>
 /// Resolves the session's language preferences and matches surfaces against them.
-/// See docs/plan/feature-parity/P9-DESIGN-localization.md §4.
+/// See docs/architecture/adr-015-localization-design.md §2.
 /// </summary>
 public static class LanguageResolver
 {

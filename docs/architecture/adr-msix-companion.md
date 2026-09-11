@@ -2,11 +2,20 @@
 
 - **Status:** Accepted (decision ADR for T16a; implemented by T16b)
 - **Date:** 2026-07-09
-- **Decision driver:** IMPLEMENTATION_SPEC.md §T16 ("Reconcile the MSIX companion
-  host") plus the two changes that broke it — §T2 (Installer.Host now drives the
-  real `Wrapper.Core` engine and **deletes** `Services/InstallerEngine.cs`) and
-  §T7 (removes the `BrandTokens.g.json` sidecar in favour of blob-embedded brand
-  tokens).
+- **Decision driver:** task **T16** of the exe-installer track ("reconcile the
+  MSIX companion host"). Before that track, `Installer.Host` *was* the MSIX
+  companion installer: `InstallerHostBundler` bundled `installer.exe` plus a
+  `BrandTokens.g.json` sidecar into MSIX staging, driven by the throwaway
+  copy-loop `InstallerEngine`. Repurposing the Host as the exe-wrapper runtime
+  silently changed what MSIX ships, so T16 required an explicit choice — (a) MSIX
+  bundles the same engine-driven host, or (b) the companion becomes a separate
+  minimal exe — recorded as an ADR, with `InstallerHostBundler` updated to match
+  and no orphaned copy-loop code left behind. The two sibling tasks that broke it
+  were **T2** (Installer.Host drives the real `Wrapper.Core` engine and
+  **deletes** `Services/InstallerEngine.cs`) and **T7** (removes the
+  `BrandTokens.g.json` sidecar in favour of blob-embedded brand tokens). *(The
+  T-numbered spec that set these tasks has since been retired; its content for
+  T16/T2/T7 is restated here so this ADR stands alone.)*
 - **Scope:** decides *what MSIX ships as its "companion installer"* and *the fate
   of the `BrandTokens.g.json` sidecar in MSIX*. This is a **decision ADR** — no
   `src/` changes are made here. The concrete edits are T16b (wave 3); a minimal
@@ -204,9 +213,10 @@ remains").
    `BrandTokens.g.json`. This pins "MSIX never bundles the wizard" so it cannot
    regress. (Today's two tests assert nothing about the companion, so they stay
    green regardless — but they also would not catch a reintroduction.)
-6. **Grep-gate the cleanup** (spec T16b VERIFY): confirm no references to the
-   deleted `Services/InstallerEngine` remain anywhere in `src/`/`tests/` (only the
-   three `docs/plan/*.md` narrative mentions are acceptable), and no references to
+6. **Grep-gate the cleanup** (T16b VERIFY): confirm no references to the
+   deleted `Services/InstallerEngine` remain anywhere in `src/`/`tests/`
+   (narrative mentions in historical plan documents were acceptable; those
+   documents have since been retired), and no references to
    `InstallerHostBundler` / `BrandTokens.g.json` remain outside docs.
 
 **Risks / coordination:**

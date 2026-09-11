@@ -165,9 +165,9 @@ jobs:
           if-no-files-found: warn
 
   # P12 (T12.6): update-engine + web-installer stub end-to-end, appended as its
-  # OWN job per the append-only convention (docs/plan/ORCHESTRATION_PLAN.md:
-  # "each task appends its own job/step ... append-only, never reorder others'
-  # steps") — kept separate from the install-matrix job above rather than adding a
+  # OWN job per the append-only convention this workflow is built on — each task
+  # appends its own job or step and never reorders another task's steps — kept
+  # separate from the install-matrix job above rather than adding a
   # step to it. T12.6 itself already delivers everything locally runnable
   # (SigilBuild.Wrapper.Tests/Update/UpdateEndToEndTests.cs and
   # SigilBuild.Packaging.Tests/ExeWrapper/WebInstallerStubEndToEndTests.cs — real

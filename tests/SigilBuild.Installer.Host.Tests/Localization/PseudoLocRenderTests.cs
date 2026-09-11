@@ -40,12 +40,12 @@ public sealed class PseudoLocRenderTests : IDisposable
 {
     // T14: real license text is manifest/user-authored content that is loaded
     // verbatim (InstallerLicenseLoader), never routed through the catalog — the
-    // "English step detail" exception design D2 / §8.1 calls out. This fixture
+    // "English step detail" exception ADR-015 §4 (design D2) calls out. This fixture
     // stands in for it so the License screen's OWN text doesn't need bracketing
     // to prove the chrome around it (title, accept checkbox, rail, buttons) does.
     private const string LicenseFixtureText = "Example EULA text.";
 
-    // Design D2 (docs/plan/feature-parity/P9-DESIGN-localization.md): the catalog
+    // Design D2 (docs/architecture/adr-015-localization-design.md §4): the catalog
     // covers prose engine messages only — per-step failure detail stays English by
     // design. This is the exact shape InstallFlowTests drives the Failed screen
     // with (an InstallOutcome.Error string), reproduced here for the same reason.

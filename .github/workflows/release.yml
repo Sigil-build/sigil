@@ -197,7 +197,7 @@ jobs:
           Copy-Item THIRD-PARTY-NOTICES.md publish/win-arm64/
           Compress-Archive -Path publish/win-arm64/* -DestinationPath "dist/sigil-${{ github.ref_name }}-win-arm64.zip"
 
-      # R42 / SUP.3 handoff (docs/plan/release/sup-sbom-handoff.md): the SBOM
+      # R42 / SUP.3 (applied by PR #42, commit 81584de): the SBOM
       # must describe exactly what got signed and released, so it runs after
       # signing + packaging (dist/ already exists by this point, created by
       # the win-x64 archive step above) and before SHA256SUMS / the release

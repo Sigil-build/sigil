@@ -2,13 +2,17 @@
 
 - **Status:** Accepted (policy ADR; enables feature-parity lanes P1/P4/P9)
 - **Date:** 2026-07-13
-- **Decision driver:** `docs/plan/feature-parity/00-GAP_ANALYSIS.md` §4
-  ("Cross-cutting prerequisite") and `01-IMPLEMENTATION_PLAN.md` P0 — the
-  wrapper's expression engine, packager, and localization deferral **already
-  cite ADR-008** as their governing contract, but the file was never written.
-  Four in-tree citation sites and the packaging test suite point here; this ADR
-  makes those citations resolve and unblocks every P-lane that extends the
-  expression, variable, step, or localization surface.
+- **Decision driver:** the feature-parity gap analysis named exactly one
+  **cross-cutting prerequisite** — `Wrapper.Core/Expressions/Functions.cs` and
+  the localization deferral both cite **ADR-008** as their governing contract,
+  yet no `docs/architecture/adr-008-*.md` existed, so no P-lane could extend the
+  expression surface without inventing the policy it claimed to obey. Writing
+  this file was therefore scheduled as **P0** (wave 0, docs-only) ahead of every
+  other feature-parity lane. *(Both planning documents have since been retired;
+  their driving content is restated here so this ADR stands alone.)* Four
+  in-tree citation sites and the packaging test suite point here; this ADR makes
+  those citations resolve and unblocks every P-lane that extends the expression,
+  variable, step, or localization surface.
 - **Scope:** codifies (1) the closed expression/function catalog and the
   criteria for admitting a new function; (2) the variable model that P1 builds
   on; (3) the secret-redaction contract; (4) the localization stance; (5) the
@@ -247,6 +251,12 @@ Decision for P9:
 This is exactly the "revisit together with ADR-008" the `SigilBuild.Wrapper.csproj`
 comment points at: localization is enabled **without** relaxing
 `InvariantGlobalization`.
+
+The *mechanism* that implements this stance — the catalog's authoring rules, the
+language-resolution chain and matching algorithm, and the shared language-tag
+validator — is recorded in
+[ADR-015](adr-015-localization-design.md). This section stays the stance; that
+ADR is the design.
 
 ---
 

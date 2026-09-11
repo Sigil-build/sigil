@@ -3,8 +3,10 @@
 - **Status:** Accepted (deferral, not a rejection — see "Intended follow-up
   shape" below)
 - **Date:** 2026-07-23
-- **Decision driver:** P12 (`01-IMPLEMENTATION_PLAN.md`'s P12 section,
-  gap G15/G16 in `00-GAP_ANALYSIS.md`) ships the update engine's
+- **Decision driver:** **P12**, the feature-parity track's update-engine +
+  web-installer lane, closing the two competitor gaps **G15** (auto/delta
+  updates — Velopack/Squirrel's core feature, MSIX AppInstaller) and **G16**
+  (web/net installer — Burn, NSIS web installers). P12 ships the update engine's
   full-package path (T12.1–T12.6). `UpdatesSection.DeltaTargets` and the
   `deltaTargets:` manifest field have existed since before P12 as parsed,
   schema-validated, but functionally inert metadata — this ADR records that
@@ -37,8 +39,8 @@ P12's job was to make `/Update` do something real for the first time
 (T12.1–T12.6: channel manifest, ECDSA verification — see
 [ADR-009](adr-009-update-manifest-signature.md) — version comparison,
 full-package download and hand-off, plus the web-installer stub). The
-original P12 scoping (`01-IMPLEMENTATION_PLAN.md`) is explicit that delta
-patches are a separate, larger effort:
+original P12 scoping (in the now-retired feature-parity plan, quoted verbatim
+here) is explicit that delta patches are a separate, larger effort:
 
 > Delta updates (`deltaTargets`, zstd dictionaries) stay **explicitly
 > deferred** — ship full-package updates first, write the delta-deferral
@@ -220,7 +222,7 @@ built:
 
 | Date | Change | Justification |
 |------|--------|----------------|
-| 2026-07-23 | Initial deferral: full-package updates ship in P12; `deltaTargets`/zstd-dictionary delta patches recorded as explicitly out of scope, with the intended follow-up shape described. | P12 (T12.7) — `01-IMPLEMENTATION_PLAN.md` required this ADR before P12 could be considered documentation-complete. |
+| 2026-07-23 | Initial deferral: full-package updates ship in P12; `deltaTargets`/zstd-dictionary delta patches recorded as explicitly out of scope, with the intended follow-up shape described. | P12 (T12.7) — the feature-parity lane plan required this ADR before P12 could be considered documentation-complete. |
 
 *(Append one row when a future lane actually scopes or builds the delta
 engine. Never rewrite prior rows.)*

@@ -4,7 +4,8 @@ Audit date **2026-07-28** · tree `main` @ `1be494c` · audited on Windows 11,
 .NET SDK 10.0.302.
 
 Companions: [`00-GAP_REGISTER.md`](00-GAP_REGISTER.md) (every finding, with
-evidence) · [`01-FIX_PLAN.md`](01-FIX_PLAN.md) (who fixes what, when).
+evidence) · [`03-RC_ORCHESTRATION.md`](03-RC_ORCHESTRATION.md) (who fixes what,
+when — it supersedes the original 2026-07-28 fix-plan sketch, now retired).
 
 ---
 

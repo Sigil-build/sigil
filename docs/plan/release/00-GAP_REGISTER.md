@@ -3592,3 +3592,335 @@ by a bare "skip the check" flag. **The guard must stay fail-closed** for every o
 caller — that is **R34**, which exists because this mutex once failed *open* on its
 `NULL` branch, and a fix that widens the hole is worse than the bug. Cross-references
 **R34**, **R58** and **R74**.
+
+---
+
+**R77–R79** come from a fourth Stage-4 source: the **docs-vs-code drift audit**
+(report: `.superpowers/sdd/2026-09-08-g2-release-prep/cleanup-audit-docs.md`,
+gitignored, not part of this PR), which read every user-facing document against the
+code it describes. Most of what it found is documentation debt and is being fixed by
+the docs lane. These three are **not** — in each case the documentation describes a
+reasonable behaviour and the code does something else, so the honest fix is in `src/`
+(or, for **R79**, in the schema). All three are **OPEN with no owner**. None was found
+by a test, which is the common thread: each sits in a gap no test asserts across.
+
+### R77 — `file_copy`'s `overwrite: false` is inert, so an existing user config is destroyed by a flag that promises to preserve it
+**Component:** Wrapper.Core / steps · **Effort: S** · **SHOULD-FIX**
+
+> **STATUS (2026-09-10):** **OPEN, no owner.** Found by reading
+> `docs/guides/install-steps.md:29` against `Steps/FileCopyStep.cs`. Not caught by any
+> test: the suite covers the `overwrite: true` path and the rollback journal, and
+> never asserts what `overwrite: false` does to a destination that already exists.
+
+`docs/guides/install-steps.md:29` documents the field as:
+
+> `overwrite` | bool | default `true` | Overwrite existing files. When `false`, an
+> existing file at `to` is **left alone** (but the prior bytes are still journaled).
+
+`FileCopyStep.cs:67` implements:
+
+```csharp
+File.Copy(src, dst, overwrite: _spec.Overwrite || existed);
+```
+
+`existed` is set five lines earlier by `File.Exists(dst)` — it is true **exactly when
+there is a file to preserve**. So the disjunction is unconditionally true in the only
+case the flag was written for, and `overwrite: false` never once prevents an
+overwrite. The flag is not merely ignored; it is ignored precisely when it matters.
+
+**Why this is worse than an ordinary doc-vs-code mismatch.** The documented behaviour
+is the one a publisher reaches for to protect a user's settings across an upgrade — an
+`appsettings.json`, a licence file, a database. A manifest that says `overwrite: false`
+reads as "do not clobber the user's file" and silently clobbers it. Nothing in the log
+distinguishes the two cases, because from the step's point of view the copy succeeded.
+The `.sigil-bak` copy and the `RestoreFile` journal record mean the prior bytes survive
+*a failed install*, but a **successful** install leaves the user's file replaced and
+the backup discarded with the journal — which is the normal path, not the exceptional
+one.
+
+**Fix shape (not implemented here).** Honour the flag: when the destination exists and
+`Overwrite` is false, skip the copy and report success (the destination is already in
+the state the manifest asked for), keeping the existing journal record so a rollback
+still restores the untouched file. Whether a skip should also emit a log line is a
+small design call — it probably should, since a silent no-op is how this class of bug
+hides. **The test comes first and must fail on today's code:** copy over an existing
+destination with `overwrite: false` and assert the destination's *content* is
+unchanged. Note the choice this forces into the open — Sigil has no third "fail if it
+exists" mode, and adding one is out of scope for the fix.
+
+### R78 — `on_failure: fail` and `on_failure: rollback` are the same code path, so two documented behaviours are one
+**Component:** Wrapper.Core / Engine · **Effort: M** · **SHOULD-FIX**
+
+> **STATUS (2026-09-10):** **OPEN, no owner — needs an orchestrator decision before
+> anyone writes code.** Found by reading `docs/guides/install-steps.md:344` and
+> `docs/guides/conditional-installs.md` against `Engine/InstallEngine.cs`. Not caught
+> by any test: the suite asserts `continue` versus "everything else", never `fail`
+> against `rollback`.
+
+Three surfaces document three behaviours. The engine implements two.
+
+| Surface | `rollback` | `fail` |
+|---|---|---|
+| `docs/guides/install-steps.md:344` | "undo journaled steps" | "**abort without rollback**" |
+| `docs/guides/conditional-installs.md:57-67` | "undo the journal **up to and including this step**, then abort" | "abort immediately. **No rollback of preceding steps.**" |
+| `Manifest/InstallStep.cs:337-343` (XML doc) | "undo the journal up to (and including) this step" | "abort the install (default)" |
+
+`InstallEngine.cs:169-179`:
+
+```csharp
+switch (spec.OnFailure)
+{
+    case OnFailure.Continue:  … continue;
+    case OnFailure.Rollback:
+    case OnFailure.Fail:
+    default:
+        throw new StepFailureException(spec.Id, $"{phaseLabel}: {result.Error}");
+}
+```
+
+Both values fall through to the same `throw`, and the `catch` at `:87-103` replays the
+**entire** shared journal in reverse across all three phases (`pre_install`,
+`install_steps`, `post_install`). There is no "abort without rollback", and there is no
+"undo only up to this step" — the journal is one list and it is always fully unwound.
+
+**Why it matters more than a cosmetic enum.** `fail`'s documented meaning is the one an
+author picks deliberately: leave the machine in the half-installed state so a support
+engineer can inspect it, or because the earlier steps registered something that must
+*not* be retracted. Choosing it today silently gets the opposite. And `fail` is the
+**default** for `install_steps`/`pre_install`/`post_install`, so every manifest that
+never mentions `on_failure` is relying on documentation that does not describe the
+engine. The engine's actual behaviour — full rollback — is the safe one, which is why
+this is SHOULD-FIX rather than a blocker; the defect is that the manifest surface
+promises a choice it does not offer.
+
+**Fix shape — a decision, then a test per value.** Two coherent options, and the
+orchestrator should pick before code is written:
+
+- **(a) Implement the documented semantics.** `fail` skips the undo replay and returns
+  the failed result directly; `rollback` keeps today's behaviour. Cheap in the engine,
+  but it introduces a mode that leaves changes on disk with no undo — which needs its
+  own thinking about `uninstall.json` and the ARP row, since **R15**'s retain-on-failure
+  rule assumes the journal was replayed.
+- **(b) Collapse the enum.** Keep `rollback` and `continue`, retire `fail` as an alias
+  of `rollback` (a schema lockstep change, per the `schema-change` skill), and correct
+  all three doc surfaces. Honest, smaller, and loses a capability nobody has yet
+  depended on — the pre-MVP window is exactly when this is cheap.
+
+Either way, the deliverable includes **one test per enum value** asserting what the
+journal actually did, which is the assertion the current suite is missing. Do not
+"fix" this by editing the docs to match the code without deciding: the partial-undo
+wording in `conditional-installs.md` is specific enough that someone designed it.
+
+### R79 — Parameter-level `screen:` grouping is dead: the field is parsed, schema-validated, documented in five places, and renders nothing
+**Component:** Core / Installer.Host / schema · **Effort: M** · **POST-v1**
+
+> **STATUS (2026-09-10):** **OPEN, no owner.** Found by reading
+> `docs/getting-started.md:156-168`, `docs/guides/parameters.md:136-138` and
+> `docs/guides/installer-wizard.md:7,12,69-92` against the wizard's actual flow
+> construction. The docs lane is annotating the affected pages "Known issue (R79)"
+> in the meantime, which is a stopgap and not the fix.
+>
+> The five surfaces: those three, plus `docs/migration/from-inno.md:184` and
+> `docs/manifest-reference.md:179` — the last generated from the field's
+> `description` in `schemas/sigil-schema.json:41`, so it cannot be corrected in the
+> Markdown alone.
+
+`ParameterDefinition.Screen` (`Manifest/ParameterDefinition.cs:22`) is parsed and
+schema-validated (`schemas/sigil-schema.json:41`), and it reaches exactly one consumer:
+`BrandTokenEmitter.EmitInstallTimeParameters` (`:244`), which serialises an
+`InstallTimeParameters.g.json` sidecar for `InstallTimeParameterLoader.LoadOrEmpty`
+(`Installer.Host/Branding/InstallTimeParameters.cs:87-101`). **Neither has a call
+site.** The emitter is not invoked by `ExeWrapperPackager`, the loader is not invoked by
+the host, and the sidecar is never written into the stamped exe.
+
+What the wizard actually renders comes from `installer.screens[]` only:
+`App.axaml.cs:100` calls `_vm.LoadScreens(InstallerScreensLoader.LoadFromSelf(), …)`,
+and `InstallerViewModel.LoadScreens` (`:318-352`) builds one `CustomScreenViewModel`
+per declared screen from that screen's explicit `fields:` list. The flow is assembled
+at `:1050-1060` from those screens plus the built-ins. A parameter's `screen:` value is
+read by nothing on this path.
+
+**The user-visible consequence.** A parameter declared `install_time: true` and given a
+`screen:` label, but not named by any `installer.screens[].fields` entry, is **never
+shown**. It silently resolves to its default (or a `/P` override), which for a required
+value with no default means the silent path exits 64 and the wizard path installs
+something the user was never asked about. The documented example in
+`getting-started.md` — the flow `Welcome → Install Location → Server Settings → Privacy
+→ Installing → Finish` — cannot be produced by the manifest printed above it.
+
+**Why POST-v1 and not SHOULD-FIX.** The real mechanism (`installer.screens[]`) exists,
+works and is tested; nothing is unachievable. What ships broken is a *second*,
+redundant spelling of the same feature, and the damage is a reader following the wrong
+one. That is fixable in documentation for the release and properly in code after it.
+
+**Fix shape (not implemented here) — two options, and this one leans clearly.**
+
+- **Remove the field** (leaning). Drop `screen` from `ParameterDefinition`, from the
+  schema (a lockstep change — schema, `docs/manifest-reference.md`, `examples/**`,
+  `tests/SigilBuild.Schema.Tests/` fixtures; use the `schema-change` skill), and delete
+  the two dead sidecar members with it. Pre-MVP, so no deprecation window is owed; a
+  manifest still carrying `screen:` gets a clean unrecognized-field error instead of
+  silent nothing, which is strictly better than today. Then rewrite the four prose
+  surfaces around `installer.screens[]`, which `docs/guides/installer-wizard.md`
+  currently never mentions at all.
+- **Wire it.** Synthesise a screen per unique `screen:` value at pack time. This
+  resurrects a second path to the same outcome and needs an ordering rule against
+  declared screens, a merge rule when both are present, and its own `when` semantics —
+  more surface than the feature is worth, and it would need an ADR.
+
+Context worth carrying into the fix: this field is a leftover of the *sidecar* delivery
+model that `docs/architecture/adr-msix-companion.md` records being replaced by
+blob-embedded data (task T7 removed the `BrandTokens.g.json` sidecar for the same
+reason). The install-time-parameter sidecar was never migrated with it — it was simply
+left unwired, which is why the field went dead without anything failing. The docs
+lane's "Known issue (R79)" annotations must be removed by whichever fix lands.
+
+---
+
+**R80–R81** come from the same drift audit, found by the docs lane while repointing the
+manifest surfaces. Both are **schema-versus-parser disagreements**: the JSON schema and
+the typed parser each hold their own copy of a list, the two copies differ, and
+`docs/manifest-reference.md` is generated from the schema — so the document tells the
+reader whichever version the schema happens to hold. Both are **OPEN with no owner**,
+and neither was caught by a test, for the same structural reason: the schema suite
+asserts *"this fixture validates"* and the parser suite asserts *"this YAML parses"*,
+and nothing asserts the two agree about the same document.
+
+### R80 — `installer.brand`'s snake_case colour keys validate, pack, and are never read, so a branded installer silently ships Sigil's default palette
+**Component:** Core / schema · **Effort: S** · **SHOULD-FIX**
+
+> **STATUS (2026-09-11):** **OPEN, no owner.** Found by the docs lane reading
+> `docs/manifest-reference.md:136-139` (which lists **all four** keys) against
+> `ManifestParser.ParseInstallerSection`. **The repo's own reference fixture is
+> already wrong because of it** — see the evidence below, which is the sharpest
+> available proof that no test covers this.
+
+`schemas/sigil-schema.json:493-516` declares `installer.brand` with
+`additionalProperties: false` and then explicitly lists **four** colour keys:
+
+```json
+"primaryColor":  { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
+"accentColor":   { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
+"primary_color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
+"accent_color":  { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" }
+```
+
+`ManifestParser.cs:276-277` reads **two**:
+
+```csharp
+PrimaryColor: GetScalar(brand, "primaryColor"),
+AccentColor:  GetScalar(brand, "accentColor")),
+```
+
+So a manifest that spells the keys in snake_case — the spelling the rest of Sigil's
+manifest surface uses everywhere else, and the one a reader would naturally reach for —
+passes schema validation, passes `sigil validate` with no diagnostic, packs
+successfully, and produces `InstallerBrand(PrimaryColor: null, AccentColor: null)`.
+`BrandTokenEmitter.Derive` then falls back to `DefaultPrimary = "#1F2937"` /
+`DefaultAccent = "#3B82F6"`, and the publisher ships a wizard in Sigil's neutral grey
+and blue. Nothing in the log, the diagnostics, or the produced artifact says the brand
+was dropped. Same shape as **R77**: a declared field that validates and does nothing.
+
+**The evidence that no test covers this is in the repo.**
+`tests/SigilBuild.Schema.Tests/Fixtures/valid/reference-installer-manifest.yaml:34-35`
+— the end-to-end reference manifest, the one fixture whose whole job is to exercise the
+full installer surface — writes:
+
+```yaml
+    primary_color: "#312E81"
+    accent_color:  "#4F46E5"
+```
+
+`SchemaValidationTests.ReferenceInstallerManifest_IsValidAgainstSchema` passes, because
+it asserts only that the document validates. If that fixture were ever driven through
+the parser and packer, it would produce an unbranded installer. The reference manifest
+for the branded-installer feature does not brand anything.
+
+**Why snake_case is in the schema at all** is worth establishing before choosing a fix
+— it looks like a defensive both-spellings addition that only ever reached the schema
+half. The manifest's other multi-word keys (`install_steps`, `on_failure`,
+`run_after_install`, `allow_outside_install_dir`) are snake_case, so snake_case is
+arguably the *correct* spelling here and camelCase is the anomaly.
+
+**Fix shape (not implemented here).** Two coherent options; pick before writing code:
+
+- **Read both** (leaning). `GetScalar(brand, "primaryColor") ?? GetScalar(brand, "primary_color")`,
+  and likewise for accent. Two lines, no schema change, nothing an existing manifest
+  can trip over, and it matches what the schema already promises.
+- **Reject the snake_case keys.** Remove them from the schema so a snake_case manifest
+  fails loudly against `additionalProperties: false`. A lockstep change (schema →
+  `docs/manifest-reference.md` → `examples/**` → `tests/SigilBuild.Schema.Tests/`
+  fixtures; use the `schema-change` skill), and it makes the naming *less* consistent
+  with the rest of the manifest.
+
+Either way the deliverable is **two tests**: a parser test asserting the colours reach
+`InstallerBrand` (or that the manifest is refused), and a fixture in
+`tests/SigilBuild.Schema.Tests` pinning the decision. **Fix the reference fixture in the
+same change** — whichever option wins, `reference-installer-manifest.yaml:34-35` is
+wrong today.
+
+### R81 — Hooks accept 14 step types in the schema and 18 in the parser, and the generated reference documents neither
+**Component:** Core / schema · **Effort: M** · **SHOULD-FIX**
+
+> **STATUS (2026-09-11):** **OPEN, no owner.** Found by the docs lane comparing the
+> `HookPhase` definition against `ParseHooks`. **Not a validation bypass** — schema
+> validation runs first (`ManifestLoader.cs:29,48`) and the validator does enforce
+> `enum` (`SchemaValidator.cs:75`), so the four extra types are genuinely refused.
+> The defect is that two lists disagree, the parser carries unreachable arms, and the
+> refusal is undocumented and therefore baffling.
+
+`schemas/sigil-schema.json:235-239` gives `HookPhase.items.type` an enum of **14**
+step types. The root `InstallStep` enum (`:69-73`) has **18**. The four in the catalog
+but not admitted in a hook:
+
+> `http_download`, `ini_write`, `json_edit`, `xml_edit`
+
+`ParseHooks` (`ManifestParser.cs:609-612`) routes all four phases through
+`ParseInstallSteps`, whose type switch (`:1376-1397`) accepts **all 18**. So the parser
+carries four arms for hooks that the schema guarantees it will never see — dead code
+that reads as intentional support.
+
+**Why it matters despite not being a bypass.** `docs/guides/install-steps.md` documents
+one catalog of 18 and never says hooks are narrower. A publisher who puts
+`http_download` in a `post_install` hook — a plausible thing to want, fetching a
+config after install — gets a schema enum error, with nothing anywhere explaining that
+hooks have their own catalog or why. And the generated reference cannot help, which is
+the compounding half:
+
+`docs/manifest-reference.md:155-158` renders all four hook phases as
+
+```
+| `pre_install` | HookPhase | - | - | _(undocumented)_ |
+```
+
+because `generate-manifest-reference.ps1:50` renders a `$ref` as the bare definition
+name and the definition's `description` is not pulled into the row. So the reference
+documents **neither** 14 nor 18 — it names an opaque type and stops. A reader cannot
+discover the hook step catalog from the reference at all.
+
+**Was the narrowing deliberate?** Possibly — the four excluded types are exactly the
+ones whose destination is subject to `install_dir` containment (the same four named in
+`allow_outside_install_dir`'s description), and hooks run **outside the rollback
+journal**, so an unjournaled write into the install tree is a defensible thing to
+refuse. But nothing records that reasoning, and if it is the reason then
+`run_program` — which can do anything at all — being *admitted* makes the line
+arbitrary. **Do not settle this by widening the enum to 18 without deciding which
+story is true.**
+
+**Fix shape (not implemented here).** Settle it in code, one list, one source of truth:
+the parser's hook-phase allow-list should be **derived from the same table the schema
+enum is generated from**, rather than both being hand-maintained. Then:
+
+1. Decide and record whether hooks are narrower than `install_steps`, and why. If they
+   are, the narrowing belongs in `docs/guides/install-steps.md` and in the `HookPhase`
+   `description` (which is what would make it reach the reference).
+2. Give the parser a hook-specific rejection with a real diagnostic naming the phase,
+   so the refusal is legible even when the schema is not the thing doing the refusing.
+3. Fix `generate-manifest-reference.ps1` to render a `$ref`'d definition's own
+   `description`, or the reference will keep saying `_(undocumented)_` for every hook
+   phase whatever else is done.
+4. Regenerate `docs/manifest-reference.md` (the `docs.yml` drift check enforces this).
+
+Cross-references **R60** (the validator's `additionalProperties`-as-subschema form is
+never applied) — same family: a schema whose authority over a document is partly
+theoretical, and a second, divergent copy of the rules living in the parser.

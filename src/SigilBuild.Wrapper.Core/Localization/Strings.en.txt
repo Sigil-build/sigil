@@ -1,8 +1,8 @@
 # src/SigilBuild.Wrapper.Core/Localization/Strings.en.txt
 # Baseline catalog — the source of truth for every user-facing chrome string.
-# See docs/plan/feature-parity/P9-DESIGN-localization.md §3.
+# See docs/architecture/adr-015-localization-design.md §1.
 #
-# RULE (§3.1): a count may appear in a value, but must never inflect the
+# RULE (ADR-015 §1.1): a count may appear in a value, but must never inflect the
 # sentence around it. "Applications to close: {count}" is allowed;
 # "{count} applications must be closed" is not — uk has three plural forms and
 # concatenation cannot select between them.

@@ -2581,6 +2581,11 @@ swept **by hand**: nothing enforces the spelling in a Markdown code fence, so a
 future doc can reintroduce it. A docs-wide grep gate would close that, and is
 not implemented here.
 
+**Note (2026-09-11):** The same shape recurs in the closer-lane PR's repoint of
+19 stale `design §N`/`design DN` comment citations onto ADR-015 — nothing greps
+a comment for a citation into a retired document, so those too were found and
+fixed by a manual sweep, not a gate.
+
 ### R60 — The schema validator's `additionalProperties`-as-subschema form is never applied
 **Component:** Core / Configuration · **Effort: M** · **SHOULD-FIX**
 
@@ -3351,6 +3356,10 @@ that existed at `b07021e` (and every row filed since carries its own), but keepi
 true is a per-PR obligation, and the merge gate should check it the way it checks the
 lockstep surfaces in `AGENTS.md`.
 
+**Note (2026-09-11):** The closer lane's PR followed this rule — its review
+evidence (build, full test totals, strip-diff verdict) lives in the PR body,
+not only in this register.
+
 ### R74 — An elevated process installing per-user plans the upgrade blind but cleans up sighted, so it can silently downgrade
 **Component:** Wrapper.Core / Engine · **Effort: M** · **SHOULD-FIX**
 
@@ -3924,3 +3933,56 @@ enum is generated from**, rather than both being hand-maintained. Then:
 Cross-references **R60** (the validator's `additionalProperties`-as-subschema form is
 never applied) — same family: a schema whose authority over a document is partly
 theoretical, and a second, divergent copy of the rules living in the parser.
+
+### R82 — `SIG0270` is reused for two unrelated diagnostics: `installer.vars` and the exe-format-on-non-Windows refusal
+**Component:** Cli / diagnostics · **Effort: S** · **SHOULD-FIX**
+
+> **STATUS (2026-09-11):** **OPEN, no owner.** Found by the closer lane while
+> sweeping comments for stale citations. Not fixed in this PR.
+
+`src/SigilBuild.Cli/Commands/PackCommand.cs:95-101` emits the string literal
+`"SIG0270"` (and the matching `https://docs.sigil.build/diagnostics/SIG0270` URL)
+for "package format 'exe' can only be produced on a Windows pack host". But
+`SIG0270` already names `DiagnosticCodes.InvalidInstallerVar`
+(`src/SigilBuild.Core/Diagnostics/DiagnosticCodes.cs:53`), the `installer.vars`
+malformed-expression / reference-cycle error. One code now covers two unrelated
+failures — a manifest validation error and a pack-host capability refusal — so
+its diagnostics URL cannot document both meanings, and a reader who greps the
+docs site for the exe-on-non-Windows message finds the `installer.vars` page
+instead.
+
+**Why it slipped through.** `PackCommand.cs`'s diagnostic is a raw string
+literal, not a `DiagnosticCodes` member, so nothing checks it against the
+constants table; `InvalidInstallerVar`'s own SIG027x band comment gives no
+signal that a second, unrelated caller also claims the number.
+
+**Fix shape (not implemented here).** Mint a new code as a `DiagnosticCodes`
+constant in the packaging band — never a literal — and point `PackCommand.cs`
+at it instead. Add a test that walks every emitted `"SIG0xxx"`-shaped string
+literal in the codebase (or every `Diagnostic` construction site) and asserts
+it resolves to a `DiagnosticCodes` member, so a second collision fails CI
+instead of waiting for a docs URL to be silently overloaded again.
+
+### R83 — `InstallOptionsView.axaml` renders its "Upgrading from x.y.z" banner twice
+**Component:** Installer.Host / UI · **Effort: S** · **POST-v1**
+
+> **STATUS (2026-09-11):** **OPEN, no owner.** Found by the closer lane while
+> sweeping comments for stale citations. Not fixed in this PR.
+
+`src/SigilBuild.Installer.Host/Views/Screens/InstallOptionsView.axaml:16-25`
+declares the same `TextBlock` — identical comment, identical bindings
+(`IsVisible="{Binding HasUpgradeNotice}"`, `Text="{Binding UpgradeNotice}"`),
+identical styling — twice in a row inside the Destination screen's
+`StackPanel`. Whenever `HasUpgradeNotice` is true the upgrade banner renders
+(or is measured) twice, doubling the vertical space it takes on the screen and
+doing the binding work twice per property change.
+
+**Why it is POST-v1, not a release blocker.** Nothing crashes and no value is
+wrong — the second copy is dead weight, not incorrect data — so correctness
+and security are unaffected; only layout and a wasted binding are.
+
+**Fix shape (not implemented here).** Delete one of the two identical
+`TextBlock`s (and its now-redundant comment). If the host test suite ever
+grows a rendering/screenshot assertion for the Destination screen, pin the
+banner's presence there so a reintroduced duplicate fails loudly instead of
+silently doubling the layout again.

@@ -80,7 +80,7 @@ public sealed class LocalizationEndToEndTests : IDisposable
     /// manifest's own <c>configure</c> screen declares a uk title, so under
     /// <c>/lang=uk</c> BOTH the declared screen and the chrome resolve to
     /// Ukrainian — the "everything lines up" case that contrasts with the de
-    /// fixture below (design §4.4).
+    /// fixture below (ADR-015 §2.2).
     /// </summary>
     [Fact]
     public async Task UkFixture_RendersUkrainianChromeAndDeclaredScreens()
@@ -108,7 +108,7 @@ public sealed class LocalizationEndToEndTests : IDisposable
     }
 
     /// <summary>
-    /// The asymmetry fixture (design §4.4's crux). Sigil ships NO <c>de</c> chrome
+    /// The asymmetry fixture (ADR-015 §2.2's crux). Sigil ships NO <c>de</c> chrome
     /// catalog (only en + uk), so <see cref="LanguageResolver.MatchChrome"/>
     /// falls back to <see cref="Lang.En"/> — but the manifest's own <c>configure</c>
     /// screen supplies a <c>de</c> title, and that resolves against the SAME

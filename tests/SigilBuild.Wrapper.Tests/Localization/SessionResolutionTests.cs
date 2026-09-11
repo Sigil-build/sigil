@@ -11,7 +11,7 @@ using Xunit;
 namespace SigilBuild.Wrapper.Tests.Localization;
 
 /// <summary>
-/// Resolution at session start (design §4.6). Before this, nothing
+/// Resolution at session start (ADR-015 §2.4). Before this, nothing
 /// called <see cref="LanguageResolver"/> — <see cref="SessionLanguage.Current"/>
 /// was only ever the <see cref="Lang.En"/> default. These tests cover the resolver
 /// chain itself, the session-start wiring

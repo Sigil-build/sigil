@@ -613,8 +613,8 @@ public static partial class FilesInUse
     }
 
     [SupportedOSPlatform("windows")]
-    // R38: a `ref` into a caller-allocated char[CCH_RM_SESSION_KEY + 1], not a managed
-    // string. strSessionKey is an OUT parameter and must never alias anything the
+    // A `ref` into a caller-allocated char[CCH_RM_SESSION_KEY + 1], not a managed
+    // string (R38). strSessionKey is an OUT parameter and must never alias anything the
     // runtime may share. Declared as `ref ushort` (the blittable view of the UTF-16
     // buffer) because a `ref char` would demand DisableRuntimeMarshalling on the whole
     // assembly; the call site casts with MemoryMarshal and keeps the char[] typing.

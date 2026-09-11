@@ -654,7 +654,7 @@ public sealed class StepContext
                 .TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
             result = result.Replace("{temp_dir}", tempDir, System.StringComparison.Ordinal);
         }
-        // R5: the web-installer stub's download destination. Same determinism property
+        // The web-installer stub's download destination (R5). Same determinism property
         // as {temp_dir} — the packed step string stays a literal token, so two packs of
         // the same manifest are byte-identical — but it resolves at INSTALL time to a
         // freshly created GUID-named private directory instead of a predictable name in
@@ -735,7 +735,7 @@ public sealed class StepContext
     {
         var resolved = Resolve(template);
 
-        // R16: a brace token that never resolved must not reach the filesystem.
+        // A brace token that never resolved must not reach the filesystem (R16).
         // The check lives HERE, at the one resolver every path-valued step field
         // goes through, rather than in the per-step destination guards.
         // Containment legitimately varies per step — some writes deliberately land

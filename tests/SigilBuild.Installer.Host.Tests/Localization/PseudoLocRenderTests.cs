@@ -40,7 +40,7 @@ public sealed class PseudoLocRenderTests : IDisposable
 {
     // T14: real license text is manifest/user-authored content that is loaded
     // verbatim (InstallerLicenseLoader), never routed through the catalog — the
-    // "English step detail" exception ADR-015 §4 (design D2) calls out. This fixture
+    // "English step detail" exception ADR-015 §4 calls out. This fixture
     // stands in for it so the License screen's OWN text doesn't need bracketing
     // to prove the chrome around it (title, accept checkbox, rail, buttons) does.
     private const string LicenseFixtureText = "Example EULA text.";
@@ -150,7 +150,7 @@ public sealed class PseudoLocRenderTests : IDisposable
 
     // Glyphs, brand/version data, user-entered field values and per-step engine
     // failure detail are legitimately un-pseudo — they are not catalog strings
-    // (design D2, §8.1). An exact allowlist (not a broad predicate) so a
+    // (ADR-015 §4). An exact allowlist (not a broad predicate) so a
     // genuinely hardcoded catalog-shaped string still fails loudly.
     private static bool IsAllowed(string text) =>
         text is "🔒" or "✓" or "•" or "••••••••"

@@ -16,7 +16,7 @@ namespace SigilBuild.Packaging.Tests.ExeWrapper;
 /// Pack → blob coverage: <see cref="ExeWrapperPackager.BuildBlobBytes"/>
 /// reads each manifest-referenced license file into a tag -&gt; text map, embeds
 /// it into the <c>SIGIL_BLOB_V1</c> wire payload, and splits diagnostic ownership
-/// by failure kind (design §5.3): a per-entry read failure is a non-fatal
+/// by failure kind: a per-entry read failure is a non-fatal
 /// <see cref="DiagnosticCodes.LicenseFileUnreadable"/> (SIG0250); the resulting
 /// map lacking an <c>en</c> entry is a fatal <see cref="DiagnosticCodes.LocalizedTextMissingEnglish"/>
 /// (SIG0290); an entirely empty map omits the screen with neither diagnostic. (gap G10)

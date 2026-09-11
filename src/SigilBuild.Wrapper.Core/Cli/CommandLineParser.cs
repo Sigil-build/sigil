@@ -135,7 +135,7 @@ public sealed class ParsedCommandLine
 
     /// <summary>
     /// Requested wizard language from /lang=&lt;tag&gt;. A fixed installer.language
-    /// overrides this (design §2.1) — language is a display preference, so a
+    /// overrides this (ADR-015 §2.1) — language is a display preference, so a
     /// conflict is logged and ignored rather than being a usage error like the
     /// fixed-scope vs /allusers conflict.
     /// </summary>

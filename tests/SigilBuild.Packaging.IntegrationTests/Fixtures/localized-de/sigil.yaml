@@ -1,4 +1,4 @@
-# Task 16 (P9): the asymmetry fixture (design §4.4's crux). Sigil ships NO `de`
+# Task 16 (P9): the asymmetry fixture (ADR-015 §2.2's crux). Sigil ships NO `de`
 # chrome catalog (only en + uk — Task 12), but this manifest's own declared
 # screen supplies `de` text. Under /lang=de the declared screen must render in
 # German while the chrome (nav buttons, rail built-ins) falls back to English,

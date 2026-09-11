@@ -630,15 +630,6 @@ public sealed class InstallSession
     public string? CollectedInstallDir { get; set; }
 
     /// <summary>
-    /// Resolve the install directory the wizard's Destination screen should
-    /// pre-fill for <paramref name="scope"/> (the current scope toggle
-    /// selection, or <see cref="ResolvedScope"/> when the toggle is hidden). Honors
-    /// a <c>/D=</c> override and the manifest <c>install_dir</c>, resolving their
-    /// <c>{scope_root}</c> / <c>{app.*}</c> tokens; falls back to
-    /// <c>&lt;scope root&gt;\&lt;App.Name&gt;</c>. Does NOT consider a previously
-    /// collected path, so re-toggling scope recomputes a clean default.
-    /// </summary>
-    /// <summary>
     /// The grandfather clause: a recovered <c>priorInstallDir</c> that resolves
     /// outside the scope root is HONOURED (an install predating the containment
     /// rule must stay upgradable and cleanly removable), but the exemption is
@@ -671,6 +662,15 @@ public sealed class InstallSession
             "A NEW destination outside the root is still refused.");
     }
 
+    /// <summary>
+    /// Resolve the install directory the wizard's Destination screen should
+    /// pre-fill for <paramref name="scope"/> (the current scope toggle
+    /// selection, or <see cref="ResolvedScope"/> when the toggle is hidden). Honors
+    /// a <c>/D=</c> override and the manifest <c>install_dir</c>, resolving their
+    /// <c>{scope_root}</c> / <c>{app.*}</c> tokens; falls back to
+    /// <c>&lt;scope root&gt;\&lt;App.Name&gt;</c>. Does NOT consider a previously
+    /// collected path, so re-toggling scope recomputes a clean default.
+    /// </summary>
     public string ResolveDefaultInstallDir(InstallScope? scope = null)
     {
         var effective = scope ?? _scope;
@@ -1104,7 +1104,10 @@ public sealed class InstallSession
     /// double install appends the install dir exactly once and duplicates no
     /// shortcut or ARP row. A best-effort step: a failed prior-uninstall (e.g.
     /// missing state) must not block the reinstall, so the outcome is intentionally
-    /// ignored. No-op for the un-stamped runtime and off Windows.
+    /// ignored. No-op for the un-stamped runtime and off Windows. This cleanup keys
+    /// off <see cref="ExistingInstallDetected"/>, which is sourced from the state
+    /// store rather than ARP, so under elevation it can tear down a per-user install
+    /// that the ARP-sourced upgrade plan could not see (R74).
     /// </summary>
     private async Task PerformReinstallCleanupAsync(string? resolvedInstallDir, CancellationToken ct)
     {

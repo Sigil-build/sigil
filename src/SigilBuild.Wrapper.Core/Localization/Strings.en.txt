@@ -8,7 +8,7 @@
 # concatenation cannot select between them.
 #
 # NOT in this catalog: log output, journal lines, developer exception messages,
-# per-step failure detail (design D2), and CLI help (design D3).
+# per-step failure detail, and CLI help (ADR-015 §4).
 #
 # Reviewer: n/a (source language)
 
@@ -134,7 +134,7 @@ already_running.body = Setup is already running.\n\nAnother copy of this install
 brand.app_fallback = Application
 brand.publisher_fallback = Publisher
 
-# --- engine prose (design D2 — prose only; step failure detail stays English) ---
+# --- engine prose (ADR-015 §4 — prose only; step failure detail stays English) ---
 engine.removing_previous = Removing previous version
 engine.removing_newer = Removing newer version
 engine.installing_prerequisite = Installing {name}…

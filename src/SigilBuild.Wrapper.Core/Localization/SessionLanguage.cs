@@ -10,7 +10,7 @@ namespace SigilBuild.Wrapper.Core.Localization;
 /// in XAML <c>{x:Static}</c>.
 /// </summary>
 /// <remarks>
-/// The guard is deliberately asymmetric (design §3.2). A read before
+/// The guard is deliberately asymmetric. A read before
 /// initialization means someone reordered startup, and the natural consequence
 /// would be a silent wrong-language render — invisible to tests and users alike.
 /// Debug throws so the test suite fails loudly; Release falls back to English and

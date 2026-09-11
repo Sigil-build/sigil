@@ -232,7 +232,7 @@ public class LocalizationEndToEndTests
 
             ukBody.Should().Be(
                 enBody,
-                "the log wording must be identical regardless of /lang (design D2 - the " +
+                "the log wording must be identical regardless of /lang (ADR-015 §4 - the " +
                 "log is the support surface and stays English) once timestamps and the " +
                 "args-echo header are stripped");
         }
@@ -291,7 +291,7 @@ public class LocalizationEndToEndTests
             var exit = await sandbox.RunAsync(
                 setupExe, SilentInstallArgs("uk", installDir, logPath));
 
-            exit.Should().Be(0, "a language conflict is not a usage error (design §2.1)");
+            exit.Should().Be(0, "a language conflict is not a usage error (ADR-015 §2.1)");
 
             File.Exists(logPath).Should().BeTrue("/LOG was requested");
             var logText = File.ReadAllText(logPath);

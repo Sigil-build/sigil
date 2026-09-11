@@ -7,41 +7,31 @@ using FluentAssertions;
 using Xunit;
 
 /// <summary>
-/// WiX-class install + uninstall snapshot-diff integration test
-/// (Sprint 5d, WBS 2.30). Exercises the canonical "WiX-class" payload —
-/// file copy + 4 registry writes + 2 shortcuts + a post-install registry
-/// mark — and asserts that uninstall reverts every observable mutation.
+/// WiX-class install + uninstall snapshot-diff integration test. Exercises the
+/// canonical "WiX-class" payload — file copy + 4 registry writes + 2 shortcuts + a
+/// post-install registry mark — and asserts that uninstall reverts every observable
+/// mutation.
 /// </summary>
 /// <remarks>
-/// <para>Reports a genuine Skipped result (via <see cref="VmFactAttribute"/>, register
-/// row R6) when any of the following are missing: the host is not Windows;
-/// <c>SIGIL_VM_TESTS=1</c> is not set; the AOT-published wrapper runtime is not staged
-/// under <c>runtimes/win-x64/SigilBuild.Wrapper.exe</c>.</para>
+/// <para>Reports a genuine Skipped result (via <see cref="VmFactAttribute"/>, R6) when
+/// any of the following are missing: the host is not Windows; <c>SIGIL_VM_TESTS=1</c> is
+/// not set; the AOT-published wrapper runtime is not staged under
+/// <c>runtimes/win-x64/SigilBuild.Wrapper.exe</c>.</para>
 ///
-/// <para>The test uses HKCU (not HKLM) so it never needs admin rights.
-/// Real installers would write under HKLM, but exercising HKLM here would
-/// gate the test on Administrator and pollute the host machine. HKCU under
-/// a unique subkey gives us a snapshot-clean comparison without that cost,
-/// and the wrapper code path through <see cref="Microsoft.Win32.RegistryKey"/>
-/// is identical for both hives.</para>
+/// <para>Uses HKCU (not HKLM) so it never needs admin rights and never pollutes the host
+/// machine; the wrapper code path through <see cref="Microsoft.Win32.RegistryKey"/> is
+/// identical for both hives.</para>
 ///
-/// <para><b>Shortcuts.</b> The shipped example manifest now anchors its two
-/// shortcuts at the named <c>start_menu</c> / <c>desktop</c> locations (register
-/// row R16 / lane S2) — which is correct for an example that documents real
-/// shortcut placement, and wrong for this test in two independent ways: the
-/// resulting <c>.lnk</c> files land <em>outside</em> <see cref="SnapshotDiffer"/>'s
-/// scope (<c>installDir</c> + the HKCU subtree), so the empty-diff assertion
-/// could not observe them at all; and creating them would write real entries into
-/// the runner's Start Menu and onto its Desktop, which this stage's standard
-/// forbids on any host. So the test packs a <em>copy</em> of the example whose two
-/// <c>location:</c> values are rewritten to scratch coordinates under
-/// <c>{install_dir}</c> — inside the temp install root, inside the snapshot scope,
-/// and therefore actually covered by the uninstall assertion. The shipped manifest
-/// is not modified, and <see cref="RewriteShortcutLocationsToScratch"/> fails loudly
-/// if it ever stops finding the anchors to rewrite.</para>
-///
-/// <para>Placing a real <c>.lnk</c> in a real shell folder and reverting it on
-/// uninstall is a distinct claim from "uninstall is observation-clean", and is not
+/// <para><b>Shortcuts.</b> The shipped example manifest anchors its two shortcuts at the
+/// named <c>start_menu</c> / <c>desktop</c> locations (R16), which land outside
+/// <see cref="SnapshotDiffer"/>'s scope (<c>installDir</c> + the HKCU subtree) and would
+/// write real entries onto the runner's Start Menu and Desktop. So the test packs a copy
+/// of the example whose two <c>location:</c> values are rewritten to scratch coordinates
+/// under <c>{install_dir}</c> — inside the snapshot scope and therefore actually covered
+/// by the uninstall assertion. The shipped manifest is not modified, and
+/// <see cref="RewriteShortcutLocationsToScratch"/> fails loudly if it ever stops finding
+/// the anchors to rewrite. Placing a real <c>.lnk</c> in a real shell folder and reverting
+/// it on uninstall is a distinct claim from "uninstall is observation-clean", and is not
 /// covered here.</para>
 /// </remarks>
 public class WixClassInstallUninstallTests
@@ -57,12 +47,9 @@ public class WixClassInstallUninstallTests
     /// <c>CommandLineParser</c> so a grammar drift fails in every CI run.
     /// </summary>
     /// <remarks>
-    /// R66: this used to be <c>/install_dir=&lt;dir&gt; /registered_user=alice</c>.
-    /// Neither is a token in the wrapper's closed grammar — the install dir is
-    /// <c>/D=</c> and a declared parameter is <c>/P&lt;name&gt;=</c> — so this leg died
-    /// with a <c>UsageException</c> (exit <b>64</b>) on the first real VM run, before
-    /// anything was installed and therefore long before the snapshot diff it exists to
-    /// assert.
+    /// Neither <c>/install_dir=&lt;dir&gt;</c> nor <c>/registered_user=alice</c> is a
+    /// token in the wrapper's closed grammar: the install dir is <c>/D=</c> and a
+    /// declared parameter is <c>/P&lt;name&gt;=</c> (R66).
     /// </remarks>
     internal static string[] SilentInstallArgs(string installDir) =>
         new[] { "/S", "/D=" + installDir, "/Pregistered_user=alice" };
@@ -162,15 +149,12 @@ public class WixClassInstallUninstallTests
         var installDiff = SnapshotDiffer.Diff(before, afterInstall);
         installDiff.Should().NotBeEmpty("install must change observable state (sanity check)");
 
-        // Uninstall via the wrapper directly. We invoke the *original* setup.exe (not the
-        // uninstaller copy T15 drops in install_dir) with /S /Uninstall: this scenario
-        // doesn't bootstrap a copy, it just runs the uninstall mode of the same packed exe.
-        //
-        // R58: this comment used to claim this was "the same code path the ARP
-        // UninstallString invokes". It is not, and the difference was a release blocker —
-        // the original setup exe lives OUTSIDE install_dir, so it never meets the P6
-        // files-in-use gate that the dropped uninstall.exe always meets from within.
-        // ArpUninstallStringTests covers the registered string itself.
+        // Uninstall via the wrapper directly: /S /Uninstall runs the uninstall mode of the
+        // same packed exe, not the uninstaller copy dropped in install_dir. This is NOT
+        // the same code path the ARP UninstallString invokes — the original setup exe
+        // lives OUTSIDE install_dir, so it never meets the files-in-use gate that the
+        // dropped uninstall.exe always meets from within (R58). ArpUninstallStringTests
+        // covers the registered string itself.
         var rcUninstall = await sandbox.RunAsync(setupExe, SilentUninstallArgs());
         rcUninstall.Should().Be(0, "uninstall must succeed");
 

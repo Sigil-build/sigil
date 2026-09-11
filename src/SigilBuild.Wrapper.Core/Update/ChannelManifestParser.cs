@@ -7,15 +7,15 @@ namespace SigilBuild.Wrapper.Update;
 
 /// <summary>
 /// Parses + validates the channel manifest JSON fetched from
-/// <c>updates.manifestUrl</c> at <c>/Update</c> time (P12, T12.1). Uses the
+/// <c>updates.manifestUrl</c> at <c>/Update</c> time. Uses the
 /// source-generated <see cref="ChannelManifestJsonContext"/> exclusively — no
 /// reflection-based <see cref="JsonSerializer"/> overload, per the Native AOT
 /// contract every wrapper-runtime assembly ships under.
 /// </summary>
 /// <remarks>
-/// Does NOT verify the detached signature (T12.2) or compare versions against
-/// the installed one (T12.3) — this is purely "is the fetched document a
-/// well-formed, in-range channel manifest".
+/// Does NOT verify the detached signature or compare versions against the
+/// installed one — this is purely "is the fetched document a well-formed,
+/// in-range channel manifest".
 /// </remarks>
 internal static class ChannelManifestParser
 {
@@ -75,8 +75,8 @@ internal static class ChannelManifestParser
             return Malformed("missing required field 'packageUrl'");
         }
 
-        // Mirrors SIG0235's http_download insecure-URL stance (P4), applied at
-        // update runtime instead of pack time: a plain prefix check, not a full
+        // Mirrors SIG0235's http_download insecure-URL stance, applied at update
+        // runtime instead of pack time: a plain prefix check, not a full
         // Uri parse, since a channel manifest that can't even spell "https://"
         // correctly is already malformed.
         if (!manifest.PackageUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
@@ -89,10 +89,10 @@ internal static class ChannelManifestParser
             return Malformed("missing required field 'sha256'");
         }
 
-        // R13: freshness. These are REQUIRED, not optional — an optional freshness
-        // field is defeated by replaying a correctly signed manifest that predates
-        // it, which is the exact attack. A manifest with no issuedAt is therefore
-        // malformed rather than "unbounded".
+        // Freshness. These are REQUIRED, not optional — an optional freshness field
+        // is defeated by replaying a correctly signed manifest that predates it, which
+        // is the exact attack. A manifest with no issuedAt is therefore malformed
+        // rather than "unbounded" (R13).
         if (string.IsNullOrWhiteSpace(manifest.IssuedAt))
         {
             return Malformed(

@@ -5,12 +5,12 @@ using SigilBuild.Core.Diagnostics;
 namespace SigilBuild.Wrapper.Update;
 
 /// <summary>
-/// Verifies a fetched channel manifest's detached ECDSA P-256 signature (P12,
-/// T12.2) against <see cref="SigilBuild.Core.Manifest.UpdatesSection.SigningKey"/>,
+/// Verifies a fetched channel manifest's detached ECDSA P-256 signature against
+/// <see cref="SigilBuild.Core.Manifest.UpdatesSection.SigningKey"/>,
 /// per the encoding locked in on <see cref="ChannelManifest"/>'s remarks: a
 /// base64 IEEE-P1363 (r‖s) signature fetched from <c>manifestUrl + ".sig"</c>,
 /// checked with the BCL's <see cref="ECDsa"/> against a base64 X.509 SPKI DER
-/// public key. This is a hard security gate for the update runtime (T12.3) —
+/// public key. This is a hard security gate for the update runtime —
 /// every expected failure (bad signature, bad/missing key, malformed input,
 /// wrong curve) is surfaced as <see cref="DiagnosticCodes.ChannelManifestSignatureInvalid"/>
 /// (SIG0321) rather than an escaping exception, so a tampered or unsigned

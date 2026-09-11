@@ -8,9 +8,9 @@ namespace SigilBuild.Wrapper.Update;
 
 /// <summary>
 /// The highest channel-manifest <c>sequence</c> this machine has ever accepted for a
-/// given app + scope (register row R13). Persisted so that a correctly signed but
-/// superseded manifest — the replay case a validity window alone cannot catch, because
-/// the replayed document may still be inside its own window — is refused.
+/// given app + scope. Persisted so that a correctly signed but superseded manifest —
+/// the replay case a validity window alone cannot catch, because the replayed document
+/// may still be inside its own window — is refused (R13).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -23,12 +23,12 @@ namespace SigilBuild.Wrapper.Update;
 /// <para>
 /// <b>Hardening.</b> Machine scope lands under <c>%ProgramData%</c>, whose inherited
 /// DACL grants <c>BUILTIN\Users</c> write. This file is a security decision input, so
-/// it goes through <see cref="StateDirectorySecurity.CreateHardened"/> exactly as S1
-/// made <c>UninstallStateStore</c> do — an unprivileged user who can lower the stored
-/// sequence can re-enable every replay this row exists to stop. User scope legitimately
+/// it goes through <see cref="StateDirectorySecurity.CreateHardened"/> exactly as
+/// <c>UninstallStateStore</c> does — an unprivileged user who can lower the stored
+/// sequence can re-enable every replay this file exists to stop. User scope legitimately
 /// lives in the user's own profile, where hardening would be meaningless, and where the
-/// user could steer their own update eligibility anyway (the same posture R37 records
-/// for <c>minFromVersion</c>: publisher policy, not a security boundary).
+/// user could steer their own update eligibility anyway (the same posture as
+/// <c>minFromVersion</c>: publisher policy, not a security boundary — R37).
 /// </para>
 /// <para>
 /// <b>Fail-safe, not fail-open.</b> An unreadable or corrupt file reads as "no sequence

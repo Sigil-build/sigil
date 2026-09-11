@@ -49,11 +49,9 @@ internal static class Functions
             // always "" under InvariantGlobalization=true. Returns the user's top
             // preference; the full ordered list drives language resolution
             // (Localization/LanguageResolver). Total: "" when unavailable.
-            // ADR-008 §1.1 amended by P9 Task 17 (2026-07-15) — see
-            // docs/architecture/adr-008-expression-policy.md §1.1 and the
-            // amendment log. This was a behavior change, not only a source
-            // change: a `When` using locale() moved from always-"" to a real
-            // tag, which can flip conditions.
+            // See docs/architecture/adr-008-expression-policy.md §1.1: a `When`
+            // clause using locale() sees a real tag, so it can gate on the OS
+            // language.
             ["locale"] = _ => OsUiLanguage.Primary(),
 
             ["file_exists"] = a => File.Exists(ToStringOrNull(a[0])),
@@ -63,7 +61,7 @@ internal static class Functions
                 ToStringOrNull(a[1]),
                 ToStringOrNull(a[2])),
 
-            // --- P1 data-retrieval functions (ADR-008 §1.3). All return a
+            // --- Data-retrieval functions (ADR-008 §1.3). All return a
             //     string, "" when absent/denied, read-only, AOT-safe. These are
             //     the declarative equivalents of NSIS ReadRegStr / Inno
             //     RegQueryStringValue / WiX RegistrySearch. ---
@@ -116,7 +114,7 @@ internal static class Functions
         }
     }
 
-    // Reads this app's own Add/Remove-Programs DisplayVersion (feeds P3 upgrade
+    // Reads this app's own Add/Remove-Programs DisplayVersion (feeds upgrade
     // logic). The install scope is not known at eval time, so probe the machine
     // hive first, then the per-user hive — mirroring ArpRegistration's
     // scope-correct write layout (…\CurrentVersion\Uninstall\<app_id>). "" when

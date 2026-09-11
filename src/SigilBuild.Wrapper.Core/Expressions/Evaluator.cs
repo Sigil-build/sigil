@@ -38,7 +38,7 @@ public sealed class Evaluator
 
     /// <summary>
     /// Evaluate an expression to its raw value (string / long / bool / list).
-    /// Backs the <c>installer.vars</c> variable model (P1): a var's expression
+    /// Backs the <c>installer.vars</c> variable model: a var's expression
     /// is evaluated once at session start and the result exposed as
     /// <c>var.&lt;name&gt;</c>. The same closed grammar, function table, and
     /// identifier set as <see cref="EvaluateBool"/> apply.

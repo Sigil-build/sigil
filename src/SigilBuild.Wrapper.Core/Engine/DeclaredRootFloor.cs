@@ -22,8 +22,8 @@ using System.IO;
 /// <para>
 /// So a declaration contributes a root only when it is <em>specific</em> — a place that
 /// belongs to this application rather than to Windows or to everybody. The documented
-/// case R44 exists to fix, <c>C:\ProgramData\MyApp</c>, clears the floor;
-/// <c>C:\ProgramData</c> itself does not.
+/// example, <c>C:\ProgramData\MyApp</c>, clears the floor;
+/// <c>C:\ProgramData</c> itself does not (R44).
 /// </para>
 /// <para>
 /// <strong>Deliberately NOT part of the floor: admin-only writability.</strong> It looks

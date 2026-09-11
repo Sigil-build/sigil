@@ -58,7 +58,7 @@ public class LanguageResolverTests
         LanguageResolver.Match(new[] { "zz" }, new[] { "en", "uk" }).Should().Be("en");
     }
 
-    // The reason list-walk exists (design §4.2). This test fails under first-only.
+    // The reason list-walk exists (ADR-015 §2.1). This test fails under first-only.
     [Fact]
     public void Match_WalksPastUnavailableTopPreference()
     {

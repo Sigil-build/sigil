@@ -35,7 +35,10 @@ namespace SigilBuild.Wrapper.IntegrationTests;
 /// the plan is always <c>FreshInstall</c>. On a GitHub-hosted runner — always elevated —
 /// the downgrade guard is therefore silently off and the prior install dir is not
 /// preserved; those two assertions skip there with a reason naming R2 and the elevated
-/// per-user upgrade-plan row, rather than failing or passing for the wrong reason.</para>
+/// per-user upgrade-plan row, rather than failing or passing for the wrong reason. That
+/// gap is filed as R74, and the prior-version <c>uninstall.exe</c> each of these legs
+/// spawns is itself admitted past the single-instance guard via R76's parent-identity
+/// handoff, not by relaxing the guard.</para>
 /// <para>The fixture ships a per-version marker file (<c>version-&lt;version&gt;.marker</c>,
 /// copied by <c>from: payload://**</c>) so a genuine replacement is observable rather
 /// than inferred: an exit code and an ARP string alone do not distinguish it from a

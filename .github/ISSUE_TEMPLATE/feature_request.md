@@ -14,5 +14,5 @@ labels: enhancement, triage
 
 ## Scope check
 
-- [ ] Within MVP scope (Windows, MSIX/ZIP, Azure Trusted Signing) — see `decisions.md#D-004`
+- [ ] Within MVP scope (Windows, MSIX/ZIP, Azure Trusted Signing) — see `docs/architecture/`
 - [ ] Post-MVP — happy to wait

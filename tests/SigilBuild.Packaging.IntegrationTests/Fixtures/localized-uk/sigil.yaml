@@ -2,7 +2,7 @@
 # Sigil ships an en+uk chrome catalog (Task 12), and this manifest's own screen
 # text also carries an `uk` entry, so both surfaces resolve to Ukrainian under
 # /lang=uk. Contrast with localized-de/sigil.yaml, which supplies `de` screen
-# text that Sigil's chrome catalog does NOT ship, proving design §4.4:
+# text that Sigil's chrome catalog does NOT ship, proving ADR-015 §2.2:
 # chrome and manifest text match INDEPENDENTLY against the same preference list.
 spec: v1.0
 

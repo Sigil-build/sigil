@@ -299,7 +299,7 @@ jobs:
           dotnet build tests/SigilBuild.Wrapper.IntegrationTests/SigilBuild.Wrapper.IntegrationTests.csproj
           --configuration Release
 
-      # HARD GATE (not just a log line): the P11 system-step tests below
+      # HARD GATE (not just a log line): the system-step tests below
       # soft-skip — reporting as Passed, not Skipped — when
       # Elevation.IsProcessElevated() comes back false. That means an
       # unelevated runner would make this whole job go green having

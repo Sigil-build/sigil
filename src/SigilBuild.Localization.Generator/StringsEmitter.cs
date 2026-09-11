@@ -92,7 +92,7 @@ internal static class StringsEmitter
 
         // `S` — session-resolved static accessors for XAML {x:Static}. Only argless
         // keys get one: a key with placeholders needs an argument, so it must go
-        // through a ViewModel property instead (design §7.1).
+        // through a ViewModel property instead.
         sb.AppendLine("/// <summary>Session-resolved chrome strings for XAML <c>{x:Static}</c>.</summary>");
         sb.AppendLine("public static class S");
         sb.AppendLine("{");

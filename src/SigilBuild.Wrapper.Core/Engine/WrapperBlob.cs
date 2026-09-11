@@ -368,7 +368,7 @@ public sealed record InstallerBrandData(
     // Combined with WinVerifyTrust(self) to gate the trust line (see
     // InstallerTrustLoader). Appended last to keep the record backward-compatible.
     bool SignDeclared = false,
-    // R45: the declared downloaded-binary signature policy. Defaults to the pre-R45
+    // The declared downloaded-binary signature policy (R45). Defaults to the pre-R45
     // behaviour (infer from SignDeclared), so an un-stamped or older blob means
     // exactly what it always did.
     SigilBuild.Core.Manifest.RequireSignedDownloads RequireSignedDownloads

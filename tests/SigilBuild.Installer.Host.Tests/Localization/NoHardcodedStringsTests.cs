@@ -13,7 +13,7 @@ namespace SigilBuild.Installer.Host.Tests.Localization;
 /// contains a letter — anything found bypassed the S/Strings catalog.
 /// Complements <see cref="PseudoLocRenderTests"/>, whose runtime render
 /// walk can only prove screens it can actually reach; this scan sees every XAML
-/// file regardless of reachability (design §8.1).
+/// file regardless of reachability.
 /// </summary>
 public class NoHardcodedStringsTests
 {

@@ -115,7 +115,7 @@ public sealed class UpgradeSessionTests
     [Fact]
     public async Task Downgrade_blocked_message_stays_english_and_names_the_override_flag()
     {
-        // P9 design D2: the console/silent downgrade-blocked message is the headless
+        // ADR-015 §4: the console/silent downgrade-blocked message is the headless
         // twin of the wizard's localized DowngradeBlocked notice screen — it names the
         // English CLI flag /force-downgrade, so (like BuildBlockerMessage) it must NOT
         // be routed through the catalog. This pins the reverted English text and

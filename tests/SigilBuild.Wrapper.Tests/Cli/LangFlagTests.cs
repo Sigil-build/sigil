@@ -24,7 +24,7 @@ public class LangFlagTests
     public void Lang_WellFormedButUnknown_IsAccepted_NotAnError()
     {
         // Sigil ships no `de` chrome, but a manifest may supply `de` screens.
-        // Rejecting this would break design §4.4.
+        // Rejecting this would break ADR-015 §2.2.
         Parse("/lang=de").Lang.Should().Be("de");
     }
 

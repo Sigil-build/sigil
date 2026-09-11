@@ -7,15 +7,14 @@ namespace SigilBuild.Wrapper.IntegrationTests;
 
 /// <summary>
 /// Exercises the REAL <c>WinVerifyTrust</c> P/Invoke behind
-/// <see cref="AuthenticodeVerifier"/> (T11 / decision 7) against files with a
-/// known Authenticode state — no bespoke test cert required. Windows-only; on
-/// other hosts (and when the reference file is absent) the tests report a genuine
-/// Skipped result (via <see cref="AuthenticodeFactAttribute"/> /
-/// <see cref="AuthenticodeReferenceFileFactAttribute"/>, register row R6) mirroring
-/// the VM-gated install tests.
-/// The pure trust-line gating decision is covered in the unit test project; this
-/// proves the native call itself distinguishes a validly-signed binary from an
-/// unsigned one.
+/// <see cref="AuthenticodeVerifier"/> against files with a known Authenticode state —
+/// no bespoke test cert required. Windows-only; on other hosts (and when the reference
+/// file is absent) the tests report a genuine Skipped result (via
+/// <see cref="AuthenticodeFactAttribute"/> /
+/// <see cref="AuthenticodeReferenceFileFactAttribute"/>, R6) mirroring the VM-gated
+/// install tests. The pure trust-line gating decision is covered in the unit test
+/// project; this proves the native call itself distinguishes a validly-signed binary
+/// from an unsigned one.
 /// </summary>
 public class AuthenticodeVerifierTests
 {
@@ -27,11 +26,10 @@ public class AuthenticodeVerifierTests
     [AuthenticodeReferenceFileFact]
     public void VerifyFile_returns_true_for_a_signed_system_binary()
     {
-        // Register row R17 switched revocation checking on (WTD_REVOKE_WHOLECHAIN), which
-        // means this file's verdict now depends on whether a CRL/OCSP responder is
-        // reachable. Asserting BeTrue would make this test pass on a networked host and
-        // fail on an air-gapped one for a reason that has nothing to do with the
-        // signature — so it asserts what is actually invariant: a genuinely signed
+        // Revocation checking is on (WTD_REVOKE_WHOLECHAIN, R17), so this file's verdict
+        // depends on whether a CRL/OCSP responder is reachable. Asserting BeTrue would pass
+        // on a networked host and fail on an air-gapped one for a reason unrelated to the
+        // signature — so this asserts what is actually invariant: a genuinely signed
         // Microsoft binary is never reported unsigned, invalid or revoked, whatever the
         // host's connectivity.
         var status = AuthenticodeVerifier.VerifyFileStatus(SignedSystemFile);

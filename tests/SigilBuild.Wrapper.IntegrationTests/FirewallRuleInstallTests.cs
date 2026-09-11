@@ -10,13 +10,13 @@ using SigilBuild.Wrapper.Steps;
 using Xunit;
 
 /// <summary>
-/// T13.1 (P13): the live create + reverse leg for <c>firewall_rule</c> (P11 /
-/// T11.3), deferred to CI-VM when that step shipped with unit/parse/roundtrip
-/// coverage only. Drives <see cref="FirewallRuleStep"/> directly (the
-/// <c>netsh</c> argument construction itself is already proven byte-for-byte
-/// by <c>FirewallRuleStepTests.BuildAddArgs_*</c>/<c>BuildDeleteArgs_*</c>;
-/// this test is only about the real <c>netsh advfirewall</c> round trip) and
-/// asserts BOTH halves of the P11 "Verify" block:
+/// The live create + reverse leg for <c>firewall_rule</c>, deferred to CI-VM when that
+/// step shipped with unit/parse/roundtrip coverage only. Drives
+/// <see cref="FirewallRuleStep"/> directly (the <c>netsh</c> argument construction itself
+/// is already proven byte-for-byte by
+/// <c>FirewallRuleStepTests.BuildAddArgs_*</c>/<c>BuildDeleteArgs_*</c>; this test is only
+/// about the real <c>netsh advfirewall</c> round trip) and asserts BOTH halves of the
+/// "Verify" block:
 /// <list type="bullet">
 /// <item><description>add → <c>netsh advfirewall firewall show rule
 /// name=&lt;name&gt;</c> finds it;</description></item>
@@ -29,15 +29,13 @@ using Xunit;
 /// <remarks>
 /// <para>
 /// <b>Gating:</b> reports a genuine Skipped result (via
-/// <see cref="VmSystemStepsFactAttribute"/>, register row R6 — the same convention
-/// as <c>PrerequisiteInstallTests</c>/<c>UpgradeInstallTests</c>) unless the
-/// host is Windows, <c>SIGIL_VM_TESTS=1</c> and <c>SIGIL_VM_SYSTEMSTEPS=1</c>
-/// are both set, AND the current process is elevated
-/// (<see cref="Elevation.IsProcessElevated"/>) — <c>netsh advfirewall
-/// firewall add/delete rule</c> requires admin. This is NOT run locally in
-/// this sandbox (not Windows, not elevated, env vars unset) — the CI VM job
-/// (<c>p11-system-steps-vm</c> in <c>wrapper-vm-tests.yml</c>) sets all three
-/// and runs on a real elevated <c>windows-latest</c> runner.
+/// <see cref="VmSystemStepsFactAttribute"/>, R6 — the same convention as
+/// <c>PrerequisiteInstallTests</c>/<c>UpgradeInstallTests</c>) unless the host is Windows,
+/// <c>SIGIL_VM_TESTS=1</c> and <c>SIGIL_VM_SYSTEMSTEPS=1</c> are both set, AND the current
+/// process is elevated (<see cref="Elevation.IsProcessElevated"/>) — <c>netsh advfirewall
+/// firewall add/delete rule</c> requires admin. Not run locally in this sandbox — the CI
+/// VM job (<c>p11-system-steps-vm</c> in <c>wrapper-vm-tests.yml</c>) sets all three and
+/// runs on a real elevated <c>windows-latest</c> runner.
 /// </para>
 /// <para>
 /// Uses a uniquely-named <c>SigilItRule_*</c> rule (per-run GUID suffix) on a

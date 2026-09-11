@@ -7,30 +7,29 @@ using FluentAssertions;
 using SigilBuild.Wrapper.Engine;
 
 /// <summary>
-/// Register row R67: the unelevated, non-VM half of the P11 system-step fixture —
-/// everything about <see cref="SystemStepInstallDir"/>'s anchor that can be proved
-/// without admin rights, so the VM matrix is no longer the <em>first</em> place the
-/// anchoring is exercised.
+/// The unelevated, non-VM half of the system-step fixture (R67) — everything about
+/// <see cref="SystemStepInstallDir"/>'s anchor that can be proved without admin rights,
+/// so the VM matrix is no longer the <em>first</em> place the anchoring is exercised.
 /// </summary>
 /// <remarks>
 /// <para>
 /// The <c>vm (p11 system steps)</c> leg failed on its first ever run because the
 /// two legs it carries had never executed anywhere: they were written against
-/// <see cref="StepContext.Empty"/> and system-binary targets, both of which lane
-/// S2's <see cref="PrivilegedTargetGuard"/> refuses. These cases run on every
-/// Windows PR build and are pure computation — no task, no service, no COM
-/// registration, no write outside the process — so a future regression in the
-/// fixture's anchor is caught before the matrix runs, not by it.
+/// <see cref="StepContext.Empty"/> and system-binary targets, both of which
+/// <see cref="PrivilegedTargetGuard"/> refuses. These cases run on every Windows PR
+/// build and are pure computation — no task, no service, no COM registration, no
+/// write outside the process — so a future regression in the fixture's anchor is
+/// caught before the matrix runs, not by it.
 /// </para>
 /// <para>
-/// What is <b>not</b> provable here, honestly stated: the elevated legs create
-/// their <c>install_dir</c> under <c>%ProgramFiles%</c>, and an unelevated process
-/// cannot create that directory. The guard's ACL arm inspects the directory the
-/// target sits in, so with the per-run leaf absent the arm answers "not admin-only"
-/// on a technicality (<see cref="StateDirectorySecurity.IsAdminOnlyWritable"/>
+/// What is <b>not</b> provable here, honestly stated: the elevated legs create their
+/// <c>install_dir</c> under <c>%ProgramFiles%</c>, and an unelevated process cannot
+/// create that directory, so the guard's ACL arm — which inspects the directory the
+/// target sits in — answers "not admin-only" here only on the technicality that the
+/// per-run leaf is absent (<see cref="StateDirectorySecurity.IsAdminOnlyWritable"/>
 /// fails closed for a directory that does not exist). The two arms are therefore
 /// pinned separately below — containment against the fixture's own resolved anchor,
-/// and the ACL predicate against the machine scope root that the created directory
+/// and the ACL predicate against the machine scope root the created directory
 /// inherits from — plus one full-guard accept case against an existing admin-only
 /// directory under that same root.
 /// </para>
@@ -69,7 +68,7 @@ public class SystemStepAnchorTests
         PathContainment.IsUnderWithoutTraversal(anchor, Path.Combine(dir, "sigilcomprobe.dll"))
             .Should().BeTrue("com_register's DLL is copied into install_dir");
 
-        // The two targets the legs used to name — the reason the first VM run failed.
+        // The two targets these legs no longer use — both are outside any install_dir.
         PathContainment.IsUnderWithoutTraversal(anchor, Path.Combine(Environment.SystemDirectory, "cmd.exe"))
             .Should().BeFalse("a System32 binary is outside any install_dir");
         PathContainment.IsUnderWithoutTraversal(anchor, Path.Combine(Environment.SystemDirectory, "kernel32.dll"))
@@ -111,8 +110,7 @@ public class SystemStepAnchorTests
     [WindowsFact("Windows ACL APIs")]
     public void The_two_refusals_that_failed_the_first_vm_run_still_fire()
     {
-        // Verbatim the two failures from run 34361541578, pinned so the fixture can
-        // never quietly regress to either shape.
+        // Verbatim the two failures the fixture must never quietly regress to.
         var systemBinary = Path.Combine(Environment.SystemDirectory, "cmd.exe");
         var systemDll = Path.Combine(Environment.SystemDirectory, "kernel32.dll");
         var (_, context) = SystemStepInstallDir.ResolveAnchor();

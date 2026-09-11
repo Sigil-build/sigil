@@ -8,8 +8,8 @@ using Xunit;
 
 [assembly: Avalonia.Headless.AvaloniaTestApplication(typeof(SigilBuild.Installer.Host.Tests.TestAppBuilder))]
 
-// P9: SessionLanguage (SigilBuild.Wrapper.Core.Localization) is process-wide static
-// state now read from many production code paths exercised across this assembly's
+// SessionLanguage (SigilBuild.Wrapper.Core.Localization) is process-wide static
+// state read from many production code paths exercised across this assembly's
 // tests (BrandTokens defaults, InstallerViewModel, FieldViewModel, ...). Serializing
 // test collections keeps ViewModelLocalizationTests' SetForTesting(Lang.Uk) from
 // racing another collection's bare `new BrandTokens()` expecting the English default.
@@ -22,8 +22,8 @@ public class TestAppBuilder
     public static AppBuilder BuildAvaloniaApp() =>
         AppBuilder.Configure<App>().UseHeadless(new AvaloniaHeadlessPlatformOptions());
 
-    // P9 Task 13 fallout: production field initializers (InstallerViewModel,
-    // UninstallViewModel, FieldViewModel, BrandTokens) now read
+    // Production field initializers (InstallerViewModel,
+    // UninstallViewModel, FieldViewModel, BrandTokens) read
     // SessionLanguage.Current at construction time. In Release that guard falls
     // back to Lang.En + logs; in Debug it throws — deliberately (see
     // SessionLanguage.Current's remarks). ~20 of this assembly's test classes

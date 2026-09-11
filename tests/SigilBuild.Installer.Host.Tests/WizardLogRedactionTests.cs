@@ -9,12 +9,13 @@ using Xunit;
 namespace SigilBuild.Installer.Host.Tests;
 
 /// <summary>
-/// I1: the wizard's always-on log must not carry a <see cref="ParameterType.Secret"/>
-/// value. The started line used to write <c>string.Join(' ', args)</c>, and a
-/// per-user install never takes the elevation branch — so R18's DPAPI handoff never
-/// engages and argv still holds <c>/P&lt;secret&gt;=&lt;value&gt;</c> verbatim. That
-/// contradicted docs/guides/parameters.md, which promises a secret is redacted
-/// (<c>***</c>) from the install log.
+/// The wizard's always-on log must not carry a <see cref="ParameterType.Secret"/>
+/// value. A per-user install never takes the elevation branch, so R18's DPAPI
+/// handoff never engages — if the started line wrote argv verbatim
+/// (<c>string.Join(' ', args)</c>), a per-user install's log would hold
+/// <c>/P&lt;secret&gt;=&lt;value&gt;</c> in the clear, contradicting
+/// docs/guides/parameters.md's promise that a secret is redacted (<c>***</c>) from
+/// the install log.
 /// </summary>
 /// <remarks>
 /// <see cref="Program.Main"/> itself is not unit-testable — <c>[STAThread]</c>, a

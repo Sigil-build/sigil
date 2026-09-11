@@ -9,16 +9,17 @@ using SigilBuild.Installer.Host.Branding;
 using Xunit;
 
 /// <summary>
-/// Register row R48 — the trust-line lookup must not block the wizard's UI thread.
+/// The trust-line lookup must not block the wizard's UI thread. (R48)
 /// </summary>
 /// <remarks>
 /// <c>InstallerTrustLoader.ResolveFromSelf</c> is <c>WinVerifyTrust</c> with whole-chain
 /// revocation checking: a network operation, measured at 335 ms on the happy path
-/// (online, warm certificate cache, embedded-signed target). It used to run inline in
-/// <c>App.OnFrameworkInitializationCompleted</c> while the first window was being built,
-/// so the wizard could not paint until it returned. These tests assert the property that
-/// fixes that — the caller is not made to wait — without measuring anything, which is
-/// deliberate: a timed run on this box would measure a warm cache.
+/// (online, warm certificate cache, embedded-signed target). It must never run inline
+/// in <c>App.OnFrameworkInitializationCompleted</c> while the first window is being
+/// built — that would stall the wizard from painting until it returned. These tests
+/// assert exactly that non-blocking property — the caller is not made to wait —
+/// without measuring anything, which is deliberate: a timed run on this box would
+/// measure a warm cache.
 /// </remarks>
 public class TrustLineActivationTests
 {

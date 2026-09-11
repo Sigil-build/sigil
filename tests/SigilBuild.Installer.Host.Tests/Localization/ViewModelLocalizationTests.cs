@@ -11,7 +11,7 @@ using Xunit;
 namespace SigilBuild.Installer.Host.Tests.Localization;
 
 /// <summary>
-/// Task 13 (P9): ViewModel + code-behind chrome routed through the catalog. These
+/// ViewModel + code-behind chrome routed through the catalog. These
 /// mutate the process-wide <see cref="SessionLanguage"/>, so they're serialized in
 /// their own collection and reset it in <see cref="Dispose"/> — this assembly's
 /// other tests (e.g. bare <c>new BrandTokens()</c> expecting the English fallback)
@@ -59,7 +59,7 @@ public sealed class ViewModelLocalizationTests : IDisposable
     }
 
     /// <summary>
-    /// Critical 1 fix-round-1 regression: the pre-Avalonia single-instance
+    /// The pre-Avalonia single-instance
     /// MessageBoxW in <c>Program.cs</c> must resolve its body/caption through the
     /// catalog (<c>already_running.body</c> / <c>already_running.caption</c>) rather
     /// than a hardcoded English literal. A Win32 MessageBoxW can't be driven from a

@@ -14,7 +14,7 @@ using Xunit;
 namespace SigilBuild.Installer.Host.Tests;
 
 /// <summary>
-/// Headed wizard smoke test (T17). Launches the wizard's
+/// Headed wizard smoke test. Launches the wizard's
 /// <see cref="InstallerViewModel"/> on the Avalonia headless platform
 /// (<c>Avalonia.Headless.XUnit</c>, so it runs in the normal <c>dotnet test</c>
 /// loop on any box — no physical display, no CI-only virtual display gate) and
@@ -85,13 +85,13 @@ public sealed class WizardHeadedSmokeTests
             return new InstallOutcome(result.Success, result.Error);
         });
 
-        // Walk the real wizard flow (decision-4 default: Welcome → Location → Install).
+        // Walk the real wizard flow (default: Welcome → Location → Install).
         vm.CurrentStep.Should().Be(InstallerStep.Welcome);
 
         vm.Next(); // Welcome → Location (destination)
         vm.CurrentStep.Should().Be(InstallerStep.InstallOptions);
 
-        // Choose a real, writable destination so the Destination gate (T13) passes.
+        // Choose a real, writable destination so the Destination gate passes.
         vm.InstallPath = installDir;
 
         vm.Next(); // Location → Installing (fires the engine)

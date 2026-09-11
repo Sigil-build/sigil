@@ -11,18 +11,17 @@ using Xunit;
 namespace SigilBuild.Installer.Host.Tests;
 
 /// <summary>
-/// VM-level tests for the real-engine install flow that replaced the throwaway
-/// copy-loop <c>InstallerEngine</c>. The engine runner is injected as a fake so
-/// these stay fast + headless while exercising the same orchestration the App
-/// wires to <see cref="InstallSession.RunInstallAsync"/>.
+/// VM-level tests for the real-engine install flow. The engine runner is
+/// injected as a fake so these stay fast + headless while exercising the same
+/// orchestration the App wires to <see cref="InstallSession.RunInstallAsync"/>.
 /// </summary>
 public sealed class InstallFlowTests
 {
     private static InstallerViewModel ArrangeAtInstalling(
         Func<IProgress<StepProgress>, CancellationToken, Task<InstallOutcome>> runner)
     {
-        // No license loaded → the License screen is absent (T14). Decision-4 flow
-        // for a default VM: Welcome → InstallOptions (destination) → Installing.
+        // No license loaded → the License screen is absent. Flow for a default VM:
+        // Welcome → InstallOptions (destination) → Installing.
         var vm = new InstallerViewModel(new BrandTokens());
         vm.ConfigureInstallRunner(runner);
         vm.Next(); // Welcome → InstallOptions

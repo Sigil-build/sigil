@@ -11,7 +11,7 @@ using Xunit;
 namespace SigilBuild.Installer.Host.Tests;
 
 /// <summary>
-/// VM-level tests for the T15 interactive uninstall flow: the branded
+/// VM-level tests for the interactive uninstall flow: the branded
 /// confirm → progress → done sequence driving the real
 /// <see cref="InstallSession.RunUninstallInteractiveAsync"/> (injected here as a
 /// fake so the tests stay fast + headless). A failure lands on the Failed screen;

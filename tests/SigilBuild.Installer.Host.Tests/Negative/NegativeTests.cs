@@ -45,8 +45,8 @@ public class NegativeTests
 
     // ── InstallerViewModel navigation guard tests ────────────────────────────
 
-    // T14: the License screen is present only once license text is loaded, and
-    // sits after the destination (Location) screen per decision 4.
+    // The License screen is present only once license text is loaded, and
+    // sits after the destination (Location) screen.
     private static InstallerViewModel NavigateToLicense()
     {
         var vm = new InstallerViewModel(new BrandTokens());
@@ -80,8 +80,8 @@ public class NegativeTests
     }
 
     // ── BrandTokens default test ─────────────────────────────────────────────
-    // The BrandTokens.g.json sidecar was removed in T7; brand data now travels
-    // inside the WrapperBlob. An un-stamped/dev host falls back to defaults.
+    // Brand data travels inside the WrapperBlob (no BrandTokens.g.json sidecar).
+    // An un-stamped/dev host falls back to defaults.
 
     [Fact]
     public void BrandTokens_Default_UsesNeutralDefaults()

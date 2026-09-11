@@ -8,7 +8,7 @@ using Xunit;
 namespace SigilBuild.Installer.Host.Tests;
 
 /// <summary>
-/// P7 host coverage: the Failed screen offers an "Open log" affordance only when a
+/// Host coverage: the Failed screen offers an "Open log" affordance only when a
 /// /LOG file actually exists on disk. <see cref="InstallerViewModel.HasLog"/> gates
 /// the button's visibility.
 /// </summary>

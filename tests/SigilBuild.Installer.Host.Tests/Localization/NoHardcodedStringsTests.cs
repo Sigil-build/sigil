@@ -8,10 +8,10 @@ using Xunit;
 namespace SigilBuild.Installer.Host.Tests.Localization;
 
 /// <summary>
-/// Task 15 (P9): the static half of the "zero hardcoded strings" guarantee. Scans
+/// The static half of the "zero hardcoded strings" guarantee. Scans
 /// every <c>Views/*.axaml</c> file for a user-facing attribute literal that still
-/// contains a letter — anything found bypassed the S/Strings catalog (Tasks
-/// 12-14). Complements <see cref="PseudoLocRenderTests"/>, whose runtime render
+/// contains a letter — anything found bypassed the S/Strings catalog.
+/// Complements <see cref="PseudoLocRenderTests"/>, whose runtime render
 /// walk can only prove screens it can actually reach; this scan sees every XAML
 /// file regardless of reachability (design §8.1).
 /// </summary>

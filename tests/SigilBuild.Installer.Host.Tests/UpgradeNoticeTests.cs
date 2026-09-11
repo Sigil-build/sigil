@@ -8,9 +8,9 @@ using Xunit;
 namespace SigilBuild.Installer.Host.Tests;
 
 /// <summary>
-/// P3 (gap G3) host coverage: the wizard shows an "Upgrading from x.y.z" banner on an
+/// Host coverage: the wizard shows an "Upgrading from x.y.z" banner on an
 /// upgrade, and routes a blocked downgrade to a terminal notice screen carrying the
-/// dedicated exit code (3).
+/// dedicated exit code (3). (gap G3)
 /// </summary>
 public sealed class UpgradeNoticeTests
 {

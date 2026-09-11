@@ -12,7 +12,7 @@ using Xunit;
 namespace SigilBuild.Installer.Host.Tests.Screens;
 
 /// <summary>
-/// T9 host coverage: the widget factory maps parameter types (and overrides) to
+/// Host coverage: the widget factory maps parameter types (and overrides) to
 /// widgets, declared screens render + collect values into <c>param.*</c>, and the
 /// rail reflects only the When-visible screens.
 /// </summary>
@@ -75,7 +75,7 @@ public class CustomScreenTests
     private static InstallerViewModel NavigateToConfigure()
     {
         var (screens, parameters) = BuildConfigure();
-        // No license loaded → License screen absent (T14). Decision-4 flow:
+        // No license loaded → License screen absent. Flow:
         // Welcome → Location (destination) → configure (custom).
         var vm = new InstallerViewModel(new BrandTokens { AppName = "Acme Studio" });
         vm.LoadScreens(screens, parameters);
@@ -151,7 +151,7 @@ public class CustomScreenTests
         vm.LoadScreens(screens, parameters);
 
         var labels = vm.RailSteps.Select(r => r.Label).ToList();
-        // P9: the rail shows the manifest's own resolved title ("Configure"), not
+        // The rail shows the manifest's own resolved title ("Configure"), not
         // the raw screen id ("configure") — see InstallerViewModel.RebuildRail.
         labels.Should().Contain("Configure");
         labels.Should().NotContain("configure", "the rail must never leak the raw screen id");

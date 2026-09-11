@@ -8,8 +8,8 @@ using Xunit;
 namespace SigilBuild.Installer.Host.Tests;
 
 /// <summary>
-/// P6 (gap G7): the wizard's Close-applications gate. The screen appears only when
-/// blockers are found; Retry / Close-for-me re-scan and continue once clear.
+/// The wizard's Close-applications gate. The screen appears only when
+/// blockers are found; Retry / Close-for-me re-scan and continue once clear. (gap G7)
 /// </summary>
 public sealed class CloseAppsGateTests
 {

@@ -8,11 +8,11 @@ using Xunit;
 namespace SigilBuild.Installer.Host.Tests;
 
 /// <summary>
-/// T8 host coverage: the built-in Options screen (and its rail entry) appear IFF
+/// Host coverage: the built-in Options screen (and its rail entry) appear IFF
 /// the blob carries ≥ 1 enabled component; it renders one checkbox per component
 /// (checked = resolved default); a <c>locked</c> component renders disabled; the
 /// checkbox states flow into <see cref="InstallerViewModel.CollectedOptionValues"/>
-/// for the engine. Decision 4 places it after the License screen.
+/// for the engine. It sits after the License screen in the rail order.
 /// </summary>
 public sealed class OptionsFlowTests
 {
@@ -84,7 +84,7 @@ public sealed class OptionsFlowTests
         collected["add_to_path"].Should().BeTrue();
     }
 
-    // ── P10 (gap G11): app-defined custom components ─────────────────────────
+    // ── App-defined custom components (gap G11) ───────────────────────────────
 
     private static InstallerOptionComponent CustomComp(
         string name, LocalizedText label, bool @default = false, bool locked = false,

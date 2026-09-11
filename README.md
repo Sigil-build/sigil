@@ -71,7 +71,7 @@ See [Getting started](docs/getting-started.md) for a full walkthrough
 (`init` → `validate` → `pack`). A signed GitHub Release with prebuilt binaries
 will replace this section on the first tagged release. The release workflow
 itself already ships: `release.yml` triggers on a `v*` tag, runs the full VM
-matrix, AOT-publishes win-x64 and win-arm64, signs with Azure Trusted Signing,
+matrix, AOT-publishes win-x64 (win-arm64 best-effort), signs with Azure Trusted Signing,
 emits a CycloneDX SBOM and `SHA256SUMS`, and publishes a prerelease. What is
 missing is a pushed tag, not the automation.
 

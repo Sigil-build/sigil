@@ -126,7 +126,7 @@ implementation, not a fork.
 | Language | C# 14 / .NET 10 LTS, Native AOT |
 | YAML | YamlDotNet (with source generators for AOT) |
 | JSON Schema | Hand-rolled draft-07 validator |
-| Compression | ZstdSharp.Port — pure-managed C# zstd port, "nothing to bundle" (`Directory.Packages.props:44`) |
+| Compression | ZstdSharp.Port — pure-managed C# zstd port, "nothing to bundle" (`Directory.Packages.props:43`) |
 | Crypto — ZIP manifest signing | NSec.Cryptography / Ed25519 (`SigilBuild.Signing/Local/ZipManifestSigner.cs`) |
 | Crypto — update-manifest signing | BCL `ECDsa`, P-256 — no native crypto dependency ([ADR-009](architecture/adr-009-update-manifest-signature.md)) |
 | HTTP | HttpClient + Polly |
@@ -144,13 +144,13 @@ are **targets**, not gates:
 | Metric | Target | CI-enforced? |
 |---|---|---|
 | `sigil --version` cold-start (Native AOT, win-x64) | ≤ 200 ms | No |
-| `sigil.exe` (AOT-published, Release, stripped) | ≤ 15 MB | **Yes** — `ci.yml:379`, and again per-architecture at `release.yml:95` (win-x64) and `release.yml:107` (win-arm64) |
+| `sigil.exe` (AOT-published, Release, stripped) | ≤ 15 MB | **Yes** — `ci.yml:379`, and again per-architecture at `release.yml:95` (win-x64) and `release.yml:107` (win-arm64, which runs only when that best-effort publish leg succeeded) |
 | Installer-host full footprint (win-x64) | ≤ 45 MB | **Yes** — `scripts/publish-installer-runtime.ps1:190-192`, invoked with `-SizeGateMb 45` from `ci.yml:170`, `ci.yml:441`, `release.yml:126` and `wrapper-vm-tests.yml:133, 230`. The gate a contributor is most likely to trip. |
 | `sigil pack` for a 100 MB source tree | ≤ 5 s | No |
 | `sigil sign` round-trip via Azure Trusted Signing | ≤ 8 s p50, ≤ 20 s p99 | No |
 | Delta patch generation, 100 MB → 100 MB build | ≤ 30 s | No — metric for a deferred feature, see [ADR-010](architecture/adr-010-delta-update-deferral.md) |
 | Test coverage, project-wide union | ≥ **77 %** | **Yes** — `ci.yml:232` |
-| Test coverage, per assembly | `SigilBuild.Core` ≥ 69 %, `SigilBuild.Signing` ≥ 68 %, `SigilBuild.Wrapper.Core` ≥ 79 %, `SigilBuild.Packaging` ≥ 72 % | **Yes** — `ci.yml:235-238` |
+| Test coverage, per assembly | `SigilBuild.Core` ≥ 69 %, `SigilBuild.Signing` ≥ 68 %, `SigilBuild.Wrapper.Core` ≥ 79 %, `SigilBuild.Packaging` ≥ 72 % | **Yes** — `ci.yml:234-237` |
 
 The coverage floors are a **ratchet**: each is the current measured value
 rounded down, re-pinned upward as coverage rises, never lowered. `ci.yml` also

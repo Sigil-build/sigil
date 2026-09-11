@@ -35,7 +35,7 @@ Best for: portable apps, CI artefacts, per-user "extract anywhere" distributions
 
 A self-extracting `<App.Name>-<version>-<arch>-Setup.exe` with Sigil's branded wizard host. Full install-step engine, declarative parameters, automatic `uninstall.exe`, ARP integration.
 
-> **Producing the `exe` format requires a Windows pack host.** Stamping the payload into the installer runtime uses the Win32 resource-update APIs (`BeginUpdateResourceW`), which have no cross-platform equivalent. On Linux or macOS `sigil pack` emits a clear diagnostic (**SIG0120**) and **skips** the exe format; the other requested formats still pack.
+> **Producing the `exe` format requires a Windows pack host.** Stamping the payload into the installer runtime uses the Win32 resource-update APIs (`BeginUpdateResourceW`), which have no cross-platform equivalent. On Linux or macOS `sigil pack` emits **SIG0270** and **skips** the exe format; the other requested formats still pack, but the run exits non-zero to flag the unmet request. (Do not confuse this with **SIG0120**, "EXE-wrapper packaging requires the AOT-published `SigilBuild.Wrapper` runtime" — a different failure, on Windows, when the staged installer runtime is missing.)
 
 - The full closed catalog of 18 install-step types — see [Install steps](install-steps.md).
 - `parameters:` surfaces in the wizard or via `/PName=Value` on silent install (`/S /D=<dir> /PName=Value`; see [setup.exe reference](../setup-exe-reference.md)).

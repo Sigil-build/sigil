@@ -108,8 +108,8 @@ fetches and checks version freshness against:
 | `packageUrl` | yes | **Must start with `https://`.** Mirrors the same insecure-URL stance the `http_download` install step enforces at pack time (SIG0235), applied here at update runtime instead. |
 | `sha256` | yes | 64-character hex SHA-256 digest of the file at `packageUrl`. Checked before the download is trusted; a malformed (wrong-length/non-hex) value is refused up front rather than always mismatching. |
 | `issuedAt` | **yes** | ISO-8601 timestamp of when this manifest was minted. Must carry an explicit zone — a trailing `Z` or a numeric offset such as `+02:00`. A zone-less local timestamp is **rejected**. |
-| `expiresAt` | **yes** | ISO-8601 timestamp (same format rules) after which the manifest must not be acted on. Must not be earlier than `issuedAt`: an empty validity window is malformed, not permissive. |
-| `sequence` | **yes** | Non-negative monotonic integer. Increment it on every manifest you publish for this channel; a client refuses any value lower than the highest it has already accepted for this app. |
+| `expiresAt` | **yes** | ISO-8601 timestamp (same format rules) after which the manifest must not be acted on. Must not be earlier than `issuedAt`: an empty validity window is refused, not treated as permissive. That particular refusal happens in the freshness check rather than the parse, so it exits `8`, not `7`. |
+| `sequence` | **yes** | Non-negative monotonic integer. Increment it on every manifest you publish for this channel; a client refuses any value **strictly lower** than the highest it has already accepted for this app (an equal value is accepted). |
 | `minFromVersion` | no | The lowest installed version this package can update *from*. An installed version below the floor is treated as "an update exists, but not for you" (see [exit codes](#update-behavior-and-exit-codes)) rather than silently skipped or force-installed. Omit it if any older installed version may take this package. |
 
 > **Breaking change — `issuedAt`, `expiresAt` and `sequence` are required.**
@@ -158,8 +158,10 @@ unparseable `issuedAt`, say) returns.
 that comfortably exceeds your release cadence but stays well inside 30 days;
 re-mint and re-sign the manifest before it lapses, even when the advertised
 version has not changed, or clients stop seeing updates. Bump `sequence` on
-every publish and never reuse or lower it — a machine that has accepted
-sequence 42 will refuse 41 forever.
+every publish and never lower it — a machine that has accepted sequence 42 will
+refuse 41 forever. (Re-publishing at the *same* sequence is accepted, so
+re-minting an unchanged manifest to extend its window does not force a bump —
+but bumping anyway keeps the counter meaningful.)
 
 ## Security model
 
@@ -238,7 +240,7 @@ full table.
 | `0` | Up to date — nothing to do, or the installed version is already the same or newer than the channel manifest advertises. |
 | `6` | Not update-enabled — the manifest declared no `updates.manifestUrl`, so there is nothing to check. |
 | `7` | Check/apply failed — a network failure fetching the channel manifest or its signature, a **malformed** channel manifest (`SIG0320` — including one missing `issuedAt`, `expiresAt` or `sequence`), an implausible `sha256`, or a failed package download / child spawn. An operational failure: nothing was changed. |
-| `8` | **Hard security reject**, kept distinct from `7` so a security event is unambiguous in logs and automation. Covers three distinct causes, so do not read `8` as "tampering" alone: (a) the channel manifest's **signature** did not verify (`SIG0321`) — tampered, unsigned, wrong key, or wrong curve; (b) the manifest was authentic but **failed the freshness/replay check** — expired, older than 30 days, future-dated, an empty validity window, or a `sequence` at or below one already accepted; (c) the **downloaded package was refused by Authenticode** under the `require_signed_downloads` policy. The log line distinguishes them. |
+| `8` | **Hard security reject**, kept distinct from `7` so a security event is unambiguous in logs and automation. Covers three distinct causes, so do not read `8` as "tampering" alone: (a) the channel manifest's **signature** did not verify (`SIG0321`) — tampered, unsigned, wrong key, or wrong curve; (b) the manifest was authentic but **failed the freshness/replay check** — expired, older than 30 days, future-dated, an empty validity window, or a `sequence` **lower than** one already accepted; (c) the **downloaded package was refused by Authenticode** under the `require_signed_downloads` policy. The log line distinguishes them. |
 | `9` | Not eligible — a newer version exists, but the installed version is below the channel manifest's `minFromVersion` floor and cannot take this package via this path. |
 | *(the downloaded installer's own code)* | When a newer package is downloaded and run, `/Update` exits with **whatever exit code that child `Setup.exe` returns** (typically `0` on success, `3010` if it reports reboot-required) — `/Update` propagates it rather than inventing its own "upgrade succeeded" code. |
 

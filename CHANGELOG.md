@@ -195,7 +195,10 @@ channel-manifest wire format.
 ### Added — release mechanics and CI
 
 - **Signed, tag-triggered releases.** `release.yml` fires on a `v*` tag, runs
-  the full VM matrix first, AOT-publishes `win-x64` and `win-arm64`, signs with
+  the full VM matrix first, AOT-publishes `win-x64` (and `win-arm64`
+  best-effort — that leg is `continue-on-error` and warns that the release may
+  ship x64 assets only if the runner image stops provisioning the ARM64 C++
+  build tools), signs with
   Azure Trusted Signing, generates a **CycloneDX SBOM**, emits **`SHA256SUMS`**,
   and publishes a GitHub prerelease. What is missing for a first release is a
   pushed tag, not the automation.

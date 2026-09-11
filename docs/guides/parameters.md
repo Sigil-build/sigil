@@ -32,14 +32,19 @@ parameters:
 
 ## Types
 
-|Type|Use for|Widget when `install_time: true`|
+|Type|Use for|Widget when rendered on a screen|
 |---|---|---|
-|`string`|Free-form text|TextBox|
-|`path`|Filesystem paths|TextBox|
-|`bool`|True/false flags|CheckBox|
-|`int`|Whole numbers|TextBox|
-|`enum`|Closed set of strings|ComboBox|
-|`secret`|Passwords, tokens, keys|Masked TextBox; redacted from logs|
+|`string`|Free-form text|text input (`widget: textarea` for a multi-line one)|
+|`path`|Filesystem paths|path input|
+|`bool`|True/false flags|checkbox (`widget: switch` for a toggle)|
+|`int`|Whole numbers|number input (`widget: slider`)|
+|`enum`|Closed set of strings|radio group when there are **4 or fewer** `values:`, dropdown when there are more (`widget: radio` / `widget: dropdown` to override). An enum with a `source:` block is always a dropdown.|
+|`secret`|Passwords, tokens, keys|masked input; redacted from logs|
+
+The widget is inferred from the type; the `widget:` overrides in brackets are the
+only ones each type honours, and are set through the `{ param, widget }` form of
+an `installer.screens[].fields` entry. See
+[Installer wizard](installer-wizard.md#per-parameter-widget-selection).
 
 The **Browse...** button belongs to the wizard's always-present Choose Install Location screen, not to any parameter widget — there is no file-picker widget for a `path` parameter.
 

@@ -13,6 +13,6 @@
   AOT-risky patterns or touch the schema; treat their feedback as review comments.
 - Local machine is Windows. CI's build/test/AOT jobs run on `windows-latest`,
   but five jobs run on `ubuntu-latest` — `changes`, `pr-title`,
-  `schema-lockstep`, `secret-scan` and `docs` (see AGENTS.md). Check a job's
+  `schema-lockstep`, `gitleaks` and `drift-check` (see AGENTS.md). Check a job's
   `runs-on` before writing shell into it. If you're in a Linux sandbox, say
   which tests you couldn't run rather than implying a green suite.

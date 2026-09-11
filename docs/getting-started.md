@@ -140,8 +140,9 @@ options are `--out`, `--payload` and `--package-url`.
 
 The `exe` format is produced **only on a Windows pack host** — stamping the
 payload into the installer runtime uses `BeginUpdateResourceW`, which has no
-cross-platform equivalent. On Linux or macOS `sigil pack` emits SIG0120 and
-skips exe; the other requested formats still pack.
+cross-platform equivalent. On Linux or macOS `sigil pack` emits **SIG0270** and
+skips exe; the other requested formats still pack, but the run exits non-zero
+so the unmet request is not silent.
 
 For `package.formats: [zip]`, output lands as a flat file directly under
 `--out`: `./dist/<app.id>-<app.version>-<arch>.zip`

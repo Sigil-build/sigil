@@ -24,7 +24,7 @@ dotnet format Sigil.slnx --verify-no-changes
 ```
 
 To exercise the Native AOT publish (Windows only; `release.yml` publishes both
-`win-x64` and `win-arm64`):
+`win-x64`, and `win-arm64` best-effort):
 
 ```bash
 dotnet publish src/SigilBuild.Cli -c Release -r win-x64 -p:PublishAot=true

@@ -18,7 +18,7 @@ dotnet format Sigil.slnx --verify-no-changes   # CI-enforced
 
 .NET SDK is pinned EXACTLY by `global.json` (10.0.303, `rollForward: disable`): the locked restore (R23a) pins the SDK-injected `Microsoft.DotNet.ILCompiler` / `Microsoft.NET.ILLink.Tasks` packages, so a rolled-forward SDK fails with NU1004. Bump the SDK and regenerate the lock files together.
 
-**CI is not Windows-only.** Every job that builds, tests or AOT-publishes runs on `windows-latest`, but five jobs across four workflows run on `ubuntu-latest`: `changes` (`ci.yml:45`), `pr-title` and `schema-lockstep` (`pr-guards.yml:22, 40`), `secret-scan` (`secret-scan.yml:21`) and `docs` (`docs.yml:25`). Do not write PowerShell into a bash job — check the job's `runs-on` before you touch a workflow step.
+**CI is not Windows-only.** Every job that builds, tests or AOT-publishes runs on `windows-latest`, but five jobs across four workflows run on `ubuntu-latest`: `changes` (`ci.yml:45`), `pr-title` and `schema-lockstep` (`pr-guards.yml:22, 40`), `gitleaks` (`secret-scan.yml:21`) and `drift-check` (`docs.yml:25`). Do not write PowerShell into a bash job — check the job's `runs-on` before you touch a workflow step.
 
 ## Hard rules (CI will reject violations)
 
@@ -65,7 +65,7 @@ The Python gate in `ci.yml` enforces **five** floors, not one:
 | Floor | Value | Where |
 |---|---|---|
 | project-wide **union** | **0.77** | `PROJECT_WIDE_FLOOR`, `ci.yml:232` |
-| `SigilBuild.Core` | 0.69 | `ASSEMBLY_FLOORS`, `ci.yml:235-238` |
+| `SigilBuild.Core` | 0.69 | `ASSEMBLY_FLOORS`, `ci.yml:234-237` |
 | `SigilBuild.Signing` | 0.68 | same |
 | `SigilBuild.Wrapper.Core` | 0.79 | same |
 | `SigilBuild.Packaging` | 0.72 | same |

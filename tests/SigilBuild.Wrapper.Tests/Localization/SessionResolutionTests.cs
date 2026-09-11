@@ -35,7 +35,7 @@ public sealed class SessionResolutionTests : IDisposable
     public void FixedManifestLanguage_OverridesLangFlag_WithoutFailing()
     {
         // Design §2.1: language is a display preference, not a trust boundary,
-        // so this does NOT mirror T12's fixed-scope vs /allusers exit 64.
+        // so this does NOT mirror the fixed-scope vs /allusers exit 64.
         var prefs = LanguageResolver.Preferences(manifestLanguage: "en", langFlag: "uk", osPreferences: new[] { "uk-UA" });
 
         LanguageResolver.MatchChrome(prefs).Should().Be(Lang.En);

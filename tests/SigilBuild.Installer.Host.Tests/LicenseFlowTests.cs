@@ -7,7 +7,7 @@ using Xunit;
 namespace SigilBuild.Installer.Host.Tests;
 
 /// <summary>
-/// T14 host coverage: the License screen (and its rail entry) appear IFF the blob
+/// Host coverage: the License screen (and its rail entry) appear IFF the blob
 /// carries license text; the embedded text is rendered; the "I accept" checkbox
 /// gates Next. The headless <c>/silent</c> path never constructs the wizard, so
 /// silent installs imply acceptance — modelled here by the license-absent flow,
@@ -81,7 +81,7 @@ public sealed class LicenseFlowTests
         vm.CurrentStep.Should().NotBe(InstallerStep.License);
     }
 
-    // ── Decision-4 ordering: destination before license ──────────────────────
+    // ── Screen ordering: destination before license ───────────────────────────
 
     [Fact]
     public void License_sits_after_destination_in_the_rail()

@@ -9,7 +9,7 @@ namespace SigilBuild.Packaging.Tests.ExeWrapper;
 
 /// <summary>
 /// Unit tests for <see cref="WrapperRuntimeLocator"/> — the per-architecture
-/// resolution of the staged Native-AOT host runtime (spec T3). These use a fake
+/// resolution of the staged Native-AOT host runtime. These use a fake
 /// staged <c>runtimes/&lt;rid&gt;/</c> directory and never require a real AOT binary.
 /// </summary>
 public class WrapperRuntimeLocatorTests

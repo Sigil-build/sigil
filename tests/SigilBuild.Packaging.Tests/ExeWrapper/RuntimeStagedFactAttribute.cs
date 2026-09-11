@@ -8,7 +8,7 @@ namespace SigilBuild.Packaging.Tests.ExeWrapper;
 /// Reports a genuine Skipped result when the staged Native-AOT installer-host
 /// runtime preconditions are absent, instead of writing
 /// <c>Console.WriteLine("SKIP: ...")</c> and returning early — which reports as
-/// Passed and never reaches the trx summary at all (register row R6).
+/// Passed and never reaches the trx summary at all. (R6)
 /// </summary>
 /// <remarks>
 /// The runtime is expected to be pre-staged under

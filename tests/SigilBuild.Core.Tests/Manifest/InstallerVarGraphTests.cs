@@ -6,7 +6,7 @@ using Xunit;
 namespace SigilBuild.Core.Tests.Manifest;
 
 /// <summary>
-/// P1: dependency ordering + cycle detection for <c>installer.vars</c>
+/// Dependency ordering + cycle detection for <c>installer.vars</c>
 /// (<see cref="InstallerVarGraph"/>). Purely structural — no expression engine.
 /// </summary>
 public class InstallerVarGraphTests

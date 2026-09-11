@@ -7,9 +7,9 @@ using Xunit;
 namespace SigilBuild.Core.Tests.Manifest;
 
 /// <summary>
-/// P5 (gap G6): pack-time parsing + validation of <c>installer.prerequisites[]</c>.
+/// Pack-time parsing + validation of <c>installer.prerequisites[]</c>.
 /// The headline rule is that an <c>https://</c> source without a <c>sha256</c> is
-/// refused (SIG0280) — a download without an integrity check never ships.
+/// refused (SIG0280) — a download without an integrity check never ships. (gap G6)
 /// </summary>
 public class PrerequisiteParseTests
 {

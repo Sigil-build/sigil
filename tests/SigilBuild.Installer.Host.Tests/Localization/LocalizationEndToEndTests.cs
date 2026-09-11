@@ -14,8 +14,8 @@ using Xunit;
 namespace SigilBuild.Installer.Host.Tests.Localization;
 
 /// <summary>
-/// Task 16 (P9): end-to-end fixtures that exercise the localization mechanism
-/// (Tasks 1-15) through the real manifest -&gt; resolve -&gt; render path, rather
+/// End-to-end fixtures that exercise the localization mechanism
+/// through the real manifest -&gt; resolve -&gt; render path, rather
 /// than the hand-built <see cref="InstallerScreen"/> lists
 /// <see cref="ViewModelLocalizationTests"/> uses.
 /// </summary>
@@ -33,7 +33,7 @@ namespace SigilBuild.Installer.Host.Tests.Localization;
 /// in turn requires the MSVC C++ Native AOT linker. That toolchain is absent on
 /// this dev box (link.exe), so a genuinely spawned-exe leg lives in
 /// <c>SigilBuild.Wrapper.IntegrationTests.LocalizationEndToEndTests</c> instead,
-/// gated exactly like the existing T13 VM-style tests
+/// gated exactly like the existing VM-style tests
 /// (<c>SIGIL_VM_TESTS=1</c> + a staged runtime) — see that class's remarks.</para>
 /// <para><b>Fixtures</b> live at
 /// <c>tests/SigilBuild.Packaging.IntegrationTests/Fixtures/localized-{uk,de}/sigil.yaml</c>
@@ -76,7 +76,7 @@ public sealed class LocalizationEndToEndTests : IDisposable
         manifest.Parameters?.Values.ToList() ?? new List<ParameterDefinition>();
 
     /// <summary>
-    /// The uk fixture, headed: Sigil ships a uk chrome catalog (Task 12) AND the
+    /// The uk fixture, headed: Sigil ships a uk chrome catalog AND the
     /// manifest's own <c>configure</c> screen declares a uk title, so under
     /// <c>/lang=uk</c> BOTH the declared screen and the chrome resolve to
     /// Ukrainian — the "everything lines up" case that contrasts with the de
@@ -109,7 +109,7 @@ public sealed class LocalizationEndToEndTests : IDisposable
 
     /// <summary>
     /// The asymmetry fixture (design §4.4's crux). Sigil ships NO <c>de</c> chrome
-    /// catalog (Task 12 only shipped en + uk), so <see cref="LanguageResolver.MatchChrome"/>
+    /// catalog (only en + uk), so <see cref="LanguageResolver.MatchChrome"/>
     /// falls back to <see cref="Lang.En"/> — but the manifest's own <c>configure</c>
     /// screen supplies a <c>de</c> title, and that resolves against the SAME
     /// preference list independently of the chrome fallback. If chrome and

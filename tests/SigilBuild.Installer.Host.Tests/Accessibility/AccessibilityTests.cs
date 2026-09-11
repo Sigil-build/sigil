@@ -17,14 +17,14 @@ public class AccessibilityTests
     public void Navigation_CanProgressThroughAllSteps_Without_DeadEnd()
     {
         var vm = new InstallerViewModel(new BrandTokens());
-        vm.LoadLicense("Example EULA text."); // T14: opt the License screen into the flow.
+        vm.LoadLicense("Example EULA text."); // Opts the License screen into the flow.
 
         // Welcome → InstallOptions (destination)
         vm.CurrentStep.Should().Be(InstallerStep.Welcome);
         vm.CanGoNext.Should().BeTrue();
         vm.Next();
 
-        // InstallOptions (destination) → License, per decision 4
+        // InstallOptions (destination) → License
         vm.CurrentStep.Should().Be(InstallerStep.InstallOptions);
         vm.CanGoNext.Should().BeTrue();
         vm.Next();
@@ -51,10 +51,10 @@ public class AccessibilityTests
     public void Navigation_BackTraversal_ReachesWelcome()
     {
         var vm = new InstallerViewModel(new BrandTokens());
-        vm.LoadLicense("Example EULA text."); // T14: License screen in the flow.
+        vm.LoadLicense("Example EULA text."); // License screen in the flow.
         vm.LicenseAccepted = true;
 
-        // Walk forward to License (decision-4 flow: Welcome → Location → License).
+        // Walk forward to License (Welcome → Location → License).
         vm.Next(); // Welcome → InstallOptions
         vm.Next(); // InstallOptions → License
 

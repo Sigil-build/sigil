@@ -7,12 +7,12 @@ using Xunit;
 namespace SigilBuild.Core.Tests.Manifest;
 
 /// <summary>
-/// T14 / P9 (gap G10) parse coverage: the manifest's <c>installer.license</c>
+/// Parse coverage: the manifest's <c>installer.license</c>
 /// field is captured into <see cref="SigilBuild.Core.Manifest.InstallerSection.License"/>
 /// as a <see cref="SigilBuild.Core.Manifest.LocalizedText"/> — a plain string
 /// (path) or a <c>{en: ..., uk: ...}</c> map of per-language paths, through the
 /// same <c>ParseLocalizedText</c> path as title/subtitle/description. The file
-/// read + embed happens later, at pack time.
+/// read + embed happens later, at pack time. (gap G10)
 /// </summary>
 public class LicenseSchemaTests
 {

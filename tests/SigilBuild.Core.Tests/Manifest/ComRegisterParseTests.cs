@@ -8,8 +8,8 @@ using Xunit;
 namespace SigilBuild.Core.Tests.Manifest;
 
 /// <summary>
-/// T11.2 (P11): parsing of the <c>com_register</c> install step — the second of
-/// three machine-scope-only "system steps" and the one AOT-risk step in P11.
+/// Parsing of the <c>com_register</c> install step — the second of
+/// three machine-scope-only "system steps" and the one AOT-risk step among them.
 /// Covers the happy path, SIG0232 (missing required <c>path</c>) — com_register
 /// has no enum-valued fields so SIG0233 does not apply — and the positive
 /// SIG0310 (<see cref="DiagnosticCodes.SystemStepRequiresMachineScope"/>) case:

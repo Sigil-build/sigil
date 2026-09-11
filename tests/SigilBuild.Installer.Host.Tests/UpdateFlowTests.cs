@@ -16,7 +16,7 @@ using Xunit;
 namespace SigilBuild.Installer.Host.Tests;
 
 /// <summary>
-/// VM-level tests for the T12.4 headed <c>/Update</c> flow: <see cref="UpdateViewModel"/>
+/// VM-level tests for the headed <c>/Update</c> flow: <see cref="UpdateViewModel"/>
 /// wired to a REAL <see cref="UpdateRunner"/> (the same production decision logic the
 /// headless path drives) behind fake fetch/download/launch seams — mirroring how
 /// <c>UpdateRunnerTests</c> exercises the runner directly, but proving the ViewModel's
@@ -31,10 +31,9 @@ public sealed class UpdateFlowTests
 
     /// <summary>
     /// The bytes <see cref="FakeDownloader"/> puts on disk, and their real digest. The
-    /// double must leave a file the runner can re-open and re-verify (register row
-    /// R12): the runner holds the staged package open across the child launch, so a
-    /// downloader that reports success without ever writing anything is no longer a
-    /// faithful stand-in for a real one.
+    /// double must leave a file the runner can re-open and re-verify: the runner holds
+    /// the staged package open across the child launch, so a downloader that reports
+    /// success without ever writing anything is not a faithful stand-in for a real one. (R12)
     /// </summary>
     private static readonly byte[] PackageBytes = Encoding.UTF8.GetBytes("the-downloaded-setup-payload");
 
@@ -81,9 +80,9 @@ public sealed class UpdateFlowTests
     }
 
     /// <summary>
-    /// R13's replay high water mark, in memory. The production store reads and WRITES
+    /// The replay high water mark, in memory. The production store reads and WRITES
     /// <c>%ProgramData%\Sigil\&lt;AppId&gt;\update-sequence.txt</c>; CI runs elevated, so a
-    /// test on the default store would mutate the runner's real machine state.
+    /// test on the default store would mutate the runner's real machine state. (R13)
     /// </summary>
     private sealed class InMemorySequenceStore : IUpdateSequenceStore
     {
@@ -106,7 +105,7 @@ public sealed class UpdateFlowTests
 
     private static (byte[] Manifest, byte[] Signature, string PublicKeyBase64) SignedManifest(string version)
     {
-        // R13: freshness fields are required — minted now, valid for a week.
+        // Freshness fields are required — minted now, valid for a week. (R13)
         var issued = DateTimeOffset.UtcNow;
         var json =
             "{\n" +
@@ -220,7 +219,7 @@ public sealed class UpdateFlowTests
         downloader.Called.Should().BeTrue();
         launcher.Called.Should().BeTrue();
 
-        // T12.4: the HEADED path must launch the child WITHOUT /silent — only the
+        // The HEADED path must launch the child WITHOUT /silent — only the
         // scope flag — so the user sees the new version's own install wizard.
         launcher.Args.Should().Equal("/allusers");
         launcher.Args.Should().NotContain("/silent");

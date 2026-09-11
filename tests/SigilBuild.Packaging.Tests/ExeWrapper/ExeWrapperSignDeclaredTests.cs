@@ -9,7 +9,7 @@ using Xunit;
 namespace SigilBuild.Packaging.Tests.ExeWrapper;
 
 /// <summary>
-/// T11 / decision 7 pack → blob coverage:
+/// Pack → blob coverage:
 /// <see cref="ExeWrapperPackager.BuildBlobBytes"/> sets
 /// <see cref="SerializableWrapperBlob.SignDeclared"/> to <c>true</c> iff the
 /// manifest declares a real <c>sign</c> block (provider ≠ <c>None</c>), and never

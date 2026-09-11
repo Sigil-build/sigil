@@ -7,7 +7,7 @@ using Xunit;
 namespace SigilBuild.Packaging.Tests.Installer;
 
 /// <summary>
-/// Golden-file coverage for the T7 two-color palette derivation: a known
+/// Golden-file coverage for the two-color palette derivation: a known
 /// primary/accent must yield the exact light + dark token maps ported from the
 /// prototype's <c>colors()</c> constants, plus focused <see cref="BrandTokenEmitter.SrgbMix"/>
 /// unit tests.

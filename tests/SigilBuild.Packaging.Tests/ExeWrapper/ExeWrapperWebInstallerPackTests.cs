@@ -15,17 +15,17 @@ using Xunit;
 namespace SigilBuild.Packaging.Tests.ExeWrapper;
 
 /// <summary>
-/// P12 / T12.5: <c>pack --format exe --payload web --package-url URL</c> at the
+/// <c>pack --format exe --payload web --package-url URL</c> at the
 /// full <see cref="ExeWrapperPackager.PackAsync"/> level — two artifacts, the
 /// stub's embedded sha256 matches the actually-emitted full package, the stub
 /// carries no <c>SIGIL_PAYLOAD_V2</c> resource, and two web packs of the same
 /// input are byte-identical. Gated exactly like the existing exe-pack tests
-/// (<see cref="ExeWrapperPackagerTests"/>): via <see cref="RuntimeStagedFactAttribute"/>
-/// (register row R6), the Native-AOT host runtime must be staged under
+/// (<see cref="ExeWrapperPackagerTests"/>): via <see cref="RuntimeStagedFactAttribute"/>,
+/// the Native-AOT host runtime must be staged under
 /// <c>runtimes/win-x64/</c> (via <c>scripts/publish-installer-runtime.ps1</c>) or these
 /// tests report a genuine Skipped result rather than trigger a slow on-demand AOT
-/// publish. The live download-and-run of the stub is CI-VM-only (T12.6) — not
-/// exercised here.
+/// publish. The live download-and-run of the stub is CI-VM-only — not
+/// exercised here. (R6)
 /// </summary>
 public class ExeWrapperWebInstallerPackTests
 {
@@ -162,7 +162,7 @@ public class ExeWrapperWebInstallerPackTests
         try
         {
             var packager = new ExeWrapperPackager();
-            // Default PayloadMode (no Payload/PackageUrl args) mirrors the pre-T12.5 call shape.
+            // Default PayloadMode (no Payload/PackageUrl args).
             var options = new PackOptions(
                 Path.Combine(fixtureDir, "payload"), outputDir, PackageFormat.Exe, TargetArchitecture.X64);
 

@@ -20,11 +20,10 @@ namespace SigilBuild.Packaging.Tests.ExeWrapper;
 /// (<see cref="WrapperResourceWriter.WriteAsync"/>) requires a real PE file to
 /// update — there is no in-memory equivalent of <c>BeginUpdateResource</c>. The
 /// round-trip does NOT need the (slow-to-produce) AOT-published host: any valid
-/// PE carries a resource table, so — as T18's <c>NativeRuntimeBootstrapTests</c>
+/// PE carries a resource table, so — as <c>NativeRuntimeBootstrapTests</c>
 /// established — the running test host exe is used as a stand-in PE. This keeps
 /// the test in the normal <c>dotnet test</c> loop (no AOT publish, no staged
-/// runtime) while still exercising the real Win32 writer + reader (T17: this
-/// fact is no longer skipped).
+/// runtime) while still exercising the real Win32 writer + reader.
 /// </summary>
 public class WrapperResourceWriterTests
 {
@@ -205,7 +204,7 @@ internal static partial class ResourceReader
 {
     private static readonly IntPtr RtRcData = (IntPtr)10;
     // RT_GROUP_ICON — icon-directory resource (winuser.h). Used to verify the
-    // installer icon stamped by IconResourceWriter (PR #8).
+    // installer icon stamped by IconResourceWriter.
     private static readonly IntPtr RtGroupIcon = (IntPtr)14;
     private const uint LoadLibraryAsDataFile = 0x00000002;
 

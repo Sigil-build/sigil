@@ -10,9 +10,9 @@ using Xunit;
 namespace SigilBuild.Packaging.Tests.ExeWrapper;
 
 /// <summary>
-/// P12 / T12.5: the web-installer stub's synthesized blob
+/// The web-installer stub's synthesized blob
 /// (<see cref="ExeWrapperPackager.BuildWebStubBlobBytes"/>) — construction only.
-/// The live download-and-run of the stub is CI-VM-only (T12.6); these tests
+/// The live download-and-run of the stub is CI-VM-only; these tests
 /// assert the STUB's construction: exactly one <c>http_download</c> to the
 /// package URL carrying the full package's sha256, followed by exactly one
 /// <c>run_program</c> of the downloaded file, and that packing is deterministic
@@ -54,17 +54,16 @@ public class ExeWrapperWebInstallerBlobTests
     }
 
     /// <summary>
-    /// Register row R5. The stub used to emit <c>"{temp_dir}/" + fullPackageFileName</c>
-    /// — a pack-time constant derived from the public artifact name, identical in every
-    /// copy of the stub and landing in the shared per-user <c>%TEMP%</c> root. Any
-    /// process running as the same user (the normal split-token-admin case) could both
-    /// pre-plant that exact path before the download and swap it after the checksum, and
-    /// the stub launches it <c>requireAdministrator</c>.
+    /// The stub's download destination must not be a predictable path derived from
+    /// the public artifact name (e.g. <c>"{temp_dir}/" + fullPackageFileName</c>): any
+    /// process running as the same user (the normal split-token-admin case) could
+    /// pre-plant that exact path before the download and swap it after the checksum,
+    /// and the stub launches it <c>requireAdministrator</c>. (R5)
     /// </summary>
     /// <remarks>
     /// The destination must still be a literal token at pack time — a GUID baked into
-    /// the blob would break determinism — so the fix is a token that resolves at INSTALL
-    /// time to a freshly created, randomly named private directory. "Not
+    /// the blob would break determinism — so it resolves at INSTALL time to a freshly
+    /// created, randomly named private directory instead. "Not
     /// <c>{temp_dir}</c>" alone would be satisfied by any rename; that the resolved path
     /// is unguessable from the artifact name is asserted engine-side in
     /// <c>StagingDirTokenTests</c>.

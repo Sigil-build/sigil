@@ -33,9 +33,8 @@ public class PackCommandTests
             System.Console.SetError(capturedErr);
             try
             {
-                // Pre-Task 14, this would throw NotSupportedException at the dispatch switch.
-                // Post-Task 14, the packager runs; when the AOT runtime isn't staged in the
-                // test process's runtimes/win-x64/ folder, ExeWrapperPackager surfaces SIG0120
+                // The packager runs; when the AOT runtime isn't staged in the test
+                // process's runtimes/win-x64/ folder, ExeWrapperPackager surfaces SIG0120
                 // and the CLI exits 1. When the runtime IS staged (CI happy path), exit 0.
                 var exit = await Program.MainAsync(new[] { "pack", manifestPath, "--out", outDir });
                 exit.Should().BeOneOf(0, 1);
@@ -53,7 +52,7 @@ public class PackCommandTests
     }
 
     /// <summary>
-    /// P12 / T12.5: `--payload web` requires a resolvable HTTPS `--package-url`.
+    /// `--payload web` requires a resolvable HTTPS `--package-url`.
     /// Missing → SIG0322, pack refuses before even loading the manifest.
     /// </summary>
     [Fact]
@@ -90,7 +89,7 @@ public class PackCommandTests
     }
 
     /// <summary>
-    /// P12 / T12.5: a non-https `--package-url` is refused the same as a missing
+    /// A non-https `--package-url` is refused the same as a missing
     /// one — SIG0322, HTTPS-only.
     /// </summary>
     [Fact]
@@ -130,7 +129,7 @@ public class PackCommandTests
     }
 
     /// <summary>
-    /// P12 / T12.5: a valid `--payload web --package-url https://...` invocation
+    /// A valid `--payload web --package-url https://...` invocation
     /// passes SIG0322 validation and reaches the packager. Mirrors the existing
     /// exe-format gating tests — when the AOT host runtime isn't staged in this
     /// test process, the packager surfaces SIG0120 (missing runtime) instead of

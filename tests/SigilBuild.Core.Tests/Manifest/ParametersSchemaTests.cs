@@ -102,8 +102,8 @@ public class ParametersSchemaTests
             .Should().BeEmpty();
     }
 
-    // ── LocalizedText (P9, gap G10): parameter `description` normalizes/carries
-    //    {en, uk, ...} the same way installer.screens title/subtitle do. ──────
+    // ── LocalizedText: parameter `description` normalizes/carries
+    //    {en, uk, ...} the same way installer.screens title/subtitle do. (gap G10) ──
 
     [Fact]
     public void PlainStringDescription_NormalizesToEnglish()

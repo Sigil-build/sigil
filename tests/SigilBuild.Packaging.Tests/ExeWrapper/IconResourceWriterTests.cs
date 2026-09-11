@@ -14,17 +14,16 @@ public class IconResourceWriterTests
     [RuntimeStagedFact]
     public async Task WriteAsync_ReplacesIconInWrapperExe()
     {
-        // Reports a genuine Skipped result (via RuntimeStagedFactAttribute, register
-        // row R6) when the Native AOT wrapper runtime isn't staged into
-        // runtimes/win-x64/ (e.g. CI's build/test job, which does not run the
-        // aot-publish job first). Mirrors ExeWrapperPackager_StampsIconOnProducedSetupExe
-        // below; the leg runs wherever the runtime IS staged (locally, or a job
-        // that stages it) and the wrapper-vm / aot-publish CI jobs are the arbiter.
-        // RuntimeStagedFact already checked this exact path (WrapperRuntimeLocator.Locate
-        // resolves the identical runtimes/win-x64/SigilBuild.Installer.Host.exe), so
-        // Locate is called unguarded here: if it still throws, that is a real bug (a
-        // race, or the locator and the attribute's check disagreeing) worth failing on,
-        // not swallowing.
+        // Reports a genuine Skipped result (via RuntimeStagedFactAttribute) when the
+        // Native AOT wrapper runtime isn't staged into runtimes/win-x64/ (e.g. CI's
+        // build/test job, which does not run the aot-publish job first). Mirrors
+        // ExeWrapperPackager_StampsIconOnProducedSetupExe below; the leg runs
+        // wherever the runtime IS staged and the wrapper-vm / aot-publish CI jobs
+        // are the arbiter. RuntimeStagedFact already checked this exact path
+        // (WrapperRuntimeLocator.Locate resolves the identical
+        // runtimes/win-x64/SigilBuild.Installer.Host.exe), so Locate is called
+        // unguarded here: if it still throws, that is a real bug worth failing on,
+        // not swallowing. (R6)
         var stubExe = WrapperRuntimeLocator.Locate(SigilBuild.Core.Manifest.TargetArchitecture.X64);
         var tmp = Path.Combine(Path.GetTempPath(), $"sigil-icon-{Guid.NewGuid():N}.exe");
         File.Copy(stubExe, tmp, overwrite: true);
@@ -57,9 +56,8 @@ public class IconResourceWriterTests
         // test output directory on every build (CopyToOutputDirectory), so unlike the
         // runtime staging above it is not an environment precondition that legitimately
         // varies — if it's ever missing, that is a broken build/checkout, and letting
-        // ManifestLoader.LoadAsync fail loudly below is more honest than quietly
-        // returning would be (register row R6: the original `if (!Directory.Exists(...))
-        // return;` here was removed rather than converted to a Skip attribute).
+        // ManifestLoader.LoadAsync fail loudly below is more honest than a silent
+        // early return or a Skip attribute would be. (R6)
         var fixtureDir = Path.Combine(AppContext.BaseDirectory, "Fixtures", "minimal-payload");
 
         var loadResult = await SigilBuild.Core.Configuration.ManifestLoader.LoadAsync(
@@ -93,8 +91,8 @@ public class IconResourceWriterTests
     public void Kiosk_Setup_HasEmbeddedUninstaller()
     {
         // Reuse the attribute's own path resolution rather than recomputing it here —
-        // a second, independently-drifting copy of the same logic is exactly how this
-        // test and its [KioskSetupFact] precondition disagreed before (register row R6).
+        // a second, independently-drifting copy of the same logic would let this test
+        // and its [KioskSetupFact] precondition disagree. (R6)
         var setup = KioskSetupFactAttribute.SetupPath;
         var bytes = ResourceReader.Read(setup, "SIGIL_UNINSTALLER_V1");
         bytes.Length.Should().BeGreaterThan(1_000_000,

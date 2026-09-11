@@ -9,12 +9,13 @@ using Xunit;
 namespace SigilBuild.Core.Tests.Manifest;
 
 /// <summary>
-/// T11.0 (P11): the shared pack-time guard that T11.1-T11.3's machine-scope-only
-/// steps (<c>scheduled_task_create</c>, <c>com_register</c>, <c>firewall_rule</c>)
-/// will rely on. This task adds no system-step record — only the mechanism
+/// The shared pack-time guard that the machine-scope-only steps
+/// (<c>scheduled_task_create</c>, <c>com_register</c>, <c>firewall_rule</c>)
+/// rely on. This file exercises only the mechanism
 /// (<see cref="InstallStep.RequiresMachineScope"/> +
 /// <see cref="MachineScopeGuard"/>) and its diagnostic
-/// (<see cref="DiagnosticCodes.SystemStepRequiresMachineScope"/>, SIG0310).
+/// (<see cref="DiagnosticCodes.SystemStepRequiresMachineScope"/>, SIG0310) —
+/// no real system-step record is involved (see the step double below).
 /// </summary>
 /// <remarks>
 /// <see cref="MachineScopeGuard.ValidateStep"/> is deliberately single-step
@@ -28,11 +29,11 @@ namespace SigilBuild.Core.Tests.Manifest;
 public class MachineScopeGuardTests
 {
     /// <summary>
-    /// Test-only step double: no real system-step record exists yet (that's
-    /// T11.1's job), so the positive path is proven by subclassing the public,
-    /// non-sealed <see cref="InstallStep"/> base directly and overriding
-    /// <see cref="InstallStep.RequiresMachineScope"/> to true — the same
-    /// override point T11.1-T11.3 will use on their own records.
+    /// Test-only step double: proves the positive path by subclassing the
+    /// public, non-sealed <see cref="InstallStep"/> base directly and
+    /// overriding <see cref="InstallStep.RequiresMachineScope"/> to true — the
+    /// same override point the real machine-scope-only step records use, so
+    /// this file can exercise the guard without depending on any of them.
     /// </summary>
     private sealed record FakeSystemStep(string Id) : InstallStep(Id, When: null, OnFailure.Fail)
     {
@@ -137,8 +138,8 @@ public class MachineScopeGuardTests
     // ---- End-to-end through ManifestParser, using only existing (non-system)
     // step types, proving the guard is wired into the real parse path and stays
     // silent for manifests that don't need it. The genuine machine-scope-only
-    // positive path end-to-end is exercised once T11.1 adds a real system step;
-    // see the class doc comment. ----
+    // positive path end-to-end is exercised by each system step's own parse
+    // tests (com_register, firewall_rule, scheduled_task_create). ----
 
     private static string Yaml(string scopeLine) => $$"""
         spec: v1.0

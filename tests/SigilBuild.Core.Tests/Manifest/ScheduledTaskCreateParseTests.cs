@@ -8,7 +8,7 @@ using Xunit;
 namespace SigilBuild.Core.Tests.Manifest;
 
 /// <summary>
-/// T11.1 (P11): parsing of the <c>scheduled_task_create</c> install step — the
+/// Parsing of the <c>scheduled_task_create</c> install step — the
 /// first of three machine-scope-only "system steps". Covers the happy path,
 /// SIG0232 (missing required field) for <c>name</c>/<c>program</c>/<c>trigger</c>,
 /// SIG0233 (bad enum value) for <c>trigger</c>/<c>run_level</c>, the
@@ -101,9 +101,9 @@ public class ScheduledTaskCreateParseTests
         result.Manifest!.InstallSteps!.OfType<InstallStep.ScheduledTaskCreate>().Should().BeEmpty();
     }
 
-    // ---- SIG0310: the first real positive case (T11.0 only had a fake test
-    // double). `scope: user` / `scope: auto` must trip it, pointing at this
-    // step's own node; `scope: machine` must not. ----
+    // ---- SIG0310's first real positive case (MachineScopeGuardTests exercises the
+    // guard only via a fake step double). `scope: user` / `scope: auto` must trip
+    // it, pointing at this step's own node; `scope: machine` must not. ----
 
     [Theory]
     [InlineData("scope: user")]

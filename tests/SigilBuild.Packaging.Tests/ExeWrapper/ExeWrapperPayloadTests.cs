@@ -11,7 +11,7 @@ using Xunit;
 namespace SigilBuild.Packaging.Tests.ExeWrapper;
 
 /// <summary>
-/// T6 coverage for the packager's zstd payload container: two packs of the same
+/// Coverage for the packager's zstd payload container: two packs of the same
 /// source directory produce byte-identical <c>SIGIL_PAYLOAD_V2</c> bytes, and the
 /// container round-trips through the host-side <see cref="PayloadExtraction"/>
 /// decoder so packed files land verbatim.

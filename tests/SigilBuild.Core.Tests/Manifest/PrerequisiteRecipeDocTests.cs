@@ -10,7 +10,7 @@ using Xunit;
 namespace SigilBuild.Core.Tests.Manifest;
 
 /// <summary>
-/// P5: guarantees the two prerequisite recipes shipped in
+/// Guarantees the two prerequisite recipes shipped in
 /// <c>docs/guides/prerequisites.md</c> are copy-paste-valid — every fenced
 /// <c>```yaml</c> manifest in the guide validates against the JSON schema AND parses
 /// with no error diagnostics, and actually declares a prerequisite. Keeps the docs

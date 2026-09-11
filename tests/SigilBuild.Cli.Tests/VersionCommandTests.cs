@@ -22,9 +22,9 @@ public class VersionCommandTests
     [Fact]
     public async Task Reported_version_matches_the_assembly_informational_version()
     {
-        // R24: the CLI must report the version the build stamped onto the
+        // The CLI must report the version the build stamped onto the
         // assembly, not a hand-maintained const -- assert agreement with
-        // AssemblyInformationalVersionAttribute rather than a literal.
+        // AssemblyInformationalVersionAttribute rather than a literal. (R24)
         var expected = typeof(Program).Assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()!
             .InformationalVersion

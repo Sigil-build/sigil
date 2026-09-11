@@ -8,24 +8,15 @@ using Xunit;
 namespace SigilBuild.Core.Tests.Manifest;
 
 /// <summary>
-/// Pack-time network-trust validation: register rows R8 (<c>parameters.*.source.url</c>
-/// must be HTTPS, SIG0323), R14 (<c>updates.manifestUrl</c> must be HTTPS, SIG0324),
-/// R30 (<c>updates.signingKey</c> must be a base64 P-256 SPKI, SIG0325) and R45
-/// (<c>installer.require_signed_downloads</c> must name a known policy, SIG0326).
+/// Pack-time network-trust validation: <c>parameters.*.source.url</c> must be HTTPS
+/// (SIG0323), <c>updates.manifestUrl</c> must be HTTPS (SIG0324),
+/// <c>updates.signingKey</c> must be a base64 P-256 SPKI (SIG0325), and
+/// <c>installer.require_signed_downloads</c> must name a known policy (SIG0326).
+/// (R8, R14, R30, R45)
 /// </summary>
 /// <remarks>
-/// <para>
-/// <b>These are written to compile and FAIL on the parent commit.</b> Every assertion
-/// is against a diagnostic code as a string literal and against
-/// <see cref="ManifestParser.Parse"/>, which both exist at the parent — no new type,
-/// constant, or enum is named, so each test can be dropped onto <c>b62de86</c> as-is
-/// and will fail there because the diagnostic is simply never produced.
-/// </para>
-/// <para>
-/// <b>Each row also carries a positive control.</b> Stage 1 produced eleven
-/// over-refusals; a tightening with no test for what it must still ACCEPT is how they
-/// got in.
-/// </para>
+/// Each rule also carries a positive control: a tightening with no test for what it
+/// must still ACCEPT is how an over-refusal slips in unnoticed.
 /// </remarks>
 public class NetworkTrustParseTests
 {
@@ -138,8 +129,8 @@ public class NetworkTrustParseTests
     // ── R30: updates.signingKey ───────────────────────────────────────────────
 
     [Theory]
-    // The exact value `sigil init --template full` used to emit: a private-key FILE
-    // PATH, naming the wrong algorithm.
+    // A private-key file path, naming the wrong algorithm — the shape
+    // `sigil init --template full` must never emit again.
     [InlineData("./keys/update-signing.ed25519")]
     [InlineData("./key.pem")]
     [InlineData("C:\\\\keys\\\\update.pem")]
@@ -178,8 +169,8 @@ public class NetworkTrustParseTests
     public void An_updates_block_with_no_signingKey_is_unaffected()
     {
         // signingKey is optional at parse time (the update runtime refuses to act without
-        // it, SIG0321). R30 validates the SHAPE of a declared key; it does not make the
-        // field required, which would break every manifest that does not use updates.
+        // it, SIG0321). This validates the SHAPE of a declared key; it does not make the
+        // field required, which would break every manifest that does not use updates. (R30)
         var result = ManifestParser.Parse(
             WithUpdates("  channel: stable\n"), "sigil.yaml");
 
@@ -220,7 +211,7 @@ public class NetworkTrustParseTests
     [Fact]
     public void An_installer_block_without_the_policy_parses_clean()
     {
-        // R45 must be additive: the overwhelming majority of manifests will never name it.
+        // This policy must be additive: the overwhelming majority of manifests will never name it. (R45)
         var result = ManifestParser.Parse(WithInstaller("  install_dir: \"{scope_root}/App\"\n"), "sigil.yaml");
 
         result.Diagnostics.Should().NotContain(d => d.Code == "SIG0326");

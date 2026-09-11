@@ -6,9 +6,9 @@ using Xunit;
 namespace SigilBuild.Installer.Host.Tests;
 
 /// <summary>
-/// P2 (gap G4): the Done screen's "Launch &lt;App&gt;" checkbox. It appears only
+/// The Done screen's "Launch &lt;App&gt;" checkbox. It appears only
 /// when the manifest declares run_after_install, is checked by default, and the
-/// app launches on close only when completed + checked.
+/// app launches on close only when completed + checked. (gap G4)
 /// </summary>
 public sealed class FinishLaunchTests
 {

@@ -8,7 +8,7 @@ using Xunit;
 namespace SigilBuild.Installer.Host.Tests.Screens;
 
 /// <summary>
-/// VM-level coverage for the Destination screen (T13): path validation gating Next
+/// VM-level coverage for the Destination screen: path validation gating Next
 /// inline, and the scope toggle recomputing the default path.
 /// </summary>
 public sealed class DestinationScreenTests

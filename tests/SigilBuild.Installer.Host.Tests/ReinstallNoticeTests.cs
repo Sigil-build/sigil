@@ -6,7 +6,7 @@ using Xunit;
 namespace SigilBuild.Installer.Host.Tests;
 
 /// <summary>
-/// T10 host coverage: the wizard surfaces a repair/reinstall notice when the
+/// Host coverage: the wizard surfaces a repair/reinstall notice when the
 /// session reports a prior install of the app. The v1 behaviour is uninstall-then-
 /// install (performed by the engine); the view-model flag only informs the user.
 /// </summary>

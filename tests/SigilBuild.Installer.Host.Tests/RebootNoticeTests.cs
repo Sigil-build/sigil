@@ -6,9 +6,9 @@ using Xunit;
 namespace SigilBuild.Installer.Host.Tests;
 
 /// <summary>
-/// P5 (gap G6) host coverage: the Done screen surfaces a reboot notice when a
+/// Host coverage: the Done screen surfaces a reboot notice when a
 /// prerequisite installer reported reboot-required (exit 3010). The flag is set by
-/// the host after the install runner completes.
+/// the host after the install runner completes. (gap G6)
 /// </summary>
 public sealed class RebootNoticeTests
 {

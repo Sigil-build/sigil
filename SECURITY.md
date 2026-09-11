@@ -38,7 +38,13 @@ In scope, explicitly:
 - Rollback-journal tampering or replay that lets an unprivileged actor cause a
   privileged action.
 - Signature-verification bypass for downloaded payloads, prerequisites, or
-  update manifests.
+  update manifests. Two of these are live defences, recently shipped, and
+  worth attacking by name: **channel-manifest freshness and replay protection**
+  (the required `issuedAt` / `expiresAt` / `sequence` fields, the ±5-minute
+  validity window, the 30-day maximum age, and the persisted monotonic
+  sequence high-water mark — ADR-011), and the
+  **`installer.require_signed_downloads` policy gate**, which decides whether a
+  downloaded binary is Authenticode-verified before it is launched.
 - Path traversal or containment escapes in install-step targets
   (`install_dir`, `/D=`, registry coordinates, directory creation).
 - Insecure handling of code-signing material (local PFX, Azure Trusted

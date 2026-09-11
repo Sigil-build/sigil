@@ -4,10 +4,15 @@ When you produce an `exe` package, Sigil ships an uninstaller automatically. The
 
 ## How it works
 
-On a successful install, the wrapper drops a stamped copy of itself to `<install_dir>\uninstall.exe` (~4 MB, embedded inside `setup.exe` as the `SIGIL_UNINSTALLER_V1` resource). It then writes a per-app entry under:
+On a successful install, the wrapper copies its own running image to `<install_dir>\uninstall.exe`. That copy is made at **install time**, not at pack time: it is a byte-for-byte `File.Copy` of the Setup.exe that is executing, so its size is the size of the whole Setup.exe including the embedded payload — there is no separate, smaller uninstaller binary and no uninstaller resource inside Setup.exe. Because it is the same image, it also carries the same Authenticode signature you applied to Setup.exe.
+
+Both the uninstaller copy and the ARP entry below are written on **every** successful `exe` install, with or without an `uninstall:` block in the manifest. There is no way to suppress them.
+
+It then writes a per-app entry under the **scope-correct** hive — `HKLM` for a per-machine install, `HKCU` for a per-user one:
 
 ```
-HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\<AppId>
+HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\<AppId>   # machine scope
+HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\<AppId>   # user scope
 ```
 
 with these values:
@@ -17,10 +22,15 @@ with these values:
 |`DisplayName`|`app.name`|
 |`DisplayVersion`|`app.version`|
 |`Publisher`|`app.publisher`|
-|`UninstallString`|`"<install_dir>\uninstall.exe" /S /Uninstall`|
-|`EstimatedSize`|Total install footprint in KB|
+|`UninstallString`|`"<install_dir>\uninstall.exe" /S /Uninstall /allusers` (machine scope) or `… /currentuser` (user scope)|
+|`InstallLocation`|The install directory actually used (written when non-empty). Load-bearing: a later upgrade reads it to recover the prior install directory.|
+|`EstimatedSize`|`REG_DWORD`, in KB. Computed at pack time as the sum of the **uncompressed** payload file sizes — the bytes that land on disk — not the compressed Setup.exe size.|
 |`InstallDate`|YYYYMMDD|
 |`NoModify` / `NoRepair`|`1`|
+
+The scope flag on `UninstallString` is not optional decoration: without it the uninstall would re-resolve to the manifest's default scope and could miss the HKLM-vs-HKCU keys and `%ProgramData%`-vs-`%LocalAppData%` state the install actually wrote.
+
+**No `DisplayIcon` value is written.** The icon Windows shows in Add or Remove Programs is whatever it derives from the executable named by `UninstallString` — there is no manifest field that sets it directly.
 
 Add or Remove Programs reads this key, so your app surfaces there with no extra YAML.
 
@@ -81,6 +91,13 @@ Every install step records a reverse operation BEFORE mutating state. Examples:
 |`env_set`|Restore the prior value and re-broadcast `WM_SETTINGCHANGE`.|
 |`shortcut_create`|Delete the `.lnk`.|
 |`service_install`|Stop the service and `sc delete` it.|
+|`file_delete`|Restore the file from a temp stash.|
+|`http_download`|Restore the prior file (or delete the downloaded one if nothing was there).|
+|`ini_write` / `json_edit` / `xml_edit`|Restore the config file's prior content from a stash (or delete it if the step created it).|
+|`scheduled_task_create`|Delete the scheduled task.|
+|`com_register`|Unregister the COM server (withdrawn when the DLL failed to load or exported no `DllRegisterServer`, so nothing was registered).|
+|`firewall_rule`|Delete the firewall rule.|
+|The `uninstall.exe` copy itself|Remove `<install_dir>\uninstall.exe`.|
 |`run_program`|None - external side effects are not invertible.|
 
 Each row is what the journal *records*. Whether a given record is *replayed* also depends on the anchoring rules below.
@@ -131,10 +148,12 @@ This is reachable in practice for an **unsigned** machine-scope install whose di
 
 ## Silent uninstall
 
-`/S` suppresses any wizard chrome the uninstall flow would otherwise show. Add or Remove Programs always invokes the silent path (`QuietUninstallString` semantics).
+`/S` suppresses any wizard chrome the uninstall flow would otherwise show. Add or Remove Programs always invokes the silent path — not because a `QuietUninstallString` value exists (Sigil never writes one), but because the `UninstallString` it does write already carries `/S`.
+
+Double-clicking `<install_dir>\uninstall.exe` directly, with no flags, opens the uninstall wizard instead: Confirm → Progress → Done (or Failed).
 
 ## See also
 
-- [Manifest reference - uninstall](../manifest-reference.md#uninstall)
+- [Manifest reference - top-level `uninstall`](../manifest-reference.md#top-level)
 - [Install steps](install-steps.md)
-- [Migrating from NSIS - uninstaller mapping](../migration/from-nsis.md#uninstaller-mapping)
+- [Migrating from Inno Setup](../migration/from-inno.md)

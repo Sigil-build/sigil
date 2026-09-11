@@ -17,6 +17,30 @@
   changes were made; all measurements come from throwaway publishes under
   `artifacts-spike/` (git-ignored, not committed).
 
+> **Status of the findings below: superseded by what shipped. The decision
+> stands; the measurements and the open follow-ups do not.**
+>
+> This ADR was written on a machine with no MSVC C++ workload, so its Native AOT
+> section reads "BLOCKED by toolchain" and its size table reads "UNMEASURED".
+> Both are now resolved and none of the five follow-ups is still open. As
+> shipped:
+>
+> - The installer host **is** AOT-published in CI (`scripts/publish-installer-runtime.ps1`,
+>   invoked from `ci.yml`, `release.yml` and `wrapper-vm-tests.yml`), so the
+>   C++-workload precondition (follow-up 1) is baked into the CI image.
+> - The real numbers, recorded in the script's own `-SizeGateMb` documentation:
+>   win-x64 exe **~24 MB**, full footprint **~42 MB** (exe + Skia/ANGLE/HarfBuzz
+>   native libs ~18 MB) — inside the ~25–30 MB expectation for the exe, and
+>   confirming that the spec's proposed 25 MB host gate was unattainable
+>   (follow-ups 2 and 4).
+> - The host size gate was pinned to **40 MB** and then **re-pinned to 45 MB**
+>   in P9 when localization added ~2.26 MB (recorded in
+>   [ADR-008](adr-008-expression-policy.md)'s amendment log, 2026-07-15). ~3 MB
+>   headroom remains.
+>
+> Read the rest of this page as the spike record it is, not as the current state
+> of the build.
+
 ---
 
 ## Decision (TL;DR)

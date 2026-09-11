@@ -33,11 +33,14 @@ Best for: portable apps, CI artefacts, per-user "extract anywhere" distributions
 
 ### `exe`
 
-Self-extracting `setup.exe` with Sigil's branded wizard host (D-013 / D-014). Full install-step engine, declarative parameters, auto-generated `uninstall.exe`, ARP integration.
+A self-extracting `<App.Name>-<version>-<arch>-Setup.exe` with Sigil's branded wizard host. Full install-step engine, declarative parameters, automatic `uninstall.exe`, ARP integration.
 
-- All MUST-tier step types (`file_copy`, `registry_*`, `shortcut_create`, `env_set`, `run_program`, `service_install`, ...).
-- `parameters:` block surfaces in the wizard or via `/PName=Value` on silent install (`/S /D=<dir> /PName=Value`; see [setup.exe reference](../setup-exe-reference.md)).
-- Signing: `setup.exe` and the embedded `uninstall.exe` are both signed.
+> **Producing the `exe` format requires a Windows pack host.** Stamping the payload into the installer runtime uses the Win32 resource-update APIs (`BeginUpdateResourceW`), which have no cross-platform equivalent. On Linux or macOS `sigil pack` emits **SIG0270** and **skips** the exe format; the other requested formats still pack, but the run exits non-zero to flag the unmet request. (Do not confuse this with **SIG0120**, "EXE-wrapper packaging requires the AOT-published `SigilBuild.Wrapper` runtime" — a different failure, on Windows, when the staged installer runtime is missing.)
+
+- The full closed catalog of 18 install-step types — see [Install steps](install-steps.md).
+- `parameters:` surfaces in the wizard or via `/PName=Value` on silent install (`/S /D=<dir> /PName=Value`; see [setup.exe reference](../setup-exe-reference.md)).
+- Signing: `sigil sign --artifact` signs the finished `Setup.exe` after packing. `uninstall.exe` is a runtime copy of it and inherits the signature. See [Signing](signing.md).
+- **Payload delivery is a packaging choice too.** The default, `sigil pack --payload embedded`, puts the whole payload inside `Setup.exe`. `sigil pack --payload web --package-url <https URL>` instead produces a **second, tiny artefact** — `<App.Name>-<version>-<arch>-WebSetup.exe` — that downloads the full package from that URL at install time, verifies its SHA-256, and runs it. Both artefacts need signing. See [Updates](updates.md).
 
 Best for: full Windows installers with a wizard, install steps, and an uninstaller.
 
@@ -49,12 +52,12 @@ Best for: full Windows installers with a wizard, install steps, and an uninstall
 |Install needs to register a Windows service|x|-|-|
 |Install needs Start Menu / Desktop shortcuts|x|x|-|
 |Branded installer wizard|x|-|-|
-|Silent install (`/S` + parameter overrides)|x|x*|-|
+|Silent install (`/S` + parameter overrides)|x|n/a*|-|
 |Microsoft Store distribution|-|x|-|
 |Sandboxed runtime|-|x|-|
 |Portable / no-install distribution|-|-|x|
 
-*MSIX installs are silent by default via App Installer; there is no Sigil-controlled silent surface.
+*MSIX installs are silent by default via App Installer — that is Windows doing it, not Sigil. There is no Sigil-controlled silent surface for `msix`, and no `parameters:` or `install_steps:` to override, so this row is "not applicable" rather than "supported".
 
 ## Architectures
 
@@ -66,14 +69,21 @@ package:
   architectures: [x64, arm64]
 ```
 
-yields `setup-x64.exe`, `setup-arm64.exe`, `app-x64.zip`, `app-arm64.zip`.
+yields four files. Artefact names are fixed by the packager, not configurable:
 
-## Migrating from WiX or NSIS
+|Format|File name|
+|---|---|
+|`exe`|`<sanitized app.name>-<version>-<arch>-Setup.exe` (and `…-WebSetup.exe` with `--payload web`)|
+|`zip`|`<app.id>-<version>-<arch>.zip`|
+|`msix`|`<app.id>-<version>-<arch>.msix`|
 
-Coming from WiX or NSIS, `exe` is the format you want. The migration guides cover the construct-by-construct mapping:
+Note the asymmetry: the **exe** name is built from `app.name` (sanitized against path traversal and illegal filename characters), while **zip** and **msix** use `app.id`. So an app with `name: My App` and `id: com.example.myapp` produces `My App-1.0.0-x64-Setup.exe` alongside `com.example.myapp-1.0.0-x64.zip`.
 
-- [Migrating from WiX](../migration/from-wix.md)
-- [Migrating from NSIS](../migration/from-nsis.md)
+## Migrating from another installer
+
+Coming from another installer toolchain, `exe` is the format you want:
+
+- [Migrating from Inno Setup](../migration/from-inno.md)
 
 ## See also
 

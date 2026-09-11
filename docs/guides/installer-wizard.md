@@ -4,16 +4,30 @@ When you produce an `exe`-format package (see [Packaging formats](packaging-form
 
 ## Screen flow
 
-The screen list is built at runtime from your manifest. Welcome, Choose Install Location, Installing, and Finish are always rendered; License and the built-in Options page are the only conditional ones. The middle pages are dynamic:
+The screen list is built at runtime from your manifest. Welcome, Choose Install Location, Installing and Finish are always rendered; License, the built-in Options page, and your declared custom screens are the conditional ones, in this order:
 
 1. **Welcome** — branded splash with app name + version.
-2. **Choose Install Location** — **always rendered**, immediately after Welcome, whether or not your manifest declares any `parameters:` at all. `InstallerViewModel.RebuildFlow` adds this node (`InstallerStep.InstallOptions`) unconditionally; `License` and the built-in `Options` page, added right after it, are each gated behind their own `if` (`src/SigilBuild.Installer.Host/ViewModels/InstallerViewModel.cs:1041-1055`). It is not tied to declaring a parameter named `install_dir` — see the warning under [Parameters](parameters.md#cli-overrides-at-install-time). Includes a TextBox, Browse..., and a live disk-space readout via `DriveInfo`.
-3. **License** — license text (placeholder today; a `installer.license_path` field lands post-MVP), shown only when the manifest has one.
-4. **N x parameter pages** — one page per unique `screen:` value declared on install-time parameters, in first-appearance order. Parameters without a `screen:` value collapse into a trailing synthetic "Install Options" page.
-5. **Installing** — progress feed driven by the step engine.
-6. **Finish** — completion summary.
+2. **Choose Install Location** — **always rendered**, immediately after Welcome, whether or not your manifest declares any `parameters:` at all. It is not tied to declaring a parameter named `install_dir` — see the warning under [Parameters](parameters.md). Includes a TextBox, Browse..., and a live disk-space readout via `DriveInfo`. When the manifest sets `installer.scope: auto`, this screen also carries the **user / machine scope toggle**, and flipping it recomputes the default path for the chosen scope.
+3. **License** — the real license text from `installer.license`, shown only when the manifest declares one. Next is disabled until the user accepts.
+4. **Options** — the built-in components page, shown only when at least one `installer.options` component is enabled. Rendered as checkboxes: the built-ins first (desktop shortcut, Start Menu, add to PATH, file associations), then any app-defined `components[]` in declared order.
+5. **N x custom screens** — one page per `installer.screens[]` entry, in declared order. See [Custom screens](#custom-screens-installerscreens).
+6. **Installing** — progress feed driven by the step engine.
+7. **Finish** — completion summary.
+
+Three further screens exist but are not part of that linear flow — the wizard diverts to them:
+
+- **CloseApps** — reached when running applications hold the install directory open.
+- **DowngradeBlocked** — jumped to at startup when the installed version is newer than this package; the run ends with exit code `3`.
+- **Failed** — the terminal screen for a failed install.
 
 `/S` on the command line suppresses every interactive screen and runs the manifest end-to-end using parameter defaults plus any `/PName=Value` overrides. See [Parameters](parameters.md).
+
+### The other two wizards
+
+The same host binary also renders two smaller flows:
+
+- **Uninstall.** Double-clicking `<install_dir>\uninstall.exe` with no flags: **Confirm → Progress → Done | Failed**. (Add/Remove Programs passes `/S`, which skips all of it.)
+- **Headed `/Update`.** A single status window rather than a paged flow: **Checking → Downloading → LaunchingChild → UpToDate | Done | Failed**. Headless `/Update` shows none of it.
 
 ## Brand slots
 
@@ -27,22 +41,20 @@ installer:
     hero:          ./brand/hero.png
     primaryColor:  "#1F2937"
     accentColor:   "#3B82F6"
-    gradientStart: "#280B74"
-    gradientMid:   "#6047A7"
-    gradientEnd:   "#19D3D8"
 ```
 
-Slots:
+Slots — this is the **complete** list. `installer.brand` is `additionalProperties: false`, so any other key fails `sigil validate` with SIG0010:
 
 |Field|What it does|
 |---|---|
 |`logo`|Header logo (SVG or PNG).|
-|`hero`|Welcome-screen hero artwork.|
+|`hero`|Welcome-screen hero artwork (SVG or PNG).|
 |`primaryColor`|Primary button + accent fill.|
 |`accentColor`|Secondary accent (progress + links).|
-|`gradientStart` / `gradientMid` / `gradientEnd`|Three-stop sidebar gradient.|
 
-All colours are `#RRGGBB` hex. `BrandTokenEmitter` enforces WCAG-AA contrast against white text at pack time; failing combos surface as a pack-time diagnostic, not a runtime surprise.
+> **Use the camelCase spellings.** The schema also permits `primary_color` and `accent_color`, but the manifest parser reads only `primaryColor` and `accentColor` — a manifest that sets the snake_case keys alone passes `sigil validate` and then packs with **no brand colours at all**, silently falling back to the defaults.
+
+All colours are `#RRGGBB` hex — the schema enforces the pattern. The full light and dark palette is **derived from those two colours** at pack time by the brand generator; there is no gradient, sidebar or per-surface colour field to set. `BrandTokenEmitter` enforces WCAG-AA contrast against white text at pack time; failing combos surface as a pack-time diagnostic, not a runtime surprise.
 
 ## Installer icon
 
@@ -57,39 +69,57 @@ The `.ico` is stamped into the produced `setup.exe`'s Explorer icon, into the wi
 
 The wizard picks a widget per parameter from its declared shape:
 
-|Manifest declaration|Widget|
-|---|---|
-|`type: enum` with `values: [...]`|static ComboBox|
-|any type plus `source: { ... }`|dynamic ComboBox (HTTPS-fetched on page-attach)|
-|`type: bool`|CheckBox|
-|`string` / `path` / `int` / `secret`|TextBox (secrets masked)|
+|Manifest declaration|Widget|`widget:` override|
+|---|---|---|
+|`type: enum` with 4 or fewer `values:`|radio group|`dropdown`|
+|`type: enum` with 5 or more `values:`|dropdown|`radio`|
+|`type: enum` plus `source: { ... }`|dropdown, HTTPS-fetched on page-attach — never a radio group|(none)|
+|`type: bool`|checkbox|`switch`|
+|`type: string`|text input|`textarea`|
+|`type: int`|number input|`slider`|
+|`type: path`|path input|(none)|
+|`type: secret`|masked input|(none)|
 
-Dynamic ComboBoxes defer their fetch until every `${parameters.X}` referenced in `source.url` has a non-empty value, then cache the result for the page lifetime. Full mechanics in [Parameters](parameters.md).
+The `widget:` column lists the only override each type honours; any other value falls through to the default. Set one with the `{ param, widget }` form of a screen field.
 
-## Multi-screen parameter grouping
+Dynamic dropdowns defer their fetch until every `${parameters.X}` referenced in `source.url` has a non-empty value, then cache the result for the page lifetime. Full mechanics in [Parameters](parameters.md).
+
+## Custom screens (`installer.screens`)
+
+Custom wizard pages come from `installer.screens[]` — an ordered list, one page per entry — and **nowhere else**:
 
 ```yaml
-parameters:
-  server_ip:
-    type: string
-    install_time: true
-    screen: "Server Settings"
-  domain_name:
-    type: string
-    install_time: true
-    screen: "Server Settings"
-  enable_telemetry:
-    type: bool
-    install_time: true
-    # No `screen:` -> lands on the trailing "Install Options" page.
+installer:
+  screens:
+    - id: server
+      title: "Server Settings"
+      subtitle: "Where this workstation reports to."
+      fields:
+        - server_ip
+        - param: log_level
+          widget: dropdown
+    - id: privacy
+      title: "Privacy"
+      when: "parameters.edition != 'community'"
+      fields:
+        - enable_telemetry
 ```
+
+|Field|Required|What it does|
+|---|---|---|
+|`id`|yes|Stable identifier for the page.|
+|`title`|yes|Page heading and rail label. A `LocalizedText` — a plain string, or a per-language map.|
+|`subtitle`|-|Secondary line under the heading. Also `LocalizedText`.|
+|`when`|-|Expression gating the page. Evaluated at **navigation** time, not when the flow is built, so a page can become visible after an earlier field is set — and is skipped when it is false.|
+|`fields`|yes|The parameters to render, in order. Each entry is either a bare parameter name or a `{ param, widget }` object that overrides the widget choice.|
 
 Rules:
 
-- Parameters sharing a `screen:` value render on the same wizard page in declaration order.
-- Unlabelled parameters fall through to a synthetic `Install Options` page at the end.
-- **There is no reserved `install_dir` parameter.** The Choose Install Location screen (previous section) is a fixed part of the flow, wired to the engine's own `{install_dir}` resolution — it does not read a manifest parameter of that name. Do not declare one; see the warning in [Parameters](parameters.md#cli-overrides-at-install-time).
-- If the manifest declares no install-time parameters at all, the wizard still renders an empty Install Options page so the flow has a slot between License and Installing.
+- A `fields` entry naming a parameter that does not exist is dropped; the page renders without it.
+- **A parameter no screen names is never rendered**, even with `install_time: true`. It resolves to its default or a `/PName=Value` override.
+- **There is no reserved `install_dir` parameter.** The Choose Install Location screen is a fixed part of the flow, wired to the engine's own `{install_dir}` resolution — it does not read a manifest parameter of that name. Do not declare one; see the warning in [Parameters](parameters.md).
+
+> **Known issue (R79): the parameter-level `screen:` field does not build pages.** The schema still accepts `screen:` on a parameter and the manifest reference still describes it as grouping parameters onto wizard pages. It does not: the value is written into a sidecar nothing reads, and no page is produced from it. Use `installer.screens[]`.
 
 ## Silent install
 
@@ -97,7 +127,7 @@ Rules:
 setup.exe /S /D="C:\Apps\MyApp" /Pedition=professional
 ```
 
-`/S` skips every screen and runs the step list non-interactively. `/D=path` overrides the install directory (see [the setup.exe reference](../setup-exe-reference.md#d)); any `/PName=Value` tokens override the matching `install_time: true` parameter default — the `P` prefix is required, a bare `/Name=Value` is rejected (`CommandLineParser.cs:497,503-504`). Undeclared parameter names are rejected at parse time. Bool values write back as the literal strings `True` / `False`.
+`/S` skips every screen and runs the step list non-interactively. `/D=path` overrides the install directory (see [the setup.exe reference](../setup-exe-reference.md)); any `/PName=Value` tokens override the matching `install_time: true` parameter default — the `P` prefix is required, a bare `/Name=Value` is rejected. `/Poption.<Name>=<Value>` overrides an `installer.options.components[]` entry. Undeclared parameter and component names are rejected at parse time. Bool values write back as the literal strings `True` / `False`.
 
 ## See also
 

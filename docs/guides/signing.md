@@ -28,9 +28,10 @@ sign:
 
 Drop the password into the environment, not the manifest:
 
-```bash
+```powershell
 $env:SIGIL_PFX_PASSWORD = "..."
 sigil pack sigil.yaml
+sigil sign sigil.yaml --artifact ./dist/MyApp-1.0.0-x64-Setup.exe
 ```
 
 ## Azure Trusted Signing
@@ -61,10 +62,13 @@ Auth uses the standard Azure SDK environment-variable conventions. In GitHub Act
 
 |Artefact|Signed?|How|
 |---|---|---|
-|`setup.exe` (EXE wrapper)|yes|Authenticode via the configured provider.|
-|`uninstall.exe` (embedded inside `setup.exe`)|yes|Same provider, signed before being embedded.|
+|`<App.Name>-<version>-<arch>-Setup.exe` (EXE wrapper)|yes|Authenticode via the configured provider. Sign it **after** packing — see [Running it](#running-it).|
+|`<App.Name>-<version>-<arch>-WebSetup.exe` (only with `--payload web`)|yes|A **second** signable artefact: the tiny stub that downloads the full package. Sign it too, with the same `sigil sign --artifact` invocation pointed at it. An unsigned stub is the file your users actually download and run first.|
+|`uninstall.exe`|inherited|Not separately signed and not embedded anywhere. It is a byte-for-byte runtime copy of the already-signed `Setup.exe`, made at install time, so it carries that same signature.|
 |MSIX bundles|yes|Package signature via the provider.|
 |ZIP artefacts|no|No widely-understood embedded signature for ZIP; archives are unsigned in the MVP.|
+
+Artefact names are not configurable: the exe uses the sanitized **`app.name`**, while `zip` and `msix` use **`app.id`**. See [Packaging formats](packaging-formats.md#architectures).
 
 ## Timestamping
 
@@ -72,14 +76,18 @@ RFC 3161 timestamping is enabled by default for both providers and lands a count
 
 ## Running it
 
-`sigil pack` invokes the signer automatically when a `sign:` block is present. To sign without packing (e.g. to re-sign an existing artefact):
+**`sigil pack` does not sign.** Packing and signing are two commands, and the order is fixed: pack stamps the payload, brand and blob into the installer through the Win32 resource-update APIs, and **any resource edit invalidates a prior Authenticode signature**. So signing must be last.
 
 ```bash
-sigil sign sigil.yaml
+sigil pack sigil.yaml
+sigil sign sigil.yaml --artifact ./dist/MyApp-1.0.0-x64-Setup.exe
 ```
+
+`--artifact <file>` is **required** — `sigil sign sigil.yaml` on its own fails immediately. The manifest supplies the provider and its configuration; `--artifact` says which file to sign. Run it once per artefact: each architecture's `Setup.exe`, and the `WebSetup.exe` stub as well when you packed with `--payload web`.
+
+The installer's own verified "Signed by {publisher}" trust line only appears when the finished `Setup.exe` verifies at install time — which is another way of saying: sign the file you ship, after it is finished.
 
 ## See also
 
 - [Manifest reference - sign](../manifest-reference.md#sign)
 - [Packaging formats](packaging-formats.md)
-- ADR-005 (monetization) - cloud signing as the wedge between OSS and Business tiers.

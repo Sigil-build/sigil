@@ -6,7 +6,7 @@ namespace SigilBuild.Wrapper.IntegrationTests;
 /// <summary>
 /// Reports a genuine Skipped result when the base VM-integration preconditions —
 /// Windows, <c>SIGIL_VM_TESTS=1</c>, and the staged installer-host runtime — are
-/// absent, instead of returning early and reporting as Passed (register row R6).
+/// absent, instead of returning early and reporting as Passed (R6).
 /// Used by <see cref="MultiEditionInstallTests"/>,
 /// <see cref="WixClassInstallUninstallTests"/>, and
 /// <see cref="LocalizationEndToEndTests"/>, whose <c>ShouldRun</c> gate is exactly
@@ -36,7 +36,7 @@ internal sealed class VmFactAttribute : FactAttribute
 /// Reports a genuine Skipped result when the base VM preconditions are met but
 /// <c>SIGIL_VM_UPGRADE=1</c> is not set — the extra opt-in
 /// <see cref="UpgradeInstallTests"/> requires on top of <see cref="VmFactAttribute"/>'s
-/// checks (register row R6).
+/// checks (R6).
 /// </summary>
 internal sealed class VmUpgradeFactAttribute : FactAttribute
 {
@@ -64,41 +64,28 @@ internal sealed class VmUpgradeFactAttribute : FactAttribute
 
 /// <summary>
 /// <see cref="VmUpgradeFactAttribute"/> plus one more precondition: the process must
-/// NOT be elevated. For the upgrade assertions that can only be true when the install
-/// can see its own prior per-user install — which, in an elevated session, it cannot.
+/// NOT be elevated. The upgrade assertions that need this can only be true when the
+/// install can see its own prior per-user install — which, in an elevated session, it
+/// cannot.
 /// </summary>
 /// <remarks>
-/// <para><b>Why.</b> <c>InstalledStateResolver.ScopeProbeOrder</c> (register row
-/// <b>R2</b>, lane S1) probes <b>HKLM only</b> when the process is elevated: an elevated
-/// process must not act on HKCU-sourced data, in particular an attacker-plantable
-/// <c>UninstallString</c> it would then spawn as administrator. That is deliberate and
-/// must not be weakened for a test. Its consequence here is that an elevated per-user
-/// install cannot see its own prior per-user install: the v2 ARP row lives in HKCU, so
+/// <c>InstalledStateResolver.ScopeProbeOrder</c> probes HKLM only when the process is
+/// elevated (R2): an elevated process must not act on HKCU-sourced data, in particular an
+/// attacker-plantable <c>UninstallString</c> it would then spawn as administrator. Do not
+/// weaken this for a test. Consequence: the v2 ARP row lives in HKCU, so
 /// <c>UpgradePlanner.Plan</c> short-circuits on <c>!state.Found</c> and returns
-/// <c>FreshInstall</c> — never <c>DowngradeBlocked</c>, and with no <c>priorInstallDir</c>
-/// to preserve.</para>
-/// <para><b>Why that matters on CI.</b> Every GitHub-hosted Windows runner is an
-/// elevated <c>runneradmin</c> session, and a <c>/currentuser</c> install does not
-/// de-elevate (<c>InstallSession.RequiresElevation</c> is
-/// <c>scope == Machine &amp;&amp; !elevated</c>), so the install runs in whatever
-/// integrity level it was launched at. The downgrade guard is therefore silently off:
-/// <c>Silent_downgrade_is_blocked_with_exit_code_3</c> gets <b>0</b> instead of 3, and
-/// the prior-install-dir half of <c>Upgrade_replaces_older_version_…</c> lands in v2's
-/// own default dir. Neither is a product defect the test can assert around, and
-/// <c>/allusers</c> is not a substitute — machine scope moves the R3 containment roots
-/// to <c>%ProgramFiles%</c>, which would reject the temp-rooted fixture
-/// <c>install_dir</c> with exit 1.</para>
-/// <para><b>Skip, not a vacuous pass</b> (register row <b>R6</b>): the reason names R2
-/// and the register row being filed for the plan-vs-cleanup divergence it exposes — the
-/// <em>elevated per-user upgrade-plan row</em>, whose number the docs lane is assigning.
-/// The divergence: the plan is ARP-sourced and blind under elevation, while
-/// <c>ExistingInstallDetected</c> → <c>PerformReinstallCleanupAsync</c> is state-store-
-/// sourced and sighted, so an elevated per-user run believes it is a fresh install and
-/// still tears the prior version down. The pure decision table stays covered by
-/// <c>UpgradePlannerTests</c>, <c>InstallDirResolverTests</c> and
-/// <c>UpgradeSessionTests</c>, which run everywhere; de-elevating the install-matrix leg
-/// (it needs no admin — the P11 system-step legs are a separate job) would restore the
-/// end-to-end coverage, and is a change for the workflow's owner.</para>
+/// <c>FreshInstall</c> — never <c>DowngradeBlocked</c>, with no <c>priorInstallDir</c> to
+/// preserve. Every GitHub-hosted Windows runner is an elevated <c>runneradmin</c> session,
+/// and a <c>/currentuser</c> install does not de-elevate, so on CI the downgrade guard is
+/// silently off; <c>/allusers</c> is not a substitute, since machine scope moves the R3
+/// containment roots to <c>%ProgramFiles%</c>, which rejects the temp-rooted fixture
+/// <c>install_dir</c>. These assertions report a genuine Skip (R6) naming R2 and the
+/// elevated per-user upgrade-plan row — the divergence where the plan is ARP-sourced and
+/// blind under elevation while <c>PerformReinstallCleanupAsync</c> is state-store-sourced
+/// and sighted, so an elevated per-user run believes it is a fresh install and still tears
+/// the prior version down — rather than passing or failing for the wrong reason. The pure
+/// decision table stays covered everywhere by <c>UpgradePlannerTests</c>,
+/// <c>InstallDirResolverTests</c> and <c>UpgradeSessionTests</c>.
 /// </remarks>
 internal sealed class VmUpgradeUnelevatedFactAttribute : FactAttribute
 {
@@ -142,14 +129,11 @@ internal sealed class VmUpgradeUnelevatedFactAttribute : FactAttribute
 /// Reports a genuine Skipped result when the base VM preconditions are met but
 /// <c>SIGIL_VM_UNINSTALL_SURVIVE=1</c> is not set — the extra opt-in
 /// <see cref="ArpUninstallStringTests"/> requires on top of
-/// <see cref="VmFactAttribute"/>'s checks (register row R6).
+/// <see cref="VmFactAttribute"/>'s checks (R6).
 /// </summary>
 /// <remarks>
-/// R58: <c>wrapper-vm-tests.yml</c> has declared <c>SIGIL_VM_UNINSTALL_SURVIVE</c> as a
-/// T15 scenario toggle since T17 consolidated the matrix, but until now no test read it —
-/// the leg was advertised and absent, which is a large part of why the ARP uninstall path
-/// went unexercised and R58 stayed latent from P6 to the release candidate. This
-/// attribute is what finally consumes it.
+/// <c>wrapper-vm-tests.yml</c> declares <c>SIGIL_VM_UNINSTALL_SURVIVE</c> as a scenario
+/// toggle; this attribute is what consumes it (R58).
 /// </remarks>
 internal sealed class VmUninstallSurviveFactAttribute : FactAttribute
 {
@@ -179,7 +163,7 @@ internal sealed class VmUninstallSurviveFactAttribute : FactAttribute
 /// Reports a genuine Skipped result when the base VM preconditions are met but
 /// <c>SIGIL_VM_PREREQ=1</c> is not set — the extra opt-in
 /// <see cref="PrerequisiteInstallTests"/> requires on top of
-/// <see cref="VmFactAttribute"/>'s checks (register row R6).
+/// <see cref="VmFactAttribute"/>'s checks (R6).
 /// </summary>
 internal sealed class VmPrerequisiteFactAttribute : FactAttribute
 {
@@ -214,7 +198,7 @@ internal sealed class VmPrerequisiteFactAttribute : FactAttribute
 /// <see cref="ComRegisterInstallTests"/>) drive the step classes directly rather than
 /// through a packed Setup.exe, so no staged runtime is required; they instead require
 /// admin rights, which is why they get their own attribute rather than reusing
-/// <see cref="VmFactAttribute"/> (register row R6).
+/// <see cref="VmFactAttribute"/> (R6).
 /// </summary>
 internal sealed class VmSystemStepsFactAttribute : FactAttribute
 {

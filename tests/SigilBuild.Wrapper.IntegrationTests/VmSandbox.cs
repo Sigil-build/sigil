@@ -13,9 +13,9 @@ namespace SigilBuild.Wrapper.IntegrationTests;
 /// <remarks>
 /// FUTURE: hardening to a real Windows Sandbox (.wsb profile mounting the
 /// SDK output dir + an empty <c>C:\AppDir</c> target) lands when the plan
-/// calls for true VM isolation. For Task 13's scope, host-process invocation
-/// against a temp directory is sufficient — the tests still drive the wrapper
-/// exe end-to-end, they just don't get the OS-level sandboxing.
+/// calls for true VM isolation. Host-process invocation against a temp
+/// directory is sufficient for now — the tests still drive the wrapper exe
+/// end-to-end, they just don't get the OS-level sandboxing.
 /// </remarks>
 internal sealed class VmSandbox : IDisposable
 {

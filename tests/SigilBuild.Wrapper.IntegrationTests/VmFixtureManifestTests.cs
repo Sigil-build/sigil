@@ -13,39 +13,38 @@ using Xunit;
 namespace SigilBuild.Wrapper.IntegrationTests;
 
 /// <summary>
-/// Register row <b>R66</b>. The always-on half of the VM matrix: every fixture the
-/// <c>[VmFact]</c>-gated legs pack, and every argv they pass to the packed Setup.exe,
-/// checked here through the <em>real</em> manifest loader and the <em>real</em>
-/// command-line parser — with no Windows Sandbox, no staged AOT runtime, and no
-/// <c>SIGIL_VM_*</c> toggle required.
+/// The always-on half of the VM matrix: every fixture the <c>[VmFact]</c>-gated legs
+/// pack, and every argv they pass to the packed Setup.exe, checked here through the
+/// <em>real</em> manifest loader and the <em>real</em> command-line parser — with no
+/// Windows Sandbox, no staged AOT runtime, and no <c>SIGIL_VM_*</c> toggle required
+/// (R66).
 /// </summary>
 /// <remarks>
 /// <para><b>Why this class exists.</b> The VM matrix was dispatch-only and had never
-/// actually run. On its first real run (run <c>34361541578</c>) eleven of its nineteen
-/// tests failed, and not one failure was about the behaviour under test — every one was
-/// the fixtures having rotted underneath a suite nothing ever executed:</para>
+/// actually run. On its first real run, eleven of its nineteen tests failed, and not one
+/// failure was about the behaviour under test — every one was the fixtures having rotted
+/// underneath a suite nothing ever executed:</para>
 /// <list type="number">
 ///   <item><description><b>Invalid YAML.</b> Paths and registry keys interpolated into
 ///   <em>double</em>-quoted scalars, where <c>\</c> is an escape character:
 ///   <c>manifest validation failed: While scanning a quoted scalar, found unknown escape
 ///   character</c>. Guarded by <see cref="Generated_vm_fixture_manifest_is_schema_valid"/>
-///   — the fixture builders are now pure functions returning the YAML, so the exact
-///   string a VM leg packs is validated in every CI run.</description></item>
-///   <item><description><b>Schema-invalid <c>app.id</c>.</b> A per-run unique id built as
-///   <c>"com.sigil.p3." + Guid("N")</c>, whose hex segment is usually digit-led, against a
-///   pattern that requires every segment to be letter-led. Guarded by
+///   — the fixture builders are pure functions returning the YAML, so the exact string a
+///   VM leg packs is validated in every CI run.</description></item>
+///   <item><description><b>Schema-invalid <c>app.id</c>.</b> A per-run unique id built
+///   from a raw GUID hex segment, usually digit-led, against a pattern that requires
+///   every segment to be letter-led. Guarded by
 ///   <see cref="Generated_app_ids_are_accepted_by_the_real_schema"/>, which exercises the
 ///   id <em>generators</em> repeatedly rather than one lucky draw.</description></item>
-///   <item><description><b>Command-line grammar drift.</b> <c>/Edition=enterprise</c>,
-///   <c>/InstallDir=…</c>, <c>/install_dir=…</c>, <c>/registered_user=alice</c> — none of
-///   them tokens the wrapper's closed grammar accepts, so those legs exited <b>64</b>
-///   (usage error) before installing anything. Guarded by
+///   <item><description><b>Command-line grammar drift.</b> Flags like
+///   <c>/Edition=enterprise</c> or <c>/install_dir=…</c> are not tokens the wrapper's
+///   closed grammar accepts, so those legs exited <b>64</b> (usage error) before
+///   installing anything. Guarded by
 ///   <see cref="Vm_leg_argv_parses_under_the_real_grammar"/>.</description></item>
-///   <item><description><b><c>from: payload/**</c> instead of <c>payload://**</c></b> —
-///   register row <b>R59</b>, fixed in the docs and both shipped examples but missed in
-///   the localization fixtures, which the VM localization legs pack. Schema-legal, so
-///   static validation cannot see it; at install time the glob root resolves against the
-///   process working directory and the step fails with exit <b>1</b>. Guarded by
+///   <item><description><b><c>from: payload/**</c> instead of <c>payload://**</c></b>
+///   (R59): schema-legal, so static validation cannot see it; at install time the glob
+///   root resolves against the process working directory and the step fails with exit
+///   <b>1</b>. Guarded by
 ///   <see cref="Vm_fixture_file_copy_sources_use_the_payload_scheme"/>.</description></item>
 /// </list>
 /// <para>What this class deliberately does NOT claim: that the VM legs pass. It proves
@@ -282,7 +281,7 @@ public sealed class VmFixtureManifestTests
     }
 
     /// <summary>
-    /// Failure class 4 (register row <b>R59</b>): a <c>file_copy</c> whose <c>from:</c>
+    /// Failure class 4 (R59): a <c>file_copy</c> whose <c>from:</c>
     /// omits the <c>payload://</c> scheme is schema-legal and silently wrong — only that
     /// literal scheme is rebased onto the extracted payload root
     /// (<c>StepContext.ResolvePath</c>); anything else is resolved against the install
@@ -331,8 +330,7 @@ public sealed class VmFixtureManifestTests
     /// <c>&lt;install_dir&gt;\app.txt\app.txt</c>. The step returns
     /// <c>StepResult.Ok()</c>, the install exits 0, the ARP row is correct — and every
     /// <c>File.Exists(&lt;install_dir&gt;\app.txt)</c> assertion in the matrix fails
-    /// against a directory. Three fixture builders shipped that shape, which is four of
-    /// the six failures in run <c>34368896457</c>.</para>
+    /// against a directory.</para>
     /// <para>The rule enforced here — no file extension on the destination's last
     /// segment — is deliberately <em>tighter</em> than the runtime contract: an
     /// extension-less file name (<c>to: '{install_dir}\LICENSE'</c>) would still slip

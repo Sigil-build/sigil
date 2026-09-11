@@ -6,7 +6,7 @@ using SigilBuild.Core.Manifest;
 using SigilBuild.Wrapper.Expressions;
 
 /// <summary>
-/// Evaluates the declarative <c>installer.vars</c> (P1) once at install-session
+/// Evaluates the declarative <c>installer.vars</c> once at install-session
 /// start and seeds <c>var.&lt;name&gt;</c> into the expression/substitution context.
 /// Called by <see cref="StepContext.From"/> after every base identifier
 /// (<c>param.*</c>, <c>app.*</c>, <c>system.*</c>, <c>env.*</c>, <c>scope</c>,

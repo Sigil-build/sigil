@@ -71,7 +71,7 @@ public sealed class InstallEngine
             ? null
             : new ProgressReporter(progress, preInstall.Count + installList.Count + postInstall.Count);
 
-        // P4: let a long-running step (http_download) stream intra-step rows to the
+        // Let a long-running step (http_download) stream intra-step rows to the
         // same progress channel (wizard + /LOG) without moving the overall bar.
         ctx.ProgressSink = progress;
 
@@ -90,7 +90,7 @@ public sealed class InstallEngine
             // ex.Message already names the failing step ("step '<id>' failed: …").
             reporter?.ReportMessage($"error: {ctx.Redact(ex.Message)}", isError: true);
             reporter?.ReportMessage("rollback: reverting changes", isError: true);
-            // Stream each reversal (P7): passing `progress` makes UndoAsync emit a
+            // Stream each reversal: passing `progress` makes UndoAsync emit a
             // per-record line (delete / rmdir / path - / reg -) so the rollback
             // trail lands in the /LOG file and the wizard log pane, not just the
             // summary line above.

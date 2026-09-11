@@ -3,7 +3,7 @@ namespace SigilBuild.Wrapper.Engine;
 using System;
 
 /// <summary>
-/// Finds a <c>{token}</c> that survived substitution (register row R16).
+/// Finds a <c>{token}</c> that survived substitution (R16).
 /// </summary>
 /// <remarks>
 /// <para>

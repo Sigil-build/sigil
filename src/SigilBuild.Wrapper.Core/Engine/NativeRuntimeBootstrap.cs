@@ -11,7 +11,7 @@ namespace SigilBuild.Wrapper.Engine;
 
 /// <summary>
 /// Makes a standalone stamped <c>Setup.exe</c> self-contained for the GUI
-/// wizard (spec T18). A wizard installer needs its Skia / ANGLE / HarfBuzz
+/// wizard. A wizard installer needs its Skia / ANGLE / HarfBuzz
 /// native DLLs (~18 MB) that Native AOT publishes <em>beside</em> the exe, not
 /// inside it. The packager archives that native-dep set into the
 /// <c>SIGIL_RUNTIME_V1</c> Win32 resource; before the Avalonia GUI starts the
@@ -47,9 +47,9 @@ public static partial class NativeRuntimeBootstrap
 
     /// <summary>
     /// Marker written after a complete <em>and verified</em> extraction. It is a
-    /// fast-path hint, never the trust decision: register row R4 is precisely that a
-    /// marker an attacker can <c>touch</c> was treated as proof that the directory
-    /// beside it held our bytes.
+    /// fast-path hint, never the trust decision — treating a
+    /// marker an attacker can <c>touch</c> as proof that the directory
+    /// beside it holds our bytes is the defect (R4).
     /// </summary>
     private const string CompletionMarkerName = ".sigil-runtime-complete";
 
@@ -109,7 +109,7 @@ public static partial class NativeRuntimeBootstrap
     /// <param name="report">
     /// Optional <c>(message, isError)</c> sink for the one thing an operator needs to
     /// see: that a cache directory was discarded because its contents did not match
-    /// the embedded archive. That is either an interrupted extraction or R4's attack,
+    /// the embedded archive. That is either an interrupted extraction or the attack (R4),
     /// and both are worth a line in the wizard log.
     /// </param>
     [SupportedOSPlatform("windows")]
@@ -142,15 +142,15 @@ public static partial class NativeRuntimeBootstrap
     /// <c>%LocalAppData%</c> is per-user, so unelevated there is no privilege boundary
     /// to cross and no better location exists — the attacker and the victim are the same
     /// account. Elevated there very much is one, and <c>%LocalAppData%</c> is on the
-    /// wrong side of it: that is register row R4.
+    /// wrong side of it. (R4)
     /// </para>
     /// <para>
     /// <b>Deliberately a direct child of <c>%ProgramData%</c>, and deliberately not
     /// under <c>%ProgramData%\Sigil</c>.</b> That path is the install-state store's root
-    /// and must not be repaired from here; depending on it instead meant that any
-    /// non-administrator who pre-created it — register row R1's attack, which needs no
-    /// privilege — blocked every elevated GUI install, because this bootstrap would then
-    /// refuse. <c>sigil-runtime</c> is this component's own directory, so
+    /// and must not be repaired from here; depending on it means that any
+    /// non-administrator who pre-creates it — which needs no privilege (R1) — blocks
+    /// every elevated GUI install, because this bootstrap then
+    /// refuses. <c>sigil-runtime</c> is this component's own directory, so
     /// <see cref="StateDirectorySecurity.CreateHardened"/> may re-permission and take
     /// ownership of a squatted one, which turns that denial of service back into a
     /// no-op. <c>%ProgramData%</c> itself grants <c>BUILTIN\Users</c> <c>(CI)(WD,AD)</c>
@@ -183,8 +183,9 @@ public static partial class NativeRuntimeBootstrap
 
     /// <summary>
     /// Produce a cache directory under <paramref name="cacheRoot"/> whose contents are
-    /// known to be exactly <paramref name="archiveBytes"/>, and return it. This is the
-    /// fix for register row R4.
+    /// known to be exactly <paramref name="archiveBytes"/>, and return it. Verified
+    /// content — never the marker file beside it — is what makes the directory
+    /// trustworthy. (R4)
     /// </summary>
     /// <param name="requireAdminOnlyRoot">
     /// True for an elevated run. The root and the cache directory must then pass
@@ -245,7 +246,7 @@ public static partial class NativeRuntimeBootstrap
 
         var root = Path.GetFullPath(cacheRoot);
 
-        // R50: before this run possibly adds a fallback of its own, remove the ones
+        // Before this run possibly adds a fallback of its own, remove the ones
         // earlier runs left behind. Sited here rather than at process exit because the
         // directory a run leaks is the one whose DLLs it still has mapped — it cannot
         // clean up after itself, only after its predecessors. The sweep touches nothing
@@ -313,7 +314,7 @@ public static partial class NativeRuntimeBootstrap
     /// <summary>
     /// Delete per-run fallback roots (<c>&lt;parent&gt;\sigil-runtime-&lt;guid&gt;</c>)
     /// left behind by runs that have ended, and report how many were reclaimed. This is
-    /// the fix for register row R50.
+    /// how an abandoned fallback stops accumulating. (R50)
     /// </summary>
     /// <param name="cacheRoot">
     /// The shared cache root; its <em>parent</em> is the directory swept, because that
@@ -327,12 +328,12 @@ public static partial class NativeRuntimeBootstrap
     /// </param>
     /// <remarks>
     /// <para>
-    /// <b>The leak.</b> When the shared root cannot be established or repaired — a
-    /// <em>file</em> at that path, an owner-pinned deny ACE — the run extracts ~18 MB
-    /// into a fresh per-run GUID directory instead. That directory was never cleaned
-    /// up, and the squat that caused it is permanent, so one <c>New-Item</c> by any
-    /// unprivileged user armed an unbounded per-install disk leak. The refusal itself
-    /// is the design and is not changed here; only the litter is.
+    /// <b>The leak this closes.</b> When the shared root cannot be established or
+    /// repaired — a <em>file</em> at that path, an owner-pinned deny ACE — the run
+    /// extracts ~18 MB into a fresh per-run GUID directory instead. The squat that
+    /// causes that is permanent, so without this sweep one <c>New-Item</c> by any
+    /// unprivileged user arms an unbounded per-install disk leak. The refusal itself is
+    /// the design and is untouched here; only the litter is.
     /// </para>
     /// <para>
     /// <b>Constraint 1 — guards read from an open handle, never through the path.</b>
@@ -677,7 +678,7 @@ public static partial class NativeRuntimeBootstrap
             $"({failure}); extracting to the private directory '{perRun}' for this run instead",
             true);
 
-        // R50: lease it in the same breath as establishing it. The lease is what lets a
+        // Lease it in the same breath as establishing it (R50). The lease is what lets a
         // LATER run tell "abandoned, reclaim it" from "in use, leave it alone", and a
         // fallback we cannot lease is one we must not extract into — a concurrent run's
         // sweep would be entitled to remove it out from under us once the grace period
@@ -962,7 +963,7 @@ public static partial class NativeRuntimeBootstrap
 
 /// <summary>
 /// The native-dependency cache directory could not be established, cleaned or verified,
-/// so it was <b>not</b> added to the process DLL search path (register row R4). Distinct
+/// so it was <b>not</b> added to the process DLL search path (R4). Distinct
 /// from a plain <see cref="IOException"/> because it is a deliberate refusal rather than
 /// an incidental I/O failure: the host reports it and exits instead of starting a wizard
 /// whose native code might not be ours.

@@ -1780,6 +1780,31 @@ add `.superpowers/` to the root `.gitignore`.
 > licence metadata, and a NuGet package can never be deleted — only unlisted. It
 > carries no code, so the exposure is nil, but unlist it once a real version
 > ships under the Sigil License 1.0.
+>
+> **STATUS (2026-09-14, later): BOTH IDS NOW CLAIMED — the row's original
+> finding is closed.** `SigilBuild.UpdateSdk 0.0.0-reserved` was built and
+> **pushed to nuget.org** the same day; nuget.org returned `Created`, and the
+> package is live and indexed
+> (<https://www.nuget.org/packages/SigilBuild.UpdateSdk/> returns 200,
+> `v3-flatcontainer` lists the version). The README advertising
+> `dotnet tool install -g SigilBuild` can no longer be squatted, and neither can
+> the SDK id — which is what this row was actually about.
+>
+> The placeholder ships **under ADR-016**, not MIT: `<license type="file">LICENSE</license>`
+> with `requireLicenseAcceptance`, an embedded README, and the real copyright
+> holder. That is deliberate beyond correctness — "packages use the `license`
+> element and not the deprecated `licenseUrl`" is one of nuget.org's own ID-prefix
+> acceptance criteria, so the placeholder is written to support the application
+> below rather than merely occupy the name.
+>
+> **What is left is not this row.** The **`SigilBuild.*` prefix is still
+> unreserved** (`"verified": false`): owning two exact ids protects only those
+> two strings, and every other name under the prefix — `SigilBuild.Core`,
+> `SigilBuild.Cli` — remains open to anyone. Reservation is a separate
+> application, **an email to `account@nuget.org`** naming the owner display name
+> and the prefix (verified against nuget.org's own documentation, 2026-09-14 —
+> it is not a web form). Sent by the owner on 2026-09-14; **awaiting nuget.org's
+> reply.** Track the prefix as its own G4 line, not as R41a.
 
 `docs/sprint-01/identifier-reservation.md:13` marks `SigilBuild` as a "Reserved
 placeholder **to be published** before Sprint 1 ends"; `:23`

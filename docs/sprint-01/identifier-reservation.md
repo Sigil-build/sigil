@@ -2,16 +2,17 @@
 
 This document records the identifier reservations and access-control settings established at the start of Sprint 1, per Plan _1 Tasks 1 and 9. Items marked "to verify" require a live check against the relevant external registry.
 
-> **Status as of the release-candidate track (register row R41a): the NuGet
-> IDs below are still unclaimed.** `README.md` tells users to
-> `dotnet tool install -g SigilBuild` (aspirationally, under "Install") while
-> neither `SigilBuild` nor `SigilBuild.UpdateSdk` has been reserved on
-> nuget.org. Going public with an unclaimed package ID your own README
-> advertises invites a name squat. **This is an orchestrator action item for
-> G4, before the repo gets wider attention** — see
-> `docs/plan/release/00-GAP_REGISTER.md`'s R41a. Reserve both IDs, then
-> either update the rows below to "Reserved" with the date, or delete this
-> file.
+> **Both NuGet IDs are now claimed (2026-09-14).** The banner that stood here
+> said they were unclaimed and that `README.md` was advertising
+> `dotnet tool install -g SigilBuild` against a free name. That is resolved —
+> see the rows below and register row **R41a**.
+>
+> **One narrower exposure survives and is not tracked by these rows: the
+> `SigilBuild.*` ID prefix is not reserved.** Owning two exact ids protects
+> exactly those two strings; `SigilBuild.Core`, `SigilBuild.Cli` and every other
+> name under the prefix is still free for anyone to publish. Prefix reservation
+> is a separate application to `account@nuget.org`, sent 2026-09-14 and awaiting
+> a reply.
 
 ---
 
@@ -21,7 +22,7 @@ This document records the identifier reservations and access-control settings es
 
 | Item | Value | Status |
 |---|---|---|
-| Package ID (CLI tool) | `SigilBuild` | ⏳ Reserved placeholder to be published before Sprint 1 ends |
+| Package ID (CLI tool) | `SigilBuild` | ✅ Reserved — `0.0.0-reserved` published 2026-05-05 |
 | Install command | `dotnet tool install -g SigilBuild` | — |
 | Binary command | `sigil` (via `<ToolCommandName>`) | — |
 
@@ -31,7 +32,7 @@ This document records the identifier reservations and access-control settings es
 
 | Item | Value | Status |
 |---|---|---|
-| Package ID | `SigilBuild.UpdateSdk` | ⏳ Pending public reservation — ships post-Sprint 8 |
+| Package ID | `SigilBuild.UpdateSdk` | ✅ Reserved — `0.0.0-reserved` published 2026-09-14 |
 
 The Update SDK is a client NuGet consumed by end-user applications. It is not part of Sprint 1 deliverables; the reservation should be made before Sprint 8 to prevent squatting.
 

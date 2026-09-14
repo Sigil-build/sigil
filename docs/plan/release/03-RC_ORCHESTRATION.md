@@ -134,6 +134,11 @@
 >   its own dated block.
 > - **Private vulnerability reporting** is still `{"enabled":false}` (**R23**) and
 >   **both NuGet IDs are still unreserved** (**R41a**) — two G4 owner actions.
+>   *(**Superseded 2026-09-14:** both ids are now claimed —
+>   `SigilBuild.UpdateSdk 0.0.0-reserved` was pushed and indexed that day. What
+>   replaces it on the G4 list is narrower and was not previously tracked: the
+>   **`SigilBuild.*` prefix** is still unreserved, so every other name under it
+>   remains free. See R41a.)*
 > - **Merging the open lane PRs**, if any remain. The orchestrator cannot merge
 >   them.
 >
@@ -762,8 +767,15 @@ check as R58.**
 - [ ] Release notes = the known-limitations draft from `02-READINESS_REPORT.md`
 - [ ] **Not announced.** Hold the launch post for a `v0.2.0` with at least one
       external user's successful install and a scheduled green VM matrix.
-- [ ] NuGet IDs `SigilBuild` and `SigilBuild.UpdateSdk` reserved *(R41a)* —
-      orchestrator chore, do before the repo gets attention
+- [x] NuGet IDs `SigilBuild` and `SigilBuild.UpdateSdk` reserved *(R41a)* —
+      **done 2026-09-14**; `SigilBuild` was already published 2026-05-05,
+      `SigilBuild.UpdateSdk 0.0.0-reserved` pushed and indexed the same day,
+      under the Sigil License 1.0 (ADR-016), not MIT
+- [ ] **`SigilBuild.*` ID prefix reserved** — *not* covered by the row above:
+      owning two exact ids protects only those two strings, and the search API
+      reports `"verified": false`, so `SigilBuild.Core` and every other name
+      under the prefix is still free. Separate application by email to
+      `account@nuget.org` (not a web form), sent 2026-09-14 — awaiting reply
 - [ ] `archive/*` tags deleted
 
 ---

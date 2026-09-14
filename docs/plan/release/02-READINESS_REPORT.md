@@ -392,12 +392,15 @@ failing** throwaway PR #17's `broken title`).
    not against each lane at its own tip.
 5. **R23's other half — private vulnerability reporting is still OFF**
    (`{"enabled":false}`, re-checked 2026-09-09). Repo-owner action, G4.
-6. **NuGet IDs reserved.** **Half done — re-measured 2026-09-14, see R41a.**
-   `SigilBuild` *is* reserved (`0.0.0-reserved`, published 2026-05-05; NuGet never
-   releases a published ID, so that half is permanent). Still open: a placeholder
-   push for **`SigilBuild.UpdateSdk`** (registration returns 404) and the
-   **`SigilBuild.*` prefix reservation** (`"verified": false` — owning one exact ID
-   protects nothing else under the prefix). Owner actions, G4.
+6. ~~**NuGet IDs reserved.**~~ **MET, 2026-09-14** — see R41a. Both ids are
+   claimed: `SigilBuild` (`0.0.0-reserved`, 2026-05-05) and
+   **`SigilBuild.UpdateSdk`** (`0.0.0-reserved`, pushed 2026-09-14, live and
+   indexed, shipped under the Sigil License 1.0 rather than MIT). NuGet never
+   releases a published id, so both are permanent. **A narrower item survives
+   and is not this box:** the **`SigilBuild.*` prefix** is still unreserved
+   (`"verified": false`), so names like `SigilBuild.Core` remain open to anyone.
+   That is a separate application — an email to `account@nuget.org` — sent
+   2026-09-14, awaiting reply. Track it as its own G4 line.
 7. **"Every remaining register row is either demonstrated fixed or listed in the
    release notes' known limitations."** Not yet: the known-limitations draft below
    predates **R60–R65** and **R69–R76**. Closing this box means a pass over that

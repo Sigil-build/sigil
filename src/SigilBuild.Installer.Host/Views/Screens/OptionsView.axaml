@@ -1,3 +1,7 @@
+<!--
+  Copyright (c) 2026 Yevhen Khudoliiv. All rights reserved.
+  Licensed under the Sigil License 1.0. See LICENSE in the repository root.
+-->
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:SigilBuild.Installer.Host.ViewModels"

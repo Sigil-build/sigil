@@ -25,3 +25,10 @@ dotnet_style_qualification_for_method = false:warning
 dotnet_diagnostic.CA1416.severity = error
 dotnet_diagnostic.IL2026.severity = error
 dotnet_diagnostic.IL3050.severity = error
+
+# ADR-016: every source file carries the licence header. IDE0073 makes a
+# missing or mismatched header a build error (TreatWarningsAsErrors is on), and
+# `dotnet format` — a required status check — inserts it for you. Edit this
+# template and you have relicensed the repo: see the lockstep row in AGENTS.md.
+file_header_template = Copyright (c) 2026 Yevhen Khudoliiv. All rights reserved.\nLicensed under the Sigil License 1.0. See LICENSE in the repository root.
+dotnet_diagnostic.IDE0073.severity = error

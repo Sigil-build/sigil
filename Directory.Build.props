@@ -9,10 +9,15 @@
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <DeterministicSourcePaths>true</DeterministicSourcePaths>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
-    <Authors>Sigil-build</Authors>
+    <Authors>Yevhen Khudoliiv</Authors>
     <Company>Sigil-build</Company>
-    <Copyright>Copyright (c) Sigil-build contributors</Copyright>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Copyright>Copyright (c) 2026 Yevhen Khudoliiv. All rights reserved.</Copyright>
+    <!-- ADR-016: the Sigil License 1.0 is bespoke, and
+         PackageLicenseExpression accepts SPDX identifiers only — so the licence
+         ships as a file and consumers must accept it. Do not "simplify" this
+         back to an expression; there is no SPDX id for it. -->
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
+    <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <PackageProjectUrl>https://sigil.build</PackageProjectUrl>
     <RepositoryUrl>https://github.com/Sigil-build/sigil</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
@@ -67,4 +72,11 @@
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
     <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
   </PropertyGroup>
+
+  <!-- ADR-016: PackageLicenseFile names a path INSIDE the package, so the
+       licence has to be packed in. Repo-root path, packed at the package root,
+       hidden from the IDE tree. Inert for projects that are never packed. -->
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)LICENSE" Pack="true" PackagePath="" Visible="false" />
+  </ItemGroup>
 </Project>

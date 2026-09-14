@@ -1,21 +1,125 @@
-MIT License
+Sigil License 1.0
 
-Copyright (c) 2026 Sigil-build contributors
+Copyright (c) 2026 Yevhen Khudoliiv. All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+## Purpose
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+This license lets you use Sigil to build and ship installers for your own
+software, including commercially, and lets you give those installers to anyone.
+It does not let you copy, change, or reuse Sigil's own source code.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+## Acceptance
+
+To receive this license, you must agree to its rules. Those rules are both
+obligations under this agreement and conditions to your license. You must not do
+anything under this license that its rules forbid.
+
+## Definitions
+
+**The licensor** is Yevhen Khudoliiv, the copyright holder.
+
+**You** are the individual or entity agreeing to these rules.
+
+**The software** is Sigil: its source code, the tools built from that source
+code (including `sigil.exe`), and the compiled components the licensor
+distributes.
+
+**Redistributable Components** are the parts of the software that the tools
+embed into the artifacts they generate: the installer host, the wrapper host,
+and the native dependencies bundled with them, exactly as the tools embed them.
+
+**Generated Artifacts** are the files the tools produce from your own manifest
+and your own payload: `Setup.exe` executables, MSIX packages, archives, update
+manifests, and their checksums.
+
+**Your Product** is software you own or have the right to distribute, and which
+is not itself a software distribution, packaging, code-signing, or installer
+tool that competes with the software.
+
+## Permission to use
+
+You may use the software for any purpose, including a commercial purpose, on any
+number of machines, by any number of your personnel.
+
+## Permission to distribute Generated Artifacts
+
+You may reproduce and distribute Generated Artifacts, including the
+Redistributable Components inside them, to any number of recipients, for any
+purpose including a commercial purpose, royalty-free and without further
+permission, provided that:
+
+1. the Redistributable Components are exactly as the tools embedded them, not
+   modified;
+2. they are distributed only inside a Generated Artifact that installs, updates,
+   or uninstalls Your Product; and
+3. you comply with the third-party notice requirements below.
+
+Anyone who receives a Generated Artifact from you may run it and may use the
+Redistributable Components inside it for their intended purpose - installing,
+updating, and uninstalling Your Product - without needing further permission
+from the licensor.
+
+This permission, and your recipients' permission, survive any termination of
+your other permissions under this license, for Generated Artifacts you
+distributed before that termination.
+
+## What you may not do
+
+You may not:
+
+- copy, publish, or distribute the software's source code, in whole or in part;
+- modify the software, or create derivative works of it;
+- distribute the software itself, as distinct from Generated Artifacts;
+- extract or separate the Redistributable Components from a Generated Artifact,
+  or decompile or reverse engineer the software, except to the extent that
+  applicable law expressly forbids this restriction;
+- use the software, or anything you learn from reading its source code, to build
+  a product that competes with the software;
+- remove or alter any copyright, license, or attribution notice in the software
+  or in a Generated Artifact.
+
+## Third-party notices
+
+The Redistributable Components include third-party software distributed under
+its own permissive terms. `THIRD-PARTY-NOTICES.md` lists that software and the
+notices it requires. Those notices travel with the Redistributable Components:
+when you distribute a Generated Artifact, you must keep them intact and make
+them available to your recipients. The licensor cannot waive them on your
+behalf, and this license does not limit any right those terms give you in the
+third-party software they cover.
+
+## No other rights
+
+This license gives you no right that it does not give expressly. The licensor
+reserves every other right, including patent and trademark rights. The names
+"Sigil" and "Sigil-build", and the licensor's logos, are not licensed here.
+
+## Termination
+
+If you violate any rule of this license, your permissions end immediately. If
+this is your first violation, and the licensor notifies you of it, and you stop
+it within 30 days of that notice, your permissions are reinstated retroactively.
+
+## No warranty, no liability
+
+The software comes as is, without any warranty of any kind, express or implied,
+including the warranties of merchantability, fitness for a particular purpose,
+title, and non-infringement. To the fullest extent the law allows, the licensor
+will not be liable to you for any damages arising out of this license or the use
+of the software, under any legal theory, even if advised of the possibility of
+those damages.
+
+## Contributions
+
+The licensor does not accept contributions of code to the software. See
+`CONTRIBUTING.md`.
+
+---
+
+Sigil License 1.0 is not an Open Source license as defined by the Open Source
+Initiative, and not a Free Software license as defined by the Free Software
+Foundation.
+
+Sigil was published under the MIT License until 2026-09-14. That grant is not
+revoked, and it is not withdrawn from any copy it already covered; it simply
+does not extend to any version published on or after that date.

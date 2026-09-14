@@ -88,10 +88,12 @@ will change without a superseding architecture decision record:
 - **Two-surface UX: CLI for developers, branded Windows wizard for end
   users.** The CLI is the primary product; the wizard is a thin host that
   consumes the same manifest.
-- **Open Core, two-tier honor system.** The CLI in this repo is MIT-licensed.
+- **Source-available tool, closed SaaS half.** The CLI in this repo is licensed
+  under the [Sigil License 1.0](../LICENSE) — readable, freely usable, not
+  reusable as source (see [ADR-016](architecture/adr-016-licensing.md)).
   A separate, closed-source SaaS half handles cloud signing orchestration,
-  team accounts, and signing history; it is **not** co-located with the OSS
-  components and has no required runtime dependency on the CLI.
+  team accounts, and signing history; it is **not** co-located with the
+  components in this repo and has no required runtime dependency on the CLI.
 
 ## Component layout
 

@@ -1,7 +1,9 @@
 # Sigil documentation
 
-User-facing docs for the `sigil` CLI and its manifest format. For contributor
-docs (build, test, branch policy), see [`../CONTRIBUTING.md`](../CONTRIBUTING.md).
+User-facing docs for the `sigil` CLI and its manifest format. Build, test and
+repo conventions live in [`../AGENTS.md`](../AGENTS.md);
+[`../CONTRIBUTING.md`](../CONTRIBUTING.md) covers what to report and why code
+contributions are closed.
 
 ## Start here
 

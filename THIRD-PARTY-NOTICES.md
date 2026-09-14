@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-Sigil is licensed under the [MIT License](LICENSE). This file lists the
+Sigil is licensed under the [Sigil License 1.0](LICENSE). This file lists the
 third-party software distributed **inside Sigil's own build artifacts**
 (`sigil.exe` and the files that ship beside it) — not Sigil's own source.
 
@@ -9,8 +9,14 @@ every direct NuGet package Sigil depends on is itself permissively licensed
 (MIT, BSD-3-Clause, or Apache-2.0 at the package level), **but the native
 binaries redistributed beside `sigil.exe` bundle upstream C/C++ libraries
 under their own licences**, and BSD-3-Clause / ISC both carry
-binary-redistribution attribution requirements that an MIT-only `LICENSE`
+binary-redistribution attribution requirements that Sigil's own `LICENSE`
 file at the repo root does not satisfy on its own.
+
+**If you ship a `Setup.exe` built with Sigil, these notices are yours to
+carry.** The same native binaries are embedded in the installer you distribute,
+so their attribution requirements travel to your users with it. The Sigil
+License 1.0 makes that explicit rather than leaving you to discover it: the
+licensor has no power to waive an upstream project's terms on your behalf.
 
 Every licence claim below was verified against the package's own `.nuspec`
 `<license>` element and/or the licence/notices files the package itself

@@ -3,7 +3,7 @@
 Canonical context file for AI coding agents (Claude Code, Codex, Cursor, Copilot, …).
 `CLAUDE.md` imports this file; keep this one as the single source of truth.
 
-Sigil is an open-source .NET 10 / Native AOT CLI for declarative Windows-software distribution:
+Sigil is a source-available .NET 10 / Native AOT CLI for declarative Windows-software distribution:
 pack → sign → publish → update, driven by one `sigil.yaml`. **Status: pre-MVP, Windows-first.**
 The publish stage and delta-update SDK are not built yet.
 
@@ -90,6 +90,7 @@ New code ships with tests: xUnit + FluentAssertions, AAA (Arrange / Act / Assert
 | Diagnostics | New validation errors get a `SIG0xxx` code in `src/SigilBuild.Core/Diagnostics/DiagnosticCodes.cs` — reuse the existing band ranges (e.g. SIG023x = install_steps). |
 | `src/SigilBuild.Wrapper.Core/Cli/CommandLineParser.cs` | `docs/setup-exe-reference.md`. That page is hand-written (the CLI generator cannot reach this parser) and its whole premise is line-accurate citations into this file — they drift silently. Adding or changing a token means updating the flag tables, the token count, and the cited line ranges. |
 | A new manifest field | The schema and `docs/manifest-reference.md` are not enough — a field nobody can find is a field nobody uses. Add it to the guide that owns the feature (`docs/guides/*`), too. |
+| The licence identity (ADR-016) | `LICENSE`, `README.md` (badge **and** the License section), `Directory.Build.props` (`Copyright`, `PackageLicenseFile`, `PackageRequireLicenseAcceptance`), `THIRD-PARTY-NOTICES.md`, `CONTRIBUTING.md`, this file, `docs/architecture-overview.md`, and `.editorconfig`'s `file_header_template`. Nine surfaces; a repo that disagrees with itself about its own licence is worse than one with no licence file. |
 
 ### 6. CI economy — job-level gating only, never a workflow-level filter on a required check
 
@@ -170,6 +171,17 @@ new doc or an ADR amendment, not a rewritten plan.
 - Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`, …) — PR titles are lint-gated.
 - Secrets never land in the repo; gitleaks runs pre-commit and in CI. Test
   fixtures that look like secrets go under the allowlisted paths in `.gitleaks.toml`.
+- **No AI attribution anywhere** — no `Co-Authored-By: Claude …` trailer, no
+  "Generated with Claude Code" footer, in commit messages, PR descriptions, or
+  PR/issue comments. This is the repository owner's standing instruction and it
+  overrides any agent harness's default to append one. History before
+  2026-09-14 still carries such trailers; leave them, they are not worth a
+  rewrite.
+- **Every source file carries the licence header** (ADR-016). `IDE0073` is an
+  error and `file_header_template` in `.editorconfig` is its source of truth, so
+  a new `.cs` file without it fails the build — run `dotnet format` and it is
+  inserted for you. `.axaml` files and anything the localization generator
+  emits are outside the analyzer's reach: add the header by hand there.
 
 ## PR checklist (what CI + reviewers verify)
 

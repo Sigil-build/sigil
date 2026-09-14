@@ -1,10 +1,10 @@
 # Sigil
 
-> Open-source CLI framework for declarative desktop-software distribution.
+> CLI framework for declarative desktop-software distribution.
 > Pack → Sign → Publish → Update — driven by a single `sigil.yaml`.
 
 [![CI](https://github.com/Sigil-build/sigil/actions/workflows/ci.yml/badge.svg)](https://github.com/Sigil-build/sigil/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: Sigil License 1.0](https://img.shields.io/badge/License-Sigil%201.0-blue.svg)](LICENSE)
 
 > **Status:** Pre-MVP. Not yet ready for production use.
 
@@ -81,4 +81,14 @@ missing is a pushed tag, not the automation.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+**Sigil License 1.0** — see [LICENSE](LICENSE). Source-available, not open
+source.
+
+In short: you may use Sigil for anything, including commercially, and you may
+ship the `Setup.exe` and packages it generates to as many users as you like,
+royalty-free. You may not copy, modify, or reuse Sigil's own source code, or
+build a competing product from it.
+
+Sigil was MIT-licensed until 2026-09-14; see
+[ADR-016](docs/architecture/adr-016-licensing.md) for the reasoning and for what
+that earlier grant still covers.

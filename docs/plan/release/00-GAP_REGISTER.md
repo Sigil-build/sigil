@@ -1758,6 +1758,28 @@ add `.superpowers/` to the root `.gitignore`.
 > sequencing note), not something any lane PR can deliver. This is the first of the
 > two consequences that put **R73** on the board: a row can be recorded as closed
 > in a merge table while its actual disposition is "documented open".
+>
+> **STATUS (2026-09-14): HALF CLOSED — measured, not inferred.** The V1.1 line
+> above is out of date on its central fact. Queried against nuget.org's own APIs:
+>
+> - **`SigilBuild` IS reserved** — `SigilBuild 0.0.0-reserved`, published
+>   **2026-05-05**, listed, a metadata-only placeholder with no code. The owner
+>   did this and it was never recorded here. NuGet never releases a published ID,
+>   so this half is permanent.
+> - **`SigilBuild.UpdateSdk` is NOT reserved** — the registration endpoint
+>   returns **404**. Still a free name-squat.
+> - **The `SigilBuild.*` ID prefix is NOT reserved** — the search API reports
+>   `"verified": false`, so only the exact string `SigilBuild` is protected. Any
+>   third party may publish `SigilBuild.UpdateSdk`, `SigilBuild.Cli`, or anything
+>   else under the prefix today. Prefix reservation is a separate application to
+>   the NuGet team, not a consequence of owning one ID.
+>
+> **Remaining owner actions, narrowed:** (1) push a `0.0.0-reserved` placeholder
+> for `SigilBuild.UpdateSdk`; (2) apply for the `SigilBuild.*` prefix reservation.
+> **New, from ADR-016:** the published `0.0.0-reserved` records `MIT` in its
+> licence metadata, and a NuGet package can never be deleted — only unlisted. It
+> carries no code, so the exposure is nil, but unlist it once a real version
+> ships under the Sigil License 1.0.
 
 `docs/sprint-01/identifier-reservation.md:13` marks `SigilBuild` as a "Reserved
 placeholder **to be published** before Sprint 1 ends"; `:23`

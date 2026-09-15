@@ -203,7 +203,7 @@ Install-time / pack-time parameter declarations consumed by the wrapper installe
 | `id` | string | yes | - | _(undocumented)_ |
 | `type` | string | yes | - | _(undocumented)_ |
 | `when` | string | - | - | _(undocumented)_ |
-| `on_failure` | string | - | - | _(undocumented)_ |
+| `on_failure` | string | - | - | What to do when this step fails. `rollback` (the default) aborts and replays the rollback journal in reverse across every phase that ran; `continue` logs and proceeds. There is no abort-without-rollback mode for a journalled phase: `fail` was accepted until it was removed in R78, where it had always behaved identically to `rollback`, and is now refused with SIG0233. |
 | `allow_outside_install_dir` | boolean | - | - | Opt this step out of the install_dir destination-containment rule (register row R16). Accepted only by the step types whose destination is contained: file_copy, directory_create, file_delete, directory_delete, http_download, ini_write, json_edit, xml_edit. On any other step type it is an unrecognized field (SIG0231) and has no effect. Use it for deliberate out-of-tree writes, such as a machine-wide config under ProgramData. It does NOT relax the privileged-target rule on service_install / scheduled_task_create / com_register / firewall_rule, and it does not suppress the unresolved-token failure, which applies to every path field and has no opt-out. Note there is no %VAR% expansion in a step path. |
 
 ## Definition: `InstallerOption`

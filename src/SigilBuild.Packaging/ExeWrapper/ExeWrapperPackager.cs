@@ -249,7 +249,7 @@ public sealed class ExeWrapperPackager : IPackager
                 TimeoutSeconds: null,
                 Retries: 3,
                 When: null,
-                OnFailure: OnFailure.Fail)
+                OnFailure: OnFailure.Rollback)
             {
                 // Every step destination is contained to install_dir. This one
                 // deliberately is not — the stub downloads the full package to a
@@ -269,7 +269,7 @@ public sealed class ExeWrapperPackager : IPackager
                 ExpectedExitCodes: RunExpectedExitCodes,
                 TimeoutSeconds: null,
                 When: null,
-                OnFailure: OnFailure.Fail),
+                OnFailure: OnFailure.Rollback),
         };
 
         var inMemory = new WrapperBlob(

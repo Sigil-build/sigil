@@ -600,12 +600,22 @@ internal static class SerializableInstallStepConverter
         };
     }
 
+    /// <summary>
+    /// Decodes a blob's <c>on_failure</c> word. Stays tolerant — a blob decodes long
+    /// after the manifest is gone, so there is no diagnostic to raise — but the
+    /// fallback is <see cref="OnFailure.Rollback"/> rather than
+    /// <see cref="OnFailure.Fail"/> (R78): it is the abort mode a journalled step can
+    /// actually take, and on a hook it aborts the phase exactly as <c>fail</c> does,
+    /// so it is the one safe answer for a step whose family is not known here.
+    /// <c>"fail"</c> still decodes to itself, so hook blobs round-trip unchanged, as
+    /// do blobs written before this change.
+    /// </summary>
     private static OnFailure ParseOnFailure(string raw) => raw switch
     {
         "rollback" => OnFailure.Rollback,
         "continue" => OnFailure.Continue,
         "fail" => OnFailure.Fail,
-        _ => OnFailure.Fail,
+        _ => OnFailure.Rollback,
     };
 
     /// <summary>

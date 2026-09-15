@@ -1,0 +1,18 @@
+# R78, the mirror case: hooks run OUTSIDE the rollback journal, so `rollback`
+# names an unwind that cannot happen. The schema has never listed it in the hook
+# enum; the parser used to accept it anyway and silently treat it as `fail`.
+spec: v1.0
+app:
+  id: com.example.App
+  name: Example
+  version: 0.1.0
+  publisher: Example Inc.
+build:
+  source: ./out
+installer:
+  hooks:
+    pre_install:
+      - id: warm_cache
+        type: run_program
+        program: warm.exe
+        on_failure: rollback

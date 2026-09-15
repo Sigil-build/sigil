@@ -419,10 +419,10 @@ Every step accepts the same envelope:
 |`id`|yes|-|Stable identifier. Appears in logs and rollback journal entries.|
 |`type`|yes|-|One of the step types above.|
 |`when`|-|-|Expression gating execution. See [Conditional installs](conditional-installs.md).|
-|`on_failure`|-|`fail`|`rollback` (undo journaled steps), `continue` (log + proceed), or `fail` (abort). Note the default differs by phase: it is `fail` for `install_steps:`, `pre_install:`, `post_install:` and `uninstall:`, and for `installer.hooks.pre_*`, but **`continue`** for `installer.hooks.post_*`.|
+|`on_failure`|-|`rollback`|**In a journalled phase** (`install_steps:`, `pre_install:`, `post_install:`, `uninstall:`) the value is `rollback` (abort and replay the whole journal in reverse — the default) or `continue` (log + proceed). **In an `installer.hooks.*` phase** it is `fail` (abort; there is no journal to unwind) or `continue`; the hook default is `fail` for `pre_*` and **`continue`** for `post_*`. The two families' words are not interchangeable: naming the other family's word is an error (`SIG0233`), not a silent alias.|
 |`allow_outside_install_dir`|-|`false`|Opts this step out of destination containment (below). Accepted only by `file_copy`, `directory_create`, `file_delete`, `directory_delete`, `http_download`, `ini_write`, `json_edit` and `xml_edit`; on any other step type it is an unrecognized field and has no effect.|
 
-> **Known issue (R78): `on_failure: fail` and `on_failure: rollback` behave identically.** Both take the same path in the engine and both replay the **entire** rollback journal in reverse, across all phases. There is currently no "abort without rollback" mode and no "undo only up to this step" mode. Only `continue` is distinct. Treat the two as synonyms until this is fixed; if you need a step's failure not to unwind the install, use `on_failure: continue` and check the condition yourself.
+> **There is no "abort without rollback", and no "undo only up to this step".** A journalled phase that aborts always replays the **entire** journal in reverse, across all phases. `on_failure: fail` used to be accepted here and did exactly that despite its name; it is now refused with `SIG0233` rather than quietly meaning `rollback` (R78). If you need a step's failure not to unwind the install, use `on_failure: continue` and test the condition yourself.
 
 ## Every step destination is contained to `install_dir`
 

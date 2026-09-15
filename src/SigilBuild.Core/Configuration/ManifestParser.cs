@@ -604,10 +604,10 @@ public static class ManifestParser
     {
         if (node is null) return null;
 
-        var pre = ParseInstallSteps(GetSequenceOfMappings(node, "pre_install"), scope, diagnostics, fileName, OnFailure.Fail);
-        var post = ParseInstallSteps(GetSequenceOfMappings(node, "post_install"), scope, diagnostics, fileName, OnFailure.Continue);
-        var preU = ParseInstallSteps(GetSequenceOfMappings(node, "pre_uninstall"), scope, diagnostics, fileName, OnFailure.Fail);
-        var postU = ParseInstallSteps(GetSequenceOfMappings(node, "post_uninstall"), scope, diagnostics, fileName, OnFailure.Continue);
+        var pre = ParseInstallSteps(GetSequenceOfMappings(node, "pre_install"), scope, diagnostics, fileName, OnFailure.Fail, isHook: true);
+        var post = ParseInstallSteps(GetSequenceOfMappings(node, "post_install"), scope, diagnostics, fileName, OnFailure.Continue, isHook: true);
+        var preU = ParseInstallSteps(GetSequenceOfMappings(node, "pre_uninstall"), scope, diagnostics, fileName, OnFailure.Fail, isHook: true);
+        var postU = ParseInstallSteps(GetSequenceOfMappings(node, "post_uninstall"), scope, diagnostics, fileName, OnFailure.Continue, isHook: true);
 
         if (pre is null && post is null && preU is null && postU is null)
         {
@@ -1322,13 +1322,13 @@ public static class ManifestParser
 
     private static List<InstallStep>? ParseInstallSteps(
         List<YamlMappingNode>? nodes, InstallScope scope, List<Diagnostic> diagnostics, string fileName,
-        OnFailure defaultOnFailure = OnFailure.Fail)
+        OnFailure defaultOnFailure = OnFailure.Rollback, bool isHook = false)
     {
         if (nodes is null) return null;
         var list = new List<InstallStep>(nodes.Count);
         foreach (var node in nodes)
         {
-            var step = ParseInstallStep(node, scope, diagnostics, fileName, defaultOnFailure);
+            var step = ParseInstallStep(node, scope, diagnostics, fileName, defaultOnFailure, isHook);
             if (step is not null) list.Add(step);
         }
         return list;
@@ -1336,7 +1336,7 @@ public static class ManifestParser
 
     private static InstallStep? ParseInstallStep(
         YamlMappingNode node, InstallScope scope, List<Diagnostic> diagnostics, string fileName,
-        OnFailure defaultOnFailure = OnFailure.Fail)
+        OnFailure defaultOnFailure = OnFailure.Rollback, bool isHook = false)
     {
         var loc = new SourceLocation(fileName, (int)node.Start.Line, (int)node.Start.Column);
         var id = GetScalar(node, "id");
@@ -1365,11 +1365,13 @@ public static class ManifestParser
         }
 
         var when = GetScalar(node, "when");
-        // An absent on_failure uses the caller's phase default (Fail for the
-        // journaled bodies; per-phase for lifecycle hooks). An explicit value
-        // is always honored.
+        // An absent on_failure uses the caller's phase default (Rollback for the
+        // journalled bodies; per-phase for lifecycle hooks). An explicit value is
+        // honoured only if the phase can deliver it — see ParseOnFailure (R78).
         var onFailureRaw = GetScalar(node, "on_failure");
-        var onFailure = onFailureRaw is null ? defaultOnFailure : ParseOnFailure(onFailureRaw);
+        var onFailure = onFailureRaw is null
+            ? defaultOnFailure
+            : ParseOnFailure(onFailureRaw, isHook, id, diagnostics, loc);
 
         var step = typeStr switch
         {
@@ -1588,14 +1590,55 @@ public static class ManifestParser
         return null;
     }
 
-    private static OnFailure ParseOnFailure(string? raw) => raw switch
+    /// <summary>
+    /// Resolves an explicit <c>on_failure:</c> word against the modes the phase can
+    /// actually deliver, rejecting the rest with <c>SIG0233</c> (R78).
+    /// </summary>
+    /// <remarks>
+    /// Each family has exactly one abort mode and they are not the same mode, so the
+    /// other family's word is refused rather than translated. A journalled phase
+    /// cannot abort without replaying the journal, so <c>fail</c> there would promise
+    /// something the engine never does; a hook has no journal, so <c>rollback</c>
+    /// there would promise an unwind that cannot happen. Both used to be accepted and
+    /// quietly mapped onto the mode the phase does have — and so did every
+    /// misspelling, since the old fallback arm turned any unrecognised word into
+    /// <c>fail</c>.
+    /// </remarks>
+    private static OnFailure ParseOnFailure(
+        string raw, bool isHook, string stepId, List<Diagnostic> diagnostics, SourceLocation loc)
     {
-        "rollback" => OnFailure.Rollback,
-        "continue" => OnFailure.Continue,
-        "fail" => OnFailure.Fail,
-        null => OnFailure.Fail,
-        _ => OnFailure.Fail,
-    };
+        switch (raw)
+        {
+            case "continue":
+                return OnFailure.Continue;
+            case "rollback" when !isHook:
+                return OnFailure.Rollback;
+            case "fail" when isHook:
+                return OnFailure.Fail;
+        }
+
+        var (allowed, hint) = isHook
+            ? ("'fail' or 'continue'",
+               raw == "rollback"
+                   ? "hooks run outside the rollback journal, so there is nothing to unwind — use 'fail' to abort the operation"
+                   : null)
+            : ("'rollback' or 'continue'",
+               raw == "fail"
+                   ? "a journalled phase always unwinds its journal when it aborts; 'fail' promised an abort without rollback that the engine never performed — use 'rollback'"
+                   : null);
+
+        var message = $"step '{stepId}': on_failure '{raw}' is not valid here; expected {allowed}";
+        if (hint is not null) message += $" ({hint})";
+
+        diagnostics.Add(new Diagnostic(
+            DiagnosticSeverity.Error,
+            DiagnosticCodes.InvalidStepFieldValue,
+            message,
+            loc,
+            "https://docs.sigil.build/diagnostics/SIG0233"));
+
+        return isHook ? OnFailure.Fail : OnFailure.Rollback;
+    }
 
     private static InstallStep.FileCopy? BuildFileCopy(
         YamlMappingNode node, string id, string? when, OnFailure onFailure,

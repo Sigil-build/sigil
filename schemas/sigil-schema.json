@@ -498,19 +498,13 @@
             "hero": { "type": "string" },
             "primaryColor": {
               "type": "string",
-              "pattern": "^#[0-9A-Fa-f]{6}$"
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "description": "Wizard primary colour as #RRGGBB — primary buttons and accent fill. Feeds BrandTokenEmitter, which derives a full light+dark palette from this and accentColor at pack time. Omitted, it falls back to Sigil's default #1F2937. NOTE the camelCase spelling: `primary_color` was accepted by this schema until R80 and read by nothing, so a snake_case manifest packed a silently unbranded installer; it is now refused by additionalProperties."
             },
             "accentColor": {
               "type": "string",
-              "pattern": "^#[0-9A-Fa-f]{6}$"
-            },
-            "primary_color": {
-              "type": "string",
-              "pattern": "^#[0-9A-Fa-f]{6}$"
-            },
-            "accent_color": {
-              "type": "string",
-              "pattern": "^#[0-9A-Fa-f]{6}$"
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "description": "Wizard secondary accent as #RRGGBB — progress indication and links. Omitted, it falls back to Sigil's default #3B82F6. camelCase, for the reason given on primaryColor."
             }
           }
         },

@@ -116,7 +116,7 @@ Source: `schemas/sigil-schema.json` (JSON Schema, draft-07).
 | `brand` | object | - | - | _(undocumented)_ |
 | `scope` | string | - | `auto` | Install scope: per-user, per-machine, or auto-resolve (T12). |
 | `install_dir` | string | - | - | Optional install-dir override; may reference {app.*} / {scope_root} tokens (T13). |
-| `license` | LocalizedText | - | - | _(undocumented)_ |
+| `license` | LocalizedText | - | - | Either a plain string (treated as English) or a { "en": ..., "uk": ... } map. An `en` entry is required (SIG0290). |
 | `language` | string | - | - | Optional fixed installer language tag (P9, gap G10) — the first link in the language-preference chain (installer.language -> /lang -> OS list -> en). An invalid tag is diagnosed (SIG0291). |
 | `require_signed_downloads` | string | - | `sign_declared` | Whether a binary this installer pulls off the network -- an update package or a web-stub payload -- must be Authenticode-valid before it is launched (register row R45). `sign_declared` (default, and the historical behaviour) arms the check only when this manifest declares a `sign` block; that infers 'should downloads be verified' from 'did the publisher configure signing for their own output', which are different questions. `always` arms it regardless. `always_verified_revocation` additionally REFUSES a binary whose revocation status could not be established (register row R46) -- by default that is a warning, because refusing it would break installs behind a captive portal, on an air-gapped network, or inside a locked-down enterprise egress; turn it on when you know your audience is reliably online. Prerequisites are not governed by this setting: they are always checked, and carry their own per-prerequisite `allow_unsigned` opt-out. An unrecognized value is SIG0326. |
 | `options` | object | - | - | Built-in configurable installer components (T8) plus app-defined custom components (P10, gap G11). |
@@ -140,20 +140,20 @@ Source: `schemas/sigil-schema.json` (JSON Schema, draft-07).
 
 | Property | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `desktop_shortcut` | InstallerOption | - | - | _(undocumented)_ |
-| `start_menu` | InstallerOption | - | - | _(undocumented)_ |
-| `add_to_path` | InstallerOption | - | - | _(undocumented)_ |
-| `file_associations` | FileAssociationOption | - | - | _(undocumented)_ |
+| `desktop_shortcut` | InstallerOption | - | - | Built-in configurable installer component: shorthand boolean or an object. |
+| `start_menu` | InstallerOption | - | - | Built-in configurable installer component: shorthand boolean or an object. |
+| `add_to_path` | InstallerOption | - | - | Built-in configurable installer component: shorthand boolean or an object. |
+| `file_associations` | FileAssociationOption | - | - | file_associations component: shorthand boolean or an object with extensions. |
 | `components` | array | - | - | App-defined custom components (P10, gap G11) — the Inno [Tasks] equivalent. Each generates NO install step of its own; it exists only as option.<name> in the expression engine, gating arbitrary steps / step groups via their `when`. Rendered as checkboxes on the Options screen after the built-ins, in declared order. |
 
 ## `installer.hooks`
 
 | Property | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `pre_install` | HookPhase | - | - | _(undocumented)_ |
-| `post_install` | HookPhase | - | - | _(undocumented)_ |
-| `pre_uninstall` | HookPhase | - | - | _(undocumented)_ |
-| `post_uninstall` | HookPhase | - | - | _(undocumented)_ |
+| `pre_install` | HookPhase | - | - | An ordered list of lifecycle-hook steps (P2). Accepts the SAME closed catalog of 18 step types as `install_steps` — the four config/network types were missing here until R81, which was drift from the lane that added them, never a policy. What differs is the journal, not the catalog: hooks run OUTSIDE the rollback journal, so their side effects are never recorded and never undone, and each step is governed only by its own `on_failure` (`fail` or `continue`; `rollback` is refused — there is nothing to unwind). See installer.hooks. |
+| `post_install` | HookPhase | - | - | An ordered list of lifecycle-hook steps (P2). Accepts the SAME closed catalog of 18 step types as `install_steps` — the four config/network types were missing here until R81, which was drift from the lane that added them, never a policy. What differs is the journal, not the catalog: hooks run OUTSIDE the rollback journal, so their side effects are never recorded and never undone, and each step is governed only by its own `on_failure` (`fail` or `continue`; `rollback` is refused — there is nothing to unwind). See installer.hooks. |
+| `pre_uninstall` | HookPhase | - | - | An ordered list of lifecycle-hook steps (P2). Accepts the SAME closed catalog of 18 step types as `install_steps` — the four config/network types were missing here until R81, which was drift from the lane that added them, never a policy. What differs is the journal, not the catalog: hooks run OUTSIDE the rollback journal, so their side effects are never recorded and never undone, and each step is governed only by its own `on_failure` (`fail` or `continue`; `rollback` is refused — there is nothing to unwind). See installer.hooks. |
+| `post_uninstall` | HookPhase | - | - | An ordered list of lifecycle-hook steps (P2). Accepts the SAME closed catalog of 18 step types as `install_steps` — the four config/network types were missing here until R81, which was drift from the lane that added them, never a policy. What differs is the journal, not the catalog: hooks run OUTSIDE the rollback journal, so their side effects are never recorded and never undone, and each step is governed only by its own `on_failure` (`fail` or `continue`; `rollback` is refused — there is nothing to unwind). See installer.hooks. |
 
 ## `installer.run_after_install`
 
@@ -170,7 +170,7 @@ Source: `schemas/sigil-schema.json` (JSON Schema, draft-07).
 | `default` | - | - | - | _(undocumented)_ |
 | `values` | array | - | - | _(undocumented)_ |
 | `install_time` | boolean | - | `False` | _(undocumented)_ |
-| `description` | LocalizedText | - | - | _(undocumented)_ |
+| `description` | LocalizedText | - | - | Either a plain string (treated as English) or a { "en": ..., "uk": ... } map. An `en` entry is required (SIG0290). |
 | `pattern` | string | - | - | _(undocumented)_ |
 | `min` | integer | - | - | _(undocumented)_ |
 | `max` | integer | - | - | _(undocumented)_ |
@@ -239,15 +239,15 @@ file_associations component: shorthand boolean or an object with extensions.
 
 ## Definition: `HookPhase`
 
-An ordered list of lifecycle-hook steps (P2). Runs outside the rollback journal; each step is governed only by its own `on_failure` (no rollback obligations — see installer.hooks).
+An ordered list of lifecycle-hook steps (P2). Accepts the SAME closed catalog of 18 step types as `install_steps` — the four config/network types were missing here until R81, which was drift from the lane that added them, never a policy. What differs is the journal, not the catalog: hooks run OUTSIDE the rollback journal, so their side effects are never recorded and never undone, and each step is governed only by its own `on_failure` (`fail` or `continue`; `rollback` is refused — there is nothing to unwind). See installer.hooks.
 
 ## Definition: `InstallerScreen`
 
 | Property | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `id` | string | yes | - | _(undocumented)_ |
-| `title` | LocalizedText | yes | - | _(undocumented)_ |
-| `subtitle` | LocalizedText | - | - | _(undocumented)_ |
+| `title` | LocalizedText | yes | - | Either a plain string (treated as English) or a { "en": ..., "uk": ... } map. An `en` entry is required (SIG0290). |
+| `subtitle` | LocalizedText | - | - | Either a plain string (treated as English) or a { "en": ..., "uk": ... } map. An `en` entry is required (SIG0290). |
 | `when` | string | - | - | _(undocumented)_ |
 | `fields` | array | yes | - | _(undocumented)_ |
 

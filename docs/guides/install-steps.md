@@ -4,6 +4,8 @@
 
 The catalog is a **closed set of 18 step types**, listed in full below. It is not extended by configuration — a new type requires an amendment to [ADR-008](../architecture/adr-008-expression-policy.md) and a change across the whole chain from the manifest model to the runtime. `pre_install:` and `post_install:` accept the same step shapes and run before / after `install_steps:` respectively; `uninstall:` accepts them too.
 
+**`installer.hooks.*` accepts the same 18 types as well** — the catalog does not narrow for a hook. What changes is the journal, not the list: a hook runs **outside** the rollback journal, so whatever it does is never recorded and never undone, and an uninstall will not clean it up. That is why a hook's `on_failure` is `fail` or `continue` rather than `rollback` — there is nothing to unwind. Four of the types were missing from the hook list until R81, which was drift from the lane that introduced them rather than a policy; a manifest that reached for one got a bare schema-enum error and no explanation.
+
 ## Write the destination as `{install_dir}`
 
 Every example on this page writes its destination as `{install_dir}`. That is the installer's own resolved destination, and it is the single value everything else agrees on:

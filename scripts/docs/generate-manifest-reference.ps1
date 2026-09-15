@@ -50,7 +50,18 @@ function Render-PropertyTable {
         $type = if ($p.type) { (@($p.type) -join ' / ') } elseif ($p.'$ref') { $p.'$ref' -replace '#/definitions/', '' } elseif ($p.enum) { 'enum: ' + ($p.enum -join ', ') } else { '-' }
         $req = if ($Required -contains $name) { 'yes' } else { '-' }
         $def = if ($null -ne $p.default) { '`' + $p.default + '`' } else { '-' }
-        $desc = if ($p.description) { $p.description -replace '\|', '\|' } else { '_(undocumented)_' }
+        # R81: a $ref'd property carries no description of its own, so every
+        # hook phase rendered as "_(undocumented)_" and the reference documented
+        # neither the hook step catalog nor its size. Fall back to the referenced
+        # definition's own description, which is where that prose already lived.
+        $rawDesc = if ($p.description) {
+            $p.description
+        } elseif ($p.'$ref') {
+            $defName = $p.'$ref' -replace '#/definitions/', ''
+            $target = $schema.definitions.$defName
+            if ($target -and $target.description) { $target.description } else { $null }
+        } else { $null }
+        $desc = if ($rawDesc) { $rawDesc -replace '\|', '\|' } else { '_(undocumented)_' }
         [void]$sb.AppendLine("| ``$name`` | $type | $req | $def | $desc |")
     }
     [void]$sb.AppendLine()

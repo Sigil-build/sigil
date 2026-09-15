@@ -26,15 +26,13 @@ Copies one file or a glob pattern. A `from:` (or `to:`) path that starts with th
 |---|---|---|---|---|
 |`from`|string|yes|-|File path or glob. `**` recurses; `*.txt` is non-recursive.|
 |`to`|string|yes|-|Destination directory.|
-|`overwrite`|bool|-|`true`|Overwrite existing files. When `false`, an existing file at `to` is meant to be left alone (the prior bytes are journaled either way).|
+|`overwrite`|bool|-|`true`|Overwrite existing files. When `false`, an existing file at `to` is left alone: the step skips it, logs `kept existing <name>`, and reports success. Nothing is journaled for a file it did not write, so a later rollback leaves it alone too.|
 
-> **Known issue (R77): `overwrite: false` is inert.** The step currently
-> replaces an existing file regardless of this setting, so a manifest that
-> relies on `overwrite: false` to preserve a user's existing config **will
-> overwrite it**. The prior bytes are journaled, so an uninstall or a rollback
-> puts the original back — but the file is replaced during the install. Until
-> this is fixed, gate the step with `when: "!file_exists('…')"` instead of
-> relying on `overwrite: false`.
+> **Use `overwrite: false` to protect a user's config across an upgrade.** An
+> `appsettings.json`, a licence file or a database that your installer ships a
+> default for, but must not clobber once the user has edited it, is exactly what
+> this flag is for. A file that is absent is still copied — the flag guards
+> existing files, it is not "never copy".
 
 ```yaml
 - id: deploy-payload

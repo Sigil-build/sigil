@@ -55,6 +55,24 @@ internal sealed class FileCopyStep : IStep
             Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
 
             var existed = File.Exists(dst);
+
+            // R77: overwrite:false means an existing file at the destination is
+            // already the state the manifest asked for — the flag exists to protect a
+            // user's settings across an upgrade — so leave it and move on. No backup
+            // and no journal record either: nothing is written, so there is nothing to
+            // undo, and journalling a restore of bytes we never touched would cost a
+            // full copy and strand a .sigil-bak file for no gain.
+            //
+            // The condition used to be `overwrite: _spec.Overwrite || existed`, which
+            // is unconditionally true in exactly the case the flag was written for, so
+            // the flag never once prevented an overwrite.
+            if (existed && !_spec.Overwrite)
+            {
+                ctx.ProgressSink?.Report(new StepProgress(
+                    0, 0, $"file_copy: kept existing {Path.GetFileName(dst)}", false));
+                continue;
+            }
+
             string? backup = null;
             if (existed)
             {
@@ -65,7 +83,9 @@ internal sealed class FileCopyStep : IStep
             // Record rollback BEFORE the write so a crash leaves the journal correct.
             journal.Append(new RollbackRecord.RestoreFile(dst, existed, backup));
 
-            File.Copy(src, dst, overwrite: _spec.Overwrite || existed);
+            // Past the guard above, `existed` implies Overwrite, so this is always a
+            // sanctioned replacement.
+            File.Copy(src, dst, overwrite: true);
         }
         return Task.FromResult(StepResult.Ok());
     }

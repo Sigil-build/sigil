@@ -3663,6 +3663,32 @@ by a test, which is the common thread: each sits in a gap no test asserts across
 ### R77 — `file_copy`'s `overwrite: false` is inert, so an existing user config is destroyed by a flag that promises to preserve it
 **Component:** Wrapper.Core / steps · **Effort: S** · **SHOULD-FIX**
 
+> **STATUS (2026-09-15): CLOSED.** The flag is honoured: when the destination exists
+> and `Overwrite` is false the step skips the copy, reports
+> `file_copy: kept existing <name>`, and returns success.
+>
+> **One deviation from the fix shape written below, taken deliberately.** That shape
+> said to keep the journal record "so a rollback still restores the untouched file".
+> It does not: a skipped file is **not** journalled and gets **no `.sigil-bak`**.
+> Nothing was written, so there is nothing to undo — journalling a restore of bytes
+> the install never touched would cost a full backup copy per preserved file and
+> strand a backup on disk, to reinstate a file that was already correct. The
+> orchestrator approved the deviation. The behaviour is asserted directly: after a
+> preserved copy the journal is empty, no `.sigil-bak` exists, and replaying the
+> journal leaves the user's content in place.
+>
+> **The small design call is resolved the way the row guessed:** the skip emits a log
+> line, because a silent no-op is how this class of defect hides — which is precisely
+> how this one hid.
+>
+> **The tests failed on the parent commit before the fix landed**, as the row
+> required: `Overwrite_false_leaves_an_existing_destination_untouched` (a *content*
+> assertion), plus the journal/backup and log-line cases. Two control cases —
+> `overwrite: true` replaces, and an absent destination is still copied — passed
+> before and after, so the fix is scoped. Suite green, Release build 0 warnings.
+>
+> **Not added:** a third "fail if it exists" mode. Out of scope, as the row says.
+>
 > **STATUS (2026-09-10):** **OPEN, no owner.** Found by reading
 > `docs/guides/install-steps.md:29` against `Steps/FileCopyStep.cs`. Not caught by any
 > test: the suite covers the `overwrite: true` path and the rollback journal, and

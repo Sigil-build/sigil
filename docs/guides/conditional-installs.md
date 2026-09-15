@@ -73,15 +73,31 @@ The function table is closed at these twelve - anything outside this list is a h
 
 ## `on_failure` policy
 
-Each step has an `on_failure:` field (default `fail`):
+Each step has an `on_failure:` field, and which values it accepts depends on
+whether the step sits inside the rollback journal.
+
+**Journalled phases** — `install_steps:`, `pre_install:`, `post_install:`,
+`uninstall:` — default to `rollback`:
 
 |Value|Behaviour|
 |---|---|
-|`rollback`|Abort, and undo the rollback journal.|
+|`rollback`|Abort, and replay the **entire** journal in reverse, across all phases — not "up to and including this step".|
 |`continue`|Log a warning and proceed with the next step. The journal entry from any partial mutation stays in place.|
-|`fail`|Abort, and undo the rollback journal.|
 
-> **Known issue (R78): `rollback` and `fail` are currently identical.** Both take the same path in the engine and both replay the **entire** journal in reverse, across all phases — not "up to and including this step", and not "abort without rollback". Only `continue` is a distinct policy today. The intent is that the two differ; the shipped behaviour is that they do not.
+**`installer.hooks.*` phases** run outside the journal, so they have nothing to
+unwind. They default to `fail` for `pre_*` and `continue` for `post_*`:
+
+|Value|Behaviour|
+|---|---|
+|`fail`|Abort the operation. No journal is replayed, because a hook never wrote to one.|
+|`continue`|Log a warning and proceed with the next hook step.|
+
+> **The two families' words are not interchangeable.** `fail` in a journalled
+> phase, or `rollback` in a hook, is a manifest error (`SIG0233`). Both used to be
+> accepted and silently mapped onto the mode the phase actually has — `fail`
+> unwound the whole journal despite its name, and `rollback` in a hook unwound
+> nothing. A value that means something other than what it says is worse than one
+> that is rejected, so they are now rejected (R78).
 
 `continue` does not protect preceding steps from being rolled back if a LATER step then aborts. Best-effort cleanup (e.g. tearing down a third-party service that may not be installed) is the canonical use of `continue`.
 

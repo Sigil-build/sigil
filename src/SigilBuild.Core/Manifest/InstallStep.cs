@@ -336,13 +336,26 @@ public abstract record InstallStep(string Id, string? When, OnFailure OnFailure)
 }
 
 /// <summary>
-/// What the step engine should do when a step's primary action fails.
+/// What the engine should do when a step's primary action fails.
 /// <list type="bullet">
-///   <item><description><c>Rollback</c> — undo the journal up to (and including) this step.</description></item>
-///   <item><description><c>Continue</c> — emit a warning and proceed with the next step.</description></item>
-///   <item><description><c>Fail</c> — abort the install (default).</description></item>
+///   <item><description><c>Rollback</c> — abort and replay the rollback journal in
+///     reverse across every phase that ran. The default, and the only abort mode
+///     available to a journalled phase.</description></item>
+///   <item><description><c>Continue</c> — log the failure and proceed with the next step.</description></item>
+///   <item><description><c>Fail</c> — abort without replaying a journal. Reachable only
+///     from <c>installer.hooks</c>, which run outside the journal and so have nothing
+///     to unwind; it is the default for the <c>pre_*</c> hook phases.</description></item>
 /// </list>
 /// </summary>
+/// <remarks>
+/// The two abort modes are not interchangeable, and which one a phase may name is
+/// decided at parse time, not here (R78). A journalled phase that names <c>fail</c>
+/// and a hook that names <c>rollback</c> are both refused with <c>SIG0233</c> rather
+/// than silently aliased to the mode that phase actually has — the engine cannot
+/// offer "abort without rollback" to a journalled step, and cannot offer journal
+/// replay to a hook, so accepting either word would be a promise the engine does not
+/// keep.
+/// </remarks>
 public enum OnFailure
 {
     Rollback,

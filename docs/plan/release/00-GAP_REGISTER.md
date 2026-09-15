@@ -3712,6 +3712,57 @@ exists" mode, and adding one is out of scope for the fix.
 > `docs/guides/conditional-installs.md` against `Engine/InstallEngine.cs`. Not caught
 > by any test: the suite asserts `continue` versus "everything else", never `fail`
 > against `rollback`.
+>
+> **STATUS (2026-09-15): CLOSED — option (b), and wider than option (b) was
+> written.** The orchestrator ruled: collapse the surface onto what the engine
+> actually does, and make the retired word a **hard validation error** rather than a
+> silent alias, on the principle that a manifest must do what it says.
+>
+> **Implementing it found the row's own framing to be incomplete.** `on_failure` is
+> not one surface but two, sharing one C# enum:
+>
+> - **journalled phases** (`install_steps`, `pre_install`, `post_install`,
+>   `uninstall` — `ManifestParser.cs:67-70`) accept `rollback`/`continue`/`fail`, and
+>   `fail` ≡ `rollback`. **This is the row's finding.**
+> - **hooks** (`installer.hooks.*` — `ManifestParser.cs:607-610`) accept
+>   `fail`/`continue`, and there `fail` is **honest and load-bearing**: hooks run
+>   outside the journal, so aborting without an unwind is the only thing that can
+>   happen, and `fail` is the default for the `pre_*` phases.
+>
+> So option (b) as written — "retire `fail`" — would have **broken the hook
+> surface**. What shipped instead: the enum keeps all three members with precise
+> meanings, and the **parser validates each phase against the abort mode it can
+> actually deliver**. A journalled `fail` and a hook `rollback` are both refused with
+> **`SIG0233`** (reused per the band rule, no new code). Journalled default moves
+> `Fail` → `Rollback`.
+>
+> **Two further silent aliases fell out of the same fix**, neither of them in the
+> original row:
+>
+> - `ParseOnFailure`'s old fallback arm turned **every unrecognised word** into
+>   `fail` — `on_failure: rollbck` parsed clean and unwound the journal. Now `SIG0233`.
+> - Hooks accepted `rollback` and quietly meant `fail`; the schema even documented
+>   the aliasing. Same class of defect as the row itself, pointing the other way.
+>   Ruled in scope by the orchestrator and now refused.
+>
+> **One live defect, not just a surface fix:** `ExeWrapperPackager.cs:252,272`
+> synthesises the web-installer stub's journalled steps **directly, bypassing the
+> parser**, and stamped them `OnFailure.Fail`. Runtime behaviour was unchanged (the
+> engine's `default` arm threw and unwound anyway), but the blob shipped a value the
+> manifest can no longer express. Both are now `Rollback`. The blob decoder's unknown
+> fallback moved `Fail` → `Rollback` for the same reason; `"fail"` still decodes to
+> itself so hook blobs and pre-existing blobs round-trip.
+>
+> **The missing assertion is now written.** `OnFailureJournalEffectTests` asserts what
+> the journal *did* per value — the assertion whose absence let the two modes share an
+> arm of the switch unnoticed for the whole feature-parity track — plus
+> `OnFailurePolicyParseTests` (11 cases) and two negative schema fixtures. Suite:
+> **1779 total / 1762 passed / 0 failed / 17 skipped**, Release build 0 warnings,
+> format clean.
+>
+> **Breaking change, deliberately:** a manifest using `on_failure: fail` in a
+> journalled phase, or `rollback` in a hook, now fails validation. No `examples/**`
+> used either, so the blast radius inside the repo was nil.
 
 Three surfaces document three behaviours. The engine implements two.
 

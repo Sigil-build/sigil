@@ -125,9 +125,11 @@ public sealed class InstallEngine
     /// <summary>
     /// Execute a single phase's worth of steps against the shared journal.
     /// Honours per-step <see cref="OnFailure.Continue"/> by skipping forward;
-    /// <see cref="OnFailure.Fail"/> and <see cref="OnFailure.Rollback"/> raise
-    /// a <see cref="StepFailureException"/> that the caller translates into a
-    /// journal replay. The same routine is used for all three phases — the
+    /// <see cref="OnFailure.Rollback"/> raises a <see cref="StepFailureException"/>
+    /// that the caller translates into a journal replay. <see cref="OnFailure.Fail"/>
+    /// never arrives here: a journalled phase that names it is refused at parse time
+    /// (R78), because this routine has no way to abort without unwinding.
+    /// The same routine is used for all three phases — the
     /// "post-install continue is non-fatal" property falls out naturally,
     /// since the journal is only replayed on a thrown
     /// <see cref="StepFailureException"/>.
@@ -176,8 +178,11 @@ public sealed class InstallEngine
                     reporter?.Advance(ctx.Redact(Describe(spec)), isError: false);
                     continue;
                 case OnFailure.Rollback:
-                case OnFailure.Fail:
                 default:
+                    // OnFailure.Fail cannot reach a journalled phase — the parser
+                    // refuses it here with SIG0233 (R78) — so the two abort modes no
+                    // longer share an arm. The default stays fail-closed: an
+                    // unrecognised mode aborts and unwinds rather than proceeding.
                     throw new StepFailureException(spec.Id, $"{phaseLabel}: {result.Error}");
             }
         }

@@ -1,0 +1,17 @@
+# R78: `fail` is no longer a value a journalled phase can name. It always
+# behaved identically to `rollback` — the engine has no abort-without-unwind
+# mode for a step inside the journal — so the schema refuses the word rather
+# than accepting a promise it does not keep.
+spec: v1.0
+app:
+  id: com.example.App
+  name: Example
+  version: 0.1.0
+  publisher: Example Inc.
+build:
+  source: ./out
+install_steps:
+  - id: make_dir
+    type: directory_create
+    path: "{install_dir}/data"
+    on_failure: fail

@@ -221,11 +221,58 @@ rights, and the failure would be discovered in the wild rather than in CI.
 
 ---
 
-## Known limitations — draft for release notes
+## Release notes — draft
 
 Lift this into the release once the blockers are fixed; it is written to be
 honest rather than flattering.
 
+**Swept 2026-09-15.** The previous draft predated R60–R65, R69–R83 and the
+relicence, and three of its bullets had gone false **in the product's favour** —
+it claimed update manifests were not freshness-checked (R13 and ADR-011 shipped
+that), that the rendering stack pinned a preview SkiaSharp (stable since R42),
+and that coverage was ~75 % (measured at 78 %+ with four hard per-assembly
+floors). A limitations list that understates the product is not the safe kind of
+wrong: it is the kind that gets copied into someone's threat model. It also had
+no place to put a breaking change, which an alpha has more of than it has
+limitations.
+
+> ### Licence
+>
+> **Sigil is source-available, not open source.** It was MIT-licensed until
+> 2026-09-14 and is now under the **Sigil License 1.0** ([ADR-016](../../architecture/adr-016-licensing.md)).
+> You may use it for anything, commercially included, and the `Setup.exe` and
+> packages it generates are yours to distribute royalty-free to as many users as
+> you like. You may not copy, modify or reuse its source, or build a competing
+> tool from it. Contributions are closed; bug reports and security reports are
+> very much open.
+>
+> ### Breaking manifest changes in this release
+>
+> Every one of these was a field that validated and then did something other than
+> what it said. They are refused now rather than quietly mismapped.
+>
+> - **`on_failure: fail` is gone** from journalled phases (`install_steps`,
+>   `pre_install`, `post_install`, `uninstall`). It always behaved identically to
+>   `rollback` — there has never been an abort-without-rollback mode — so it is
+>   refused with **SIG0233** and the default is now `rollback`. In an
+>   `installer.hooks.*` phase `fail` is still correct and still the `pre_*`
+>   default; `rollback` is refused there instead, because a hook has no journal to
+>   unwind (R78).
+> - **`installer.brand.primary_color` / `accent_color` are gone.** The schema
+>   accepted them and the parser read only `primaryColor` / `accentColor`, so a
+>   snake_case manifest packed a silently unbranded installer. Use the camelCase
+>   spellings (R80).
+> - **Signing diagnostic codes are renumbered** into a `SIG04xx` band.
+>   `SIG0200/0210/0220/0300/0301` collided with manifest-validation codes — the
+>   same number naming two unrelated failures, so neither could be documented
+>   (R82).
+> - **`installer.hooks.*` accepts four more step types** — `http_download`,
+>   `ini_write`, `json_edit`, `xml_edit`. Not a new capability: they were always
+>   accepted by the engine and only missing from the hook schema enum, so
+>   manifests that used them were refused for no reason (R81).
+>
+> ### Known limitations
+>
 > **Sigil 0.1.0-alpha is Windows-only and pre-production.** It builds and
 > installs real software, but it has not yet been run at scale outside its own
 > test suite. Do not use it to ship an installer to end users you cannot reach
@@ -237,10 +284,23 @@ honest rather than flattering.
 > - **Delta updates are not implemented.** `/Update` performs full-package
 >   updates. The zstd-dictionary delta format and the client SDK described in
 >   earlier material are deferred — see ADR-010.
-> - **Update manifests are authenticated but not yet freshness-checked.** A
->   signed manifest is verified against a pinned P-256 key, but an attacker who
->   can serve stale content may be able to suppress an update. Serve update
->   manifests over HTTPS from infrastructure you control.
+> - **An elevated per-user install can silently downgrade an existing one.** When
+>   an administrator runs a per-user install, scope resolution probes HKLM and
+>   does not see the prior per-user install, so the run plans a fresh install and
+>   the downgrade guard never fires — while the reinstall cleanup, which reads the
+>   state store rather than ARP, tears the newer version down anyway. Reproduced,
+>   not inferred. It is confined to sessions where the user already holds
+>   Administrator, and installing per-user from an unelevated session is
+>   unaffected (R74).
+> - **Machine-scope installs are not covered end to end.** Every hosted CI runner
+>   is already elevated, so the VM matrix cannot exercise the unelevated paths
+>   that matter most for scope resolution. Two upgrade assertions are honest skips
+>   for the same reason. The behaviour is unit-tested; what is missing is the
+>   real-machine leg (R64).
+> - **Update manifests are signed and freshness-checked**, against a pinned
+>   ECDSA P-256 key, with replays rejected — but the **live** replay against a
+>   hosted manifest is proven by unit tests, not end to end. Serve update
+>   manifests over HTTPS from infrastructure you control (ADR-011).
 > - **Machine-scope installs require care with `install_dir`.** Installing to a
 >   directory writable by non-administrators is refused; do not work around it.
 > - **`com_register` runs the publisher's `DllRegisterServer` inside the
@@ -248,11 +308,29 @@ honest rather than flattering.
 > - **Prerequisite and update payloads are verified by SHA-256 and Authenticode
 >   before execution**, but Sigil cannot vouch for what a third-party
 >   redistributable does once it runs.
-> - **Preview dependencies.** The rendering stack pins a preview SkiaSharp
->   build to satisfy Avalonia 12, and the CLI uses a System.CommandLine beta.
-> - **Coverage:** ~75 % project-wide. `SigilBuild.Core` and `SigilBuild.Signing`
->   sit below their targets and are the areas most likely to hold undiscovered
->   bugs.
+> - **Parameter-level `screen:` grouping does nothing.** The field parses,
+>   validates and is documented, and the wizard renders every parameter on one
+>   Install Options page regardless. Declaring it is harmless and pointless (R79).
+> - **The wizard renders its "Upgrading from x.y.z" banner twice** on the Install
+>   Options screen. Cosmetic (R83).
+> - **The schema validator treats `additionalProperties` as a boolean gate only.**
+>   Where the schema uses its *subschema* form to constrain the shape of
+>   open-ended maps — parameter declarations, localized-text maps — those values
+>   are not schema-checked, so `sigil validate` is weaker than the schema reads.
+>   The parser catches the cases that matter (a non-scalar localized value is
+>   `SIG0292`), but do not treat schema validation as the whole gate (R60).
+> - **`docs/guides/uninstaller.md` has drifted** from the ARP entry and
+>   uninstaller the code actually produces. Trust `setup-exe-reference.md` and the
+>   behaviour over that page until it is rewritten (R61).
+> - **One beta dependency.** The CLI uses a `System.CommandLine` beta. (The
+>   rendering stack is on stable SkiaSharp; earlier drafts of this list said
+>   otherwise.)
+> - **Coverage:** re-read the union and per-assembly figures from the release
+>   run's own gate output rather than copying a number into here — the floors are
+>   a ratchet and the number moves. Three shipping assemblies — `Cli`, `Wrapper`
+>   and `Installer.Host` — still contribute **zero** lines to it and are reported
+>   as a warning, so the headline figure describes less of the product than it
+>   appears to (R21).
 > - **Report security issues privately** via SECURITY.md. Please do not open a
 >   public issue for a privilege-escalation finding.
 
@@ -363,7 +441,16 @@ failing** throwaway PR #17's `broken title`).
 
 **Remaining — the actual gate list.**
 
-0. **R76 — a per-user upgrade fails outright, and it is a RELEASE BLOCKER.** Filed
+0. ~~**R76 — a per-user upgrade fails outright, and it is a RELEASE BLOCKER.**~~
+   **CLOSED 2026-09-09** by [#46](https://github.com/Sigil-build/sigil/pull/46) →
+   RC `6842a8c`, with the VM matrix green on the fix
+   ([34383631266](https://github.com/Sigil-build/sigil/actions/runs/34383631266)).
+   This item sat here reading "Fix lane … (PR pending)" for six days after it
+   merged — the gate list is the thing a release decision is read off, so a stale
+   blocker on it is worse than a missing one. Corrected by the known-limitations
+   sweep. The original text follows.
+
+   Filed
    after this block's other items and listed first because it outranks them: v2 over
    an installed v1, `/S /currentuser`, unelevated, exits **1** and installs nothing —
    the installer's own single-instance lock rejects the prior-version `uninstall.exe`
@@ -401,10 +488,17 @@ failing** throwaway PR #17's `broken title`).
    (`"verified": false`), so names like `SigilBuild.Core` remain open to anyone.
    That is a separate application — an email to `account@nuget.org` — sent
    2026-09-14, awaiting reply. Track it as its own G4 line.
-7. **"Every remaining register row is either demonstrated fixed or listed in the
-   release notes' known limitations."** Not yet: the known-limitations draft below
-   predates **R60–R65** and **R69–R76**. Closing this box means a pass over that
-   draft, and it is the cheapest of the seven.
+7. ~~**"Every remaining register row is either demonstrated fixed or listed in the
+   release notes' known limitations."**~~ **MET, 2026-09-15.** The draft below was
+   swept against the register as it now stands. Five of the rows it would have had
+   to list were fixed instead — **R77, R78, R80, R81, R82** — and the rest are in
+   it: **R74** (elevated per-user silent downgrade), **R64** (machine-scope not
+   covered end to end), **R79**, **R83**, **R60**, **R61**, plus the coverage and
+   beta-dependency caveats. **R62, R63, R65, R71, R72** are deliberately *not* in
+   it: they are process and test debt a reader cannot act on, and padding a
+   limitations list with them makes the ones that matter easier to skim past.
+   The sweep also found three bullets that had gone false **in the product's
+   favour** and removed them — see the note above the draft.
 
 **Security — no box here is optional**
 

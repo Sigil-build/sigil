@@ -4041,6 +4041,46 @@ wrong today.
 **Component:** Core / schema · **Effort: M** · **SHOULD-FIX**
 
 > **STATUS (2026-09-11):** **OPEN, no owner.** Found by the docs lane comparing the
+> **STATUS (2026-09-15): CLOSED — the question this row forbade guessing at is
+> answered by git, not by argument.** The row said: *"Do not settle this by widening
+> the enum to 18 without deciding which story is true."* The history settles it.
+>
+> All four missing types entered the schema in **one commit** — `c033cfc` (P9, #11) —
+> which updated the root enums and not `HookPhase`. The later **P11 (#13)** added its
+> three types to **every** copy including `HookPhase`, and in rewriting that line
+> **carried P9's gap forward** without noticing it. So nobody ever decided hooks
+> should be narrower, and P11 proves the project's own convention from the other
+> direction: a correct change touches every copy.
+>
+> **This row's own hypothesis does not survive contact with the data.** It proposed
+> that the excluded four are "exactly the ones whose destination is subject to
+> `install_dir` containment". `allow_outside_install_dir`'s description names
+> **eight** such types, and four of them — `file_copy`, `directory_create`,
+> `file_delete`, `directory_delete` — were admitted in hooks all along. There was no
+> line to justify.
+>
+> **Shipped:** the hook enum widened to 18 (the parser already accepted all 18, so its
+> four "dead arms" were never dead in the sense of unreachable — only unreachable
+> *through the schema*), and item 2 of the fix shape — a hook-specific rejection —
+> **falls away**: with the lists in agreement there is nothing to reject.
+>
+> **Instead of item 3's architectural ask** (derive the parser's list from the table
+> the schema is generated from — that is schema generation, an ADR and its own track),
+> a **test compares every step-type enum in the schema against the others**. It found
+> the schema holds **seven** copies, not the "multiple" AGENTS.md warns about, and it
+> was proven non-vacuous by re-planting the gap and watching it name the divergent
+> copy. A warning that has been missed twice is a test's job.
+>
+> **Item 4 fixed, and wider than asked.** `generate-manifest-reference.ps1` rendered a
+> `$ref`'d property with no description of its own as `_(undocumented)_`. It now falls
+> back to the referenced definition's description, which cleared **thirteen** such rows
+> — every hook phase, `license`, and all four `installer.options` components — not
+> just the four this row counted.
+>
+> Suite **1792 / 1775 passed / 0 failed / 17 skipped**, Release build 0 warnings,
+> format clean. Not a security change: `http_download`'s SHA-256 and Authenticode
+> gates do not depend on the journal, and `file_copy` was already admitted in hooks.
+>
 > `HookPhase` definition against `ParseHooks`. **Not a validation bypass** — schema
 > validation runs first (`ManifestLoader.cs:29,48`) and the validator does enforce
 > `enum` (`SchemaValidator.cs:75`), so the four extra types are genuinely refused.

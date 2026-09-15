@@ -1,0 +1,29 @@
+# R81: these four types were absent from the HookPhase enum until 2026-09-15, so
+# this manifest was refused with a bare schema-enum error and nothing anywhere
+# explained why. The absence was drift from the lane that added them to the root
+# enums, never a decision — hooks accept the same closed catalog of 18 as
+# install_steps. What differs is the journal: a hook's work is never recorded and
+# never undone, which is why its on_failure is fail/continue and not rollback.
+spec: v1.0
+app:
+  id: com.example.App
+  name: Example
+  version: 0.1.0
+  publisher: Example Inc.
+build:
+  source: ./out
+installer:
+  hooks:
+    post_install:
+      - id: fetch_runtime_config
+        type: http_download
+        url: https://example.com/config.json
+        dest: "{install_dir}/config.json"
+        sha256: 0000000000000000000000000000000000000000000000000000000000000000
+        on_failure: continue
+      - id: stamp_channel
+        type: json_edit
+        path: "{install_dir}/config.json"
+        pointer: /channel
+        value: stable
+        on_failure: continue

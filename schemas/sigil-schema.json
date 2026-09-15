@@ -223,7 +223,7 @@
     },
     "HookPhase": {
       "type": "array",
-      "description": "An ordered list of lifecycle-hook steps (P2). Runs outside the rollback journal; each step is governed only by its own `on_failure` (no rollback obligations — see installer.hooks).",
+      "description": "An ordered list of lifecycle-hook steps (P2). Accepts the SAME closed catalog of 18 step types as `install_steps` — the four config/network types were missing here until R81, which was drift from the lane that added them, never a policy. What differs is the journal, not the catalog: hooks run OUTSIDE the rollback journal, so their side effects are never recorded and never undone, and each step is governed only by its own `on_failure` (`fail` or `continue`; `rollback` is refused — there is nothing to unwind). See installer.hooks.",
       "items": {
         "type": "object",
         "required": ["id", "type"],
@@ -235,7 +235,7 @@
             "enum": [
               "file_copy", "directory_create", "file_delete", "directory_delete",
               "registry_write", "registry_delete_value", "registry_delete_key",
-              "shortcut_create", "env_set", "run_program", "service_install", "scheduled_task_create", "com_register", "firewall_rule"
+              "shortcut_create", "env_set", "run_program", "http_download", "ini_write", "json_edit", "xml_edit", "service_install", "scheduled_task_create", "com_register", "firewall_rule"
             ]
           },
           "when": { "type": "string" },

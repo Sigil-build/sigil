@@ -1,0 +1,17 @@
+# R80: `primary_color` / `accent_color` were listed in the schema and read by
+# nothing, so a manifest spelling them this way validated, packed, and shipped a
+# wizard in Sigil's default grey and blue with no diagnostic anywhere. The keys
+# are gone; `installer.brand` is additionalProperties:false, so the spelling now
+# fails loudly instead of branding nothing. Use primaryColor / accentColor.
+spec: v1.0
+app:
+  id: com.example.App
+  name: Example
+  version: 0.1.0
+  publisher: Example Inc.
+build:
+  source: ./out
+installer:
+  brand:
+    primary_color: "#312E81"
+    accent_color: "#4F46E5"

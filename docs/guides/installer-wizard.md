@@ -52,7 +52,7 @@ Slots — this is the **complete** list. `installer.brand` is `additionalPropert
 |`primaryColor`|Primary button + accent fill.|
 |`accentColor`|Secondary accent (progress + links).|
 
-> **Use the camelCase spellings.** The schema also permits `primary_color` and `accent_color`, but the manifest parser reads only `primaryColor` and `accentColor` — a manifest that sets the snake_case keys alone passes `sigil validate` and then packs with **no brand colours at all**, silently falling back to the defaults.
+> **The colour keys are camelCase**, unlike most of the manifest. `primary_color` and `accent_color` are refused (R80): the schema listed them until then while the parser read only the camelCase pair, so a snake_case manifest passed `sigil validate` and packed with **no brand colours at all**, silently falling back to the defaults. A wrong spelling is now a validation error rather than an unbranded installer.
 
 All colours are `#RRGGBB` hex — the schema enforces the pattern. The full light and dark palette is **derived from those two colours** at pack time by the brand generator; there is no gradient, sidebar or per-surface colour field to set. `BrandTokenEmitter` enforces WCAG-AA contrast against white text at pack time; failing combos surface as a pack-time diagnostic, not a runtime surprise.
 

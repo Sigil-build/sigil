@@ -31,8 +31,8 @@ installer:
   install_dir: "{scope_root}/Acme Studio"   # optional override (T13)
   license: ./LICENSE.txt      # shows the License screen (T14)
   brand:
-    primary_color: "#312E81"
-    accent_color:  "#4F46E5"
+    primaryColor: "#312E81"    # camelCase — the snake_case spelling this fixture
+    accentColor:  "#4F46E5"    # used until R80 validated and branded nothing
     logo: ./brand/logo.png
   options:
     desktop_shortcut: true

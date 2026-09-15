@@ -133,10 +133,8 @@ Source: `schemas/sigil-schema.json` (JSON Schema, draft-07).
 |---|---|---|---|---|
 | `logo` | string | - | - | _(undocumented)_ |
 | `hero` | string | - | - | _(undocumented)_ |
-| `primaryColor` | string | - | - | _(undocumented)_ |
-| `accentColor` | string | - | - | _(undocumented)_ |
-| `primary_color` | string | - | - | _(undocumented)_ |
-| `accent_color` | string | - | - | _(undocumented)_ |
+| `primaryColor` | string | - | - | Wizard primary colour as #RRGGBB — primary buttons and accent fill. Feeds BrandTokenEmitter, which derives a full light+dark palette from this and accentColor at pack time. Omitted, it falls back to Sigil's default #1F2937. NOTE the camelCase spelling: `primary_color` was accepted by this schema until R80 and read by nothing, so a snake_case manifest packed a silently unbranded installer; it is now refused by additionalProperties. |
+| `accentColor` | string | - | - | Wizard secondary accent as #RRGGBB — progress indication and links. Omitted, it falls back to Sigil's default #3B82F6. camelCase, for the reason given on primaryColor. |
 
 ## `installer.options`
 

@@ -3922,6 +3922,42 @@ and nothing asserts the two agree about the same document.
 ### R80 — `installer.brand`'s snake_case colour keys validate, pack, and are never read, so a branded installer silently ships Sigil's default palette
 **Component:** Core / schema · **Effort: S** · **SHOULD-FIX**
 
+> **STATUS (2026-09-15): CLOSED — option two, against this row's own lean.** The
+> row leaned "read both spellings"; the orchestrator chose to **remove
+> `primary_color` / `accent_color` from the schema** instead, so
+> `additionalProperties: false` refuses them loudly. One field, one spelling.
+>
+> **The row's argument for the other option does not survive the evidence.** It
+> reasoned that snake_case is arguably *correct* here because the rest of the
+> manifest is snake_case. But every example and every doc snippet in the repo
+> already writes camelCase — `examples/full/sigil.yaml:52-53`,
+> `docs/getting-started.md:170-171`, `docs/guides/installer-wizard.md:42-43,52-53`.
+> snake_case appeared in exactly two places: the schema, and the broken reference
+> fixture. camelCase is the de-facto canon here, so "read both" would have kept a
+> second spelling alive forever and obliged the docs to explain both, to no one's
+> benefit. Nothing breaks: **zero** manifests under `examples/**` used the retired
+> keys.
+>
+> It is also the same call as **R78**, one row over: refuse the word that promises
+> something the code does not do, rather than quietly aliasing it.
+>
+> **The reference fixture is fixed in the same change**, as the row required —
+> `reference-installer-manifest.yaml:34-35` now writes camelCase and therefore
+> actually brands. That fixture being wrong was the row's sharpest evidence that
+> nothing covered this, and it stayed wrong because a schema-only test cannot catch
+> it: a document can validate and still mean nothing.
+>
+> **Both deliverables shipped.** `InstallerBrandParseTests` drives the manifest
+> through the parser and asserts the colours reach `InstallerBrand` — plus a case
+> pinning that the retired spelling yields nulls, which is what made it dangerous,
+> and one for an absent brand block. A `Fixtures/invalid/` fixture pins the schema
+> half. Suite **1767 / 1750 passed / 0 failed / 17 skipped**, Release build 0
+> warnings, format clean.
+>
+> Side effect worth noting: `docs/manifest-reference.md` listed all four keys as
+> `_(undocumented)_`. It now documents the two surviving ones, because the schema
+> descriptions written here are what that page is generated from.
+>
 > **STATUS (2026-09-11):** **OPEN, no owner.** Found by the docs lane reading
 > `docs/manifest-reference.md:136-139` (which lists **all four** keys) against
 > `ManifestParser.ParseInstallerSection`. **The repo's own reference fixture is

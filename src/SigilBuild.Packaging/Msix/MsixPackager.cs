@@ -22,10 +22,10 @@ public sealed class MsixPackager : IPackager
         {
             return new PackResult(null, new[]
             {
-                new Diagnostic(DiagnosticSeverity.Error, "SIG0100",
+                new Diagnostic(DiagnosticSeverity.Error, DiagnosticCodes.MsixRequiresWindows,
                     "MSIX packaging requires Windows (D-004 MVP scope)",
                     SourceLocation.Unknown,
-                    "https://docs.sigil.build/diagnostics/SIG0100"),
+                    DiagnosticCodes.DocsUrl(DiagnosticCodes.MsixRequiresWindows)),
             });
         }
 
@@ -33,10 +33,10 @@ public sealed class MsixPackager : IPackager
         {
             return new PackResult(null, new[]
             {
-                new Diagnostic(DiagnosticSeverity.Error, "SIG0101",
+                new Diagnostic(DiagnosticSeverity.Error, DiagnosticCodes.WindowsSdkNotFound,
                     "Windows 10/11 SDK not found; install from https://aka.ms/winsdk",
                     SourceLocation.Unknown,
-                    "https://docs.sigil.build/diagnostics/SIG0101"),
+                    DiagnosticCodes.DocsUrl(DiagnosticCodes.WindowsSdkNotFound)),
             });
         }
 
@@ -74,10 +74,10 @@ public sealed class MsixPackager : IPackager
                 var detail = string.IsNullOrWhiteSpace(run.StdErr) ? run.StdOut.Trim() : run.StdErr.Trim();
                 return new PackResult(null, new[]
                 {
-                    new Diagnostic(DiagnosticSeverity.Error, "SIG0110",
+                    new Diagnostic(DiagnosticSeverity.Error, DiagnosticCodes.MakeAppxFailed,
                         $"MakeAppx.exe exited {run.ExitCode}: {detail}",
                         SourceLocation.Unknown,
-                        "https://docs.sigil.build/diagnostics/SIG0110"),
+                        DiagnosticCodes.DocsUrl(DiagnosticCodes.MakeAppxFailed)),
                 });
             }
 
@@ -89,10 +89,10 @@ public sealed class MsixPackager : IPackager
             {
                 if (!WackRunner.TryFromInstalled(out var wack))
                 {
-                    diagnostics.Add(new Diagnostic(DiagnosticSeverity.Warning, "SIG0111",
+                    diagnostics.Add(new Diagnostic(DiagnosticSeverity.Warning, DiagnosticCodes.WackNotInstalled,
                         "runWack=true but the Windows App Certification Kit (appcert.exe) is not installed; skipping WACK validation",
                         SourceLocation.Unknown,
-                        "https://docs.sigil.build/diagnostics/SIG0111"));
+                        DiagnosticCodes.DocsUrl(DiagnosticCodes.WackNotInstalled)));
                 }
                 else
                 {
@@ -100,10 +100,10 @@ public sealed class MsixPackager : IPackager
                     var wackResult = await wack.RunAsync(outPath, reportPath, ct);
                     if (wackResult.ExitCode != 0)
                     {
-                        diagnostics.Add(new Diagnostic(DiagnosticSeverity.Error, "SIG0112",
+                        diagnostics.Add(new Diagnostic(DiagnosticSeverity.Error, DiagnosticCodes.WackReportedFailures,
                             $"Windows App Certification Kit reported failures (exit {wackResult.ExitCode}); see {wackResult.ReportPath}",
                             SourceLocation.Unknown,
-                            "https://docs.sigil.build/diagnostics/SIG0112"));
+                            DiagnosticCodes.DocsUrl(DiagnosticCodes.WackReportedFailures)));
                         return new PackResult(null, diagnostics);
                     }
                 }

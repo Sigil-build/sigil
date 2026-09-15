@@ -1805,6 +1805,15 @@ add `.superpowers/` to the root `.gitignore`.
 > and the prefix (verified against nuget.org's own documentation, 2026-09-14 —
 > it is not a web form). Sent by the owner on 2026-09-14; **awaiting nuget.org's
 > reply.** Track the prefix as its own G4 line, not as R41a.
+>
+> **The owning account, measured (2026-09-15):** both packages are owned by the
+> personal nuget.org account **`shikigami12`** (the search API's `owners` field; its
+> profile resolves, `Sigil-build` does not — there is no organization of that name).
+> Worth recording, because the first reply to nuget.org named `Sigil-build`, taken
+> from the packages' `Company` metadata, and support came back asking which account
+> was meant: **`Authors` / `Company` in the nuspec are not the nuget.org owner**, and
+> only the `owners` field answers that. Owner's ruling 2026-09-15: keep the personal
+> account, do not create an organization.
 
 `docs/sprint-01/identifier-reservation.md:13` marks `SigilBuild` as a "Reserved
 placeholder **to be published** before Sprint 1 ends"; `:23`
@@ -4097,6 +4106,49 @@ theoretical, and a second, divergent copy of the rules living in the parser.
 ### R82 — `SIG0270` is reused for two unrelated diagnostics: `installer.vars` and the exe-format-on-non-Windows refusal
 **Component:** Cli / diagnostics · **Effort: S** · **SHOULD-FIX**
 
+> **STATUS (2026-09-15): CLOSED — and the row understated it by a factor of four.**
+> Implementing the guard this row asks for surfaced that `SIG0270` was **one of four**
+> numbers meaning two unrelated things each, and that **eight** further codes had no
+> constant at all. The raw-literal habit this row names as "why it slipped through" was
+> not incidental to one defect; it was the mechanism behind all of them.
+>
+> | Code | `DiagnosticCodes` says | Also emitted for |
+> |---|---|---|
+> | `SIG0210` | `UnknownParameterType` | PFX certificate validation failure (`LocalPfxSigner:52`) |
+> | `SIG0220` | `ParameterValidationFailure` | `signtool.exe` non-zero exit (`LocalPfxSigner:67`) |
+> | `SIG0270` | `InvalidInstallerVar` | exe format on a non-Windows host — **this row** |
+> | `SIG0300` | `InvalidCustomComponent` | Azure signing job failed (`AzureTrustedSigner:43`) |
+>
+> Undefined entirely: `SIG0100`, `SIG0101`, `SIG0110`, `SIG0111`, `SIG0112` (MSIX),
+> `SIG0120` (exe wrapper), `SIG0200` (local signing), `SIG0301` (Azure).
+>
+> **Fixed at full scope, on the orchestrator's ruling.** Two new bands — **SIG01xx
+> packaging** (the pack backends' own failures: the document is valid and the machine
+> cannot honour it) and **SIG04xx signing** — thirteen constants, every call site in
+> five files pointed at the table, and `SIG0121` minted for this row's own refusal.
+> Renumbering the signing codes is user-visible in principle and free in practice: no
+> release has ever shipped, and the repo has **no diagnostics index** for them to
+> appear in.
+>
+> **The test this row specifies would not have caught this row's own defect.** "Assert
+> every emitted code resolves to a `DiagnosticCodes` member" passes on `SIG0270` — it
+> resolves perfectly well, to the wrong failure. What ships is a pair: **no raw
+> `"SIG0xxx"` literal anywhere in `src/`** (the mechanism), and **every value in the
+> table distinct** (the symptom). The second was proven non-vacuous by planting a
+> collision and watching it fail, naming both claimants.
+>
+> **A third defect, found while fixing the second.** Every diagnostic spells its own
+> docs URL, so the code appears twice per call site — and the renumber silently left
+> five URLs pointing at the old numbers until they were caught.
+> `DiagnosticCodes.DocsUrl` now derives it; the sites touched here use it. **The
+> remaining ~40 hardcoded URLs are correct today** and are mechanical follow-up, not a
+> defect — worth a row if anyone wants the guarantee rather than the current
+> correctness.
+>
+> Suite **1791 / 1774 passed / 0 failed / 17 skipped**, Release build 0 warnings,
+> format clean. No test pinned a renumbered code; the `SIG0270` assertions in
+> `InstallerVarsParseTests` are the manifest meaning, which is unchanged.
+>
 > **STATUS (2026-09-11):** **OPEN, no owner.** Found by the closer lane while
 > sweeping comments for stale citations. Not fixed in this PR.
 

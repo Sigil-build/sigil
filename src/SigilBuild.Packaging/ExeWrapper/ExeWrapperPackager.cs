@@ -118,10 +118,10 @@ public sealed class ExeWrapperPackager : IPackager
         {
             return (null, new List<Diagnostic>
             {
-                new Diagnostic(DiagnosticSeverity.Error, "SIG0120",
+                new Diagnostic(DiagnosticSeverity.Error, DiagnosticCodes.WrapperRuntimeMissing,
                     $"EXE-wrapper packaging requires the AOT-published SigilBuild.Wrapper runtime. {ex.Message}",
                     SourceLocation.Unknown,
-                    "https://docs.sigil.build/diagnostics/SIG0120"),
+                    DiagnosticCodes.DocsUrl(DiagnosticCodes.WrapperRuntimeMissing)),
             });
         }
 

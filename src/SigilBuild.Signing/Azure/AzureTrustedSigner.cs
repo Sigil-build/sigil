@@ -40,10 +40,10 @@ public sealed class AzureTrustedSigner : ISigningProvider
             {
                 return new SignResult(false, null, null, null, new[]
                 {
-                    new Diagnostic(DiagnosticSeverity.Error, "SIG0300",
+                    new Diagnostic(DiagnosticSeverity.Error, DiagnosticCodes.AzureSigningJobFailed,
                         $"Azure signing job {jobId} reported {status.Status}",
                         SourceLocation.Unknown,
-                        "https://docs.sigil.build/diagnostics/SIG0300"),
+                        DiagnosticCodes.DocsUrl(DiagnosticCodes.AzureSigningJobFailed)),
                 });
             }
 
@@ -59,9 +59,9 @@ public sealed class AzureTrustedSigner : ISigningProvider
         {
             return new SignResult(false, null, null, null, new[]
             {
-                new Diagnostic(DiagnosticSeverity.Error, "SIG0301", ex.Message,
+                new Diagnostic(DiagnosticSeverity.Error, DiagnosticCodes.AzureSigningFailed, ex.Message,
                     SourceLocation.Unknown,
-                    "https://docs.sigil.build/diagnostics/SIG0301"),
+                    DiagnosticCodes.DocsUrl(DiagnosticCodes.AzureSigningFailed)),
             });
         }
     }

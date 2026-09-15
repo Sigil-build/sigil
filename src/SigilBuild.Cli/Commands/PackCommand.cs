@@ -95,13 +95,13 @@ public static class PackCommand
                     {
                         new Diagnostic(
                             DiagnosticSeverity.Error,
-                            "SIG0270",
+                            DiagnosticCodes.ExeFormatRequiresWindowsHost,
                             "package format 'exe' can only be produced on a Windows pack host — " +
                             "it stamps the installer payload via the Win32 resource-update APIs " +
                             "(BeginUpdateResourceW), which have no cross-platform equivalent. " +
                             "Run 'sigil pack' on Windows to emit the -Setup.exe.",
                             SourceLocation.Unknown,
-                            "https://docs.sigil.build/diagnostics/SIG0270"),
+                            DiagnosticCodes.DocsUrl(DiagnosticCodes.ExeFormatRequiresWindowsHost)),
                     }, useColor: false);
                     ctx.ExitCode = 1;
                     continue;

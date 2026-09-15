@@ -32,10 +32,10 @@ public sealed class LocalPfxSigner : ISigningProvider
         {
             return new SignResult(false, null, null, null, new[]
             {
-                new Diagnostic(DiagnosticSeverity.Error, "SIG0200",
+                new Diagnostic(DiagnosticSeverity.Error, DiagnosticCodes.LocalSigningRequiresWindows,
                     "local PFX signing requires Windows (uses signtool.exe)",
                     SourceLocation.Unknown,
-                    "https://docs.sigil.build/diagnostics/SIG0200"),
+                    DiagnosticCodes.DocsUrl(DiagnosticCodes.LocalSigningRequiresWindows)),
             });
         }
 
@@ -49,9 +49,9 @@ public sealed class LocalPfxSigner : ISigningProvider
         {
             return new SignResult(false, null, cert.Thumbprint, null, new[]
             {
-                new Diagnostic(DiagnosticSeverity.Error, "SIG0210", validation.Reason,
+                new Diagnostic(DiagnosticSeverity.Error, DiagnosticCodes.SigningCertificateInvalid, validation.Reason,
                     SourceLocation.Unknown,
-                    "https://docs.sigil.build/diagnostics/SIG0210"),
+                    DiagnosticCodes.DocsUrl(DiagnosticCodes.SigningCertificateInvalid)),
             });
         }
 
@@ -64,10 +64,10 @@ public sealed class LocalPfxSigner : ISigningProvider
                 options.ArtifactPath, _config.Pfx, pwd, tsa, ct);
             if (run.ExitCode == 0)
                 return new SignResult(true, options.ArtifactPath, cert.Thumbprint, tsa, Array.Empty<Diagnostic>());
-            diagnostics.Add(new Diagnostic(DiagnosticSeverity.Warning, "SIG0220",
+            diagnostics.Add(new Diagnostic(DiagnosticSeverity.Warning, DiagnosticCodes.SigntoolFailed,
                 $"signtool.exe (TSA={tsa}) exited {run.ExitCode}: {run.StdErr.Trim()}",
                 SourceLocation.Unknown,
-                "https://docs.sigil.build/diagnostics/SIG0220"));
+                DiagnosticCodes.DocsUrl(DiagnosticCodes.SigntoolFailed)));
         }
 
         return new SignResult(false, null, cert.Thumbprint, null, diagnostics);

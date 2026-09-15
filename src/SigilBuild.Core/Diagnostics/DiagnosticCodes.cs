@@ -3,6 +3,20 @@
 
 namespace SigilBuild.Core.Diagnostics;
 
+/// <summary>
+/// Every diagnostic code Sigil can emit. This table is the only place a code may be
+/// spelled (R82).
+/// </summary>
+/// <remarks>
+/// Codes used to be written as raw string literals at the call site, which is how
+/// **four** numbers came to mean two unrelated things each — `SIG0210`, `SIG0220`,
+/// `SIG0270` and `SIG0300` were each claimed by a manifest-validation error and,
+/// separately, by a packaging or signing failure. A code's whole job is to identify
+/// one failure well enough to document it at one URL, so a second meaning does not
+/// make it ambiguous, it makes it useless. Two tests enforce the rule that fixed it:
+/// one refuses a raw `SIG0xxx` literal at a `Diagnostic` construction site anywhere
+/// in `src/`, the other asserts every value in this table is distinct.
+/// </remarks>
 public static class DiagnosticCodes
 {
     public const string YamlSyntaxError = "SIG0001";
@@ -11,6 +25,23 @@ public static class DiagnosticCodes
     public const string SchemaViolation = "SIG0010";
     public const string EnvVariableMissing = "SIG0020";
     public const string MissingOptionalField = "SIG0050";
+
+    // SIG01xx — packaging. The pack backends' own failures: a host that cannot
+    // produce a format, a missing SDK, a tool that exited non-zero. Distinct from
+    // the SIG02xx/SIG03xx manifest bands because nothing here is the manifest's
+    // fault — the document is valid and the machine cannot honour it.
+    public const string MsixRequiresWindows = "SIG0100";
+    public const string WindowsSdkNotFound = "SIG0101";
+    public const string MakeAppxFailed = "SIG0110";
+    public const string WackNotInstalled = "SIG0111";
+    public const string WackReportedFailures = "SIG0112";
+    public const string WrapperRuntimeMissing = "SIG0120";
+
+    // SIG0121 — `exe` requested on a non-Windows pack host. Emitted as a literal
+    // "SIG0270" until R82, which is the collision that row was filed for: SIG0270
+    // is installer.vars, so the diagnostics URL for a pack-host refusal pointed at
+    // a manifest-validation page.
+    public const string ExeFormatRequiresWindowsHost = "SIG0121";
 
     // SIG02xx — parameters: block
     public const string UnknownParameterType = "SIG0210";
@@ -149,4 +180,32 @@ public static class DiagnosticCodes
     // unrecognized value is refused rather than silently falling back to the
     // default. (R45)
     public const string RequireSignedDownloadsInvalid = "SIG0326";
+
+    // SIG04xx — signing. Its own band because signing fails for reasons that have
+    // nothing to do with the manifest: a host without signtool, a certificate that
+    // will not validate, a remote job that came back rejected.
+    //
+    // These moved here in R82. Local signing emitted SIG0200/SIG0210/SIG0220 and
+    // Azure emitted SIG0300/SIG0301 as raw literals, and three of those numbers
+    // were already taken by the parameters and custom-components bands — so
+    // `sigil validate` and `sigil sign` could print the same code for unrelated
+    // failures. Renumbering is safe precisely because no release has ever shipped:
+    // no user, log or support page carries the old numbers.
+    public const string LocalSigningRequiresWindows = "SIG0400";
+    public const string SigningCertificateInvalid = "SIG0401";
+    public const string SigntoolFailed = "SIG0402";
+    public const string AzureSigningJobFailed = "SIG0410";
+    public const string AzureSigningFailed = "SIG0411";
+
+    /// <summary>
+    /// The documentation URL for <paramref name="code"/>.
+    /// </summary>
+    /// <remarks>
+    /// Most call sites still spell this URL out, which puts a second copy of the code
+    /// in every diagnostic and lets the two drift — renumbering the signing band in
+    /// R82 silently pointed five URLs at the old numbers until they were caught. Sites
+    /// touched by that renumber use this helper instead; the rest are correct today
+    /// and are a mechanical follow-up, not a defect.
+    /// </remarks>
+    public static string DocsUrl(string code) => $"https://docs.sigil.build/diagnostics/{code}";
 }

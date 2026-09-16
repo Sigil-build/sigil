@@ -4238,3 +4238,64 @@ and security are unaffected; only layout and a wasted binding are.
 grows a rendering/screenshot assertion for the Destination screen, pin the
 banner's presence there so a reintroduced duplicate fails loudly instead of
 silently doubling the layout again.
+
+### R84 — "An unsigned release is not a release" blocked the alpha on a signature that never reaches a user
+**Component:** CI / release · **Effort: S** · **DECISION**
+
+> **STATUS (2026-09-16): CLOSED by the decision recorded here.** Raised by the
+> repository owner, who asked the question nobody in the audit had: *if our users
+> sign their own installers, why do we need a certificate at all?*
+
+`release.yml` refused to run at all without the six Trusted Signing secrets —
+*"An unsigned release is not a release"*. That refusal, and nothing else, was
+holding the **release dry-run** and **R7's clean-machine install**, which are two
+of the last owner-only items before G4. Both are unreachable by any other means:
+`release.yml` has never executed, so nobody knows whether it even parses.
+
+**What Sigil's own signature actually covers.** `release.yml` signs `publish/` —
+`sigil.exe` for win-x64/win-arm64, the staged `SigilBuild.Installer.Host.exe`
+runtimes, and their native DLLs. It does **not** reach the end user of anything
+built with Sigil:
+
+- The publisher signs their finished `Setup.exe` themselves, with their own
+  certificate, via `sigil sign`.
+- Our signature on the staged installer host is **destroyed by the next step of
+  the ordinary pipeline**. `PackCommand`'s own help text says it: *"stamping
+  resources invalidates a prior Authenticode signature, so sign the finished
+  Setup.exe last."* That is why `sigil pack` must precede `sigil sign`.
+
+So the trust chain an end user sees is the publisher's, always. Our certificate
+buys **our own distribution**: no SmartScreen warning on the `sigil.exe` a
+developer downloads from a GitHub release, no WDAC/AppLocker refusal in a
+locked-down shop, and the ability to verify the staged runtime *before* stamping.
+Real value, and none of it a property of the installers Sigil produces.
+
+**Decision.** Signing is **required for a stable tag and optional for a
+pre-release**. `v0.1.0-alpha` may ship unsigned; `v1.0.0` may not.
+
+The gate is **fail-closed**: unsigned ships only when the tag *positively* proves
+a SemVer pre-release (`^v\d+\.\d+\.\d+-`). A stable tag refuses, and so does a tag
+the pattern cannot parse — "could not tell" must never take the permissive arm,
+which is the same rule AGENTS.md §6 already applies to the `changes` job.
+
+An unsigned release **says so on the release page**, not only in the workflow log:
+the notes gain a banner explaining that SmartScreen will warn, that `SHA256SUMS`
+is the verification path, and that a publisher's own `Setup.exe` is unaffected.
+
+**A latent defect found while implementing it.** `gh release create` hardcoded
+`--prerelease` for *every* tag, so a future `v1.0.0` would have been published as
+a pre-release. The pre-release answer is now computed once, in the signing-policy
+step, and both the signing decision and the GitHub flag read that one value —
+two copies of the same answer are exactly what lets them disagree (cf. **R78**,
+**R80**, **R82**).
+
+**Not deferred, and not abandoned.** Signing stays on the G4 path for the stable
+release. The owner's current plan is a commercial CA (SSL.com / Sectigo) rather
+than Azure, since Azure's individual identity validation is restricted to the US
+and Canada and the organisation path depends on a Polish JDG being accepted as an
+organisation. **That is a separate design problem, not this row:** since June 2023
+the CA/Browser Forum requires OV and EV code-signing private keys to live in
+certified hardware, so there is no `.pfx` to drop into a GitHub secret —
+`release.yml` will need a cloud-HSM signing path (SSL.com eSigner, DigiCert
+KeyLocker) or a self-hosted runner holding a token. File that when the certificate
+is chosen.

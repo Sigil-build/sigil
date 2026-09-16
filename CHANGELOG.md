@@ -13,6 +13,57 @@ The first public release. Sigil packs, signs, and installs real Windows
 software from a single `sigil.yaml`; it has not yet been run in production
 outside its own test suite. See "Known limitations" before you rely on it.
 
+### Changed — licence
+
+**Sigil is source-available, not open source.** It was MIT-licensed until
+2026-09-14 and now ships under the **Sigil License 1.0**
+(`docs/architecture/adr-016-licensing.md`).
+
+- You may use Sigil for anything, **including commercially**, on any number of
+  machines.
+- The `Setup.exe` and packages it generates are **yours to distribute
+  royalty-free** to as many users as you like. `sigil pack` stamps the installer
+  host, which invalidates any prior signature by design, so a `Setup.exe` carries
+  *your* signature — applied by `sigil sign` after packing — not ours.
+- You may **not** copy, modify or reuse Sigil's source, or build a competing tool
+  from it.
+- Third-party notice obligations travel with the installers you ship: the Skia,
+  HarfBuzz and ANGLE binaries embedded in a `Setup.exe` carry attribution
+  requirements the licensor cannot waive on your behalf. Keep
+  `THIRD-PARTY-NOTICES.md` with what you distribute.
+- Code contributions are closed; bug reports and security reports are not. See
+  `CONTRIBUTING.md`.
+
+Versions published before 2026-09-14 remain under the MIT grant they were
+released with. That grant is not revoked and does not extend to this release.
+
+### Changed — breaking manifest changes
+
+Each of these was a field that validated and then did something other than what
+it said. They are refused now rather than silently mismapped, so a manifest that
+used them fails validation instead of behaving unexpectedly.
+
+- **`on_failure: fail` is removed from journalled phases** (`install_steps`,
+  `pre_install`, `post_install`, `uninstall`). It had always behaved identically
+  to `rollback` — there has never been an abort-without-rollback mode — so it is
+  refused with **`SIG0233`**, and the default for those phases is now `rollback`.
+  In an `installer.hooks.*` phase `fail` remains correct and remains the `pre_*`
+  default; there, `rollback` is refused instead, because a hook runs outside the
+  journal and has nothing to unwind.
+- **`installer.brand.primary_color` / `accent_color` are removed.** The schema
+  accepted them and the parser read only `primaryColor` / `accentColor`, so a
+  snake_case manifest validated, packed, and shipped a wizard in Sigil's default
+  grey and blue with no diagnostic anywhere. Use the camelCase spellings.
+- **`installer.hooks.*` accepts four more step types** — `http_download`,
+  `ini_write`, `json_edit`, `xml_edit`. Not new capability: the engine always
+  accepted them and only the hook schema omitted them, so manifests using them
+  were refused for no reason.
+- **Signing diagnostic codes are renumbered** into a `SIG04xx` band.
+  `SIG0200`/`SIG0210`/`SIG0220`/`SIG0300`/`SIG0301` collided with
+  manifest-validation codes — one number naming two unrelated failures, so
+  neither could be documented at its own URL. Packaging failures likewise moved
+  to a `SIG01xx` band.
+
 ### Added — packaging and signing (pre-installer-track foundation)
 
 - `sigil validate` / `sigil init` / `sigil pack` / `sigil sign` CLI commands
@@ -271,11 +322,44 @@ channel-manifest wire format.
 >   pin is gone — Avalonia.Skia 12.0.5 dropped its dependency to the stable
 >   `3.119.4` release, so no preview native binary ships in privileged
 >   software. Recorded as SUP.4 / R42.)
-> - **Native AOT publish is Windows-only and cannot be verified from every
->   environment.** `release.yml`'s signed, checksummed release path is
->   tag-triggered and only exercised by CI (`windows-latest`); it has not
->   been run end-to-end from every development environment used on this
->   project.
+> - **An elevated per-user install can silently downgrade an existing one.**
+>   When an administrator runs a per-user install, scope resolution probes
+>   HKLM and does not see the prior per-user install, so the run plans a
+>   fresh install and the downgrade guard never fires — while the reinstall
+>   cleanup, which reads the state store rather than Add/Remove Programs,
+>   tears the newer version down anyway. Reproduced, not inferred. It is
+>   confined to sessions where the user already holds Administrator;
+>   installing per-user from an ordinary session is unaffected.
+> - **Machine-scope installs are not covered end to end.** Every hosted CI
+>   runner is already elevated, so the VM matrix cannot exercise the
+>   unelevated paths that matter most for scope resolution, and two upgrade
+>   assertions are honest skips for the same reason. The behaviour is
+>   unit-tested; what is missing is the real-machine leg.
+> - **Parameter-level `screen:` grouping does nothing.** The field parses,
+>   validates and is documented, and the wizard renders every parameter on a
+>   single Install Options page regardless. Declaring it is harmless and
+>   pointless.
+> - **The wizard renders its "Upgrading from x.y.z" banner twice** on the
+>   Install Options screen. Cosmetic.
+> - **Schema validation is weaker than it reads.** `additionalProperties` is
+>   applied as a boolean gate only, so where the schema uses its *subschema*
+>   form to constrain open-ended maps — parameter declarations, localized-text
+>   maps — those values are not schema-checked. The parser catches the cases
+>   that matter (a non-scalar localized value is `SIG0292`), but do not treat
+>   `sigil validate` as the whole gate.
+> - **`docs/guides/uninstaller.md` has drifted** from the Add/Remove Programs
+>   entry and uninstaller the code actually produces. Trust
+>   `docs/setup-exe-reference.md` and the observed behaviour over that page
+>   until it is rewritten.
+> - **Native AOT publish is Windows-only.** `release.yml`'s signed,
+>   checksummed release path is tag-triggered and runs on `windows-latest`;
+>   it cannot be exercised from a non-Windows development environment. It was
+>   run end to end for the first time on 2026-09-16, against a throwaway tag.
+> - **The release archive is large: ~47 MB compressed, ~116 MB expanded.**
+>   Each per-architecture zip carries the installer-host runtime for **both**
+>   `win-x64` and `win-arm64`, because a manifest may declare
+>   `architectures: [x64, arm64]` and `sigil pack` needs the runtime for every
+>   target it produces. Deliberate, not bloat — but budget for it in CI caches.
 > - **Coverage:** CI enforces a project-wide union floor of **77%** as of this
 >   release, plus four **hard per-assembly floors** — `SigilBuild.Core` 69%,
 >   `SigilBuild.Signing` 68%, `SigilBuild.Wrapper.Core` 79%,

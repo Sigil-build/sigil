@@ -470,11 +470,52 @@ failing** throwaway PR #17's `broken title`).
    **Caveat that a green run does not resolve:** **R64** — machine-scope install
    remains uncovered, and because the leg runs elevated, the two skipped
    assertions are not proven end to end here.
-2. **Release dry-run.** Blocked on the **six Trusted Signing secrets** — no lane can
-   supply them; `release.yml`'s own "require signing secrets" refusal fires first.
-   This is the only way to learn whether the workflow parses and runs at all.
-3. **R7 — the published artifact runs on a clean machine.** Verified by downloading
-   it, not by reading the workflow (the sibling-DLL trap). Needs (2) first.
+2. ~~**Release dry-run.**~~ **DONE, 2026-09-16** — run
+   [35110087085](https://github.com/Sigil-build/sigil/actions/runs/35110087085),
+   **success**, on a throwaway `v0.0.1-dryrun` tag whose commit was never on a
+   branch (R24 refuses a tag that disagrees with `<Version>`, so the dry-run needed
+   its own version literal; the tag and its release were deleted afterwards and the
+   RC never carried either). Unblocked by **R84** rather than by the secrets, which
+   still do not exist.
+
+   **`release.yml` had never executed before this run.** Everything it claimed was
+   true by construction only. What the run actually establishes:
+
+   | | Measured |
+   |---|---|
+   | `sigil.exe` win-x64 | **14.13 MB** (gate 15) |
+   | `sigil.exe` win-arm64 | **14.47 MB** (gate 15) — **0.53 MB headroom, the tightest gate in the project** |
+   | installer host win-x64 | **42.87 MB** (gate 45) |
+   | installer host win-arm64 | **42.13 MB** (gate 45) |
+
+   The VM matrix ran as a dependency and all three legs passed. **win-arm64
+   cross-compiled successfully** — the workflow's tolerance for it failing was not
+   needed. Exactly two warnings were emitted, and only one is ours: R84's
+   `UNSIGNED PRE-RELEASE`. The other is GitHub's own notice that
+   `actions/checkout@v4` and `actions/setup-dotnet@v4` target the deprecated Node
+   20 — a maintenance item, filed nowhere yet.
+
+   **R84 behaved as designed end to end:** the signing step skipped, the warning
+   fired, the release notes carried the unsigned banner, and `--prerelease` came
+   from the computed value rather than the hardcoded flag it replaced.
+3. **R7 — the published artifact runs on a clean machine.** **Half proven,
+   2026-09-16.** The half that can be checked without a clean machine was, by
+   downloading the artifact rather than reading the workflow:
+   `SHA256SUMS` matches the downloaded zip byte for byte, and **the sibling-DLL
+   trap this row was filed for is closed** — `libSkiaSharp.dll` and `libsodium.dll`
+   both sit beside `sigil.exe`, together with `THIRD-PARTY-NOTICES.md` (which the
+   Sigil License 1.0 requires to travel with the binaries) and the
+   `runtimes/win-x64` + `runtimes/win-arm64` installer hosts.
+
+   **Still owed: an actual clean Windows machine** — no .NET, no VC++
+   redistributable, no developer tooling. Unzip, run `sigil.exe`, and see whether it
+   starts. That is the half a checksum cannot answer, and it is the whole point of
+   the row.
+
+   Observation, not a defect: each zip carries **both** RIDs' installer hosts, so a
+   47 MB download expands to 116 MB. Deliberate — a manifest may declare
+   `architectures: [x64, arm64]` and `sigil pack` needs the runtime for each target
+   — but worth knowing before anyone calls the download size a bug.
 4. **V1.2 — the re-attack pass.** The G1 attacks re-run against the *integrated* RC,
    not against each lane at its own tip.
 5. **R23's other half — private vulnerability reporting is still OFF**

@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-08-11
-- **Decision driver:** Register row **R36** (`docs/plan/release/00-GAP_REGISTER.md`),
+- **Decision driver:** Register row **R36** (audit register row, kept in the private development repository),
   raised during the v0.1.0-alpha release-candidate audit and assigned to
   Stage 2 lane S6. The row observes that `DllRegisterServer` executes
   **in-process at high integrity**, so a malformed or hijacked publisher DLL

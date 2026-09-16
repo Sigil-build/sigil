@@ -70,10 +70,12 @@ Please include:
 
 ## Scope notes specific to Sigil's design
 
-- Sigil is **Windows-only** and pre-MVP; see `README.md` and
-  `docs/plan/release/00-GAP_REGISTER.md` for known gaps that are already
-  tracked and do not need a separate report unless you have found a way to
-  exploit one.
+- Sigil is **Windows-only** and pre-MVP. The **Known limitations** section of
+  `CHANGELOG.md` is the public list of gaps we already track — they do not need
+  a separate report unless you have found a way to exploit one. That list is
+  curated from a fuller internal register kept in a private development
+  repository; if you think something you found belongs on the public list and
+  is not there, say so in your report and we will add it.
 - Reports about third-party dependencies (see `THIRD-PARTY-NOTICES.md` and
   `Directory.Packages.props`) are welcome, but please also report them
   upstream — we cannot patch a dependency's own CVE, only update the pin.

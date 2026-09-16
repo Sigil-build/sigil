@@ -85,9 +85,10 @@ against the pull requests that landed them:
 
 ### Security — hardening landed ahead of this release (Stage 1 of the RC track)
 
-The register rows below (`docs/plan/release/00-GAP_REGISTER.md`) were found
-by a pre-release security audit and fixed before `0.1.0-alpha` was cut, not
-discovered in the wild:
+The rows below were found by a pre-release security audit and fixed before
+`0.1.0-alpha` was cut, not discovered in the wild. The `R` numbers are the
+audit register's own ids; the register is kept in a private development
+repository, so they are provenance here rather than a link you can follow:
 
 - **R1, R2, R19** — Machine-scope install state is hardened: journal replay
   is anchored to `install_dir` and registered subtrees, the machine-scope
@@ -107,9 +108,9 @@ discovered in the wild:
   enforced; and all three VM-gated CI jobs fail loudly instead of passing
   vacuously when their preconditions are absent.
 
-See `docs/plan/release/00-GAP_REGISTER.md` for the full register, including
-rows not yet closed (tracked as known limitations below or left for a future
-release).
+The **Known limitations** section below is the public list of what remains —
+rows that are still open, and behaviour you should know about before relying
+on this release. The full audit register is internal.
 
 ### Security — network trust and the download policy (Stage 2 of the RC track)
 

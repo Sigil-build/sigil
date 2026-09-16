@@ -87,22 +87,19 @@ public static class BrandTokenEmitter
     }
 
     // ── Prototype colors() port ───────────────────────────────────────────────
-    // rail = primary_color, accent = accent_color.
+    // rail = primaryColor, accent = accentColor (the snake_case spellings this
+    // comment used were retired in R80 — the schema never read them).
     //
     // PROVENANCE (single source of truth for these constants). Every hex literal
     // and every SrgbMix percentage below is a verbatim transcription of the
-    // `colors()` function in the Claude-Design wizard prototype, which lived at
+    // `colors()` function in the wizard design prototype, an HTML file that was
+    // retired from the working tree in the pre-release docs cleanup.
     //
-    //     docs/plan/prototype/sigil-installer-wizard-prototype.html
-    //
-    // and was retired from the working tree in the pre-release docs cleanup. It
-    // is NOT lost: the file's last committed state is `b1e21d5` ("feat:
-    // wizard-driven .exe installer (sigil pack --format exe, T1-T18)", #9,
-    // 2026-07-10), so the original is recoverable with
-    //
-    //     git show b1e21d5:docs/plan/prototype/sigil-installer-wizard-prototype.html
-    //
-    // Treat that blob as the reference if a token's value is ever questioned.
+    // It is not lost, but it is no longer reachable from this repository: the
+    // blob lives at `b1e21d5:docs/plan/prototype/sigil-installer-wizard-prototype.html`
+    // in the private `Sigil-build/sigil-internal` repository, which holds this
+    // project's full pre-relicence history. Treat that blob as the reference if
+    // a token's value is ever questioned.
     // Changing a constant here is a deliberate divergence from the prototype,
     // not a bug fix — say so in the commit message, and re-check the WCAG-AA
     // assertions below, which are what these particular blends were tuned for.

@@ -109,8 +109,8 @@ produces one of those checks means the check **never reports at all** on a PR th
 doesn't touch the filtered paths — GitHub then waits forever for a status that will
 never arrive, and the PR is wedged. This already happened once, deliberately, as a
 worked example: `docs.yml`'s `pull_request` trigger has a path filter, which is exactly
-why `docs drift check` is **not** a required context (see the G0 note in
-`docs/plan/release/03-RC_ORCHESTRATION.md`).
+why `docs drift check` is **not** a required context (recorded at gate G0 in the
+private release record).
 
 The fix used in `ci.yml` is a job-level gate instead: a cheap first job (`changes`,
 via `dorny/paths-filter`, pinned by commit SHA) computes whether the diff is docs-only,
@@ -156,12 +156,20 @@ closed (runs the expensive job) whenever it cannot positively prove a skip is sa
 | `SigilBuild.Installer.BrandGenerator` | Derives light+dark palette from two manifest colors at pack time |
 | `SigilBuild.Localization.Generator` | netstandard2.0 source generator (analyzer-only reference — beware `PublishAot` property leaks; see the comment in `Directory.Build.props`) |
 
-Decisions live in `docs/architecture/` (ADRs). The historical sprint and feature-parity
-plans under `docs/plan/` are being retired; the **live** release record is
-`docs/plan/release/`, which stays authoritative until the release ships. Edit those
-files only to record outcomes — a gate closing, a register row landing, a measured
-result — never to make an old plan agree with new code. A decision that changed needs a
-new doc or an ADR amendment, not a rewritten plan.
+Decisions live in `docs/architecture/` (ADRs), and they stay **in this repository**:
+the code cites them by name in ~27 places, and an ADR a reader of the source cannot
+open is a pointer to nowhere. Sigil is source-available so that it can be audited;
+the reasoning behind a decision is part of what is being audited.
+
+**The release record is not here.** The gap register, readiness report, stage plans
+and orchestration live in the private `Sigil-build/sigil-internal` repository, which
+also holds the full history of this project. If a comment or commit message cites a
+row id like `(R18)` or `(R84)`, that is the register's id — provenance, not a path
+you can follow from here. Ask for access if you need the row itself.
+
+Row ids in code comments are kept deliberately: they are stable identifiers that
+survive the document moving, which is exactly why they are written as bare ids
+rather than links.
 
 ## Conventions
 

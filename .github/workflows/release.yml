@@ -66,7 +66,7 @@ jobs:
           # is a pre-release. A stable tag refuses, and so does a tag this regex
           # cannot parse — "could not tell" must never take the permissive arm.
           if (-not $hasSigning -and -not $isPre) {
-            Write-Error "release refused: Azure Trusted Signing secrets are not configured and '$tag' is not a pre-release tag. A stable release ships signed or not at all — see docs/plan/release/10-G2_G3_RUNBOOK.md for the six secrets to provision."
+            Write-Error "release refused: Azure Trusted Signing secrets are not configured and '$tag' is not a pre-release tag. A stable release ships signed or not at all — six Azure Artifact Signing secrets must be configured; see the release runbook in the private development repository."
             exit 1
           }
           if (-not $hasSigning) {

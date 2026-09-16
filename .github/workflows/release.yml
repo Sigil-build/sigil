@@ -31,19 +31,49 @@ jobs:
         with:
           global-json-file: global.json
 
-      # Both refusals run FIRST — before any restore, publish or signing. A
-      # release that cannot be signed, or whose tag disagrees with the one
-      # version literal, should fail in seconds rather than after two Native
-      # AOT publishes and a 45 MB host stage.
-      - name: require signing secrets
+      # Both gates run FIRST — before any restore, publish or signing. A release
+      # that cannot be signed when it must be, or whose tag disagrees with the
+      # one version literal, should fail in seconds rather than after two Native
+      # AOT publishes and a 45 MB host stage. The signing gate is a refusal only
+      # for a stable tag; for a pre-release it resolves to a warning and an
+      # output the signing step reads.
+      #
+      # R84: signing is required for a STABLE release and optional for a
+      # pre-release. Sigil's own certificate never reaches the end user of a
+      # product built with Sigil — `sigil pack` stamps resources into the
+      # installer host, which invalidates any prior Authenticode signature, so
+      # a Setup.exe carries the PUBLISHER's signature applied by `sigil sign`
+      # afterwards. What our signature buys is our own distribution: no
+      # SmartScreen warning on the sigil.exe a developer downloads. Worth
+      # having; not worth blocking a pre-release nobody is being told to trust.
+      - name: signing policy
+        id: signing
         shell: pwsh
         env:
           HAS_SIGNING: ${{ secrets.AZURE_TENANT_ID != '' && secrets.TRUSTED_SIGNING_ACCOUNT != '' }}
         run: |
-          if ($env:HAS_SIGNING -ne 'true') {
-            Write-Error "release refused: Azure Trusted Signing secrets are not configured. An unsigned release is not a release — see docs/plan/release/10-G2_G3_RUNBOOK.md for the six secrets to provision."
+          # A SemVer pre-release tag carries a hyphen after the version
+          # (v0.1.0-alpha); a stable one does not (v1.0.0). That one fact decides
+          # BOTH whether an unsigned release is tolerable and whether GitHub
+          # marks the release as a pre-release. Computing it once, here, is the
+          # point: two copies of that answer could disagree, and the release
+          # creation step used to hardcode `--prerelease` for every tag.
+          $tag = '${{ github.ref_name }}'
+          $isPre = $tag -match '^v[0-9]+\.[0-9]+\.[0-9]+-'
+          $hasSigning = $env:HAS_SIGNING -eq 'true'
+
+          # Fail-closed: unsigned ships only when the tag POSITIVELY proves this
+          # is a pre-release. A stable tag refuses, and so does a tag this regex
+          # cannot parse — "could not tell" must never take the permissive arm.
+          if (-not $hasSigning -and -not $isPre) {
+            Write-Error "release refused: Azure Trusted Signing secrets are not configured and '$tag' is not a pre-release tag. A stable release ships signed or not at all — see docs/plan/release/10-G2_G3_RUNBOOK.md for the six secrets to provision."
             exit 1
           }
+          if (-not $hasSigning) {
+            Write-Host "::warning::UNSIGNED PRE-RELEASE — no Trusted Signing secrets are configured, so '$tag' ships without an Authenticode signature. SmartScreen will warn on the downloaded sigil.exe and the staged installer host carries no publisher signature. Permitted for a pre-release only (R84)."
+          }
+          "has_signing=$(([string]$hasSigning).ToLowerInvariant())" | Add-Content -Path $env:GITHUB_OUTPUT
+          "is_prerelease=$(([string]$isPre).ToLowerInvariant())" | Add-Content -Path $env:GITHUB_OUTPUT
 
       - name: tag matches Directory.Build.props version
         shell: pwsh
@@ -166,6 +196,9 @@ jobs:
       # — upstream attribution stays in THIRD-PARTY-NOTICES.md, which ships in
       # the same archive.
       - name: sign binaries (Azure Trusted Signing)
+        # Skipped only on an unsigned pre-release, which the signing-policy step
+        # above has already proven permissible and warned about (R84).
+        if: steps.signing.outputs.has_signing == 'true'
         uses: azure/trusted-signing-action@v2.0.0
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -253,9 +286,35 @@ jobs:
           if (@($assets).Count -lt 1) { throw "no release assets found in dist/" }
           Write-Host "uploading $(@($assets).Count) asset(s):"
           $assets | ForEach-Object { Write-Host "  $_" }
+
+          # An unsigned release says so on the release page itself. A warning
+          # that lives only in the workflow log is a warning nobody downloading
+          # the zip will ever see. Written to the workspace root, NOT dist/ —
+          # everything in dist/ is an uploaded asset and was checksummed into
+          # SHA256SUMS several steps ago.
+          $notesFile = 'CHANGELOG.md'
+          if ('${{ steps.signing.outputs.has_signing }}' -ne 'true') {
+            $notesFile = 'release-notes.md'
+            $banner = @(
+              '> ### These artifacts are not code-signed',
+              '>',
+              '> This pre-release ships without an Authenticode signature. Windows SmartScreen will warn when you download and run `sigil.exe`, and the installer host staged inside the archive carries no publisher signature. Verify what you downloaded against `SHA256SUMS` instead.',
+              '>',
+              '> **This does not affect installers you build with Sigil.** `sigil pack` stamps the installer host and invalidates any prior signature by design, so a `Setup.exe` carries *your* signature, applied by `sigil sign` after packing.',
+              ''
+            )
+            Set-Content -Path $notesFile -Value ($banner + (Get-Content CHANGELOG.md)) -Encoding utf8
+          }
+
+          # --prerelease comes from the signing-policy step's computed value, not
+          # from a hardcoded flag: this workflow used to mark EVERY tag as a
+          # pre-release, including a stable one.
+          $releaseArgs = @()
+          if ('${{ steps.signing.outputs.is_prerelease }}' -eq 'true') { $releaseArgs += '--prerelease' }
+
           gh release create "${{ github.ref_name }}" `
             --title "sigil ${{ github.ref_name }}" `
-            --notes-file CHANGELOG.md `
-            --prerelease `
+            --notes-file $notesFile `
+            @releaseArgs `
             @assets
           if ($LASTEXITCODE -ne 0) { throw "gh release create exited $LASTEXITCODE" }

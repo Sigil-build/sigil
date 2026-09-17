@@ -27,7 +27,7 @@ public static class ManifestParser
                     new Diagnostic(DiagnosticSeverity.Error, DiagnosticCodes.YamlSyntaxError,
                         "manifest is empty",
                         new SourceLocation(fileName, 1, 1),
-                        "https://docs.sigil.build/diagnostics/SIG0001"),
+                        DiagnosticCodes.DocsUrl(DiagnosticCodes.YamlSyntaxError)),
                 });
             }
 
@@ -45,7 +45,7 @@ public static class ManifestParser
                 new Diagnostic(DiagnosticSeverity.Error, DiagnosticCodes.YamlSyntaxError,
                     ex.Message,
                     new SourceLocation(fileName, (int)ex.Start.Line, (int)ex.Start.Column),
-                    "https://docs.sigil.build/diagnostics/SIG0001"),
+                    DiagnosticCodes.DocsUrl(DiagnosticCodes.YamlSyntaxError)),
             });
         }
     }
@@ -172,7 +172,7 @@ public static class ManifestParser
                 DiagnosticCodes.UpdateManifestUrlInsecure,
                 $"updates.manifestUrl must be an https:// URL (got '{manifestUrl}')",
                 loc,
-                "https://docs.sigil.build/diagnostics/SIG0324"));
+                DiagnosticCodes.DocsUrl(DiagnosticCodes.UpdateManifestUrlInsecure)));
         }
 
         // The field is the update runtime's trust anchor. Validate the shape it is
@@ -189,7 +189,7 @@ public static class ManifestParser
                 "Produce it by base64-encoding ECDsa.ExportSubjectPublicKeyInfo() for your P-256 " +
                 "update-signing key; see docs/manifest-reference.md.",
                 loc,
-                "https://docs.sigil.build/diagnostics/SIG0325"));
+                DiagnosticCodes.DocsUrl(DiagnosticCodes.UpdateSigningKeyInvalid)));
         }
 
         return new UpdatesSection(
@@ -363,7 +363,7 @@ public static class ManifestParser
                     $"installer.require_signed_downloads must be one of 'sign_declared', 'always', " +
                     $"or 'always_verified_revocation' (got '{raw}')",
                     new SourceLocation(fileName, (int)node.Start.Line, (int)node.Start.Column),
-                    "https://docs.sigil.build/diagnostics/SIG0326"));
+                    DiagnosticCodes.DocsUrl(DiagnosticCodes.RequireSignedDownloadsInvalid)));
                 return RequireSignedDownloads.SignDeclared;
         }
     }
@@ -391,7 +391,7 @@ public static class ManifestParser
                 DiagnosticCodes.InvalidLanguageTag,
                 $"installer.language '{raw}' is not a valid language tag",
                 new SourceLocation(fileName, (int)node.Start.Line, (int)node.Start.Column),
-                "https://docs.sigil.build/diagnostics/SIG0291"));
+                DiagnosticCodes.DocsUrl(DiagnosticCodes.InvalidLanguageTag)));
         }
 
         return raw;
@@ -454,7 +454,7 @@ public static class ManifestParser
                     DiagnosticCodes.LocalizedTextValueNotScalar,
                     $"'{key}.{tag}' must be a plain string; found a non-scalar value instead",
                     loc,
-                    "https://docs.sigil.build/diagnostics/SIG0292"));
+                    DiagnosticCodes.DocsUrl(DiagnosticCodes.LocalizedTextValueNotScalar)));
             }
 
             if (!LanguageTag.IsValid(tag))
@@ -464,7 +464,7 @@ public static class ManifestParser
                     DiagnosticCodes.InvalidLanguageTag,
                     $"'{key}' has an invalid language tag '{tag}'",
                     loc,
-                    "https://docs.sigil.build/diagnostics/SIG0291"));
+                    DiagnosticCodes.DocsUrl(DiagnosticCodes.InvalidLanguageTag)));
             }
         }
 
@@ -476,7 +476,7 @@ public static class ManifestParser
                 DiagnosticCodes.LocalizedTextMissingEnglish,
                 $"'{key}' is missing an 'en' entry — every runtime fallback bottoms out at English",
                 loc,
-                "https://docs.sigil.build/diagnostics/SIG0290"));
+                DiagnosticCodes.DocsUrl(DiagnosticCodes.LocalizedTextMissingEnglish)));
         }
 
         return localizedText;
@@ -589,7 +589,7 @@ public static class ManifestParser
             DiagnosticCodes.InvalidPrerequisite,
             message,
             loc,
-            "https://docs.sigil.build/diagnostics/SIG0280"));
+            DiagnosticCodes.DocsUrl(DiagnosticCodes.InvalidPrerequisite)));
 
     /// <summary>
     /// Parse the <c>installer.hooks</c> block. Each phase reuses the ordinary
@@ -662,7 +662,7 @@ public static class ManifestParser
                     DiagnosticCodes.InvalidInstallerVar,
                     $"installer.vars '{name}' must be a non-empty expression string",
                     loc,
-                    "https://docs.sigil.build/diagnostics/SIG0270"));
+                    DiagnosticCodes.DocsUrl(DiagnosticCodes.InvalidInstallerVar)));
                 continue;
             }
 
@@ -674,7 +674,7 @@ public static class ManifestParser
                     DiagnosticCodes.InvalidInstallerVar,
                     $"installer.vars '{name}' expression is invalid ({reason}): '{expr}'",
                     loc,
-                    "https://docs.sigil.build/diagnostics/SIG0270"));
+                    DiagnosticCodes.DocsUrl(DiagnosticCodes.InvalidInstallerVar)));
                 continue;
             }
 
@@ -697,7 +697,7 @@ public static class ManifestParser
                 DiagnosticCodes.InvalidInstallerVar,
                 $"installer.vars form a reference cycle: {string.Join(" -> ", ex.Cycle)}",
                 new SourceLocation(fileName, (int)node.Start.Line, (int)node.Start.Column),
-                "https://docs.sigil.build/diagnostics/SIG0270"));
+                DiagnosticCodes.DocsUrl(DiagnosticCodes.InvalidInstallerVar)));
         }
 
         return list;
@@ -788,7 +788,7 @@ public static class ManifestParser
                     DiagnosticCodes.InvalidInstallerScope,
                     $"installer.scope '{raw}' is not one of user|machine|auto — defaulting to auto",
                     new SourceLocation(fileName, (int)node.Start.Line, (int)node.Start.Column),
-                    "https://docs.sigil.build/diagnostics/SIG0260"));
+                    DiagnosticCodes.DocsUrl(DiagnosticCodes.InvalidInstallerScope)));
                 return InstallScope.Auto;
         }
     }
@@ -865,7 +865,7 @@ public static class ManifestParser
                 DiagnosticCodes.InvalidCustomComponent,
                 message,
                 loc,
-                "https://docs.sigil.build/diagnostics/SIG0300"));
+                DiagnosticCodes.DocsUrl(DiagnosticCodes.InvalidCustomComponent)));
 
             if (string.IsNullOrWhiteSpace(name))
             {
@@ -1073,7 +1073,7 @@ public static class ManifestParser
                     DiagnosticCodes.UnknownScreenParameterRef,
                     $"installer screen field references unknown parameter '{param}' — declare it under the top-level 'parameters:' block",
                     loc,
-                    "https://docs.sigil.build/diagnostics/SIG0240"));
+                    DiagnosticCodes.DocsUrl(DiagnosticCodes.UnknownScreenParameterRef)));
             }
 
             fields.Add(new ScreenField(param, widget));
@@ -1102,7 +1102,7 @@ public static class ManifestParser
                     DiagnosticCodes.InvalidScreenTitleToken,
                     $"installer screen title/subtitle has an unterminated '{{' token: '{text}'",
                     loc,
-                    "https://docs.sigil.build/diagnostics/SIG0242"));
+                    DiagnosticCodes.DocsUrl(DiagnosticCodes.InvalidScreenTitleToken)));
                 return;
             }
 
@@ -1119,7 +1119,7 @@ public static class ManifestParser
                     DiagnosticCodes.InvalidScreenTitleToken,
                     $"installer screen title/subtitle references unknown interpolation token '{{{token}}}' (allowed: {string.Join(", ", KnownScreenTokens)})",
                     loc,
-                    "https://docs.sigil.build/diagnostics/SIG0242"));
+                    DiagnosticCodes.DocsUrl(DiagnosticCodes.InvalidScreenTitleToken)));
             }
 
             i = end + 1;
@@ -1139,7 +1139,7 @@ public static class ManifestParser
             DiagnosticCodes.InvalidScreenWhenExpression,
             $"installer screen 'when' expression is invalid ({reason}): '{when}'",
             loc,
-            "https://docs.sigil.build/diagnostics/SIG0241"));
+            DiagnosticCodes.DocsUrl(DiagnosticCodes.InvalidScreenWhenExpression)));
 
         var depthParen = 0;
         var depthBracket = 0;
@@ -1207,7 +1207,7 @@ public static class ManifestParser
                     DiagnosticCodes.UnknownParameterType,
                     $"unknown parameter type '{typeStr}' for parameter '{name}'",
                     loc,
-                    "https://docs.sigil.build/diagnostics/SIG0210"));
+                    DiagnosticCodes.DocsUrl(DiagnosticCodes.UnknownParameterType)));
                 continue;
             }
 
@@ -1237,7 +1237,7 @@ public static class ManifestParser
                         DiagnosticCodes.ParameterSourceInvalid,
                         $"parameter '{name}' has a `source:` block missing required field(s)",
                         paramLoc,
-                        "https://docs.sigil.build/diagnostics/SIG0234"));
+                        DiagnosticCodes.DocsUrl(DiagnosticCodes.ParameterSourceInvalid)));
                 }
                 else if (!url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
                 {
@@ -1253,7 +1253,7 @@ public static class ManifestParser
                         $"parameter '{name}' has a `source.url` that is not https:// (got '{url}') — " +
                         "its fetched values are substituted into install steps that run elevated",
                         paramLoc,
-                        "https://docs.sigil.build/diagnostics/SIG0323"));
+                        DiagnosticCodes.DocsUrl(DiagnosticCodes.ParameterSourceInsecure)));
                 }
                 else
                 {
@@ -1349,7 +1349,7 @@ public static class ManifestParser
                 DiagnosticCodes.MissingRequiredStepField,
                 "install step is missing required field 'id'",
                 loc,
-                "https://docs.sigil.build/diagnostics/SIG0232"));
+                DiagnosticCodes.DocsUrl(DiagnosticCodes.MissingRequiredStepField)));
             return null;
         }
 
@@ -1360,7 +1360,7 @@ public static class ManifestParser
                 DiagnosticCodes.MissingRequiredStepField,
                 $"install step '{id}' is missing required field 'type'",
                 loc,
-                "https://docs.sigil.build/diagnostics/SIG0232"));
+                DiagnosticCodes.DocsUrl(DiagnosticCodes.MissingRequiredStepField)));
             return null;
         }
 
@@ -1586,7 +1586,7 @@ public static class ManifestParser
             DiagnosticCodes.UnknownStepType,
             $"unknown install step type '{typeStr}' for step '{id}'",
             loc,
-            "https://docs.sigil.build/diagnostics/SIG0230"));
+            DiagnosticCodes.DocsUrl(DiagnosticCodes.UnknownStepType)));
         return null;
     }
 
@@ -1635,7 +1635,7 @@ public static class ManifestParser
             DiagnosticCodes.InvalidStepFieldValue,
             message,
             loc,
-            "https://docs.sigil.build/diagnostics/SIG0233"));
+            DiagnosticCodes.DocsUrl(DiagnosticCodes.InvalidStepFieldValue)));
 
         return isHook ? OnFailure.Fail : OnFailure.Rollback;
     }
@@ -1799,7 +1799,7 @@ public static class ManifestParser
                 DiagnosticCodes.HttpDownloadChecksumRequired,
                 $"http_download step '{id}' must declare a 'sha256' — a download without an integrity checksum is refused",
                 loc,
-                "https://docs.sigil.build/diagnostics/SIG0236"));
+                DiagnosticCodes.DocsUrl(DiagnosticCodes.HttpDownloadChecksumRequired)));
             return null;
         }
 
@@ -1812,7 +1812,7 @@ public static class ManifestParser
                 DiagnosticCodes.HttpDownloadInsecureUrl,
                 $"http_download step '{id}' url must be https:// (got '{url}')",
                 loc,
-                "https://docs.sigil.build/diagnostics/SIG0235"));
+                DiagnosticCodes.DocsUrl(DiagnosticCodes.HttpDownloadInsecureUrl)));
             return null;
         }
 
@@ -1900,7 +1900,7 @@ public static class ManifestParser
             DiagnosticCodes.MissingRequiredStepField,
             $"install step '{id}' (type {stepType}) is missing required field '{field}'",
             loc,
-            "https://docs.sigil.build/diagnostics/SIG0232"));
+            DiagnosticCodes.DocsUrl(DiagnosticCodes.MissingRequiredStepField)));
     }
 
     /// <summary>
@@ -1922,7 +1922,7 @@ public static class ManifestParser
             $"install step '{id}' (type {stepType}) has invalid '{field}' value '{value}'; " +
             $"expected one of: {string.Join(", ", allowed)}",
             loc,
-            "https://docs.sigil.build/diagnostics/SIG0233"));
+            DiagnosticCodes.DocsUrl(DiagnosticCodes.InvalidStepFieldValue)));
     }
 
     private static void ReportUnknownStepFields(
@@ -1946,7 +1946,7 @@ public static class ManifestParser
                     DiagnosticCodes.StepParameterMismatch,
                     $"install step '{id}' (type {stepType}) has unknown field '{key}' — ignored",
                     loc,
-                    "https://docs.sigil.build/diagnostics/SIG0231"));
+                    DiagnosticCodes.DocsUrl(DiagnosticCodes.StepParameterMismatch)));
             }
         }
     }

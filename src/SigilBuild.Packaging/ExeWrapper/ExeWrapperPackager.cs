@@ -527,7 +527,7 @@ public sealed class ExeWrapperPackager : IPackager
                 "Every localized value needs an English fallback — without it there is no defined " +
                 "rendering for users whose language you do not ship.",
                 SourceLocation.Unknown,
-                "https://docs.sigil.build/diagnostics/SIG0290"));
+                DiagnosticCodes.DocsUrl(DiagnosticCodes.LocalizedTextMissingEnglish)));
         }
 
         return texts;
@@ -592,7 +592,7 @@ public sealed class ExeWrapperPackager : IPackager
             DiagnosticCodes.LicenseFileUnreadable,
             message,
             SourceLocation.Unknown,
-            "https://docs.sigil.build/diagnostics/SIG0250"));
+            DiagnosticCodes.DocsUrl(DiagnosticCodes.LicenseFileUnreadable)));
     }
 
     /// <summary>

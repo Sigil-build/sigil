@@ -21,7 +21,7 @@ public static class ManifestLoader
                 new Diagnostic(DiagnosticSeverity.Error, DiagnosticCodes.FileNotFound,
                     $"manifest file '{path}' not found",
                     new SourceLocation(path, 0, 0),
-                    "https://docs.sigil.build/diagnostics/SIG0002"),
+                    DiagnosticCodes.DocsUrl(DiagnosticCodes.FileNotFound)),
             });
         }
 
@@ -86,7 +86,7 @@ public static class ManifestLoader
                 DiagnosticCodes.ParameterValidationFailure,
                 $"parameter '{name}' value {displayValue} {failure}",
                 SourceLocation.Unknown,
-                "https://docs.sigil.build/diagnostics/SIG0220"));
+                DiagnosticCodes.DocsUrl(DiagnosticCodes.ParameterValidationFailure)));
         }
         return diagnostics;
     }

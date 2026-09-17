@@ -19,8 +19,11 @@ namespace SigilBuild.Core.Configuration;
 
 public static class SchemaValidator
 {
-    private const string DocsUrl = "https://docs.sigil.build/diagnostics/SIG0010";
-    private const string SyntaxDocsUrl = "https://docs.sigil.build/diagnostics/SIG0001";
+    // static readonly, not const: the URL is now composed by DiagnosticCodes.DocsUrl
+    // rather than spelled here, and a const cannot hold a method call. Composing it
+    // is the point — the documentation host lives in exactly one place.
+    private static readonly string DocsUrl = DiagnosticCodes.DocsUrl(DiagnosticCodes.SchemaViolation);
+    private static readonly string SyntaxDocsUrl = DiagnosticCodes.DocsUrl(DiagnosticCodes.YamlSyntaxError);
 
     private static JsonDocument? _cachedSchema;
 

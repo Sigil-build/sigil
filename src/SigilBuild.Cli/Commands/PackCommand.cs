@@ -66,7 +66,7 @@ public static class PackCommand
                         "pack --payload web requires a resolvable HTTPS --package-url (missing, " +
                         $"empty, or non-https URLs are refused) — got '{packageUrl ?? "<none>"}'.",
                         SourceLocation.Unknown,
-                        "https://docs.sigil.build/diagnostics/SIG0322"),
+                        DiagnosticCodes.DocsUrl(DiagnosticCodes.WebInstallerPackageUrlUnresolved)),
                 }, useColor: false);
                 ctx.ExitCode = 1;
                 return;

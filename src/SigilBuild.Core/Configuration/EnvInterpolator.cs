@@ -37,7 +37,7 @@ public static class EnvInterpolator
                         DiagnosticCodes.EnvVariableMissing,
                         $"environment variable '{name}' is not set",
                         SourceLocation.Unknown,
-                        "https://docs.sigil.build/diagnostics/SIG0020"));
+                        DiagnosticCodes.DocsUrl(DiagnosticCodes.EnvVariableMissing)));
                     sb.Append(m.Value);
                 }
                 else

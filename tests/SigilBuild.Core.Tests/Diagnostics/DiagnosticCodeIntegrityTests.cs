@@ -14,8 +14,9 @@ using Xunit;
 namespace SigilBuild.Core.Tests.Diagnostics;
 
 /// <summary>
-/// The two guards that keep <see cref="DiagnosticCodes"/> the only place a code is
-/// spelled, and every code the name of exactly one failure (R82).
+/// The guards that keep <see cref="DiagnosticCodes"/> the only place a code — or the
+/// documentation host it resolves to — is spelled, and every code the name of exactly
+/// one failure (R82).
 /// </summary>
 /// <remarks>
 /// Both are needed, and neither substitutes for the other. The register asked only
@@ -54,6 +55,57 @@ public class DiagnosticCodeIntegrityTests
             "a diagnostic code belongs in DiagnosticCodes and nowhere else — use the "
             + "constant, and DiagnosticCodes.DocsUrl for the documentation link");
     }
+
+    [Fact]
+    public void No_source_file_spells_the_documentation_host()
+    {
+        // Arrange — the sibling of the test above, and the one it could not do. Its
+        // regex requires a quote immediately before SIG, so it never saw the code
+        // embedded in a URL ("https://…/diagnostics/SIG0322"), and 40 such literals
+        // across seven files had bypassed DocsUrl entirely — the one function that
+        // exists to own this host. A host spelled in 40 places is a host that cannot
+        // be changed, and these URLs are printed to users and outlive the binary that
+        // printed them.
+        var offenders = new List<string>();
+        var scanned = 0;
+        var sawTheTable = false;
+
+        // Act
+        foreach (var file in EnumerateSources())
+        {
+            scanned++;
+            if (Path.GetFileName(file) == "DiagnosticCodes.cs")
+            {
+                sawTheTable = true;
+                continue;
+            }
+
+            var text = File.ReadAllText(file);
+            if (text.Contains(DocumentationHost, StringComparison.OrdinalIgnoreCase))
+            {
+                offenders.Add(Path.GetFileName(file));
+            }
+        }
+
+        // Assert — prove the scan reached the source tree first. A file walk that
+        // silently finds nothing would make every assertion below vacuously true,
+        // which is the failure mode of a guard nobody notices is asleep.
+        scanned.Should().BeGreaterThan(50, "the scan must actually be walking src/");
+        sawTheTable.Should().BeTrue(
+            "DiagnosticCodes.cs is the one file allowed to spell the host, so not "
+            + "encountering it means the walk is looking somewhere else entirely");
+
+        offenders.Should().BeEmpty(
+            "the documentation host belongs in DiagnosticCodes.DocsUrl and nowhere else, "
+            + "so that moving it stays a one-line change instead of a repo-wide audit");
+    }
+
+    /// <summary>
+    /// Spelled from its parts on purpose: the scan covers <c>src/</c> only, but if it
+    /// is ever widened to the test tree this file must not become the offender it is
+    /// looking for.
+    /// </summary>
+    private static readonly string DocumentationHost = "docs." + "sigil.build";
 
     [Fact]
     public void Every_diagnostic_code_value_is_distinct()

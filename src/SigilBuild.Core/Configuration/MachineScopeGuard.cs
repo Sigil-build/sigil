@@ -61,6 +61,6 @@ internal static class MachineScopeGuard
             $"step '{step.Id}' ({step.GetType().Name}) requires installer scope: machine, " +
             "but this manifest does not set installer.scope: machine",
             location,
-            "https://docs.sigil.build/diagnostics/SIG0310"));
+            DiagnosticCodes.DocsUrl(DiagnosticCodes.SystemStepRequiresMachineScope)));
     }
 }

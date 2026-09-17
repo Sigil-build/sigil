@@ -280,6 +280,45 @@ channel-manifest wire format.
   `packages.lock.json` is committed per project, `NuGet.config` pins
   nuget.org as the only feed, and CI restores with `--locked-mode`.
 
+### Fixed — what the clean-machine run found (R7)
+
+Both of these were found by running the release artifact on a fresh Windows VM
+with no developer tooling, which is the one thing a checksum and a green test
+suite cannot do for you. Both had been in the repository for months.
+
+- **The installer wizard had never opened — on any machine.**
+  `Assets/default-logo.png` and `Assets/default-hero.png` carried a corrupt
+  IDAT chunk CRC. Every other byte was valid, so the files looked fine to
+  anything that did not decode them; libpng inside Skia checks chunk CRCs and
+  refuses, and the refusal arrived as
+  `ArgumentException: Unable to load bitmap from provided data` thrown out of
+  `XamlIlPopulate` — before `InstallerWindow` finished construction, so the
+  process died with no window and no message. `UninstallWindow` and
+  `UpdateWindow` bind the same asset and were dead the same way. Only `/S`
+  (silent) installs worked.
+
+  The test suite could not see it: `TestAppBuilder` configures
+  `UseHeadless(new AvaloniaHeadlessPlatformOptions())`, whose
+  `UseHeadlessDrawing` defaults to `true`, and that platform's `LoadBitmap`
+  returns a stub **without parsing the bytes**. Five test classes construct
+  these windows and all five stayed green. The new guard
+  (`ShippedAssetDecodeTests`) resolves every `avares://installer/Assets/*`
+  exactly as the XAML does and decodes it with SkiaSharp directly, so the
+  drawing stub is out of the loop.
+
+- **`sigil pack` produced installers with no payload, and reported success.**
+  A `build.source` naming a directory that is not on disk was never checked:
+  `ExeWrapperPackager.BuildPayloadBytes` returned an empty array,
+  `WrapperResourceWriter` then skipped the `SIGIL_PAYLOAD_V2` stamp entirely,
+  and `pack` printed an artifact path and exited `0`. The first sign of trouble
+  was on the end user's machine — a failed step and a rollback reading
+  `'payload://' source used but no payload was extracted for this run`.
+
+  `pack` now refuses with **`SIG0122`** before writing anything, naming both
+  what you wrote and what it resolved to, and stating the rule that decided it
+  (relative paths resolve against the manifest's directory, not the working
+  directory). The output directory is no longer created for a refused pack.
+
 ### Known limitations
 
 > **Sigil 0.1.0-alpha is Windows-only and pre-production.** It builds and

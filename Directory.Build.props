@@ -38,7 +38,7 @@
          the version the CLI reports agrees with it. One source of truth,
          enforced from both ends. So: bump <Version> in this file before
          tagging, commit it, and only then push the matching v<Version> tag. -->
-    <Version>0.1.0-alpha</Version>
+    <Version>0.0.2-dryrun</Version>
   </PropertyGroup>
 
   <!-- Static graph restore is required so that ProjectReference metadata

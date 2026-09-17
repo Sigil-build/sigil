@@ -76,10 +76,55 @@ public static class PackCommand
             DiagnosticReporter.Write(Console.Error, load.Diagnostics, useColor: false);
             if (load.Manifest is null) { ctx.ExitCode = 1; return; }
 
-            Directory.CreateDirectory(outDir);
             var manifest = load.Manifest;
             var formats = manifest.Package?.Formats ?? new[] { PackageFormat.Zip };
             var arches = manifest.Package?.Architectures ?? new[] { TargetArchitecture.X64 };
+
+            // Resolved ONCE, before any packager runs: it does not vary by format or
+            // architecture, and every backend needs it (ZipPackager walks it,
+            // MsixPackager copies it, ExeWrapperPackager encodes it into the payload).
+            var sourceDir = System.IO.Path.IsPathRooted(manifest.Build.Source)
+                ? manifest.Build.Source
+                : System.IO.Path.GetFullPath(
+                    System.IO.Path.Combine(
+                        System.IO.Path.GetDirectoryName(path) ?? ".",
+                        manifest.Build.Source));
+
+            // build.source is the one manifest field the schema cannot check: it is an
+            // assertion about the filesystem. Nothing downstream checked it either —
+            // ExeWrapperPackager.BuildPayloadBytes returns an empty array for a
+            // directory that is not there, and WrapperResourceWriter then skips the
+            // SIGIL_PAYLOAD_V2 stamp entirely, so `pack` printed an artifact path and
+            // exited 0 while emitting a Setup.exe that cannot install anything. The
+            // failure first appeared on the END USER's machine, as a failed step and a
+            // rollback: "'payload://' source used but no payload was extracted for this
+            // run". Found by R7 on a clean machine.
+            //
+            // So refuse at pack time. A wrong build.source is the author's mistake and
+            // belongs in the author's terminal — shipping it is strictly worse than
+            // failing here.
+            if (!Directory.Exists(sourceDir))
+            {
+                DiagnosticReporter.Write(Console.Error, new[]
+                {
+                    new Diagnostic(
+                        DiagnosticSeverity.Error,
+                        DiagnosticCodes.BuildSourceNotFound,
+                        $"build.source '{manifest.Build.Source}' resolves to '{sourceDir}', which " +
+                        "does not exist. Relative paths are resolved against the manifest's own " +
+                        "directory, not the current working directory. Refusing to pack: an absent " +
+                        "source produces a package with no payload, and the install would fail on " +
+                        "the user's machine rather than here.",
+                        SourceLocation.Unknown,
+                        DiagnosticCodes.DocsUrl(DiagnosticCodes.BuildSourceNotFound)),
+                }, useColor: false);
+                ctx.ExitCode = 1;
+                return;
+            }
+
+            // Only now: a refused pack that still leaves an output directory behind
+            // invites someone to look in it and ship whatever is there.
+            Directory.CreateDirectory(outDir);
 
             foreach (var format in formats)
             {
@@ -120,13 +165,6 @@ public static class PackCommand
                         PackageFormat.Exe => new ExeWrapperPackager(),
                         _ => throw new System.NotSupportedException($"unknown format {format}"),
                     };
-
-                    var sourceDir = System.IO.Path.IsPathRooted(manifest.Build.Source)
-                        ? manifest.Build.Source
-                        : System.IO.Path.GetFullPath(
-                            System.IO.Path.Combine(
-                                System.IO.Path.GetDirectoryName(path) ?? ".",
-                                manifest.Build.Source));
 
                     var payloadMode = isWebPayload ? PayloadMode.Web : PayloadMode.Embedded;
                     var result = await packager.PackAsync(manifest,

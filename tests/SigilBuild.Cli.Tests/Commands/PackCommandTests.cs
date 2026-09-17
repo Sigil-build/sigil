@@ -55,6 +55,57 @@ public class PackCommandTests
     }
 
     /// <summary>
+    /// R7: a `build.source` that is not on disk must fail in the author's terminal,
+    /// not on the user's machine. Before this guard `pack` exited 0 and wrote a
+    /// Setup.exe with no SIGIL_PAYLOAD_V2 resource, and the first sign of trouble
+    /// was a failed step and a rollback during a real install.
+    /// </summary>
+    [Fact]
+    public async Task Pack_BuildSourceMissing_ReportsSig0122AndExits1()
+    {
+        var workDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(workDir);
+
+        // Deliberately do NOT create ./payload — that is the defect under test.
+        var manifestPath = Path.Combine(workDir, "sigil.yaml");
+        File.WriteAllText(manifestPath, """
+            spec: v1.0
+            app: { id: com.example.App, name: Example, version: 1.0.0, publisher: Example Inc. }
+            build: { source: ./payload }
+            package: { formats: [zip], architectures: [x64] }
+            """);
+        var outDir = Path.Combine(workDir, "dist");
+        try
+        {
+            var origErr = System.Console.Error;
+            using var capturedErr = new StringWriter();
+            System.Console.SetError(capturedErr);
+            try
+            {
+                var exit = await Program.MainAsync(new[] { "pack", manifestPath, "--out", outDir });
+
+                exit.Should().Be(1, "packing nothing is not a success");
+
+                var err = capturedErr.ToString();
+                err.Should().Contain("SIG0122");
+                err.Should().Contain("./payload", "the author needs to see what they wrote");
+                err.Should().Contain(
+                    "resolved against the manifest's own directory",
+                    "the usual cause is running pack from elsewhere, so name the rule that decided the path");
+            }
+            finally
+            {
+                System.Console.SetError(origErr);
+            }
+
+            // Nothing may be emitted: a refused pack that still leaves an artifact
+            // behind invites someone to ship it.
+            Directory.Exists(outDir).Should().BeFalse();
+        }
+        finally { Directory.Delete(workDir, recursive: true); }
+    }
+
+    /// <summary>
     /// `--payload web` requires a resolvable HTTPS `--package-url`.
     /// Missing → SIG0322, pack refuses before even loading the manifest.
     /// </summary>

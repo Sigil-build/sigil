@@ -43,6 +43,13 @@ public static class DiagnosticCodes
     // a manifest-validation page.
     public const string ExeFormatRequiresWindowsHost = "SIG0121";
 
+    // SIG0122 — build.source names a directory that is not on disk. In the
+    // packaging band rather than a manifest band on purpose: the document is
+    // valid YAML against a valid schema, and only the filesystem can contradict
+    // it. Refusing here is what stops a pack from succeeding with nothing to
+    // pack (R7).
+    public const string BuildSourceNotFound = "SIG0122";
+
     // SIG02xx — parameters: block
     public const string UnknownParameterType = "SIG0210";
     public const string ParameterValidationFailure = "SIG0220";

@@ -208,11 +208,20 @@ public static class DiagnosticCodes
     /// The documentation URL for <paramref name="code"/>.
     /// </summary>
     /// <remarks>
-    /// Most call sites still spell this URL out, which puts a second copy of the code
-    /// in every diagnostic and lets the two drift — renumbering the signing band in
-    /// R82 silently pointed five URLs at the old numbers until they were caught. Sites
-    /// touched by that renumber use this helper instead; the rest are correct today
-    /// and are a mechanical follow-up, not a defect.
+    /// This is the ONLY place the documentation host is spelled. Call sites used to
+    /// write the whole URL out, which put a second copy of the code in every
+    /// diagnostic and let the two drift — renumbering the signing band in R82
+    /// silently pointed five URLs at the old numbers until they were caught. All 40
+    /// such literals now route through here, and a test forbids the host appearing
+    /// anywhere else under <c>src/</c>.
+    /// <para>
+    /// The target is one page with a per-code anchor, not a page per code:
+    /// <c>docs/diagnostics.md</c> renders at <c>/diagnostics/</c> and each entry
+    /// carries an explicit lowercase <c>{#sigXXXX}</c> id. Lower-casing here is what
+    /// matches those ids — a fragment is case-sensitive, and the codes are written
+    /// upper-case everywhere else.
+    /// </para>
     /// </remarks>
-    public static string DocsUrl(string code) => $"https://docs.sigil.build/diagnostics/{code}";
+    public static string DocsUrl(string code) =>
+        $"https://docs.sigil.build/diagnostics/#{code.ToLowerInvariant()}";
 }

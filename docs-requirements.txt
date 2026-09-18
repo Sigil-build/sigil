@@ -2,9 +2,9 @@
 # the .NET restore: nothing in src/ or tests/ needs Python, and the locked NuGet
 # restore (R23a) stays the single story for everything that ships.
 #
-# PINNING: the version below is a floor, not a pin, because it could not be
-# verified from this machine (no Python toolchain here — the first Cloudflare
-# Pages build is what resolves it). Read the resolved version out of that build
-# log and replace this with an exact `==` pin, so a future mkdocs-material
-# release cannot change the published site without a commit saying so.
-mkdocs-material>=9.5
+# Pinned exactly, on the same principle as packages.lock.json: a new
+# mkdocs-material release must not be able to change the published site without
+# a commit saying so. This is the version the first Cloudflare Pages build
+# actually resolved and served — read back from the live page's generator meta
+# tag (mkdocs-1.6.1, mkdocs-material-9.7.7) rather than assumed.
+mkdocs-material==9.7.7

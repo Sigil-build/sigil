@@ -86,7 +86,13 @@ public class MachineScopeGuardTests
         d.Code.Should().Be("SIG0310");
         d.Message.Should().Contain("register_com_server");
         d.Message.Should().Contain(nameof(FakeSystemStep));
-        d.DocsUrl.Should().Be("https://docs.sigil.build/diagnostics/SIG0310");
+        // The property worth pinning here is that the diagnostic's URL belongs to
+        // the diagnostic's own code — the R82 renumber is what happens when those
+        // two drift apart. The URL's shape is pinned once, by
+        // DiagnosticCodeIntegrityTests.DocsUrl_is_built_from_the_code_it_is_given,
+        // so spelling it out a second time here only creates another place to
+        // update when the docs site moves.
+        d.DocsUrl.Should().Be(DiagnosticCodes.DocsUrl(d.Code));
     }
 
     [Fact]

@@ -137,11 +137,50 @@ public class DiagnosticCodeIntegrityTests
     {
         // Arrange, Act, Assert — the property that makes a URL unable to drift from
         // its code, which is how the R82 renumber briefly left five URLs behind.
+        // The target is an anchor on one page, and a URL fragment is case-sensitive,
+        // so the assertion pins the lower-casing too: it is what makes the link land
+        // on the entry rather than at the top of the page.
         DiagnosticCodes.DocsUrl(DiagnosticCodes.SigntoolFailed)
-            .Should().EndWith("/" + DiagnosticCodes.SigntoolFailed);
+            .Should().EndWith("#" + DiagnosticCodes.SigntoolFailed.ToLowerInvariant());
     }
 
-    private static IEnumerable<string> EnumerateSources()
+    [Fact]
+    public void Every_diagnostic_code_has_an_entry_in_the_reference_page()
+    {
+        // Arrange — the codes are printed to users with a URL promising an
+        // explanation, so a code with no entry is a broken promise that only the
+        // reader discovers. The page carries an explicit {#sigxxxx} id per entry
+        // precisely so this can be checked mechanically.
+        var page = File.ReadAllText(Path.Combine(RepoRoot(), "docs", "diagnostics.md"));
+
+        var codes = typeof(DiagnosticCodes)
+            .GetFields(BindingFlags.Public | BindingFlags.Static)
+            .Where(f => f.IsLiteral && f.FieldType == typeof(string))
+            .Select(f => (string)f.GetRawConstantValue()!)
+            .Where(v => v.StartsWith("SIG", StringComparison.Ordinal))
+            .ToList();
+
+        var documented = Regex.Matches(page, @"\{#(sig[0-9]{4})\}")
+            .Select(m => m.Groups[1].Value.ToUpperInvariant())
+            .ToHashSet(StringComparer.Ordinal);
+
+        // Act
+        var undocumented = codes.Where(c => !documented.Contains(c)).OrderBy(c => c, StringComparer.Ordinal).ToList();
+        var orphaned = documented.Where(d => !codes.Contains(d)).OrderBy(d => d, StringComparer.Ordinal).ToList();
+
+        // Assert
+        codes.Should().NotBeEmpty("the reflection query must actually find the table");
+        documented.Should().NotBeEmpty("the anchor regex must actually match the page");
+
+        undocumented.Should().BeEmpty(
+            "every code Sigil can print links to this page, so one without an entry "
+            + "sends the reader to a heading that is not there");
+        orphaned.Should().BeEmpty(
+            "an entry for a code that no longer exists outlives the failure it "
+            + "described, and reads as though Sigil still emits it");
+    }
+
+    private static string RepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "src")))
@@ -150,9 +189,13 @@ public class DiagnosticCodeIntegrityTests
         }
 
         dir.Should().NotBeNull("the test must be able to locate the repo root");
+        return dir!.FullName;
+    }
 
+    private static IEnumerable<string> EnumerateSources()
+    {
         return Directory
-            .EnumerateFiles(Path.Combine(dir!.FullName, "src"), "*.cs", SearchOption.AllDirectories)
+            .EnumerateFiles(Path.Combine(RepoRoot(), "src"), "*.cs", SearchOption.AllDirectories)
             .Where(p => !p.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
                      && !p.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal));
     }

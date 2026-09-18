@@ -81,6 +81,7 @@ nav:
       - Updates: guides/updates.md
       - Uninstaller: guides/uninstaller.md
       - Localization: guides/localization.md
+  - Diagnostics: diagnostics.md
   - Reference:
       - Manifest: manifest-reference.md
       - CLI: cli-reference.md

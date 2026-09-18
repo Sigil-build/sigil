@@ -198,6 +198,6 @@ tool. Sigil ships one built in (gap G15, shipped P12):
 
 ## Examples
 
-See the worked manifests under [`examples/`](../../examples/) in the repo
+See the worked manifests under [`examples/`](https://github.com/Sigil-build/sigil/tree/HEAD/examples/) in the repo
 root — each is validated in CI against the current schema, so they stay
 accurate to shipped behavior by construction.

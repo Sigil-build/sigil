@@ -1,0 +1,106 @@
+# Documentation site for docs.sigil.build, built by Cloudflare Pages.
+#
+# Build command:  pip install -r docs-requirements.txt && mkdocs build
+# Output dir:     site
+# Required env:   PYTHON_VERSION = 3.12  (Cloudflare Pages does not default to a
+#                 Python 3 the current mkdocs-material supports)
+#
+# docs/ is the same tree GitHub renders when browsing the repository, so every
+# page has to keep working in BOTH places. That rules out MkDocs-only link
+# syntax: intra-doc links stay relative and keep their .md extension, which
+# MkDocs rewrites for the site and GitHub follows as-is.
+
+site_name: Sigil
+site_description: Declarative Windows software distribution — pack, sign, publish, update, from one sigil.yaml.
+site_url: https://docs.sigil.build/
+repo_url: https://github.com/Sigil-build/sigil
+repo_name: Sigil-build/sigil
+edit_uri: edit/main/docs/
+
+docs_dir: docs
+site_dir: site
+
+# Sigil is source-available, not open source (ADR-016). The footer's copyright
+# should say so rather than leave a reader to assume the usual.
+copyright: >
+  Copyright (c) 2026 Yevhen Khudoliiv. Source-available under the Sigil License 1.0.
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.instant
+    - content.code.copy
+    - search.highlight
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+plugins:
+  - search
+
+# Explicit, because the alphabetical default buries getting-started under the
+# ADRs and orders the guides by filename rather than by the order someone
+# actually needs them.
+nav:
+  - Overview: README.md
+  - Getting started: getting-started.md
+  - Architecture: architecture-overview.md
+  - Guides:
+      - Install steps: guides/install-steps.md
+      - Parameters: guides/parameters.md
+      - Conditional installs: guides/conditional-installs.md
+      - Prerequisites: guides/prerequisites.md
+      - Installer wizard: guides/installer-wizard.md
+      - Packaging formats: guides/packaging-formats.md
+      - Signing: guides/signing.md
+      - Upgrades: guides/upgrades.md
+      - Updates: guides/updates.md
+      - Uninstaller: guides/uninstaller.md
+      - Localization: guides/localization.md
+  - Reference:
+      - Manifest: manifest-reference.md
+      - CLI: cli-reference.md
+      - Setup.exe: setup-exe-reference.md
+  - Migration:
+      - From Inno Setup: migration/from-inno.md
+  - Decisions (ADRs):
+      - Avalonia and Native AOT: architecture/adr-avalonia-aot.md
+      - MSIX companion: architecture/adr-msix-companion.md
+      - 008 Expression policy: architecture/adr-008-expression-policy.md
+      - 009 Update manifest signature: architecture/adr-009-update-manifest-signature.md
+      - 010 Delta update deferral: architecture/adr-010-delta-update-deferral.md
+      - 011 Update manifest freshness: architecture/adr-011-update-manifest-freshness.md
+      - 012 COM registration isolation: architecture/adr-012-com-registration-isolation.md
+      - 013 Brand tokens — runtime JSON vs source gen: architecture/adr-013-brand-token-runtime-json-vs-source-gen.md
+      - 014 Schema validator monolith: architecture/adr-014-schema-validator-monolith.md
+      - 015 Localization design: architecture/adr-015-localization-design.md
+      - 016 Licensing: architecture/adr-016-licensing.md
+
+# A broken internal link should fail the build, not ship as a 404. The docs
+# tree already carries ~28 cross-references between ADRs and guides, and R71
+# showed how easily a file move breaks them silently.
+strict: true

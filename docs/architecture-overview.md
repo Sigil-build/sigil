@@ -89,7 +89,7 @@ will change without a superseding architecture decision record:
   users.** The CLI is the primary product; the wizard is a thin host that
   consumes the same manifest.
 - **Source-available tool, closed SaaS half.** The CLI in this repo is licensed
-  under the [Sigil License 1.0](../LICENSE) — readable, freely usable, not
+  under the [Sigil License 1.0](https://github.com/Sigil-build/sigil/blob/HEAD/LICENSE) — readable, freely usable, not
   reusable as source (see [ADR-016](architecture/adr-016-licensing.md)).
   A separate, closed-source SaaS half handles cloud signing orchestration,
   team accounts, and signing history; it is **not** co-located with the

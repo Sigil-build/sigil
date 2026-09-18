@@ -5,7 +5,7 @@ checkout to a validated, packed artifact.
 
 > **Pre-MVP status.** Sigil is not yet on `winget` / `dotnet tool install`.
 > Today the only way to run it is to build from source. Public installers
-> ship at MVP launch — see [the README](../README.md).
+> ship at MVP launch — see [the README](https://github.com/Sigil-build/sigil/blob/HEAD/README.md).
 
 ## 1. Prerequisites
 
@@ -91,7 +91,7 @@ None of the templates is a tour of the whole schema: **no** template ships
 `parameters:`, `install_steps:`, `pre_install:`/`post_install:`, `uninstall:`,
 or the rest of the `installer:` block (`options`, `screens`, `vars`, `hooks`,
 `prerequisites`, `app_mutex`, `scope`, `license`, `require_signed_downloads`).
-For those, start from a guide or from [`examples/`](../examples/) — the two
+For those, start from a guide or from [`examples/`](https://github.com/Sigil-build/sigil/tree/HEAD/examples/) — the two
 manifests under `examples/exe-wrapper/` are the ones that produce a real
 installer.
 

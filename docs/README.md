@@ -1,8 +1,8 @@
 # Sigil documentation
 
 User-facing docs for the `sigil` CLI and its manifest format. Build, test and
-repo conventions live in [`../AGENTS.md`](../AGENTS.md);
-[`../CONTRIBUTING.md`](../CONTRIBUTING.md) covers what to report and why code
+repo conventions live in [`../AGENTS.md`](https://github.com/Sigil-build/sigil/blob/HEAD/AGENTS.md);
+[`../CONTRIBUTING.md`](https://github.com/Sigil-build/sigil/blob/HEAD/CONTRIBUTING.md) covers what to report and why code
 contributions are closed.
 
 ## Start here
@@ -16,7 +16,7 @@ contributions are closed.
   and an example. *Auto-generated from the live command tree.*
 - [**Manifest reference**](manifest-reference.md) — every key in `sigil.yaml`,
   with type, default, and description. *Auto-generated from
-  [`schemas/sigil-schema.json`](../schemas/sigil-schema.json).*
+  [`schemas/sigil-schema.json`](https://github.com/Sigil-build/sigil/blob/HEAD/schemas/sigil-schema.json).*
 - [**setup.exe reference**](setup-exe-reference.md) — every runtime flag the
   produced installer/uninstaller accepts (`/S`, `/D=`, `/PName=Value`, exit
   codes, …). *Hand-written — see the page for why it cannot be generated.*

@@ -500,6 +500,7 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
                 OnPropertyChanged(nameof(CanGoBack));
                 OnPropertyChanged(nameof(CanGoNext));
                 OnPropertyChanged(nameof(CanCancel));
+                OnPropertyChanged(nameof(IsTerminal));
                 // When the step is set directly (tests, engine outcome) rather than
                 // through Next/Back, resync the flow cursor so navigation stays correct.
                 if (!_navigating)
@@ -535,6 +536,24 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
 
     /// <summary>False only on the Finish screen — install is already done, nothing to cancel.</summary>
     public bool CanCancel => _step is not InstallerStep.Finish;
+
+    /// <summary>
+    /// True on the three screens the wizard never navigates away from: the install
+    /// has finished, failed, or was refused as a downgrade. They need a button that
+    /// closes the window, not one that navigates or cancels.
+    /// </summary>
+    /// <remarks>
+    /// Until this existed the footer showed Back / Next / Cancel on every screen,
+    /// with Back and Next disabled on a terminal screen and Cancel wired to
+    /// <see cref="CancelAsync"/>, which returns <c>false</c> on Finish by design —
+    /// "install completed, nothing to cancel". The result was a finished installer
+    /// whose only enabled button did nothing at all, leaving the taskbar or Task
+    /// Manager as the way out. <c>UninstallWindow</c> and <c>UpdateWindow</c> both
+    /// had a terminal Close button already; the install wizard was the one that
+    /// never got one.
+    /// </remarks>
+    public bool IsTerminal =>
+        _step is InstallerStep.Finish or InstallerStep.Failed or InstallerStep.DowngradeBlocked;
 
     /// <summary>
     /// The embedded license text shown on the License screen. Empty until
@@ -1303,9 +1322,10 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     /// "user cancelled").
     /// </summary>
     /// <param name="confirmAsync">
-    /// A delegate that, when the install is actively running, must show a confirmation dialog
-    /// and return <c>true</c> if the user confirms cancellation.  Pass <c>null</c> to skip the
-    /// modal (used in automated tests for pre-install screens).
+    /// A delegate that must show a confirmation dialog and return <c>true</c> if the user
+    /// confirms cancellation. Invoked on every non-terminal screen, not only while the
+    /// engine is running. Pass <c>null</c> to skip the modal (automated tests, and any
+    /// caller that has already asked).
     /// </param>
     public async Task<bool> CancelAsync(Func<Task<bool>>? confirmAsync = null)
     {
@@ -1318,16 +1338,22 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
         if (_step == InstallerStep.DowngradeBlocked)
             return true;    // downgrade blocked — close, keep exit code 3
 
+        // Confirm on EVERY non-terminal screen, not only while the engine is
+        // running. Abandoning setup is the user's decision either way, and the X
+        // in the title bar sits a few pixels from the buttons they actually meant
+        // to press — an unconfirmed close there loses whatever they had already
+        // chosen (destination, components, licence key) with no way back.
+        if (confirmAsync is not null)
+        {
+            var confirmed = await confirmAsync().ConfigureAwait(true);
+            if (!confirmed)
+                return false;
+        }
+
+        // Only a running engine needs interrupting; the earlier screens have
+        // nothing in flight to stop.
         if (_step == InstallerStep.Installing && _engineCts is not null)
         {
-            // Confirm with the user before interrupting a running install.
-            if (confirmAsync is not null)
-            {
-                var confirmed = await confirmAsync().ConfigureAwait(true);
-                if (!confirmed)
-                    return false;
-            }
-
             _engineCts.Cancel();
         }
 

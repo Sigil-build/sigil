@@ -7,11 +7,19 @@
         xmlns:loc="clr-namespace:SigilBuild.Wrapper.Core.Localization;assembly=SigilBuild.Wrapper.Core"
         x:Class="SigilBuild.Installer.Host.Views.CancelConfirmDialog"
         Title="{x:Static loc:S.CancelTitle}"
-        Width="360" Height="180"
+        Width="360" Height="200"
         CanResize="False"
+        ShowInTaskbar="False"
         WindowStartupLocation="CenterOwner"
-        WindowDecorations="BorderOnly">
+        Background="{DynamicResource WinBgBrush}"
+        WindowDecorations="Full">
 
+  <!-- The dialog is white-on-white against the content pane, and BorderOnly's
+       hairline frame vanished into it — the modal read as text that had appeared
+       in the middle of the wizard rather than as a window asking a question.
+       A real title bar is the unambiguous boundary, and it matches the main
+       window's chrome; closing it with the X returns no result, which the caller
+       reads as "do not cancel" — the safe default. -->
   <StackPanel Margin="24" Spacing="20">
     <TextBlock Text="{x:Static loc:S.CancelTitle}"
                FontSize="16" FontWeight="SemiBold" />
@@ -19,8 +27,11 @@
                TextWrapping="Wrap" Foreground="#374151" />
     <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right">
       <Button Name="YesButton" Content="{x:Static loc:S.CancelConfirm}" Click="OnYes" />
+      <!-- Same pairing as the wizard's primary button: the rail's colour with the
+           rail's text colour, so the two derive together and stay legible for a
+           brand whose palette resolves light. -->
       <Button Name="NoButton"  Content="{x:Static loc:S.CancelResume}" Click="OnNo"
-              Background="{DynamicResource AccentBrush}" Foreground="White" />
+              Background="{DynamicResource RailBgBrush}" Foreground="{DynamicResource RailTextBrush}" />
     </StackPanel>
   </StackPanel>
 

@@ -9,6 +9,28 @@
              RequestedThemeVariant="Light">
   <Application.Styles>
     <FluentTheme />
+
+    <!-- Avalonia leaves the arrow cursor on clickable controls, unlike the web and
+         unlike every other installer on Windows, so nothing in the wizard told the
+         user what was clickable. Set once here rather than per-control: a button
+         added to a screen later should not have to remember this. -->
+    <Style Selector="Button">
+      <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="CheckBox">
+      <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="RadioButton">
+      <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="ComboBox">
+      <Setter Property="Cursor" Value="Hand" />
+    </Style>
+
+    <!-- A disabled button is not clickable, so it must not claim to be. -->
+    <Style Selector="Button:disabled">
+      <Setter Property="Cursor" Value="Arrow" />
+    </Style>
   </Application.Styles>
   <Application.Resources>
     <ResourceDictionary>

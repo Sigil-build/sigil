@@ -12,16 +12,21 @@
         Width="800" Height="500"
         CanResize="False"
         WindowStartupLocation="CenterScreen"
-        WindowDecorations="BorderOnly"
+        WindowDecorations="Full"
         Background="{DynamicResource WinBgBrush}">
 
   <Grid ColumnDefinitions="240,*" RowDefinitions="*,56">
 
     <!-- Sidebar (rail): brand block on top, step indicator below -->
-    <Border Grid.Row="0" Grid.Column="0" Grid.RowSpan="2" Background="{DynamicResource RailBgBrush}">
+    <!-- The title bar is the discoverable way to move the window; this is the
+         convenience on top of it. Kept because the rail holds no interactive
+         controls, so a press here is unambiguously a grab — and because it is what
+         keeps the window movable at all if the chrome is ever made custom again. -->
+    <Border Grid.Row="0" Grid.Column="0" Grid.RowSpan="2" Background="{DynamicResource RailBgBrush}"
+            PointerPressed="OnChromePressed">
       <DockPanel Margin="24" LastChildFill="False">
         <StackPanel DockPanel.Dock="Top" Spacing="16">
-          <Image Source="avares://installer/Assets/default-logo.png" Height="48" HorizontalAlignment="Left" />
+          <Image Source="{Binding Brand.LogoImage}" Height="48" HorizontalAlignment="Left" />
           <TextBlock Text="{Binding Brand.AppName}" Foreground="{DynamicResource RailTextBrush}" FontSize="22" FontWeight="SemiBold" />
           <TextBlock Text="{Binding Brand.Publisher}" Foreground="{DynamicResource RailMutedBrush}" FontSize="13" />
           <!-- Verified-signature-gated trust line. Visible only when the manifest
@@ -58,9 +63,20 @@
     <!-- Footer -->
     <Border Grid.Row="1" Grid.Column="1" BorderBrush="{DynamicResource FrameBrush}" BorderThickness="0,1,0,0" Padding="16,8">
       <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right">
-        <Button Content="{x:Static loc:S.NavBack}" IsEnabled="{Binding CanGoBack}" Click="OnBack" />
-        <Button Content="{x:Static loc:S.NavNext}" IsEnabled="{Binding CanGoNext}" Click="OnNext" Background="{DynamicResource AccentBrush}" Foreground="White" />
-        <Button Content="{x:Static loc:S.NavCancel}" Click="OnCancel" />
+        <Button Content="{x:Static loc:S.NavBack}" IsEnabled="{Binding CanGoBack}" Click="OnBack" IsVisible="{Binding !IsTerminal}" />
+        <!-- The primary button wears the rail's colour, not the accent: the rail is
+             the largest branded surface on screen and the two sat side by side as
+             two different blues. Foreground is RailTextBrush rather than a literal
+             White because that pair is what the brand generator derives together —
+             hardcoding White would break the contrast guarantee for any brand whose
+             rail resolves light. -->
+        <Button Content="{x:Static loc:S.NavNext}" IsEnabled="{Binding CanGoNext}" Click="OnNext" IsVisible="{Binding !IsTerminal}" Background="{DynamicResource RailBgBrush}" Foreground="{DynamicResource RailTextBrush}" />
+        <Button Content="{x:Static loc:S.NavCancel}" Click="OnCancel" IsVisible="{Binding !IsTerminal}" />
+        <!-- Terminal footer, mirroring UninstallWindow / UpdateWindow: on Finish,
+             Failed and DowngradeBlocked the only sensible action is to leave, and
+             Cancel is not it — CancelAsync returns false on Finish by design. -->
+        <Button Content="{x:Static loc:S.NavClose}" Click="OnClose" IsVisible="{Binding IsTerminal}"
+                Background="{DynamicResource RailBgBrush}" Foreground="{DynamicResource RailTextBrush}" />
       </StackPanel>
     </Border>
 

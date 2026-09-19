@@ -2,6 +2,9 @@
 // Licensed under the Sigil License 1.0. See LICENSE in the repository root.
 
 using System.Collections.Generic;
+using System.IO;
+using Avalonia.Media.Imaging;
+using Avalonia.Platform;
 using SigilBuild.Wrapper.Core.Localization;
 
 namespace SigilBuild.Installer.Host.Branding;
@@ -37,6 +40,85 @@ public sealed class BrandTokens : System.ComponentModel.INotifyPropertyChanged
 
     /// <summary>Base64-encoded brand hero bytes carried in the blob, if any.</summary>
     public string? HeroBase64 { get; init; }
+
+    /// <summary>
+    /// The logo to render: the manifest's <c>installer.brand.logo</c> when one was
+    /// packed, otherwise the bundled default. Also the window icon, so the title
+    /// bar, the taskbar and the rail all show the same mark.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Until this existed, <see cref="LogoBase64"/> was read out of the blob into
+    /// this type and then consumed by nothing: all three windows bound their
+    /// <c>Image</c> to the bundled asset by a literal <c>avares://</c> path, so a
+    /// manifest that declared a brand logo had it packed and silently ignored, and
+    /// no window set <c>Icon</c> at all.
+    /// </para>
+    /// <para>
+    /// Resolved lazily and once. Lazily because constructing an Avalonia
+    /// <see cref="Bitmap"/> needs an initialised platform, and ~20 test classes
+    /// build a <c>BrandTokens</c> with no UI at all; once because the getter is hit
+    /// on every screen change.
+    /// </para>
+    /// <para>
+    /// A brand logo that will not decode falls back to the default rather than
+    /// throwing. A decorative image is never worth failing an install over — and a
+    /// bitmap that Skia refuses, thrown out of a window constructor, is exactly the
+    /// defect that kept this wizard from ever opening.
+    /// </para>
+    /// </remarks>
+    public Bitmap? LogoImage
+    {
+        get
+        {
+            if (_logoResolved)
+            {
+                return _logo;
+            }
+
+            _logoResolved = true;
+            _logo = DecodeBrandLogo() ?? LoadDefaultLogo();
+            return _logo;
+        }
+    }
+
+    private Bitmap? _logo;
+    private bool _logoResolved;
+
+    private Bitmap? DecodeBrandLogo()
+    {
+        if (string.IsNullOrWhiteSpace(LogoBase64))
+        {
+            return null;
+        }
+
+#pragma warning disable CA1031 // Any failure here means "no usable brand logo"; the default is the answer.
+        try
+        {
+            using var stream = new MemoryStream(System.Convert.FromBase64String(LogoBase64));
+            return new Bitmap(stream);
+        }
+        catch
+        {
+            return null;
+        }
+#pragma warning restore CA1031
+    }
+
+    private static Bitmap? LoadDefaultLogo()
+    {
+#pragma warning disable CA1031 // A missing default asset must not take the wizard down with it.
+        try
+        {
+            using var stream = AssetLoader.Open(new System.Uri("avares://installer/Assets/default-logo.png"));
+            return new Bitmap(stream);
+        }
+        catch
+        {
+            return null;
+        }
+#pragma warning restore CA1031
+    }
 
     /// <summary>
     /// The verified-signature-gated trust line, e.g.

@@ -22,6 +22,8 @@ public partial class UpdateWindow : Window
     public UpdateWindow()
     {
         AvaloniaXamlLoader.Load(this);
+        DataContextChanged += (_, __) =>
+            BrandWindowIcon.Apply(this, (DataContext as UpdateViewModel)?.Brand.LogoImage);
     }
 
     private void OnClose(object? _, RoutedEventArgs __) => Close();

@@ -319,6 +319,45 @@ suite cannot do for you. Both had been in the repository for months.
   (relative paths resolve against the manifest's directory, not the working
   directory). The output directory is no longer created for a refused pack.
 
+### Fixed — what walking the wizard found (R7, step 4)
+
+The install wizard had never been opened by a person. The corrupt-asset defect
+above is why; once it rendered, a single walkthrough of the four screens found
+everything below. Three of these are not cosmetic.
+
+- **The OS close gesture was not handled at all.** Nothing listened for
+  `Closing`, so Alt+F4 during an install tore the wizard down mid-run — no
+  confirmation, no cancellation of the engine, no rollback. The window had no X
+  to click, which is the only reason it went unnoticed. The X, Alt+F4 and the
+  taskbar's Close now reach the same decision as the Cancel button.
+- **A finished install trapped the user.** The footer showed Back / Next /
+  Cancel on every screen; on the Finish screen Back and Next are disabled and
+  `CancelAsync` returns `false` by design — "install completed, nothing to
+  cancel". So the only enabled button did nothing, and the window could be
+  closed only from the taskbar or Task Manager. `UninstallWindow` and
+  `UpdateWindow` had a terminal Close button already; the install wizard never
+  got one. The view model's `CanCancel` existed, was maintained, was covered by
+  a test — and was bound to nothing.
+- **`installer.brand.logo` was packed and ignored.** The logo and hero travel
+  from the manifest into the wrapper blob and on into `BrandTokens`, where no
+  view read either: all three windows bound their image to the bundled default
+  by a literal `avares://` path, and no window set an icon at all. A declared
+  brand logo now renders in the rail, the title bar and the taskbar; an
+  undecodable one falls back to the default rather than throwing, because a
+  decorative image is not worth failing an install over.
+
+Also fixed, all of it visible on first use: no control ever changed the mouse
+cursor; the window had no title bar and so could not be moved; the primary
+button used the accent colour beside a rail of a different colour; cancelling
+asked for confirmation only while files were copying, so Cancel on any earlier
+screen silently discarded a chosen destination or a typed licence key; and the
+confirmation dialog had no visible frame against the content behind it.
+
+The dialog's own text claimed "files already copied will be removed during
+rollback", which stopped being true once it appeared before copying starts. It
+now reads "Cancel setup? Any files already copied will be removed", in both
+shipped languages.
+
 ### Known limitations
 
 > **Sigil 0.1.0-alpha is Windows-only and pre-production.** It builds and

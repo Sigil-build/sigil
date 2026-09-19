@@ -76,7 +76,7 @@ failed.open_log = Open log
 
 # --- cancel dialog ---
 cancel.title = Cancel Installation
-cancel.body = Cancel now? Files already copied will be removed during rollback.
+cancel.body = Cancel setup? Any files already copied will be removed.
 cancel.confirm = Yes, cancel
 cancel.resume = Continue installing
 

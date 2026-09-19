@@ -20,6 +20,8 @@ public partial class UninstallWindow : Window
     public UninstallWindow()
     {
         AvaloniaXamlLoader.Load(this);
+        DataContextChanged += (_, __) =>
+            BrandWindowIcon.Apply(this, (DataContext as UninstallViewModel)?.Brand.LogoImage);
     }
 
     private void OnUninstall(object? _, RoutedEventArgs __)

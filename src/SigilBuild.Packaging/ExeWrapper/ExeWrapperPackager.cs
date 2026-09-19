@@ -125,20 +125,6 @@ public sealed class ExeWrapperPackager : IPackager
             });
         }
 
-        // Output filename mirrors the Zip/Msix convention: id-version-arch tag.
-        // Sanitize the user-controlled App.Name segment against path-traversal /
-        // illegal characters so a malicious or accidental manifest cannot escape
-        // the output directory.
-        var archStr = options.Architecture.ToString().ToLowerInvariant();
-        var safeName = SanitizeFileNameSegment(manifest.App.Name);
-        var outputName = $"{safeName}-{manifest.App.Version}-{archStr}-{outputNameSuffix}.exe";
-        var outputPath = Path.Combine(options.OutputDirectory, outputName);
-
-        Directory.CreateDirectory(options.OutputDirectory);
-        if (File.Exists(outputPath))
-            File.Delete(outputPath);
-        File.Copy(stubPath, outputPath);
-
         ct.ThrowIfCancellationRequested();
 
         // Diagnostics surfaced during blob construction (a missing / unreadable /
@@ -158,6 +144,62 @@ public sealed class ExeWrapperPackager : IPackager
         // A non-null override (empty, for the web
         // stub — it carries NO app payload) is used verbatim instead.
         var payloadBytes = payloadBytesOverride ?? BuildPayloadBytes(options.SourceDirectory, ct);
+
+        // A manifest that resolves payload:// needs a payload to resolve it against.
+        // SIG0122 already refuses a build.source that is not on disk; this is its
+        // sibling, and the nastier half — an EMPTY source directory packs, installs,
+        // reports success and registers in Add/Remove Programs having laid down
+        // nothing but its own uninstaller. Loud failure is bad; a convincing lie is
+        // worse.
+        //
+        // The test is "does the blob reference payload:// at all", asked of the
+        // SERIALIZED steps rather than of a list of step types. Every step field
+        // that could carry the scheme is in that JSON by construction, so a step
+        // type added later cannot quietly fall outside this check — which is the
+        // failure mode a hand-maintained list would have. The blob also carries
+        // licence text and brand data, so a licence whose prose contains the literal
+        // "payload://" would trip it; that buys drift-proofing at the price of a
+        // false refusal nobody has ever hit, and the refusal names exactly what to
+        // fix.
+        //
+        // The web stub passes through untouched: its synthesized blob is
+        // http_download + run_program, and it is handed an empty payload on purpose.
+        if (PayloadCodec.EntryCount(payloadBytes) == 0 &&
+            System.Text.Encoding.UTF8.GetString(blobBytes).Contains("payload://", StringComparison.Ordinal))
+        {
+            diagnostics.Add(new Diagnostic(
+                DiagnosticSeverity.Error,
+                DiagnosticCodes.PayloadReferencedButEmpty,
+                $"the manifest installs from 'payload://' but '{options.SourceDirectory}' contains no " +
+                "files, so the package would carry no payload. The install would report success and " +
+                "lay down nothing. Point build.source at the directory holding the application's " +
+                "files, or remove the payload:// steps.",
+                SourceLocation.Unknown,
+                DiagnosticCodes.DocsUrl(DiagnosticCodes.PayloadReferencedButEmpty)));
+            return (null, diagnostics);
+        }
+
+        // Only now is anything written to disk. The runtime copy used to happen
+        // further up, which meant a refusal left a 25 MB unstamped copy of the host
+        // sitting in dist/ under the installer's name — something that looks exactly
+        // like the artifact and installs nothing. Everything above this line is
+        // reading and deciding; everything below it is producing.
+        //
+        // Output filename mirrors the Zip/Msix convention: id-version-arch tag.
+        // Sanitize the user-controlled App.Name segment against path-traversal /
+        // illegal characters so a malicious or accidental manifest cannot escape
+        // the output directory.
+        var archStr = options.Architecture.ToString().ToLowerInvariant();
+        var safeName = SanitizeFileNameSegment(manifest.App.Name);
+        var outputName = $"{safeName}-{manifest.App.Version}-{archStr}-{outputNameSuffix}.exe";
+        var outputPath = Path.Combine(options.OutputDirectory, outputName);
+
+        Directory.CreateDirectory(options.OutputDirectory);
+        if (File.Exists(outputPath))
+            File.Delete(outputPath);
+        File.Copy(stubPath, outputPath);
+
+        ct.ThrowIfCancellationRequested();
 
         // Archive the host's staged native dependencies (Skia/ANGLE/HarfBuzz) so
         // the stamped Setup.exe is self-contained and can launch the GUI wizard

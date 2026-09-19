@@ -50,6 +50,15 @@ public static class DiagnosticCodes
     // pack (R7).
     public const string BuildSourceNotFound = "SIG0122";
 
+    // SIG0123 — the manifest resolves a payload:// source but the package carries
+    // no payload. The sibling of SIG0122 and the nastier half: a MISSING
+    // build.source fails the install loudly and rolls back, while an EMPTY one
+    // produced an installer that reported success, registered itself in Add/Remove
+    // Programs and laid down nothing but its own uninstaller. Checked against the
+    // serialized steps rather than a step-type list, so a step added later cannot
+    // quietly fall outside it.
+    public const string PayloadReferencedButEmpty = "SIG0123";
+
     // SIG02xx — parameters: block
     public const string UnknownParameterType = "SIG0210";
     public const string ParameterValidationFailure = "SIG0220";

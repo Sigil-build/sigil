@@ -319,6 +319,35 @@ suite cannot do for you. Both had been in the repository for months.
   (relative paths resolve against the manifest's directory, not the working
   directory). The output directory is no longer created for a refused pack.
 
+### Fixed — two ways an install could quietly do the wrong thing
+
+- **An empty `build.source` produced an installer that lied.** `SIG0122` already
+  refuses a source directory that is not on disk. An *empty* one packed, ran,
+  reported success and registered the application in Add/Remove Programs, having
+  laid down nothing but its own uninstaller — an installed application
+  containing nothing, which is much harder to notice than a failure.
+
+  `pack` now refuses with **`SIG0123`** when the manifest resolves `payload://`
+  and no payload was packed. The condition is deliberately about `payload://`
+  and not about emptiness: an installer that legitimately carries no payload —
+  one that only writes registry values, or a `--payload web` stub — still packs.
+  It is checked against the serialized steps rather than a list of step types,
+  so a step added later cannot fall outside it.
+
+  A refused pack also no longer leaves the copied-but-unstamped installer host
+  behind in the output directory.
+
+- **Uninstalling left the directory skeleton behind.** `file_copy` created the
+  destination tree and journalled only the files in it, so nothing recorded that
+  the install had made those directories — rollback and uninstall both left them
+  in place, empty, permanently.
+
+  Each directory the step actually creates is now journalled, parents included,
+  and removed on rollback or uninstall. Directories that already existed are
+  deliberately not recorded: removing one the user had is a worse mistake than
+  leaving one behind. Removal is conditional on the directory being empty, so
+  anything the application wrote there afterwards keeps it alive.
+
 ### Known limitations
 
 > **Sigil 0.1.0-alpha is Windows-only and pre-production.** It builds and

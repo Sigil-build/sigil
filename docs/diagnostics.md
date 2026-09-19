@@ -142,6 +142,23 @@ with no payload, and until this check existed `pack` printed an artifact path
 and exited `0`; the failure surfaced later, on the end user's machine, as a
 failed install step and a rollback.
 
+### SIG0123 — the manifest installs from `payload://` but there is no payload {#sig0123}
+
+`build.source` exists, but it holds no files — so the package would carry an
+empty payload while the install steps expect to copy out of one.
+
+The sibling of [SIG0122](#sig0122), and the more dangerous half. A *missing*
+`build.source` fails the install loudly and rolls back. An *empty* one used to
+pack, install, report success and register the application in Add/Remove
+Programs having laid down nothing but its own uninstaller — an installed
+application that contains nothing, which is much harder to notice than a
+failure.
+
+An installer that legitimately carries no payload is unaffected: one that only
+writes registry values, or `sigil pack --payload web`, whose stub downloads the
+real package at install time. This fires only when the manifest actually
+resolves `payload://`.
+
 ---
 
 ## SIG02xx — parameters and install steps

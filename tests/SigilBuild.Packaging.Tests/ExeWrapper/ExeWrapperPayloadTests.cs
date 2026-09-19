@@ -43,6 +43,56 @@ public sealed class ExeWrapperPayloadTests
         }
     }
 
+    /// <summary>
+    /// An EMPTY payload is not an empty byte array — the container header is
+    /// written for zero entries too. That is exactly the distinction that let a
+    /// pack of an empty source directory produce an installer which reported
+    /// success, registered in Add/Remove Programs, and laid down nothing.
+    /// </summary>
+    [Fact]
+    public void An_empty_source_directory_still_produces_container_bytes_but_no_entries()
+    {
+        var source = CreateSource();
+        try
+        {
+            var container = ExeWrapperPackager.BuildPayloadBytes(source, CancellationToken.None);
+
+            container.Should().NotBeEmpty("the header is written regardless");
+            SigilBuild.Wrapper.Codec.PayloadCodec.EntryCount(container).Should().Be(0,
+                "a length check cannot tell an empty payload from a full one — only the count can");
+        }
+        finally
+        {
+            Directory.Delete(source, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void EntryCount_reads_zero_for_anything_that_is_not_a_payload()
+    {
+        // Absent, truncated, and foreign all mean the same thing to every caller:
+        // no payload is available here.
+        SigilBuild.Wrapper.Codec.PayloadCodec.EntryCount(Array.Empty<byte>()).Should().Be(0);
+        SigilBuild.Wrapper.Codec.PayloadCodec.EntryCount(new byte[] { 0x53, 0x47 }).Should().Be(0);
+        SigilBuild.Wrapper.Codec.PayloadCodec.EntryCount(
+            Encoding.UTF8.GetBytes("not a container at all")).Should().Be(0);
+    }
+
+    [Fact]
+    public void EntryCount_matches_what_was_packed()
+    {
+        var source = CreateSource(("a.txt", "1"), ("b/c.txt", "2"), ("b/d/e.txt", "3"));
+        try
+        {
+            var container = ExeWrapperPackager.BuildPayloadBytes(source, CancellationToken.None);
+            SigilBuild.Wrapper.Codec.PayloadCodec.EntryCount(container).Should().Be(3);
+        }
+        finally
+        {
+            Directory.Delete(source, recursive: true);
+        }
+    }
+
     [Fact]
     public void BuildPayloadBytes_round_trips_through_the_host_extractor()
     {

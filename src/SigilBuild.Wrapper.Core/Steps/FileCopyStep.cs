@@ -38,7 +38,7 @@ internal sealed class FileCopyStep : IStep
             return Task.FromResult(StepResult.Failed(refusal));
         }
 
-        Directory.CreateDirectory(to);
+        CreateDirectoriesJournaled(to, journal);
 
         var (rootDir, pattern, recurse) = SplitGlob(from);
         if (!Directory.Exists(rootDir))
@@ -52,7 +52,7 @@ internal sealed class FileCopyStep : IStep
             ct.ThrowIfCancellationRequested();
             var rel = Path.GetRelativePath(rootDir, src);
             var dst = Path.Combine(to, rel);
-            Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
+            CreateDirectoriesJournaled(Path.GetDirectoryName(dst)!, journal);
 
             var existed = File.Exists(dst);
 
@@ -88,6 +88,59 @@ internal sealed class FileCopyStep : IStep
             File.Copy(src, dst, overwrite: true);
         }
         return Task.FromResult(StepResult.Ok());
+    }
+
+    /// <summary>
+    /// Create <paramref name="dir"/> and every missing level above it, recording a
+    /// <see cref="RollbackRecord.RemoveDirectory"/> for each level this call actually
+    /// created — and for none that were already there.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>file_copy</c> used to call <c>Directory.CreateDirectory</c> directly and
+    /// journal only the files. Directories were therefore created and never recorded,
+    /// so neither rollback nor uninstall removed them: uninstalling left the whole
+    /// directory skeleton behind, empty, permanently. The journal is the record of
+    /// what this run changed, and a directory it created is something it changed.
+    /// </para>
+    /// <para>
+    /// <c>Directory.CreateDirectory</c> silently creates every missing parent and does
+    /// not report which ones it made, so the levels are probed first. Anything that
+    /// already existed is deliberately NOT recorded — removing a directory the user
+    /// had is the one mistake worse than leaving one behind.
+    /// </para>
+    /// <para>
+    /// Records are appended shallowest-first because <c>UndoAsync</c> replays in
+    /// reverse, so the deepest directory is removed first and each parent is empty by
+    /// the time its own record runs. Each removal is itself conditional on the
+    /// directory being empty, so a file the user put there afterwards keeps its
+    /// directory alive.
+    /// </para>
+    /// </remarks>
+    private static void CreateDirectoriesJournaled(string dir, RollbackJournal journal)
+    {
+        if (string.IsNullOrEmpty(dir) || Directory.Exists(dir))
+        {
+            return;
+        }
+
+        // Walk up collecting what is missing: deepest first, because that is the
+        // direction the walk goes.
+        var missing = new List<string>();
+        for (var level = dir;
+             !string.IsNullOrEmpty(level) && !Directory.Exists(level);
+             level = Path.GetDirectoryName(level))
+        {
+            missing.Add(level);
+        }
+
+        Directory.CreateDirectory(dir);
+
+        // Reverse to shallowest-first for the journal.
+        for (var i = missing.Count - 1; i >= 0; i--)
+        {
+            journal.Append(new RollbackRecord.RemoveDirectory(missing[i]));
+        }
     }
 
     /// <summary>

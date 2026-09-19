@@ -128,6 +128,32 @@ internal static class PayloadCodec
     /// unsupported version, truncated framing, or a frame whose decompressed length
     /// disagrees with its recorded length).
     /// </exception>
+    /// <summary>
+    /// How many entries a container carries, read from its header without
+    /// decompressing anything. Returns <c>0</c> for an absent, truncated or
+    /// foreign container — every one of those means "no payload is available",
+    /// which is the question every caller is actually asking.
+    /// </summary>
+    /// <remarks>
+    /// An EMPTY payload is not an empty byte array: <see cref="Encode"/> writes the
+    /// 10-byte header even for zero entries, so <c>bytes.Length &gt; 0</c> says
+    /// nothing about whether anything is in there. That distinction is what let a
+    /// pack of an empty source directory produce an installer that registered
+    /// itself in Add/Remove Programs and installed nothing at all.
+    /// </remarks>
+    public static int EntryCount(ReadOnlySpan<byte> container)
+    {
+        if (container.Length < HeaderLength ||
+            !container[..Magic.Length].SequenceEqual(Magic) ||
+            container[Magic.Length] != FormatVersion)
+        {
+            return 0;
+        }
+
+        var count = BinaryPrimitives.ReadUInt32LittleEndian(container[(Magic.Length + 2)..]);
+        return count > int.MaxValue ? int.MaxValue : (int)count;
+    }
+
     public static void Decode(byte[] container, Action<string, byte[]> onEntry)
     {
         ArgumentNullException.ThrowIfNull(container);

@@ -228,7 +228,7 @@ opt-out — see [Prerequisites](prerequisites.md).
 
 `Setup.exe /Update` runs headlessly by default (no wizard), logging each
 stage to the console and, if `/LOG` was also passed, to the log file — see
-[`/LOG` below](#logging). Codes `6`-`9` are dedicated to `/Update` and are not
+[`/LOG` below](#log). Codes `6`-`9` are dedicated to `/Update` and are not
 used by the install/uninstall path, which has its own set — `0`, `1`, `2`, `3`,
 `4` (files in use), `5` (another setup instance is already running), `64`
 (usage), `78` (native-runtime bootstrap refused) and `3010` (success, reboot

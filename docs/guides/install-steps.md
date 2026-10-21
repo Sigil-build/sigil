@@ -268,7 +268,7 @@ Sets an element's text or an attribute's value in an XML document, addressed by 
 
 See also [`xml_edit` refuses a document that declares a `<!DOCTYPE>`](#xml_edit-refuses-a-document-that-declares-a-doctype).
 
-## Privileged step targets are anchored — read this before the next four steps
+## Privileged step targets are anchored (read this before the next four steps)
 
 `service_install`, `scheduled_task_create`, `com_register` and `firewall_rule` hand a path from your manifest to something running with SYSTEM-level authority: the SCM launches a service binary, `schtasks` is always invoked with `/RU SYSTEM`, `com_register` loads the DLL **into the elevated installer process** and calls its `DllRegisterServer`, and `firewall_rule`'s `program=` grants that executable the exemption you asked for.
 
@@ -291,7 +291,7 @@ The examples below all use `{install_dir}\…`, which satisfies both conditions 
 
 Registers a Windows service via `sc.exe create`, optionally starts it. Records a `RemoveService` rollback so a failed install or `setup.exe /Uninstall` stops + deletes the service.
 
-> **`binary_path` is a privileged target.** It must resolve inside `install_dir` and sit in a directory no non-administrator can write — see [the anchoring rules above](#privileged-step-targets-are-anchored--read-this-before-the-next-four-steps). Otherwise the step fails and no service is created.
+> **`binary_path` is a privileged target.** It must resolve inside `install_dir` and sit in a directory no non-administrator can write — see [the anchoring rules above](#privileged-step-targets-are-anchored-read-this-before-the-next-four-steps). Otherwise the step fails and no service is created.
 
 |Field|Notes|
 |---|---|
@@ -323,7 +323,7 @@ Creates a Windows Scheduled Task via `schtasks.exe /Create`, always running the 
 
 > **Machine-scope only.** This step touches machine-global state, so the manifest must set `installer.scope: machine`. Under `user` or `auto` scope, packing fails with **SIG0310** (`installer.scope: machine` required for this step).
 >
-> **`program` is a privileged target.** The task always runs as `SYSTEM` (`/RU SYSTEM`), so `program` must resolve inside `install_dir` and sit in a directory no non-administrator can write — see [the anchoring rules above](#privileged-step-targets-are-anchored--read-this-before-the-next-four-steps). Otherwise the step fails and no task is created.
+> **`program` is a privileged target.** The task always runs as `SYSTEM` (`/RU SYSTEM`), so `program` must resolve inside `install_dir` and sit in a directory no non-administrator can write — see [the anchoring rules above](#privileged-step-targets-are-anchored-read-this-before-the-next-four-steps). Otherwise the step fails and no task is created.
 
 |Field|Type|Required|Default|Notes|
 |---|---|---|---|---|
@@ -354,7 +354,7 @@ Self-registers a COM DLL by loading it and invoking its exported `HRESULT DllReg
 
 > **Machine-scope only.** `DllRegisterServer` writes machine-global registration (`HKLM\Software\Classes` / `HKCR\CLSID`), so the manifest must set `installer.scope: machine`. Under `user` or `auto` scope, packing fails with **SIG0310**.
 >
-> **`path` is a privileged target — and the sharpest of the four.** The DLL is loaded into the *elevated installer process* and one of its exports is called, so a user-writable path here is arbitrary code execution as administrator. It must resolve inside `install_dir` and sit in a directory no non-administrator can write — see [the anchoring rules above](#privileged-step-targets-are-anchored--read-this-before-the-next-four-steps). Otherwise the step fails and the DLL is never loaded.
+> **`path` is a privileged target — and the sharpest of the four.** The DLL is loaded into the *elevated installer process* and one of its exports is called, so a user-writable path here is arbitrary code execution as administrator. It must resolve inside `install_dir` and sit in a directory no non-administrator can write — see [the anchoring rules above](#privileged-step-targets-are-anchored-read-this-before-the-next-four-steps). Otherwise the step fails and the DLL is never loaded.
 
 |Field|Type|Required|Default|Notes|
 |---|---|---|---|---|
@@ -384,7 +384,7 @@ Creates a Windows Defender Firewall rule via `netsh advfirewall firewall add rul
 
 > **Machine-scope only.** There is no per-user firewall policy store — firewall rules are always machine-global — so the manifest must set `installer.scope: machine`. Under `user` or `auto` scope, packing fails with **SIG0310**.
 >
-> **`program` is a privileged target.** When set, it must resolve inside `install_dir` and sit in a directory no non-administrator can write — see [the anchoring rules above](#privileged-step-targets-are-anchored--read-this-before-the-next-four-steps). Otherwise the step fails and no rule is added. A rule with no `program` has no target to anchor and is unaffected.
+> **`program` is a privileged target.** When set, it must resolve inside `install_dir` and sit in a directory no non-administrator can write — see [the anchoring rules above](#privileged-step-targets-are-anchored-read-this-before-the-next-four-steps). Otherwise the step fails and no rule is added. A rule with no `program` has no target to anchor and is unaffected.
 
 |Field|Type|Required|Default|Notes|
 |---|---|---|---|---|
@@ -444,7 +444,7 @@ If a step genuinely needs to write outside the installed application — a machi
 
 > **There is no `%VAR%` expansion in a step path.** `%ProgramData%\MyApp` is not a path — it is a relative directory whose first component is literally `%ProgramData%`, and it would be created as such next to the running installer. The only substitutions a step path gets are the `{…}` runtime tokens listed under [Paths and tokens](#an-unresolved-token-in-a-path-fails-the-step) and `${…}` parameter templates. If you want the path written once rather than hard-coded per environment, `${ProgramData}` is expanded by **`sigil pack`** from the packing machine's environment — which means the resolved literal is baked into the package, so use it knowingly.
 
-The opt-out is per step and deliberate: it is a declaration that this particular write is meant to leave the install tree, not a global switch. It does **not** relax the [privileged-target rules](#privileged-step-targets-are-anchored--read-this-before-the-next-four-steps) on `service_install`, `scheduled_task_create`, `com_register` or `firewall_rule` — those have no opt-out.
+The opt-out is per step and deliberate: it is a declaration that this particular write is meant to leave the install tree, not a global switch. It does **not** relax the [privileged-target rules](#privileged-step-targets-are-anchored-read-this-before-the-next-four-steps) on `service_install`, `scheduled_task_create`, `com_register` or `firewall_rule` — those have no opt-out.
 
 > **Known limitation — an out-of-tree write is not undone at uninstall (register row R44).** The step above *is* journaled, but the uninstaller's replay anchor currently accepts only records that point inside `install_dir`. A `RestoreConfigFile` naming `C:\ProgramData\MyApp\machine.ini` is therefore **refused during replay, while the Add/Remove Programs entry and the install state are removed anyway** — so the file you wrote stays on disk after uninstall and nothing tells the user.
 >

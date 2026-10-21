@@ -47,7 +47,7 @@ not sure which output format you need.
 
 ### Architecture decision records
 
-The ADRs in [`architecture/`](architecture/) record why each load-bearing
+The ADRs, each linked from the [architecture overview](architecture-overview.md#locked-in-technical-decisions), record why each load-bearing
 choice was made. Several are user-facing contracts, not just internal
 rationale:
 

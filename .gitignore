@@ -45,6 +45,3 @@ dist/
 
 # Claude Code — personal settings stay local; .claude/settings.json is shared
 .claude/settings.local.json
-
-# MkDocs build output (docs.sigil.build is built by Cloudflare Pages, not committed)
-site/

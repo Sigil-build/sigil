@@ -6,7 +6,7 @@ like
 
 ```text
 error SIG0122: build.source './payload' resolves to 'C:\work\payload', which does not exist. ...
-  see: https://docs.sigil.build/diagnostics/#sig0122
+  see: https://docs.sigil.build/sigil/diagnostics/#sig0122
 ```
 
 the `see:` link lands on this page, at that code's entry.

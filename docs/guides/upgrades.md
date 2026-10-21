@@ -43,7 +43,7 @@ Two things about that spawn are worth knowing before you debug one:
   with `cannot upgrade: '…' is not verified`. This is reachable in practice for an
   **unsigned** machine-scope install on a secondary volume such as `D:\Apps\MyApp`,
   whose default permissions grant `Users` write. See
-  [Uninstaller](uninstaller.md#cannot-upgrade--is-not-verified).
+  [Uninstaller](uninstaller.md#cannot-upgrade-is-not-verified).
 
 ### Scope
 

@@ -1,0 +1,43 @@
+title: Sigil
+version: "0.1.0-alpha"
+license: Copyright (c) 2026 Yevhen Khudoliiv. Source-available under the Sigil License 1.0.
+license_url: https://github.com/Sigil-build/sigil/blob/HEAD/LICENSE
+repo_url: https://github.com/Sigil-build/sigil
+summary:
+  en: "Sigil is a declarative Windows software distribution tool: pack, sign, publish and update from one sigil.yaml."
+  uk: "Sigil — декларативний інструмент розповсюдження програм для Windows: пакування, підписування, публікація й оновлення з одного файлу sigil.yaml."
+nav:
+  - Overview: README.md
+  - Getting started: getting-started.md
+  - Architecture: architecture-overview.md
+  - Guides:
+      - Install steps: guides/install-steps.md
+      - Parameters: guides/parameters.md
+      - Conditional installs: guides/conditional-installs.md
+      - Prerequisites: guides/prerequisites.md
+      - Installer wizard: guides/installer-wizard.md
+      - Packaging formats: guides/packaging-formats.md
+      - Signing: guides/signing.md
+      - Upgrades: guides/upgrades.md
+      - Updates: guides/updates.md
+      - Uninstaller: guides/uninstaller.md
+      - Localization: guides/localization.md
+  - Diagnostics: diagnostics.md
+  - Reference:
+      - Manifest: manifest-reference.md
+      - CLI: cli-reference.md
+      - Setup.exe: setup-exe-reference.md
+  - Migration:
+      - From Inno Setup: migration/from-inno.md
+  - Decisions (ADRs):
+      - Avalonia and Native AOT: architecture/adr-avalonia-aot.md
+      - MSIX companion: architecture/adr-msix-companion.md
+      - 008 Expression policy: architecture/adr-008-expression-policy.md
+      - 009 Update manifest signature: architecture/adr-009-update-manifest-signature.md
+      - 010 Delta update deferral: architecture/adr-010-delta-update-deferral.md
+      - 011 Update manifest freshness: architecture/adr-011-update-manifest-freshness.md
+      - 012 COM registration isolation: architecture/adr-012-com-registration-isolation.md
+      - 013 Brand tokens — runtime JSON vs source gen: architecture/adr-013-brand-token-runtime-json-vs-source-gen.md
+      - 014 Schema validator monolith: architecture/adr-014-schema-validator-monolith.md
+      - 015 Localization design: architecture/adr-015-localization-design.md
+      - 016 Licensing: architecture/adr-016-licensing.md

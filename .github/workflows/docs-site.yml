@@ -1,0 +1,70 @@
+name: docs-site
+
+# Builds Sigil's pages the way docs.sigil.build does (strict MkDocs, anchors, and
+# the old-URL check), using the build script in Sigil-build/docs. A docs change
+# that would break the site fails here instead of at the site's next deploy.
+
+on:
+  push:
+    branches: [main, 'release/**']
+    paths:
+      - docs/**
+      - .github/workflows/docs-site.yml
+  pull_request:
+    branches: [main, 'release/**']
+    paths:
+      - docs/**
+      - .github/workflows/docs-site.yml
+
+concurrency:
+  group: docs-site-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: docs site build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: sigil
+
+      # DOCS_SITE_TOKEN is only needed while Sigil-build/docs is private; the
+      # fallback to the default token covers a public repo.
+      - uses: actions/checkout@v4
+        with:
+          repository: Sigil-build/docs
+          path: site
+          token: ${{ secrets.DOCS_SITE_TOKEN || github.token }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: install the site's pinned requirements
+        working-directory: site
+        run: pip install -r requirements.txt -c constraints.txt
+
+      - name: build Sigil's pages (strict) and check the old URLs
+        working-directory: site
+        run: python build.py --only sigil --local sigil="$GITHUB_WORKSPACE/sigil"
+
+  deploy:
+    name: ask the site to rebuild
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: call the deploy hook
+        env:
+          DOCS_DEPLOY_HOOK: ${{ secrets.DOCS_DEPLOY_HOOK }}
+        run: |
+          if [[ -z "$DOCS_DEPLOY_HOOK" ]]; then
+            echo "::notice::DOCS_DEPLOY_HOOK is not set, so docs.sigil.build was not asked to rebuild. It picks these pages up at its next build."
+            exit 0
+          fi
+          curl -fsS -X POST "$DOCS_DEPLOY_HOOK" > /dev/null
+          echo "Asked docs.sigil.build to rebuild."

@@ -145,6 +145,27 @@ public class DiagnosticCodeIntegrityTests
     }
 
     [Fact]
+    public void Docs_site_file_names_the_version()
+    {
+        // Arrange — docs/site.yml is what the multi-product site reads for the version
+        // line on every Sigil page. Directory.Build.props is the one place the version
+        // lives, so the file has to follow it or the site states a stale version.
+        var siteFile = File.ReadAllText(Path.Combine(RepoRoot(), "docs", "site.yml"));
+        var props = File.ReadAllText(Path.Combine(RepoRoot(), "Directory.Build.props"));
+
+        // Act
+        var declared = Regex.Match(props, @"<Version>\s*([^<\s]+)\s*</Version>");
+        var named = Regex.Match(siteFile, @"^version:\s*[""']?([^""'\s#]+)[""']?\s*(#.*)?$", RegexOptions.Multiline);
+
+        // Assert
+        declared.Success.Should().BeTrue("Directory.Build.props must declare <Version>");
+        named.Success.Should().BeTrue("docs/site.yml must carry a top-level version key");
+        named.Groups[1].Value.Should().Be(declared.Groups[1].Value,
+            "the site shows this version on every Sigil page, so bumping <Version> "
+            + "means bumping docs/site.yml in the same commit");
+    }
+
+    [Fact]
     public void Every_diagnostic_code_has_an_entry_in_the_reference_page()
     {
         // Arrange — the codes are printed to users with a URL promising an

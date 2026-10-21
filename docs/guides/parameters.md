@@ -100,7 +100,7 @@ Unknown identifiers are a hard runtime error - typos surface as a `FormatExcepti
 setup.exe /S /D="C:\Apps\MyApp" /Pedition=professional
 ```
 
-- `/D=path` overrides the install directory — not a parameter override; see [the setup.exe reference](../setup-exe-reference.md#d).
+- `/D=path` overrides the install directory — not a parameter override; see [the setup.exe reference](../setup-exe-reference.md#d-and-the-install-dir-precedence-chain).
 - One `/PName=Value` token per declared parameter. Last write wins. The `P` prefix is mandatory: a bare `/Name=Value` is rejected with `UsageException: unrecognized flag`.
 - Names match the canonical schema spelling case-insensitively; values preserve case.
 - Undeclared names are rejected (`UsageException`) - silent typos can't reach the step engine.

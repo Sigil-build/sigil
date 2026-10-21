@@ -165,5 +165,5 @@ gates, and there is no SDK project to hold to one.
 - Build and run the CLI: [getting started](getting-started.md).
 - Every subcommand: [CLI reference](cli-reference.md).
 - Every key in `sigil.yaml`: [manifest reference](manifest-reference.md).
-- The decisions themselves: [architecture decision records](architecture/).
-- Already on another installer? [migration guides](migration/).
+- The decisions themselves: [architecture decision records](architecture-overview.md#locked-in-technical-decisions).
+- Already on another installer? [migration guides](migration/from-inno.md).

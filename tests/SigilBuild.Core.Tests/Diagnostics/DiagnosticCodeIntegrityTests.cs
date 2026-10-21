@@ -145,6 +145,16 @@ public class DiagnosticCodeIntegrityTests
     }
 
     [Fact]
+    public void DocsUrl_points_at_the_sigil_section()
+    {
+        // Arrange, Act, Assert — Sigil's pages live under /sigil/ on the multi-product
+        // site, and these URLs are printed to users and outlive the binary that
+        // printed them, so the section is pinned here as well as built in DocsUrl.
+        DiagnosticCodes.DocsUrl(DiagnosticCodes.SigntoolFailed)
+            .Should().Be("https://" + DocumentationHost + "/sigil/diagnostics/#sig0402");
+    }
+
+    [Fact]
     public void Docs_site_file_names_the_version()
     {
         // Arrange — docs/site.yml is what the multi-product site reads for the version

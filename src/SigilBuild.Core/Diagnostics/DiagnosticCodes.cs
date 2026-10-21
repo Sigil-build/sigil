@@ -225,12 +225,12 @@ public static class DiagnosticCodes
     /// anywhere else under <c>src/</c>.
     /// <para>
     /// The target is one page with a per-code anchor, not a page per code:
-    /// <c>docs/diagnostics.md</c> renders at <c>/diagnostics/</c> and each entry
+    /// <c>docs/diagnostics.md</c> renders at <c>/sigil/diagnostics/</c> and each entry
     /// carries an explicit lowercase <c>{#sigXXXX}</c> id. Lower-casing here is what
     /// matches those ids — a fragment is case-sensitive, and the codes are written
     /// upper-case everywhere else.
     /// </para>
     /// </remarks>
     public static string DocsUrl(string code) =>
-        $"https://docs.sigil.build/diagnostics/#{code.ToLowerInvariant()}";
+        $"https://docs.sigil.build/sigil/diagnostics/#{code.ToLowerInvariant()}";
 }

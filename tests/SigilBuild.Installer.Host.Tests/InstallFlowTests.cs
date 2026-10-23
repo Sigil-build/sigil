@@ -2,6 +2,7 @@
 // Licensed under the Sigil License 1.0. See LICENSE in the repository root.
 
 using System;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -100,6 +101,62 @@ public sealed class InstallFlowTests
 
         closed.Should().BeTrue("the Failed screen's button closes the window");
         vm.OutcomeCode.Should().Be(InstallerOutcomeCode.Failed, "closing a failed install must stay exit 1, not become cancel/2");
+    }
+
+    [Fact]
+    public async Task Install_runner_runs_off_the_calling_thread_so_the_Installing_screen_can_render()
+    {
+        // Arrange — a runner whose opening work is synchronous and long, the way
+        // InstallSession's payload load is before its first await. (R95)
+        using var release = new ManualResetEventSlim(false);
+        var callerThread = Environment.CurrentManagedThreadId;
+        int? runnerThread = null;
+
+        // Act
+        var vm = ArrangeAtInstalling((progress, ct) =>
+        {
+            runnerThread = Environment.CurrentManagedThreadId;
+            release.Wait(TimeSpan.FromSeconds(10), ct);
+            return Task.FromResult(new InstallOutcome(true, null));
+        });
+
+        // Assert — Next returned while the runner is still inside its synchronous
+        // work, with the wizard already on the Installing screen.
+        vm.CurrentStep.Should().Be(InstallerStep.Installing);
+        vm.InstallTask!.IsCompleted.Should().BeFalse(
+            "StartInstallAsync must yield before the runner's synchronous work, not run it inline");
+
+        release.Set();
+        await vm.InstallTask!;
+
+        runnerThread.Should().NotBe(callerThread, "the runner must not run on the UI thread");
+        vm.CurrentStep.Should().Be(InstallerStep.Finish);
+    }
+
+    [Fact]
+    public async Task Install_runner_receives_the_choices_captured_when_the_install_started()
+    {
+        // Arrange
+        var vm = new InstallerViewModel(new BrandTokens());
+        InstallRequest? seen = null;
+        vm.ConfigureInstallRunner((request, progress, ct) =>
+        {
+            seen = request;
+            return Task.FromResult(new InstallOutcome(true, null));
+        });
+        vm.Next(); // Welcome → InstallOptions
+        var chosen = Path.Combine(Path.GetTempPath(), "sigil-r95-" + Guid.NewGuid().ToString("N"));
+        vm.InstallPath = chosen;
+
+        // Act
+        vm.Next(); // InstallOptions → Installing
+        await vm.InstallTask!;
+
+        // Assert
+        seen.Should().NotBeNull();
+        seen!.InstallPath.Should().Be(chosen);
+        seen.ParameterValues.Should().BeEmpty();
+        seen.OptionValues.Should().BeEmpty();
     }
 
     /// <summary>A fake install that blocks until the engine token is cancelled, then throws like the real engine.</summary>

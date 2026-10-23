@@ -386,6 +386,17 @@ rollback", which stopped being true once it appeared before copying starts. It
 now reads "Cancel setup? Any files already copied will be removed", in both
 shipped languages.
 
+### Fixed — installing and uninstalling over a running app (R93–R95)
+
+Installing a real tray application — a GUI plus a background process the GUI
+restarts — over a running copy, and uninstalling it, found three defects.
+
+- **R95 — the Installing screen never rendered.** The install started on the UI
+  thread, and its first act is reading and decompressing the whole embedded
+  payload, so the window froze until the install was nearly done and then jumped
+  to Finish. The install, uninstall and headed `/Update` runs now start on a
+  background thread; progress still reaches the window as before.
+
 ### Known limitations
 
 > **Sigil 0.1.0-alpha is Windows-only and pre-production.** It builds and

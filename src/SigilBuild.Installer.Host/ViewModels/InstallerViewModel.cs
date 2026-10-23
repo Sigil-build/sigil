@@ -37,12 +37,22 @@ public enum InstallerOutcomeCode
 /// <summary>A single line in the Installing / Failed screen log.</summary>
 public sealed record InstallLogLine(string Text, bool IsError);
 
+/// <summary>
+/// What the user chose, captured on the UI thread at the moment the install
+/// starts. The install runner executes on a thread-pool thread and reads this
+/// snapshot instead of the view-model, which belongs to the UI thread. (R95)
+/// </summary>
+public sealed record InstallRequest(
+    string InstallPath,
+    IReadOnlyDictionary<string, string> ParameterValues,
+    IReadOnlyDictionary<string, bool> OptionValues);
+
 public sealed class InstallerViewModel : INotifyPropertyChanged
 {
     private InstallerStep _step = InstallerStep.Welcome;
     private string _installPath;
     private CancellationTokenSource? _engineCts;
-    private Func<IProgress<StepProgress>, CancellationToken, Task<InstallOutcome>>? _installRunner;
+    private Func<InstallRequest, IProgress<StepProgress>, CancellationToken, Task<InstallOutcome>>? _installRunner;
 
     // The resolved chrome language for this session, captured once at
     // construction (SessionLanguage is set before any UI is built).
@@ -988,8 +998,33 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     /// delegate). When set, entering the Installing screen kicks off the engine.
     /// Left null in unit tests, which drive the step machine directly.
     /// </summary>
+    /// <remarks>
+    /// The runner is invoked on a thread-pool thread, never the UI thread. It must
+    /// not touch this view-model or any UI object; use the overload taking an
+    /// <see cref="InstallRequest"/> for what the user chose. (R95)
+    /// </remarks>
     public void ConfigureInstallRunner(Func<IProgress<StepProgress>, CancellationToken, Task<InstallOutcome>> runner)
-        => _installRunner = runner;
+    {
+        ArgumentNullException.ThrowIfNull(runner);
+        _installRunner = (_, progress, ct) => runner(progress, ct);
+    }
+
+    /// <summary>
+    /// Wire the real install driver with the user's choices handed over as an
+    /// <see cref="InstallRequest"/> captured on the UI thread when the install starts.
+    /// </summary>
+    /// <remarks>
+    /// The runner is invoked on a thread-pool thread, never the UI thread: the
+    /// engine's first work — reading and decompressing the whole embedded payload —
+    /// is synchronous, and on the UI thread it froze the window before the
+    /// Installing screen could render. Progress reports still reach the UI thread
+    /// through the sink this view-model passes in. (R95)
+    /// </remarks>
+    public void ConfigureInstallRunner(Func<InstallRequest, IProgress<StepProgress>, CancellationToken, Task<InstallOutcome>> runner)
+        => _installRunner = runner ?? throw new ArgumentNullException(nameof(runner));
+
+    private InstallRequest CaptureInstallRequest() =>
+        new(InstallPath, CollectedParameterValues, CollectedOptionValues);
 
     public void Next()
     {
@@ -1328,11 +1363,19 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
         // SerialProgress, not Progress<T>: with no SynchronizationContext the BCL type
         // posts every report to the thread pool, so reports the engine made sequentially
         // can execute ApplyProgress concurrently and race LogLines. See SerialProgress.
+        // Constructed here, on the UI thread, so it captures the UI context and every
+        // report the background runner makes is posted back to it.
         var progress = new SerialProgress<StepProgress>(ApplyProgress);
+        var request = CaptureInstallRequest();
+        var runner = _installRunner;
+        var token = cts.Token;
 
         try
         {
-            var outcome = await _installRunner(progress, cts.Token).ConfigureAwait(true);
+            // The runner starts on a thread-pool thread, so this method returns to the
+            // dispatcher at once and the Installing screen renders before any engine
+            // work happens. (R95)
+            var outcome = await Task.Run(() => runner(request, progress, token)).ConfigureAwait(true);
             if (outcome.Success)
             {
                 InstallProgress = 1;

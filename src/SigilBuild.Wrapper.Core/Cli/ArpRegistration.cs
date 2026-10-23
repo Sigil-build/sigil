@@ -49,6 +49,9 @@ internal static class ArpRegistration
     /// standard ARP <c>InstallLocation</c> value. Read back by
     /// <see cref="SigilBuild.Wrapper.Engine.InstalledStateResolver"/> to resolve the
     /// prior install dir for an upgrade. Empty → the value is not written.</param>
+    /// <param name="DisplayIcon">Path of the file whose first icon ARP shows beside the
+    /// entry: the deployed <c>uninstall.exe</c>, which carries the stamped installer icon.
+    /// Removed with the key. Empty → the value is not written. (R100)</param>
     public sealed record Entry(
         string AppId,
         string DisplayName,
@@ -56,7 +59,8 @@ internal static class ArpRegistration
         string Publisher,
         string UninstallString,
         long EstimatedSizeBytes,
-        string InstallLocation = "");
+        string InstallLocation = "",
+        string DisplayIcon = "");
 
     /// <summary>
     /// Create or update the ARP key for <paramref name="entry"/> in the
@@ -80,6 +84,10 @@ internal static class ArpRegistration
         if (!string.IsNullOrEmpty(entry.InstallLocation))
         {
             key.SetValue("InstallLocation", entry.InstallLocation);
+        }
+        if (!string.IsNullOrEmpty(entry.DisplayIcon))
+        {
+            key.SetValue("DisplayIcon", entry.DisplayIcon);
         }
         // EstimatedSize is documented as a DWORD in KB.
         var sizeKb = (int)Math.Min(int.MaxValue, Math.Max(0, entry.EstimatedSizeBytes / 1024));

@@ -122,8 +122,24 @@ internal static class InstallerLog
     private static void AppendLine(string line)
     {
         if (_path is null) return;
+        AppendLineTo(_path, line);
+    }
+
+    /// <summary>
+    /// Appends <paramref name="line"/> to <paramref name="path"/> as UTF-8. A file that is
+    /// empty when opened (newly created) receives a UTF-8 BOM first, so Windows PowerShell
+    /// 5.1 reads it as UTF-8 rather than ANSI; an existing non-empty file never gets a
+    /// second BOM. (R89)
+    /// </summary>
+    internal static void AppendLineTo(string path, string line)
+    {
         if (!line.EndsWith('\n')) line += "\n";
-        using var fs = new FileStream(_path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+        using var fs = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+        if (fs.Length == 0)
+        {
+            var bom = Encoding.UTF8.GetPreamble();
+            fs.Write(bom, 0, bom.Length);
+        }
         var bytes = Encoding.UTF8.GetBytes(line);
         fs.Write(bytes, 0, bytes.Length);
     }

@@ -16,8 +16,9 @@ on:
       - docs/**
       - .github/workflows/docs-site.yml
 
+# A newer commit on the same pull request or branch cancels the run it has made stale.
 concurrency:
-  group: docs-site-${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -27,20 +28,24 @@ jobs:
   build:
     name: docs site build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: sigil
+          persist-credentials: false
 
       # DOCS_SITE_TOKEN is only needed while Sigil-build/docs is private; the
       # fallback to the default token covers a public repo.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Sigil-build/docs
           path: site
           token: ${{ secrets.DOCS_SITE_TOKEN || github.token }}
+          persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      # Cloudflare Pages builds the live site with Python 3.12.
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
 
@@ -57,6 +62,7 @@ jobs:
     needs: build
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: call the deploy hook
         env:
@@ -66,5 +72,5 @@ jobs:
             echo "::notice::DOCS_DEPLOY_HOOK is not set, so docs.sigil.build was not asked to rebuild. It picks these pages up at its next build."
             exit 0
           fi
-          curl -fsS -X POST "$DOCS_DEPLOY_HOOK" > /dev/null
+          curl --proto '=https' --tlsv1.2 -fsS -X POST "$DOCS_DEPLOY_HOOK" > /dev/null
           echo "Asked docs.sigil.build to rebuild."

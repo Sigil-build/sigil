@@ -35,6 +35,7 @@ rail.downgrade_blocked = Blocked
 # --- welcome ---
 welcome.title = Welcome to {appName} setup
 welcome.body = This wizard will guide you through installation. Click Next to continue.
+welcome.version = Version {version}
 
 # --- license ---
 license.title = License agreement
@@ -47,6 +48,10 @@ location.scope.user = Just for me (recommended)
 location.scope.user_hint = No administrator permission needed
 location.scope.machine = All users of this computer
 location.scope.machine_hint = Installs to Program Files — Windows will ask for permission
+location.disk_free = Free space on drive {drive}: {freeSpace}
+size.mb = {value} MB
+size.gb = {value} GB
+size.tb = {value} TB
 
 # --- install location validation ---
 location.error.empty = Enter an install location.

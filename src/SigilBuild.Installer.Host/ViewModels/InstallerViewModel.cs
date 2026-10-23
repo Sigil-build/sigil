@@ -104,6 +104,14 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     /// <summary>The Welcome screen's heading, bound by WelcomeView.axaml.</summary>
     public string WelcomeTitle => Strings.WelcomeTitle(_lang, Brand.AppName);
 
+    /// <summary>The Welcome screen's "Version x.y.z" line; empty when the app declares no version. (R99)</summary>
+    public string WelcomeVersion => HasWelcomeVersion
+        ? Strings.WelcomeVersion(_lang, Brand.AppVersion)
+        : string.Empty;
+
+    /// <summary>True when <see cref="WelcomeVersion"/> is shown.</summary>
+    public bool HasWelcomeVersion => !string.IsNullOrWhiteSpace(Brand.AppVersion);
+
     /// <summary>The Finish screen's heading, bound by FinishView.axaml.</summary>
     public string FinishTitle => Strings.FinishTitle(_lang, Brand.AppName);
 
@@ -667,6 +675,7 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
             {
                 _installPath = value;
                 OnPropertyChanged();
+                RefreshInstallPathFreeSpace();
                 // Re-validate live so a corrected path clears the inline error and
                 // re-enables Next without needing a second click.
                 if (_step == InstallerStep.InstallOptions)
@@ -675,6 +684,100 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
                 }
             }
         }
+    }
+
+    // --- Destination screen: free-space readout (R99) ---
+
+    private Func<string, long?> _freeSpaceProbe = DefaultFreeSpaceProbe;
+    private string _installPathFreeSpace = string.Empty;
+
+    /// <summary>
+    /// "Free space on drive C: 123.4 GB" for the drive holding <see cref="InstallPath"/>, or
+    /// empty when the path is blank, relative, or its drive is unavailable.
+    /// </summary>
+    public string InstallPathFreeSpace
+    {
+        get => _installPathFreeSpace;
+        private set
+        {
+            if (_installPathFreeSpace != value)
+            {
+                _installPathFreeSpace = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(HasInstallPathFreeSpace));
+            }
+        }
+    }
+
+    /// <summary>True when <see cref="InstallPathFreeSpace"/> has text to show.</summary>
+    public bool HasInstallPathFreeSpace => _installPathFreeSpace.Length > 0;
+
+    /// <summary>Replaces the free-space probe (bytes free for a path, or null when unknown). Tests only.</summary>
+    internal void SetFreeSpaceProbe(Func<string, long?> probe)
+    {
+        _freeSpaceProbe = probe ?? throw new ArgumentNullException(nameof(probe));
+        RefreshInstallPathFreeSpace();
+    }
+
+    private void RefreshInstallPathFreeSpace()
+    {
+        var path = _installPath?.Trim() ?? string.Empty;
+        if (path.Length == 0 || !System.IO.Path.IsPathFullyQualified(path))
+        {
+            InstallPathFreeSpace = string.Empty;
+            return;
+        }
+
+        long? free;
+        try
+        {
+            free = _freeSpaceProbe(path);
+        }
+#pragma warning disable CA1031 // The readout is cosmetic: any probe failure shows nothing.
+        catch
+        {
+            free = null;
+        }
+#pragma warning restore CA1031
+
+        var root = System.IO.Path.GetPathRoot(path)?.TrimEnd('\\', '/') ?? string.Empty;
+        InstallPathFreeSpace = free is { } bytes && root.Length > 0
+            ? Strings.LocationDiskFree(_lang, root, FormatSize(bytes))
+            : string.Empty;
+    }
+
+    private static long? DefaultFreeSpaceProbe(string path)
+    {
+        try
+        {
+            var root = System.IO.Path.GetPathRoot(path);
+            if (string.IsNullOrEmpty(root))
+            {
+                return null;
+            }
+            var drive = new System.IO.DriveInfo(root);
+            return drive.IsReady ? drive.AvailableFreeSpace : null;
+        }
+        catch (Exception ex) when (ex is ArgumentException or System.IO.IOException
+            or UnauthorizedAccessException or NotSupportedException)
+        {
+            return null; // UNC root, unmapped drive, or an unreadable volume: show nothing.
+        }
+    }
+
+    private string FormatSize(long bytes)
+    {
+        const double Kb = 1024d;
+        double mb = bytes / (Kb * Kb);
+        if (mb >= Kb * Kb)
+        {
+            return Strings.SizeTb(_lang, (mb / (Kb * Kb)).ToString("0.#", CultureInfo.CurrentCulture));
+        }
+        if (mb >= Kb)
+        {
+            return Strings.SizeGb(_lang, (mb / Kb).ToString("0.#", CultureInfo.CurrentCulture));
+        }
+        return Strings.SizeMb(_lang, mb.ToString("0", CultureInfo.CurrentCulture));
     }
 
     // --- Destination screen: scope toggle + inline path validation ---
@@ -760,6 +863,7 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
         _defaultPathResolver = defaultPathResolver;
         ScopeSelectable = scopeSelectable;
         InstallPath = initialPath;
+        RefreshInstallPathFreeSpace();
         InstallPathError = null;
     }
 

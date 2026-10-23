@@ -30,6 +30,12 @@
               Margin="8,0,0,0" Click="OnBrowse" />
     </Grid>
 
+    <!-- Free space on the target drive; empty (hidden) for an invalid path or unavailable drive. -->
+    <TextBlock x:Name="FreeSpace" FontSize="12" TextWrapping="Wrap"
+               Foreground="{DynamicResource TextMutBrush}"
+               IsVisible="{Binding HasInstallPathFreeSpace}"
+               Text="{Binding InstallPathFreeSpace}" />
+
     <!-- Inline validation error: absolute / non-file / writable-or-elevatable. -->
     <TextBlock Foreground="{DynamicResource DangerTextBrush}" FontSize="12"
                TextWrapping="Wrap"

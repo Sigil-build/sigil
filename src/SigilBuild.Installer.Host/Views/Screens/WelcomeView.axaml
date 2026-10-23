@@ -11,6 +11,9 @@
   <StackPanel Spacing="16">
     <TextBlock x:Name="Heading" FontSize="24" FontWeight="Bold" TextWrapping="Wrap"
                Text="{Binding WelcomeTitle}" />
+    <TextBlock x:Name="VersionLine" TextWrapping="Wrap" Foreground="#4B5563"
+               IsVisible="{Binding HasWelcomeVersion}"
+               Text="{Binding WelcomeVersion}" />
     <TextBlock TextWrapping="Wrap" Foreground="#4B5563"
                Text="{x:Static loc:S.WelcomeBody}" />
     <!-- Upgrade banner ("Upgrading from x.y.z"), shown only during an upgrade. -->

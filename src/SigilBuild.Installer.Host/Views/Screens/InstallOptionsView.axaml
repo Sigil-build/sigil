@@ -23,12 +23,6 @@
                IsVisible="{Binding HasUpgradeNotice}"
                Text="{Binding UpgradeNotice}" />
 
-    <!-- Upgrade banner ("Upgrading from x.y.z") on the ready/destination screen. -->
-    <TextBlock TextWrapping="Wrap" FontWeight="SemiBold"
-               Foreground="{DynamicResource AccentBrush}"
-               IsVisible="{Binding HasUpgradeNotice}"
-               Text="{Binding UpgradeNotice}" />
-
     <Grid ColumnDefinitions="*,Auto">
       <TextBox Grid.Column="0" x:Name="InstallPath"
                Text="{Binding InstallPath, Mode=TwoWay}" />

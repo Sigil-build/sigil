@@ -465,8 +465,8 @@ public sealed class ExeWrapperPackager : IPackager
         {
             BrandTokensLight = new Dictionary<string, string>(palette.Light),
             BrandTokensDark = new Dictionary<string, string>(palette.Dark),
-            LogoBase64 = ReadImageBase64(brand?.Logo, sourceDirectory),
-            HeroBase64 = ReadImageBase64(brand?.Hero, sourceDirectory),
+            LogoBase64 = ReadImageBase64(brand?.Logo, "logo", manifest, sourceDirectory, diagnostics),
+            HeroBase64 = ReadImageBase64(brand?.Hero, "hero", manifest, sourceDirectory, diagnostics),
             // Carry the declared custom wizard screens into the blob so the
             // stamped host can render them. Parameters are already populated by
             // FromWrapperBlob; screens live only on the manifest's InstallerSection.
@@ -477,7 +477,7 @@ public sealed class ExeWrapperPackager : IPackager
             // non-fatal); a non-empty result missing 'en' is fatal (SIG0290, see
             // ReadLicenseText). An entirely empty result is null and the screen is
             // simply omitted.
-            LicenseText = ReadLicenseText(manifest.Installer?.License, sourceDirectory, diagnostics),
+            LicenseText = ReadLicenseText(manifest.Installer?.License, manifest, sourceDirectory, diagnostics),
             // Mark the artifact as INTENDED to be signed iff the
             // manifest declares a real `sign` block. The trust line is gated at
             // install time on SignDeclared && WinVerifyTrust(self) == valid — never
@@ -504,24 +504,66 @@ public sealed class ExeWrapperPackager : IPackager
     }
 
     /// <summary>
-    /// Reads a manifest brand image (logo/hero) as base64, resolving a relative
-    /// path against the pack source directory. Returns <c>null</c> when the path
-    /// is unset or the file is missing — brand assets are optional and their
-    /// absence must not fail the pack.
+    /// Reads a manifest brand image (logo/hero) as base64. A relative path
+    /// resolves against the manifest file's directory (see
+    /// <see cref="ResolveManifestRelative"/>). Returns <c>null</c> when the path
+    /// is unset; a declared image that is missing or unreadable also yields
+    /// <c>null</c> plus a non-fatal
+    /// <see cref="DiagnosticCodes.BrandImageUnreadable"/> warning — brand assets
+    /// are optional and must not fail the pack, but must not vanish silently. (R96)
     /// </summary>
-    private static string? ReadImageBase64(string? path, string sourceDirectory)
+    private static string? ReadImageBase64(
+        string? path, string slot, SigilManifest manifest, string sourceDirectory,
+        ICollection<Diagnostic>? diagnostics)
     {
         if (string.IsNullOrWhiteSpace(path))
             return null;
 
-        var resolved = Path.IsPathRooted(path)
-            ? path
-            : Path.GetFullPath(Path.Combine(sourceDirectory ?? string.Empty, path));
+        var resolved = ResolveManifestRelative(path, manifest, sourceDirectory);
 
-        if (!File.Exists(resolved))
-            return null;
+        try
+        {
+            if (File.Exists(resolved))
+                return Convert.ToBase64String(File.ReadAllBytes(resolved));
 
-        return Convert.ToBase64String(File.ReadAllBytes(resolved));
+            AddBrandImageWarning(diagnostics,
+                $"installer.brand.{slot} file not found: '{path}' (resolved to '{resolved}', relative to the manifest) — the wizard will render without it");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            AddBrandImageWarning(diagnostics,
+                $"installer.brand.{slot} file could not be read: '{path}' — {ex.Message}; the wizard will render without it");
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Resolves a manifest-declared file path: rooted paths are used as-is, relative
+    /// paths resolve against the directory of the manifest file (the same base as
+    /// <c>installer.icon</c>). A manifest with no file location (built in memory)
+    /// falls back to the pack source directory. (R96)
+    /// </summary>
+    private static string ResolveManifestRelative(string path, SigilManifest manifest, string sourceDirectory)
+    {
+        if (Path.IsPathRooted(path))
+            return path;
+
+        var manifestDir = string.IsNullOrEmpty(manifest.Location.File)
+            ? null
+            : Path.GetDirectoryName(manifest.Location.File);
+        var baseDir = string.IsNullOrEmpty(manifestDir) ? sourceDirectory ?? string.Empty : manifestDir;
+        return Path.GetFullPath(Path.Combine(baseDir, path));
+    }
+
+    private static void AddBrandImageWarning(ICollection<Diagnostic>? diagnostics, string message)
+    {
+        diagnostics?.Add(new Diagnostic(
+            DiagnosticSeverity.Warning,
+            DiagnosticCodes.BrandImageUnreadable,
+            message,
+            SourceLocation.Unknown,
+            DiagnosticCodes.DocsUrl(DiagnosticCodes.BrandImageUnreadable)));
     }
 
     /// <summary>
@@ -537,7 +579,7 @@ public sealed class ExeWrapperPackager : IPackager
     /// <c>null</c> and omits the screen.
     /// </summary>
     private static Dictionary<string, string>? ReadLicenseText(
-        LocalizedText? license, string sourceDirectory, ICollection<Diagnostic>? diagnostics)
+        LocalizedText? license, SigilManifest manifest, string sourceDirectory, ICollection<Diagnostic>? diagnostics)
     {
         if (license is null)
         {
@@ -548,7 +590,7 @@ public sealed class ExeWrapperPackager : IPackager
 
         foreach (var (tag, pathOrText) in license.Values)
         {
-            var text = ReadOneLicense(pathOrText, sourceDirectory, tag, diagnostics);
+            var text = ReadOneLicense(pathOrText, manifest, sourceDirectory, tag, diagnostics);
             if (!string.IsNullOrWhiteSpace(text))
             {
                 texts[tag] = text!;
@@ -577,7 +619,7 @@ public sealed class ExeWrapperPackager : IPackager
 
     /// <summary>
     /// Reads a single declared license file as text, resolving a relative path
-    /// against the pack source directory. Returns <c>null</c> — and appends a
+    /// against the manifest file's directory (R96). Returns <c>null</c> — and appends a
     /// non-fatal <see cref="DiagnosticCodes.LicenseFileUnreadable"/> warning to
     /// <paramref name="diagnostics"/> — when the path is set but the file is
     /// missing, unreadable, or empty. This never hard-fails the pack by
@@ -587,16 +629,14 @@ public sealed class ExeWrapperPackager : IPackager
     /// language entry this is, for callers building a tag -&gt; text map.
     /// </summary>
     private static string? ReadOneLicense(
-        string? path, string sourceDirectory, string tag, ICollection<Diagnostic>? diagnostics)
+        string? path, SigilManifest manifest, string sourceDirectory, string tag, ICollection<Diagnostic>? diagnostics)
     {
         _ = tag; // identifies the entry to the caller; the SIG0250 message itself is per-file, not per-language.
 
         if (string.IsNullOrWhiteSpace(path))
             return null;
 
-        var resolved = Path.IsPathRooted(path)
-            ? path
-            : Path.GetFullPath(Path.Combine(sourceDirectory ?? string.Empty, path));
+        var resolved = ResolveManifestRelative(path, manifest, sourceDirectory);
 
         string text;
         try

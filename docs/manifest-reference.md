@@ -116,7 +116,7 @@ Source: `schemas/sigil-schema.json` (JSON Schema, draft-07).
 | `brand` | object | - | - | _(undocumented)_ |
 | `scope` | string | - | `auto` | Install scope: per-user, per-machine, or auto-resolve (T12). |
 | `install_dir` | string | - | - | Optional install-dir override; may reference {app.*} / {scope_root} tokens (T13). |
-| `license` | LocalizedText | - | - | Either a plain string (treated as English) or a { "en": ..., "uk": ... } map. An `en` entry is required (SIG0290). |
+| `license` | LocalizedText | - | - | License text shown on the License screen: a plain string (treated as English) or a { "en": ..., "uk": ... } map of file paths. Relative paths resolve against the manifest file's directory. An unreadable file is dropped with warning SIG0250; an `en` entry is required (SIG0290). |
 | `language` | string | - | - | Optional fixed installer language tag (P9, gap G10) — the first link in the language-preference chain (installer.language -> /lang -> OS list -> en). An invalid tag is diagnosed (SIG0291). |
 | `require_signed_downloads` | string | - | `sign_declared` | Whether a binary this installer pulls off the network -- an update package or a web-stub payload -- must be Authenticode-valid before it is launched (register row R45). `sign_declared` (default, and the historical behaviour) arms the check only when this manifest declares a `sign` block; that infers 'should downloads be verified' from 'did the publisher configure signing for their own output', which are different questions. `always` arms it regardless. `always_verified_revocation` additionally REFUSES a binary whose revocation status could not be established (register row R46) -- by default that is a warning, because refusing it would break installs behind a captive portal, on an air-gapped network, or inside a locked-down enterprise egress; turn it on when you know your audience is reliably online. Prerequisites are not governed by this setting: they are always checked, and carry their own per-prerequisite `allow_unsigned` opt-out. An unrecognized value is SIG0326. |
 | `options` | object | - | - | Built-in configurable installer components (T8) plus app-defined custom components (P10, gap G11). |
@@ -131,8 +131,8 @@ Source: `schemas/sigil-schema.json` (JSON Schema, draft-07).
 
 | Property | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `logo` | string | - | - | _(undocumented)_ |
-| `hero` | string | - | - | _(undocumented)_ |
+| `logo` | string | - | - | Path (relative to the manifest) to the wizard header logo (SVG or PNG). A missing file packs with warning SIG0251 and the wizard renders without it. |
+| `hero` | string | - | - | Path (relative to the manifest) to the Welcome-screen hero artwork (SVG or PNG). A missing file packs with warning SIG0251 and the wizard renders without it. |
 | `primaryColor` | string | - | - | Wizard primary colour as #RRGGBB — primary buttons and accent fill. Feeds BrandTokenEmitter, which derives a full light+dark palette from this and accentColor at pack time. Omitted, it falls back to Sigil's default #1F2937. NOTE the camelCase spelling: `primary_color` was accepted by this schema until R80 and read by nothing, so a snake_case manifest packed a silently unbranded installer; it is now refused by additionalProperties. |
 | `accentColor` | string | - | - | Wizard secondary accent as #RRGGBB — progress indication and links. Omitted, it falls back to Sigil's default #3B82F6. camelCase, for the reason given on primaryColor. |
 

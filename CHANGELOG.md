@@ -54,6 +54,12 @@ used them fails validation instead of behaving unexpectedly.
   accepted them and the parser read only `primaryColor` / `accentColor`, so a
   snake_case manifest validated, packed, and shipped a wizard in Sigil's default
   grey and blue with no diagnostic anywhere. Use the camelCase spellings.
+- **`installer.brand.logo` / `hero` and `installer.license` paths resolve against
+  the manifest file's directory, not `build.source`.** `installer.icon` already did,
+  so the same manifest resolved its icon and its logo from two different places and
+  a manifest-relative logo was silently dropped. A declared `logo` or `hero` that
+  cannot be read now packs with the non-fatal warning **`SIG0251`**. Move the files
+  or rewrite the paths relative to the manifest.
 - **`installer.hooks.*` accepts four more step types** — `http_download`,
   `ini_write`, `json_edit`, `xml_edit`. Not new capability: the engine always
   accepted them and only the hook schema omitted them, so manifests using them

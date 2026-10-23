@@ -494,8 +494,8 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "logo": { "type": "string" },
-            "hero": { "type": "string" },
+            "logo": { "type": "string", "description": "Path (relative to the manifest) to the wizard header logo (SVG or PNG). A missing file packs with warning SIG0251 and the wizard renders without it." },
+            "hero": { "type": "string", "description": "Path (relative to the manifest) to the Welcome-screen hero artwork (SVG or PNG). A missing file packs with warning SIG0251 and the wizard renders without it." },
             "primaryColor": {
               "type": "string",
               "pattern": "^#[0-9A-Fa-f]{6}$",
@@ -519,7 +519,7 @@
           "description": "Optional install-dir override; may reference {app.*} / {scope_root} tokens (T13).",
           "minLength": 1
         },
-        "license": { "$ref": "#/definitions/LocalizedText" },
+        "license": { "$ref": "#/definitions/LocalizedText", "description": "License text shown on the License screen: a plain string (treated as English) or a { \"en\": ..., \"uk\": ... } map of file paths. Relative paths resolve against the manifest file's directory. An unreadable file is dropped with warning SIG0250; an `en` entry is required (SIG0290)." },
         "language": {
           "type": "string",
           "description": "Optional fixed installer language tag (P9, gap G10) — the first link in the language-preference chain (installer.language -> /lang -> OS list -> en). An invalid tag is diagnosed (SIG0291)."

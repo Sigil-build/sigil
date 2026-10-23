@@ -47,12 +47,14 @@ Slots — this is the **complete** list. `installer.brand` is `additionalPropert
 
 |Field|What it does|
 |---|---|
-|`logo`|Header logo (SVG or PNG).|
-|`hero`|Welcome-screen hero artwork (SVG or PNG).|
+|`logo`|Header logo (SVG or PNG). A relative path resolves against the manifest file's directory.|
+|`hero`|Welcome-screen hero artwork (SVG or PNG). A relative path resolves against the manifest file's directory.|
 |`primaryColor`|Primary button + accent fill.|
 |`accentColor`|Secondary accent (progress + links).|
 
 > **The colour keys are camelCase**, unlike most of the manifest. `primary_color` and `accent_color` are refused (R80): the schema listed them until then while the parser read only the camelCase pair, so a snake_case manifest passed `sigil validate` and packed with **no brand colours at all**, silently falling back to the defaults. A wrong spelling is now a validation error rather than an unbranded installer.
+
+> **`logo`, `hero` and `installer.license` paths are manifest-relative** (R96), the same base as `installer.icon` — not relative to `build.source`. A declared `logo` or `hero` that cannot be read packs with the non-fatal warning `SIG0251` and the wizard renders without it; an unreadable licence file is `SIG0250`.
 
 All colours are `#RRGGBB` hex — the schema enforces the pattern. The full light and dark palette is **derived from those two colours** at pack time by the brand generator; there is no gradient, sidebar or per-surface colour field to set. `BrandTokenEmitter` enforces WCAG-AA contrast against white text at pack time; failing combos surface as a pack-time diagnostic, not a runtime surprise.
 

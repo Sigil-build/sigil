@@ -92,6 +92,11 @@ public static class DiagnosticCodes
     // screen is simply omitted.
     public const string LicenseFileUnreadable = "SIG0250";
 
+    // Emitted at pack time when a declared installer.brand.logo / hero image is
+    // missing or unreadable. Non-fatal: the pack succeeds and the wizard renders
+    // without that image. (R96)
+    public const string BrandImageUnreadable = "SIG0251";
+
     // SIG026x — installer.scope: block (dual install scope)
     // Emitted when installer.scope holds a value outside {user, machine, auto};
     // the parser falls back to auto. Non-fatal (the schema enum is the hard gate).

@@ -241,7 +241,17 @@ literally to the user.
 **Warning, not an error.** The file named by `installer.license` is missing,
 unreadable or empty at pack time. The pack succeeds and the License screen is
 omitted — so check for this if a wizard you expected to show a licence does
-not.
+not. A relative path resolves against the directory of the manifest file, not
+the `build.source` directory.
+
+### SIG0251 — a brand image could not be read {#sig0251}
+
+**Warning, not an error.** The file named by `installer.brand.logo` or
+`installer.brand.hero` is missing or unreadable at pack time. The pack succeeds
+and the wizard renders without that image. A relative path resolves against the
+directory of the manifest file, the same base as `installer.icon` — so a
+manifest that relied on the old source-relative lookup now reports this instead
+of silently dropping the image.
 
 ### SIG0260 — invalid `installer.scope` {#sig0260}
 

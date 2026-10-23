@@ -1,10 +1,12 @@
 // Copyright (c) 2026 Yevhen Khudoliiv. All rights reserved.
 // Licensed under the Sigil License 1.0. See LICENSE in the repository root.
 
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Text.Json;
 using FluentAssertions;
+using SigilBuild.Core.Diagnostics;
 using SigilBuild.Core.Manifest;
 using SigilBuild.Packaging.ExeWrapper;
 using SigilBuild.Wrapper.Json;
@@ -133,5 +135,107 @@ public class ExeWrapperBlobBrandTests
         s.BrandTokensLight!["railBg"].Should().Be("#1F2937");
         s.LogoBase64.Should().BeNull();
         s.HeroBase64.Should().BeNull();
+    }
+
+    private static SigilManifest ManifestAt(string manifestFile, string? logo, string? hero) =>
+        new("v1.0",
+            new AppSection("com.example.App", "Example", "1.0.0", "Example Inc.", null, null),
+            new BuildSection("./out", null, null, true),
+            null, null, null, null,
+            Installer: new InstallerSection(new InstallerBrand(logo, hero, "#312E81", "#4F46E5")),
+            Location: new SourceLocation(manifestFile, 1, 1));
+
+    [Fact]
+    public void BuildBlobBytes_RelativeLogoAndHero_ResolveAgainstManifestDirectory_NotSourceDirectory()
+    {
+        // Arrange
+        var root = Path.Combine(Path.GetTempPath(), "sigil-brand-" + Path.GetRandomFileName());
+        var manifestDir = Path.Combine(root, "manifest");
+        var sourceDir = Path.Combine(root, "source");
+        Directory.CreateDirectory(manifestDir);
+        Directory.CreateDirectory(sourceDir);
+        try
+        {
+            var logoBytes = new byte[] { 9, 8, 7 };
+            var heroBytes = new byte[] { 6, 5, 4 };
+            File.WriteAllBytes(Path.Combine(manifestDir, "logo.png"), logoBytes);
+            File.WriteAllBytes(Path.Combine(manifestDir, "hero.png"), heroBytes);
+            var manifest = ManifestAt(Path.Combine(manifestDir, "sigil.yaml"), "./logo.png", "hero.png");
+            var diagnostics = new List<Diagnostic>();
+
+            // Act
+            var s = Deserialize(ExeWrapperPackager.BuildBlobBytes(manifest, sourceDir, diagnostics));
+
+            // Assert
+            s.LogoBase64.Should().Be(System.Convert.ToBase64String(logoBytes));
+            s.HeroBase64.Should().Be(System.Convert.ToBase64String(heroBytes));
+            diagnostics.Should().NotContain(d => d.Code == DiagnosticCodes.BrandImageUnreadable);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void BuildBlobBytes_MissingBrandImage_WarnsWithSig0251_AndDoesNotFail()
+    {
+        // Arrange
+        var root = Path.Combine(Path.GetTempPath(), "sigil-brand-" + Path.GetRandomFileName());
+        var manifestDir = Path.Combine(root, "manifest");
+        var sourceDir = Path.Combine(root, "source");
+        Directory.CreateDirectory(manifestDir);
+        Directory.CreateDirectory(sourceDir);
+        try
+        {
+            // The file exists only beside the pack source: the old, wrong lookup base.
+            File.WriteAllBytes(Path.Combine(sourceDir, "logo.png"), new byte[] { 1 });
+            var manifest = ManifestAt(Path.Combine(manifestDir, "sigil.yaml"), "logo.png", null);
+            var diagnostics = new List<Diagnostic>();
+
+            // Act
+            var s = Deserialize(ExeWrapperPackager.BuildBlobBytes(manifest, sourceDir, diagnostics));
+
+            // Assert
+            s.LogoBase64.Should().BeNull();
+            diagnostics.Should().ContainSingle(d =>
+                d.Code == DiagnosticCodes.BrandImageUnreadable &&
+                d.Severity == DiagnosticSeverity.Warning);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void BuildBlobBytes_RelativeLicense_ResolvesAgainstManifestDirectory()
+    {
+        // Arrange
+        var root = Path.Combine(Path.GetTempPath(), "sigil-brand-" + Path.GetRandomFileName());
+        var manifestDir = Path.Combine(root, "manifest");
+        var sourceDir = Path.Combine(root, "source");
+        Directory.CreateDirectory(manifestDir);
+        Directory.CreateDirectory(sourceDir);
+        try
+        {
+            File.WriteAllText(Path.Combine(manifestDir, "EULA.txt"), "Terms.");
+            var manifest = new SigilManifest("v1.0",
+                new AppSection("com.example.App", "Example", "1.0.0", "Example Inc.", null, null),
+                new BuildSection("./out", null, null, true),
+                null, null, null, null,
+                Installer: new InstallerSection(null, License: LocalizedText.Plain("EULA.txt")),
+                Location: new SourceLocation(Path.Combine(manifestDir, "sigil.yaml"), 1, 1));
+
+            // Act
+            var s = Deserialize(ExeWrapperPackager.BuildBlobBytes(manifest, sourceDir));
+
+            // Assert
+            s.LicenseText!["en"].Should().Be("Terms.");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 }

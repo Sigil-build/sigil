@@ -87,6 +87,9 @@ close_apps.title = Close these applications to continue
 close_apps.body = Setup needs to update files that these applications are using. Close them and choose Retry, or let Setup close them for you.
 close_apps.close_for_me = Close for me
 close_apps.close_for_me_hint = Close for me asks each application to shut down normally — unsaved work is not discarded. Applications are not restarted afterwards.
+close_apps.closing = Closing applications…
+close_apps.close_failed = Setup could not close these applications. Close them yourself, then choose Retry.
+
 # --- upgrade / downgrade ---
 upgrade.reinstall_notice = {appName} is already installed. Continuing will reinstall it — the current version is removed first.
 upgrade.upgrading = Upgrading {appName} from {fromVersion} to {toVersion}.

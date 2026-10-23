@@ -227,34 +227,131 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
             return true;
         }
 
-        var found = _blockerScan(InstallPath);
+        PublishBlockers(_blockerScan(InstallPath));
+        return Blockers.Count == 0;
+    }
+
+    private void PublishBlockers(IReadOnlyList<string> found)
+    {
         Blockers.Clear();
         foreach (var b in found)
         {
             Blockers.Add(b);
         }
         OnPropertyChanged(nameof(HasBlockers));
-        return Blockers.Count == 0;
+    }
+
+    private bool _isClosingApps;
+
+    /// <summary>
+    /// True while "Close for me" is waiting on the Restart Manager. The screen shows
+    /// a closing notice and disables Retry, Close-for-me and Next until it returns. (R94)
+    /// </summary>
+    public bool IsClosingApps
+    {
+        get => _isClosingApps;
+        private set
+        {
+            if (_isClosingApps != value)
+            {
+                _isClosingApps = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(CanActOnBlockers));
+                OnPropertyChanged(nameof(CanGoNext));
+                OnPropertyChanged(nameof(CanGoBack));
+            }
+        }
+    }
+
+    /// <summary>True when Retry and Close-for-me can be pressed — not while a close is in flight.</summary>
+    public bool CanActOnBlockers => !_isClosingApps;
+
+    private bool _closeAppsFailed;
+
+    /// <summary>
+    /// True when the last "Close for me" left applications running. The screen then
+    /// says Setup could not close them, rather than showing the same list again as
+    /// though nothing had been tried. Cleared by the next attempt or Retry. (R94)
+    /// </summary>
+    public bool CloseAppsFailed
+    {
+        get => _closeAppsFailed;
+        private set
+        {
+            if (_closeAppsFailed != value)
+            {
+                _closeAppsFailed = value;
+                OnPropertyChanged();
+            }
+        }
     }
 
     /// <summary>
     /// "Close for me" — ask the Restart Manager to close the blocking applications,
     /// then re-scan. Advances into the install when that cleared them; otherwise the
-    /// screen stays put with the refreshed list (e.g. a declared app_mutex holder the
-    /// Restart Manager cannot close).
+    /// screen stays put with the refreshed list and says the close did not work (e.g.
+    /// a declared app_mutex holder the Restart Manager cannot close, or an app that
+    /// restarts itself).
     /// </summary>
-    public void CloseBlockingApps()
+    /// <remarks>
+    /// The close and the re-scan run on a thread-pool thread. A graceful
+    /// <c>RmShutdown</c> blocks for as long as the Restart Manager waits on the
+    /// applications, and on the UI thread that froze the window for the whole wait.
+    /// The re-scan is a fresh Restart Manager session, so the list it publishes
+    /// names the processes running now, not the ones the screen first showed. (R94)
+    /// </remarks>
+    public async Task CloseBlockingAppsAsync()
     {
-        _blockerClose?.Invoke(InstallPath);
-        if (RescanBlockers())
+        if (_isClosingApps)
+        {
+            return;
+        }
+
+        var path = InstallPath;
+        var close = _blockerClose;
+        var scan = _blockerScan;
+        CloseAppsFailed = false;
+        IsClosingApps = true;
+        IReadOnlyList<string> remaining;
+        try
+        {
+            remaining = await Task.Run(() =>
+            {
+#pragma warning disable CA1031 // A failed close is reported by the re-scan below, never by a crash.
+                try
+                {
+                    close?.Invoke(path);
+                }
+                catch (Exception)
+                {
+                    // The re-scan decides what the user sees next.
+                }
+#pragma warning restore CA1031
+                return scan?.Invoke(path) ?? Array.Empty<string>();
+            }).ConfigureAwait(true);
+        }
+        finally
+        {
+            IsClosingApps = false;
+        }
+
+        PublishBlockers(remaining);
+        if (Blockers.Count == 0)
         {
             GoToInstalling();
+            return;
         }
+        CloseAppsFailed = true;
     }
 
     /// <summary>"Retry" — the user closed the apps themselves; re-scan and continue when clear.</summary>
     public void RetryBlockers()
     {
+        if (_isClosingApps)
+        {
+            return;
+        }
+        CloseAppsFailed = false;
         if (RescanBlockers())
         {
             GoToInstalling();
@@ -623,8 +720,8 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
         // Terminal step (Finish/Failed) not in the linear flow: leave the cursor.
     }
 
-    public bool CanGoBack => !_isPreparing && _step is not InstallerStep.Welcome and not InstallerStep.Installing and not InstallerStep.Finish and not InstallerStep.Failed and not InstallerStep.DowngradeBlocked;
-    public bool CanGoNext => !_isPreparing && _step is not InstallerStep.Installing and not InstallerStep.Finish and not InstallerStep.Failed and not InstallerStep.DowngradeBlocked;
+    public bool CanGoBack => !_isPreparing && !_isClosingApps && _step is not InstallerStep.Welcome and not InstallerStep.Installing and not InstallerStep.Finish and not InstallerStep.Failed and not InstallerStep.DowngradeBlocked;
+    public bool CanGoNext => !_isPreparing && !_isClosingApps && _step is not InstallerStep.Installing and not InstallerStep.Finish and not InstallerStep.Failed and not InstallerStep.DowngradeBlocked;
 
     /// <summary>True on the Close-applications gate — drives its Retry / Close-for-me buttons.</summary>
     public bool IsCloseAppsStep => _step == InstallerStep.CloseApps;
@@ -1112,9 +1209,9 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
 
     public void Next()
     {
-        // A hook run is in flight; the button is disabled, and a stray invocation
-        // must not start a second one.
-        if (_isPreparing)
+        // A hook run or a close is in flight; the button is disabled, and a stray
+        // invocation must not start a second one.
+        if (_isPreparing || _isClosingApps)
         {
             return;
         }
@@ -1123,6 +1220,7 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
         // Next after clearing blockers — re-scan and only advance when clear.
         if (_step == InstallerStep.CloseApps)
         {
+            CloseAppsFailed = false;
             if (!RescanBlockers())
             {
                 return; // still blocked — stay on the screen with the refreshed list.

@@ -16,7 +16,7 @@ The screen list is built at runtime from your manifest. Welcome, Choose Install 
 
 Three further screens exist but are not part of that linear flow — the wizard diverts to them:
 
-- **CloseApps** — reached when running applications hold the install directory open. The check happens when you press Next on the screen before Installing, and the manifest's `installer.hooks.pre_install` steps run first — so a hook that stops your app (its own `--quit`, say) clears it before the wizard looks; Next shows "Preparing to install…" while they run, and they run only once per wizard run. An app the Restart Manager cannot close — a tray app with no window, or a background process its GUI restarts — is what a `pre_install` teardown hook is for.
+- **CloseApps** — reached when running applications hold the install directory open. The check happens when you press Next on the screen before Installing, and the manifest's `installer.hooks.pre_install` steps run first — so a hook that stops your app (its own `--quit`, say) clears it before the wizard looks; Next shows "Preparing to install…" while they run, and they run only once per wizard run. **Close for me** asks the Restart Manager to shut the listed applications down; the screen stays responsive while it waits, and if anything is still running afterwards it lists what is left and says Setup could not close it. An app the Restart Manager cannot close — a tray app with no window, or a background process its GUI restarts — is what a `pre_install` teardown hook is for.
 - **DowngradeBlocked** — jumped to at startup when the installed version is newer than this package; the run ends with exit code `3`.
 - **Failed** — the terminal screen for a failed install.
 

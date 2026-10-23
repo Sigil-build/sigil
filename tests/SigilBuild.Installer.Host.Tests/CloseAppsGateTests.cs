@@ -54,7 +54,7 @@ public sealed class CloseAppsGateTests
     }
 
     [Fact]
-    public void Close_for_me_invokes_the_restart_manager_and_clears()
+    public async Task Close_for_me_invokes_the_restart_manager_and_clears()
     {
         var vm = Vm();
         var blockers = new List<string> { "Acme Studio (pid 42)" };
@@ -65,24 +65,103 @@ public sealed class CloseAppsGateTests
 
         vm.RescanBlockers().Should().BeFalse();
 
-        vm.CloseBlockingApps();
+        await vm.CloseBlockingAppsAsync();
 
         closeCalled.Should().BeTrue();
         vm.HasBlockers.Should().BeFalse("the Restart Manager closed them");
+        vm.CloseAppsFailed.Should().BeFalse();
     }
 
     [Fact]
-    public void Close_for_me_that_cannot_clear_leaves_the_gate_up()
+    public async Task Close_for_me_that_cannot_clear_leaves_the_gate_up()
     {
         var vm = Vm();
         // A declared app_mutex holder the Restart Manager cannot close.
         vm.ConfigureBlockerProbe(_ => new[] { "Global\\AcmeStudio (application mutex held)" }, _ => { });
 
         vm.RescanBlockers().Should().BeFalse();
-        vm.CloseBlockingApps();
+        await vm.CloseBlockingAppsAsync();
 
         vm.HasBlockers.Should().BeTrue("a mutex holder survives RmShutdown — the gate must stay up");
         vm.CurrentStep.Should().NotBe(InstallerStep.Installing);
+    }
+
+    [Fact]
+    public async Task Close_for_me_runs_off_the_calling_thread_and_shows_a_busy_state()
+    {
+        // Arrange — a close that blocks the way RmShutdown does while it waits on
+        // the applications. (R94)
+        var vm = Vm();
+        var blockers = new List<string> { "dictum-gui.exe (pid 42)" };
+        using var release = new ManualResetEventSlim(false);
+        var callerThread = Environment.CurrentManagedThreadId;
+        int? closeThread = null;
+        vm.ConfigureBlockerProbe(
+            scan: _ => blockers.ToArray(),
+            close: _ =>
+            {
+                closeThread = Environment.CurrentManagedThreadId;
+                release.Wait(TimeSpan.FromSeconds(10));
+                blockers.Clear();
+            });
+        vm.CurrentStep = InstallerStep.CloseApps;
+        vm.RescanBlockers().Should().BeFalse();
+
+        // Act
+        var closing = vm.CloseBlockingAppsAsync();
+
+        // Assert — the call returned while the close is still blocked.
+        closing.IsCompleted.Should().BeFalse("the close must not run on the calling (UI) thread");
+        vm.IsClosingApps.Should().BeTrue();
+        vm.CanActOnBlockers.Should().BeFalse("Retry and Close-for-me are disabled while closing");
+        vm.CanGoNext.Should().BeFalse();
+
+        release.Set();
+        await closing;
+
+        closeThread.Should().NotBe(callerThread);
+        vm.IsClosingApps.Should().BeFalse();
+        vm.CanActOnBlockers.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Close_for_me_that_leaves_apps_running_says_so_and_shows_the_fresh_list()
+    {
+        // Arrange — a tray app's daemon is respawned under a new pid by the close. (R94)
+        var vm = Vm();
+        var blockers = new List<string> { "dictum-gui.exe (pid 42)", "dictum.exe (pid 43)" };
+        vm.ConfigureBlockerProbe(
+            scan: _ => blockers.ToArray(),
+            close: _ =>
+            {
+                blockers.Clear();
+                blockers.Add("dictum.exe (pid 77)");
+            });
+        vm.CurrentStep = InstallerStep.CloseApps;
+        vm.RescanBlockers().Should().BeFalse();
+
+        // Act
+        await vm.CloseBlockingAppsAsync();
+
+        // Assert
+        vm.CloseAppsFailed.Should().BeTrue("the screen must say the close did not work");
+        vm.Blockers.Should().Equal("dictum.exe (pid 77)");
+        vm.CurrentStep.Should().Be(InstallerStep.CloseApps);
+    }
+
+    [Fact]
+    public async Task Retry_clears_the_could_not_close_notice()
+    {
+        var vm = Vm();
+        var blockers = new List<string> { "Acme Studio (pid 42)" };
+        vm.ConfigureBlockerProbe(_ => blockers.ToArray(), _ => { });
+        vm.CurrentStep = InstallerStep.CloseApps;
+        await vm.CloseBlockingAppsAsync();
+        vm.CloseAppsFailed.Should().BeTrue();
+
+        vm.RetryBlockers();
+
+        vm.CloseAppsFailed.Should().BeFalse();
     }
 
     [Fact]

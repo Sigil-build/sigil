@@ -20,6 +20,8 @@ public partial class CloseAppsView : UserControl
     private void OnRetry(object? _, RoutedEventArgs __)
         => (DataContext as InstallerViewModel)?.RetryBlockers();
 
+    // Not awaited: the view-model runs the close off the UI thread, owns the busy
+    // state and handles its own failures, so the click returns at once. (R94)
     private void OnCloseForMe(object? _, RoutedEventArgs __)
-        => (DataContext as InstallerViewModel)?.CloseBlockingApps();
+        => _ = (DataContext as InstallerViewModel)?.CloseBlockingAppsAsync();
 }

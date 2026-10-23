@@ -411,6 +411,11 @@ restarts — over a running copy, and uninstalling it, found three defects.
   - A run with no `/LOG` now writes its run log into the always-on diagnostic
     log, `%TEMP%\sigil-wizard-<timestamp>-<pid>.log`, on the silent path too, so a
     refused run names its blockers somewhere.
+- **R94 — "Close for me" froze the wizard.** The Restart Manager shutdown ran on
+  the UI thread and blocked for as long as it waited on the applications; it then
+  showed the same list as if nothing had been tried. It now runs in the
+  background with a "Closing applications…" notice and Retry / Close for me
+  disabled, re-scans, and says Setup could not close what is still running.
 - **R95 — the Installing screen never rendered.** The install started on the UI
   thread, and its first act is reading and decompressing the whole embedded
   payload, so the window froze until the install was nearly done and then jumped

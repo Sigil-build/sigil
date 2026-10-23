@@ -22,13 +22,14 @@ with these values:
 |`DisplayName`|`app.name`|
 |`DisplayVersion`|`app.version`|
 |`Publisher`|`app.publisher`|
-|`UninstallString`|`"<install_dir>\uninstall.exe" /S /Uninstall /allusers` (machine scope) or `… /currentuser` (user scope)|
+|`UninstallString`|`"<install_dir>\uninstall.exe" /Uninstall /allusers` (machine scope) or `… /currentuser` (user scope) — the **interactive** uninstall, which is what Apps & features runs when a person presses Uninstall|
+|`QuietUninstallString`|The same command with `/S`: `"<install_dir>\uninstall.exe" /S /Uninstall /allusers` or `… /currentuser` — the **silent** uninstall, for scripts and deployment tooling|
 |`InstallLocation`|The install directory actually used (written when non-empty). Load-bearing: a later upgrade reads it to recover the prior install directory.|
 |`EstimatedSize`|`REG_DWORD`, in KB. Computed at pack time as the sum of the **uncompressed** payload file sizes — the bytes that land on disk — not the compressed Setup.exe size.|
 |`InstallDate`|YYYYMMDD|
 |`NoModify` / `NoRepair`|`1`|
 
-The scope flag on `UninstallString` is not optional decoration: without it the uninstall would re-resolve to the manifest's default scope and could miss the HKLM-vs-HKCU keys and `%ProgramData%`-vs-`%LocalAppData%` state the install actually wrote.
+The scope flag on both values is not optional decoration: without it the uninstall would re-resolve to the manifest's default scope and could miss the HKLM-vs-HKCU keys and `%ProgramData%`-vs-`%LocalAppData%` state the install actually wrote.
 
 **No `DisplayIcon` value is written.** The icon Windows shows in Add or Remove Programs is whatever it derives from the executable named by `UninstallString` — there is no manifest field that sets it directly.
 
@@ -39,15 +40,20 @@ Add or Remove Programs reads this key, so your app surfaces there with no extra 
 Run either path; both are equivalent:
 
 ```bash
-"<install_dir>\uninstall.exe" /S          # silent (Add/Remove Programs uses this)
+"<install_dir>\uninstall.exe" /Uninstall    # interactive (Apps & features' UninstallString)
+"<install_dir>\uninstall.exe" /S            # silent (the QuietUninstallString form)
 setup.exe /Uninstall                        # interactive, from the original setup.exe
 ```
 
 Both enter the wrapper in `Uninstall` mode:
 
-1. Run the manifest's `uninstall:` step list (top to bottom).
-2. Replay the rollback journal in reverse order - file restores, registry restores, env-var restores, service stops + deletes, shortcut deletions, etc. Every record is checked against the installation it belongs to before it is replayed; see [Anchored replay and refused records](#anchored-replay-and-refused-records).
-3. Remove the ARP entry.
+1. Run the `installer.hooks.pre_uninstall` steps. They run **first**, before anything checks for running applications, so a hook that stops your app — its own `--quit`, for instance — clears it out of the way. A hook that fails with `on_failure: fail` (the default) aborts the uninstall here.
+2. On the silent path, check for files in use: a declared `installer.app_mutex` that is held, or a process the Restart Manager reports holding a file in the install directory, refuses the run with exit code **4** unless `/closeapps` was passed. The refusal names each blocker in the log.
+3. Run the manifest's `uninstall:` step list (top to bottom).
+4. Replay the rollback journal in reverse order - file restores, registry restores, env-var restores, service stops + deletes, shortcut deletions, etc. Every record is checked against the installation it belongs to before it is replayed; see [Anchored replay and refused records](#anchored-replay-and-refused-records).
+5. Remove the ARP entry, then run the `installer.hooks.post_uninstall` steps.
+
+Every run writes a log even without `/LOG`: the stamped `Setup.exe` / `uninstall.exe` writes its run log into the always-on diagnostic log, `%TEMP%\sigil-wizard-<timestamp>-<pid>.log`, on the silent path as well as in the wizard. `/LOG` (or `/LOG=<path>`) moves it to a file you name.
 
 ## The `uninstall:` block
 
@@ -148,9 +154,9 @@ This is reachable in practice for an **unsigned** machine-scope install whose di
 
 ## Silent uninstall
 
-`/S` suppresses any wizard chrome the uninstall flow would otherwise show. Add or Remove Programs always invokes the silent path — not because a `QuietUninstallString` value exists (Sigil never writes one), but because the `UninstallString` it does write already carries `/S`.
+`/S` suppresses any wizard chrome the uninstall flow would otherwise show. Sigil registers it as the `QuietUninstallString`, which is what deployment tooling and scripts that remove software unattended look for.
 
-Double-clicking `<install_dir>\uninstall.exe` directly, with no flags, opens the uninstall wizard instead: Confirm → Progress → Done (or Failed).
+Pressing **Uninstall** in Apps & features (or Add or Remove Programs) runs the `UninstallString`, which carries no `/S`, so the person who asked for the removal sees the uninstall window: Confirm → Progress → Done (or Failed). That is deliberate — a silent run that is refused (an application still running, a `pre_uninstall` hook that aborted) has nobody to tell, and from the user's side it looks as if the button did nothing. Double-clicking `<install_dir>\uninstall.exe` directly, with no flags, opens the same window.
 
 ## See also
 

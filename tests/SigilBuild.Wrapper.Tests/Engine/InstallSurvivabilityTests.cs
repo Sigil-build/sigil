@@ -81,7 +81,7 @@ public sealed class InstallSurvivabilityTests
         var uninstallString = ArpRegistration.BuildUninstallString(dest, InstallScope.User);
 
         uninstallString.Should().Contain("uninstall.exe");
-        uninstallString.Should().Contain("/S /Uninstall /currentuser");
+        uninstallString.Should().Contain("/Uninstall /currentuser");
         // The critical guarantee: ARP does NOT point at the (deletable) download.
         uninstallString.Should().NotContain("Downloaded-Setup.exe");
     }

@@ -240,6 +240,21 @@ public class SchemaValidationTests
     }
 
     [Fact]
+    public async Task TeardownHooksFixture_IsValidAgainstSchema()
+    {
+        // The documented way to stop a running app before setup checks for files in
+        // use: a run_program --quit hook in pre_install and pre_uninstall, continuing
+        // on failure for the fresh install where the program is not there yet. (R93)
+        var schema = await LoadSchemaAsync();
+        var json = YamlToJson(await File.ReadAllTextAsync("Fixtures/valid/teardown-hooks.yaml"));
+        var errors = schema.Validate(json);
+
+        errors.Should().BeEmpty(
+            "the teardown-hooks fixture must satisfy the schema; got: {0}",
+            string.Join("; ", errors.Select(e => e.ToString())));
+    }
+
+    [Fact]
     public async Task NetworkTrustFixture_IsValidAgainstSchema()
     {
         // Two things this fixture is load-bearing for: the `installer.require_signed_downloads`

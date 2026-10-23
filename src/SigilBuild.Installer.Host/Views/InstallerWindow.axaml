@@ -63,6 +63,10 @@
     <!-- Footer -->
     <Border Grid.Row="1" Grid.Column="1" BorderBrush="{DynamicResource FrameBrush}" BorderThickness="0,1,0,0" Padding="16,8">
       <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right">
+        <!-- Shown while the manifest's pre_install hooks run ahead of the
+             files-in-use scan; Next and Back are disabled meanwhile. -->
+        <TextBlock Text="{x:Static loc:S.InstallingPreparing}" VerticalAlignment="Center"
+                   Foreground="{DynamicResource TextMutBrush}" IsVisible="{Binding IsPreparing}" />
         <Button Content="{x:Static loc:S.NavBack}" IsEnabled="{Binding CanGoBack}" Click="OnBack" IsVisible="{Binding !IsTerminal}" />
         <!-- The primary button wears the rail's colour, not the accent: the rail is
              the largest branded surface on screen and the two sat side by side as

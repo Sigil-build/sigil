@@ -61,13 +61,56 @@ public sealed class ArpScopeTests
     }
 
     [Fact]
-    public void BuildUninstallString_appends_the_scope_flag()
+    public void BuildUninstallString_is_the_interactive_uninstall_with_the_scope_flag()
     {
+        // Apps & features runs UninstallString when a person presses Uninstall: no
+        // /S, so a refusal is shown in the uninstall window rather than lost. (R93)
         ArpRegistration.BuildUninstallString(@"C:\app\uninstall.exe", InstallScope.Machine)
-            .Should().Be("\"C:\\app\\uninstall.exe\" /S /Uninstall /allusers");
+            .Should().Be("\"C:\\app\\uninstall.exe\" /Uninstall /allusers");
 
         ArpRegistration.BuildUninstallString(@"C:\app\uninstall.exe", InstallScope.User)
+            .Should().Be("\"C:\\app\\uninstall.exe\" /Uninstall /currentuser");
+    }
+
+    [Fact]
+    public void BuildQuietUninstallString_carries_S_and_the_scope_flag()
+    {
+        ArpRegistration.BuildQuietUninstallString(@"C:\app\uninstall.exe", InstallScope.Machine)
+            .Should().Be("\"C:\\app\\uninstall.exe\" /S /Uninstall /allusers");
+
+        ArpRegistration.BuildQuietUninstallString(@"C:\app\uninstall.exe", InstallScope.User)
             .Should().Be("\"C:\\app\\uninstall.exe\" /S /Uninstall /currentuser");
+    }
+
+    [Fact]
+    public void Register_writes_both_the_interactive_and_the_quiet_uninstall_strings()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        // Arrange
+        var appId = "sigil.arp.quiet." + Guid.NewGuid().ToString("N");
+        try
+        {
+            // Act
+            ArpRegistration.Register(new ArpRegistration.Entry(
+                appId, "N", "1.0", "P",
+                ArpRegistration.BuildUninstallString(@"C:\x\uninstall.exe", InstallScope.User), 0,
+                QuietUninstallString: ArpRegistration.BuildQuietUninstallString(@"C:\x\uninstall.exe", InstallScope.User)),
+                InstallScope.User);
+
+            // Assert
+            using var key = Registry.CurrentUser.OpenSubKey($@"{UninstallRoot}\{appId}");
+            key.Should().NotBeNull();
+            key!.GetValue("UninstallString").Should().Be("\"C:\\x\\uninstall.exe\" /Uninstall /currentuser");
+            key.GetValue("QuietUninstallString").Should().Be("\"C:\\x\\uninstall.exe\" /S /Uninstall /currentuser");
+        }
+        finally
+        {
+            ArpRegistration.Remove(appId, InstallScope.User);
+        }
     }
 
     [Fact]

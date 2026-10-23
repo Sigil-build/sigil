@@ -16,7 +16,7 @@ The screen list is built at runtime from your manifest. Welcome, Choose Install 
 
 Three further screens exist but are not part of that linear flow — the wizard diverts to them:
 
-- **CloseApps** — reached when running applications hold the install directory open.
+- **CloseApps** — reached when running applications hold the install directory open. The check happens when you press Next on the screen before Installing, and the manifest's `installer.hooks.pre_install` steps run first — so a hook that stops your app (its own `--quit`, say) clears it before the wizard looks; Next shows "Preparing to install…" while they run, and they run only once per wizard run. An app the Restart Manager cannot close — a tray app with no window, or a background process its GUI restarts — is what a `pre_install` teardown hook is for.
 - **DowngradeBlocked** — jumped to at startup when the installed version is newer than this package; the run ends with exit code `3`.
 - **Failed** — the terminal screen for a failed install.
 
@@ -26,7 +26,7 @@ Three further screens exist but are not part of that linear flow — the wizard 
 
 The same host binary also renders two smaller flows:
 
-- **Uninstall.** Double-clicking `<install_dir>\uninstall.exe` with no flags: **Confirm → Progress → Done | Failed**. (Add/Remove Programs passes `/S`, which skips all of it.)
+- **Uninstall.** Double-clicking `<install_dir>\uninstall.exe` with no flags, or pressing **Uninstall** in Apps & features / Add or Remove Programs (its `UninstallString` carries no `/S`): **Confirm → Progress → Done | Failed**. A script or deployment tool that wants no window runs the registered `QuietUninstallString`, which adds `/S` and skips all of it — see [Uninstaller](uninstaller.md).
 - **Headed `/Update`.** A single status window rather than a paged flow: **Checking → Downloading → LaunchingChild → UpToDate | Done | Failed**. Headless `/Update` shows none of it.
 
 ## Brand slots

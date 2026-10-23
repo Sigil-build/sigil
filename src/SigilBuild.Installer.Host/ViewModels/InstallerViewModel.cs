@@ -261,6 +261,90 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
         }
     }
 
+    // --- pre_install hooks ahead of the gate ---
+
+    private Func<InstallRequest, CancellationToken, Task<bool>>? _preInstallHooks;
+    private bool _preInstallHooksRan;
+
+    /// <summary>
+    /// Wire the manifest's <c>pre_install</c> hooks to run before the files-in-use
+    /// scan. The publisher's teardown hook — an app's own <c>--quit</c> — is the
+    /// right tool for an application the Restart Manager cannot close (a tray app
+    /// with no window, a daemon its GUI respawns), so it gets its chance before the
+    /// Close-applications screen is shown, not after. <paramref name="run"/> returns
+    /// <c>false</c> when a hook aborted the phase; the install then starts anyway
+    /// and reports that failure through the engine. Left unwired, the gate scans
+    /// immediately. (R93)
+    /// </summary>
+    public void ConfigurePreInstallHooks(Func<InstallRequest, CancellationToken, Task<bool>> run)
+        => _preInstallHooks = run ?? throw new ArgumentNullException(nameof(run));
+
+    private bool _isPreparing;
+
+    /// <summary>
+    /// True while the <c>pre_install</c> hooks run ahead of the files-in-use gate.
+    /// Next and Back are disabled and the footer says Setup is preparing. (R93)
+    /// </summary>
+    public bool IsPreparing
+    {
+        get => _isPreparing;
+        private set
+        {
+            if (_isPreparing != value)
+            {
+                _isPreparing = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(CanGoNext));
+                OnPropertyChanged(nameof(CanGoBack));
+            }
+        }
+    }
+
+    /// <summary>
+    /// The pre-gate hook run started by the last Next into Installing, or null when
+    /// none was needed. Exposed so tests can await it.
+    /// </summary>
+    public Task? PreInstallGateTask { get; private set; }
+
+    /// <summary>
+    /// Run the <c>pre_install</c> hooks off the UI thread, then apply the
+    /// files-in-use gate and either start the install or divert to the
+    /// Close-applications screen. The hooks run at most once per wizard run; going
+    /// Back and forward again goes straight to the scan. (R93)
+    /// </summary>
+    private async Task RunPreInstallHooksThenGateAsync(int installingIndex, Func<InstallRequest, CancellationToken, Task<bool>> hooks)
+    {
+        var request = CaptureInstallRequest();
+        IsPreparing = true;
+        bool hooksSucceeded;
+        try
+        {
+            hooksSucceeded = await Task.Run(() => hooks(request, CancellationToken.None)).ConfigureAwait(true);
+        }
+#pragma warning disable CA1031 // A hook-runner fault falls through to the engine, which runs the phase itself.
+        catch (Exception)
+        {
+            hooksSucceeded = true;
+        }
+#pragma warning restore CA1031
+        finally
+        {
+            _preInstallHooksRan = true;
+            IsPreparing = false;
+        }
+
+        // An aborted hook phase skips the scan: the install starts and fails with the
+        // hook's own message, which is what the user needs to read.
+        if (hooksSucceeded && !RescanBlockers())
+        {
+            CurrentStep = InstallerStep.CloseApps;
+            return;
+        }
+
+        MoveTo(installingIndex);
+        InstallTask = StartInstallAsync();
+    }
+
     // The version-aware classification for this run + the installed
     // version, wired by the host from the session. Drives the "Upgrading from x.y.z"
     // notice and — for a blocked downgrade — the dedicated notice screen.
@@ -539,8 +623,8 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
         // Terminal step (Finish/Failed) not in the linear flow: leave the cursor.
     }
 
-    public bool CanGoBack => _step is not InstallerStep.Welcome and not InstallerStep.Installing and not InstallerStep.Finish and not InstallerStep.Failed and not InstallerStep.DowngradeBlocked;
-    public bool CanGoNext => _step is not InstallerStep.Installing and not InstallerStep.Finish and not InstallerStep.Failed and not InstallerStep.DowngradeBlocked;
+    public bool CanGoBack => !_isPreparing && _step is not InstallerStep.Welcome and not InstallerStep.Installing and not InstallerStep.Finish and not InstallerStep.Failed and not InstallerStep.DowngradeBlocked;
+    public bool CanGoNext => !_isPreparing && _step is not InstallerStep.Installing and not InstallerStep.Finish and not InstallerStep.Failed and not InstallerStep.DowngradeBlocked;
 
     /// <summary>True on the Close-applications gate — drives its Retry / Close-for-me buttons.</summary>
     public bool IsCloseAppsStep => _step == InstallerStep.CloseApps;
@@ -1028,6 +1112,13 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
 
     public void Next()
     {
+        // A hook run is in flight; the button is disabled, and a stray invocation
+        // must not start a second one.
+        if (_isPreparing)
+        {
+            return;
+        }
+
         // Leaving the Close-applications screen means the user pressed
         // Next after clearing blockers — re-scan and only advance when clear.
         if (_step == InstallerStep.CloseApps)
@@ -1093,11 +1184,22 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
 
         // The last gate before the install starts. The destination is
         // settled by now, so scan for running apps holding it; if any, divert to the
-        // Close-applications screen instead of starting the engine.
-        if (_flow[next].Step == InstallerStep.Installing && !RescanBlockers())
+        // Close-applications screen instead of starting the engine. The manifest's
+        // pre_install hooks run first, off the UI thread, because stopping the
+        // application is often exactly what they do. (R93)
+        if (_flow[next].Step == InstallerStep.Installing)
         {
-            CurrentStep = InstallerStep.CloseApps;
-            return;
+            if (_preInstallHooks is { } hooks && !_preInstallHooksRan)
+            {
+                PreInstallGateTask = RunPreInstallHooksThenGateAsync(next, hooks);
+                return;
+            }
+
+            if (!RescanBlockers())
+            {
+                CurrentStep = InstallerStep.CloseApps;
+                return;
+            }
         }
 
         MoveTo(next);

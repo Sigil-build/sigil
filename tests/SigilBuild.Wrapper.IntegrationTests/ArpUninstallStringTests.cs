@@ -15,7 +15,7 @@ using Xunit;
 namespace SigilBuild.Wrapper.IntegrationTests;
 
 /// <summary>
-/// End-to-end proof that the registered ARP <c>UninstallString</c> completes: installs a
+/// End-to-end proof that the registered ARP <c>QuietUninstallString</c> completes: installs a
 /// fixture, deletes the original <c>Setup.exe</c>, then runs the ARP string verbatim from
 /// the registry — <c>&lt;install_dir&gt;\uninstall.exe</c>, launched from INSIDE the
 /// directory the files-in-use gate sweeps (R58). Uninstalling through the original packed
@@ -51,10 +51,21 @@ public sealed class ArpUninstallStringTests
             var payload = Path.Combine(installDir, "app.txt");
             File.Exists(payload).Should().BeTrue("the payload landed");
 
-            var uninstallString = ReadArp(appId, "UninstallString");
-            uninstallString.Should().NotBeNullOrWhiteSpace("the install registered an ARP row");
+            // UninstallString is the interactive uninstall Apps & features opens for a
+            // person; the silent command a script or deployment tool runs is
+            // QuietUninstallString, and that is the one this unattended test drives.
+            // Both name the same exe with the same scope flag. (R93)
+            var interactive = ReadArp(appId, "UninstallString");
+            interactive.Should().NotBeNullOrWhiteSpace("the install registered an ARP row");
+            SplitCommandLine(interactive!).Args.Should().NotContain(
+                "/S", "Apps & features must open the uninstall window, not a silent run");
+
+            var uninstallString = ReadArp(appId, "QuietUninstallString");
+            uninstallString.Should().NotBeNullOrWhiteSpace("the install registered a silent uninstall command");
 
             var (exe, args) = SplitCommandLine(uninstallString!);
+            args.Should().Contain("/S");
+            exe.Should().Be(SplitCommandLine(interactive!).Exe);
             Path.GetFullPath(exe).Should().StartWith(
                 Path.GetFullPath(installDir),
                 "R58 only bites because T15 puts the uninstaller INSIDE the swept directory " +
@@ -68,7 +79,7 @@ public sealed class ArpUninstallStringTests
             // Assert
             rc.Should().Be(
                 0,
-                "the registered UninstallString must complete; before R58 it exited 4 " +
+                "the registered QuietUninstallString must complete; before R58 it exited 4 " +
                 "(FilesInUseExitCode) because the P6 gate counted the running uninstaller " +
                 "itself as a blocker — 'blocked by: installer (pid N)' with N its own pid");
             File.Exists(payload).Should().BeFalse("the uninstall removed the payload");
@@ -81,9 +92,9 @@ public sealed class ArpUninstallStringTests
     }
 
     /// <summary>
-    /// Split a registered <c>UninstallString</c> into its exe and its arguments. The
-    /// value Sigil writes is <c>"&lt;path&gt;" /S /Uninstall /currentuser</c>
-    /// (<c>ArpRegistration.BuildUninstallString</c>), i.e. a quoted path followed by
+    /// Split a registered uninstall command into its exe and its arguments. The values
+    /// Sigil writes are <c>"&lt;path&gt;" [/S] /Uninstall /currentuser</c>
+    /// (<c>ArpRegistration.BuildUninstallString</c> / <c>BuildQuietUninstallString</c>), i.e. a quoted path followed by
     /// space-separated flags — nothing that needs full CommandLineToArgvW rules.
     /// </summary>
     private static (string Exe, string[] Args) SplitCommandLine(string commandLine)

@@ -178,6 +178,21 @@ public partial class App : Application
                     return outcome;
                 });
 
+                // The manifest's pre_install hooks run before the wizard's own
+                // files-in-use scan, so an app's own --quit gets its chance before
+                // the Close-applications screen appears. Wired only when the phase
+                // exists. The session memoizes the outcome, so the install run that
+                // follows does not run the hooks a second time. (R93)
+                if (session.HasPreInstallHooks)
+                {
+                    vm.ConfigurePreInstallHooks((request, ct) =>
+                    {
+                        session.CollectedInstallDir = request.InstallPath;
+                        return session.RunPreInstallHooksAsync(
+                            request.ParameterValues, request.OptionValues, progress: null, ct);
+                    });
+                }
+
                 // Surface the /LOG path so the Failed screen can offer "Open log".
                 _vm.LogFilePath = session.LogFilePath;
 

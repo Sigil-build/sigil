@@ -391,6 +391,26 @@ shipped languages.
 Installing a real tray application — a GUI plus a background process the GUI
 restarts — over a running copy, and uninstalling it, found three defects.
 
+- **R93 — Uninstall in Apps & features did nothing while the app was running,
+  and left no trace.** The registered `UninstallString` carried `/S`, so the
+  button ran the silent path. That path checked for files in use *before* running
+  the manifest's `pre_uninstall` hooks, so the hook that would have stopped the
+  app (its own `--quit`) never ran; the run exited `4` with no window, and with no
+  `/LOG` it wrote no log either.
+  - `installer.hooks.pre_install` and `pre_uninstall` now run **before** the
+    files-in-use check. `pre_install` therefore also runs before prerequisites
+    and before an upgrade removes the previous version — while the previous
+    version's files are still in place. In the wizard the `pre_install` hooks run
+    when Next is pressed into Installing, before the Close-applications screen
+    would be shown, and never a second time in the same run. A hook naming a
+    program under `{install_dir}` fails on a fresh install as it always did; give
+    it `on_failure: continue`.
+  - `UninstallString` is now the interactive uninstall (`/Uninstall <scope>`, no
+    `/S`), and a new `QuietUninstallString` carries the `/S` form for scripts and
+    deployment tooling.
+  - A run with no `/LOG` now writes its run log into the always-on diagnostic
+    log, `%TEMP%\sigil-wizard-<timestamp>-<pid>.log`, on the silent path too, so a
+    refused run names its blockers somewhere.
 - **R95 — the Installing screen never rendered.** The install started on the UI
   thread, and its first act is reading and decompressing the whole embedded
   payload, so the window froze until the install was nearly done and then jumped

@@ -56,6 +56,7 @@ options.file_associations = Зареєструвати асоціації фай
 
 # --- installing / finish ---
 installing.title = Встановлення…
+installing.preparing = Підготовка до встановлення…
 finish.title = {appName} встановлено
 finish.body = Тепер ви можете запустити програму з меню «Пуск».
 finish.launch_app = Запустити {appName}
@@ -77,7 +78,6 @@ close_apps.title = Закрийте ці програми, щоб продовж
 close_apps.body = Програмі встановлення потрібно оновити файли, які використовують ці програми. Закрийте їх і натисніть «Повторити» або дозвольте закрити їх автоматично.
 close_apps.close_for_me = Закрити за мене
 close_apps.close_for_me_hint = «Закрити за мене» просить кожну програму завершити роботу штатно — незбережені дані не втрачаються. Програми не запускаються повторно.
-
 # --- upgrade / downgrade ---
 upgrade.reinstall_notice = {appName} уже встановлено. Продовження перевстановить програму — поточну версію буде вилучено першою.
 upgrade.upgrading = Оновлення {appName} з версії {fromVersion} до {toVersion}.

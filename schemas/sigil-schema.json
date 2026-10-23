@@ -535,8 +535,8 @@
           "description": "Built-in configurable installer components (T8) plus app-defined custom components (P10, gap G11).",
           "additionalProperties": false,
           "properties": {
-            "desktop_shortcut": { "$ref": "#/definitions/InstallerOption" },
-            "start_menu": { "$ref": "#/definitions/InstallerOption" },
+            "desktop_shortcut": { "$ref": "#/definitions/InstallerOption", "description": "Desktop shortcut option. The shortcut targets installer.run_after_install.path when declared, otherwise {install_dir} + the app name + .exe." },
+            "start_menu": { "$ref": "#/definitions/InstallerOption", "description": "Start Menu shortcut option. The shortcut targets installer.run_after_install.path when declared, otherwise {install_dir} + the app name + .exe." },
             "add_to_path": { "$ref": "#/definitions/InstallerOption" },
             "file_associations": { "$ref": "#/definitions/FileAssociationOption" },
             "components": {

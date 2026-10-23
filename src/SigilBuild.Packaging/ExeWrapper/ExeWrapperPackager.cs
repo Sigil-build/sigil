@@ -397,7 +397,8 @@ public sealed class ExeWrapperPackager : IPackager
         // component list is carried in the blob so the runtime can seed `option.*`
         // and the host can render the Options screen.
         var (optionSteps, optionComponents) =
-            OptionStepGenerator.Generate(manifest.Installer?.Options, manifest.App);
+            OptionStepGenerator.Generate(
+                manifest.Installer?.Options, manifest.App, manifest.Installer?.RunAfterInstall?.Path);
         var installSteps = CombineSteps(manifest.InstallSteps, optionSteps);
 
         var inMemory = new WrapperBlob(

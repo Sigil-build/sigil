@@ -140,8 +140,8 @@ Source: `schemas/sigil-schema.json` (JSON Schema, draft-07).
 
 | Property | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `desktop_shortcut` | InstallerOption | - | - | Built-in configurable installer component: shorthand boolean or an object. |
-| `start_menu` | InstallerOption | - | - | Built-in configurable installer component: shorthand boolean or an object. |
+| `desktop_shortcut` | InstallerOption | - | - | Desktop shortcut option. The shortcut targets installer.run_after_install.path when declared, otherwise {install_dir} + the app name + .exe. |
+| `start_menu` | InstallerOption | - | - | Start Menu shortcut option. The shortcut targets installer.run_after_install.path when declared, otherwise {install_dir} + the app name + .exe. |
 | `add_to_path` | InstallerOption | - | - | Built-in configurable installer component: shorthand boolean or an object. |
 | `file_associations` | FileAssociationOption | - | - | file_associations component: shorthand boolean or an object with extensions. |
 | `components` | array | - | - | App-defined custom components (P10, gap G11) — the Inno [Tasks] equivalent. Each generates NO install step of its own; it exists only as option.<name> in the expression engine, gating arbitrary steps / step groups via their `when`. Rendered as checkboxes on the Options screen after the built-ins, in declared order. |

@@ -511,6 +511,54 @@ public sealed class InstallSession
         ElevationSecretHandoff.PrepareRelaunchArgs(originalArgs, _parsed);
 
     /// <summary>
+    /// True when this session cannot honour a machine-scope install and the wizard's
+    /// "All users of this computer" option therefore needs a fresh, elevated run.
+    /// </summary>
+    /// <remarks>
+    /// The condition is the resolved scope, not elevation: an already-elevated process
+    /// whose scope resolved to <c>user</c> cannot honour the choice either, because
+    /// scope is fixed when the session is created — before the window exists — and
+    /// <c>install_dir</c> containment is checked against that scope's layout. Toggling
+    /// a radio afterwards only ever changed the path, which is what made the option a
+    /// guaranteed failure rather than a choice. (R90)
+    /// </remarks>
+    public bool MachineScopeNeedsRelaunch => _scope != InstallScope.Machine;
+
+    /// <summary>
+    /// The argument vector for the wizard's machine-scope relaunch: the original
+    /// command line with any explicit scope flag replaced by <c>/allusers</c>, routed
+    /// through the same secret handoff as every other elevated relaunch (R18).
+    /// </summary>
+    /// <remarks>
+    /// Scope is re-decided by re-running <see cref="Create"/> in the child rather than
+    /// by mutating this session, so the child resolves its own destination, its own
+    /// upgrade plan against the machine hive, and its own containment roots. Nothing
+    /// the user has typed is forwarded because nothing has been typed yet — the choice
+    /// is made on the Destination screen, before any other value is collected, and the
+    /// child computes the machine default itself. (R90)
+    /// </remarks>
+    public IReadOnlyList<string> BuildMachineScopeRelaunchArgs(IReadOnlyList<string> originalArgs)
+    {
+        ArgumentNullException.ThrowIfNull(originalArgs);
+
+        var rewritten = new List<string>(originalArgs.Count + 1);
+        foreach (var arg in originalArgs)
+        {
+            // Drop any scope flag the parent was given; /allusers replaces it. Leaving
+            // both on the line would hand the child a contradiction to resolve.
+            if (arg.Equals("/currentuser", StringComparison.OrdinalIgnoreCase) ||
+                arg.Equals("/allusers", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            rewritten.Add(arg);
+        }
+        rewritten.Add("/allusers");
+
+        return BuildElevationRelaunchArgs(rewritten);
+    }
+
+    /// <summary>
     /// Run to completion without any UI. Routes by mode, echoing the engine's
     /// log lines to <paramref name="output"/>. Returns the process exit code:
     /// <c>0</c> ok, <c>1</c> step failure (rolled back), <c>2</c> cancelled

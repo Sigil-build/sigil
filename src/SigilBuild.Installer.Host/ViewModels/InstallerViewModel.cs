@@ -501,6 +501,7 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
                 OnPropertyChanged(nameof(CanGoNext));
                 OnPropertyChanged(nameof(CanCancel));
                 OnPropertyChanged(nameof(IsTerminal));
+                OnPropertyChanged(nameof(NextNeedsElevation));
                 // When the step is set directly (tests, engine outcome) rather than
                 // through Next/Back, resync the flow cursor so navigation stays correct.
                 if (!_navigating)
@@ -704,19 +705,63 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
         get => _isMachineScope;
         set
         {
-            if (_isMachineScope != value)
+            if (_isMachineScope == value)
             {
-                _isMachineScope = value;
-                OnPropertyChanged();
-                OnPropertyChanged(nameof(IsUserScope));
-                // Toggling scope recomputes a clean default path for the new scope.
-                if (_defaultPathResolver is not null)
-                {
-                    InstallPath = _defaultPathResolver(_isMachineScope);
-                }
+                return;
+            }
+
+            _isMachineScope = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsUserScope));
+            // Selecting a scope stays a selection: it swaps the pre-filled path and
+            // nothing else, so the user can still see and edit the destination before
+            // committing. The elevation that machine scope needs happens on Next —
+            // where the shield is — not on this click. (R90)
+            OnPropertyChanged(nameof(NextNeedsElevation));
+            if (_defaultPathResolver is not null)
+            {
+                InstallPath = _defaultPathResolver(_isMachineScope);
             }
         }
     }
+
+    private Func<bool>? _machineScopeElevator;
+
+    /// <summary>
+    /// Wire the machine-scope handoff. Invoked when the user picks "All users of
+    /// this computer" and the session cannot honour it; returns <c>true</c> when an
+    /// elevated instance has taken over and this one is standing down, <c>false</c>
+    /// when it has not — the UAC prompt was declined — and the selection stays put.
+    /// </summary>
+    /// <remarks>
+    /// Left unwired the option behaves as it always did, which is what the unit tests
+    /// that only exercise path swapping rely on. The host wires it only when
+    /// <c>InstallSession.MachineScopeNeedsRelaunch</c> is true, so an already
+    /// machine-scoped session toggles the radio normally. (R90)
+    /// </remarks>
+    public void ConfigureMachineScopeElevation(Func<bool> elevator)
+    {
+        _machineScopeElevator = elevator ?? throw new ArgumentNullException(nameof(elevator));
+        OnPropertyChanged(nameof(NextNeedsElevation));
+    }
+
+    /// <summary>
+    /// True when pressing Next will ask Windows for approval: the destination screen
+    /// is showing, machine scope is selected, and this session cannot provide it.
+    /// Drives the shield on the Next button.
+    /// </summary>
+    /// <remarks>
+    /// The shield belongs on the control that actually triggers the prompt, which is
+    /// the Windows convention and also the honest placement — the scope radios only
+    /// change a path, and nothing about picking one is irreversible. It appears only
+    /// when the click will really elevate: not on a session already in machine scope
+    /// (the handoff is then unwired), not while user scope is selected, and not on
+    /// any other screen. (R90)
+    /// </remarks>
+    public bool NextNeedsElevation =>
+        _machineScopeElevator is not null
+        && _isMachineScope
+        && _step == InstallerStep.InstallOptions;
 
     /// <summary>The "Just for me" scope radio — the inverse of <see cref="IsMachineScope"/>.</summary>
     public bool IsUserScope
@@ -962,9 +1007,31 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
 
         // Destination gate: a blank / relative / file / unwritable path shows
         // an inline error and blocks advancing off the destination screen.
-        if (_flow[_flowIndex].Step == InstallerStep.InstallOptions && !ValidateDestination())
+        if (_flow[_flowIndex].Step == InstallerStep.InstallOptions)
         {
-            return;
+            if (!ValidateDestination())
+            {
+                return;
+            }
+
+            // Machine scope needs a session this process cannot become: scope fixes
+            // the containment roots install_dir is checked against and the elevation
+            // decision, both settled before this window existed. Honouring the choice
+            // means a fresh elevated run, and this is the moment to ask — the user has
+            // seen the destination and pressed the button carrying the shield. (R90)
+            if (_isMachineScope && _machineScopeElevator is not null)
+            {
+                if (_machineScopeElevator())
+                {
+                    // An elevated instance owns the install now; this one is closing.
+                    return;
+                }
+
+                // Declined, or the shell refused. Stay on the screen and say why —
+                // a Next that quietly does nothing is the worse failure.
+                InstallPathError = Strings.LocationErrorElevationDeclined(_lang);
+                return;
+            }
         }
 
         // License gate: stay put until "I accept" is checked.

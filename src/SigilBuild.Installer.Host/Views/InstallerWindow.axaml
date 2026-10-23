@@ -70,7 +70,26 @@
              White because that pair is what the brand generator derives together —
              hardcoding White would break the contrast guarantee for any brand whose
              rail resolves light. -->
-        <Button Content="{x:Static loc:S.NavNext}" IsEnabled="{Binding CanGoNext}" Click="OnNext" IsVisible="{Binding !IsTerminal}" Background="{DynamicResource RailBgBrush}" Foreground="{DynamicResource RailTextBrush}" />
+        <Button IsEnabled="{Binding CanGoNext}" Click="OnNext" IsVisible="{Binding !IsTerminal}"
+                Background="{DynamicResource RailBgBrush}" Foreground="{DynamicResource RailTextBrush}">
+          <!-- The shield marks the one click that will raise a UAC prompt: the
+               Destination screen with machine scope selected, on a session that
+               cannot provide it. Windows puts the shield on the control that
+               elevates, not on the choice that leads to it — and the choice really
+               is only a choice here, since picking a scope just swaps the path. -->
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <!-- Drawn rather than set as a glyph: a TextBlock here would be a literal
+                 user-visible string in XAML, which PseudoLocRenderTests refuses on
+                 the grounds that anything on screen must come from the catalog. The
+                 rule is right and a shield is not text to translate, so it stops
+                 being text. -->
+            <Path Data="M 8,0 L 15,3 L 15,8 C 15,12 12,15 8,16 C 4,15 1,12 1,8 L 1,3 Z"
+                  Fill="{DynamicResource RailTextBrush}"
+                  Width="12" Height="13" Stretch="Uniform" VerticalAlignment="Center"
+                  IsVisible="{Binding NextNeedsElevation}" />
+            <TextBlock Text="{x:Static loc:S.NavNext}" VerticalAlignment="Center" />
+          </StackPanel>
+        </Button>
         <Button Content="{x:Static loc:S.NavCancel}" Click="OnCancel" IsVisible="{Binding !IsTerminal}" />
         <!-- Terminal footer, mirroring UninstallWindow / UpdateWindow: on Finish,
              Failed and DowngradeBlocked the only sensible action is to leave, and

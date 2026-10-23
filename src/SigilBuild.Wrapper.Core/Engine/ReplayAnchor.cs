@@ -290,7 +290,7 @@ internal sealed class ReplayAnchor
         {
             var layout = ScopeLayout.For(scope);
             AddRoot(roots, layout.DesktopFolder);
-            AddRoot(roots, layout.StartMenuFolder);
+            AddRoot(roots, layout.StartMenuRoot);
 
             // The per-app state directory, never the shared <StateRoot>\Sigil parent:
             // allowing the parent lets one app's journal delete or overwrite another
@@ -307,7 +307,7 @@ internal sealed class ReplayAnchor
             // surface; nothing Sigil writes lands there.
             foreach (var excludedSubPath in ExcludedRootSubPaths)
             {
-                AddRoot(excluded, SafeCombine(layout.StartMenuFolder, excludedSubPath));
+                AddRoot(excluded, SafeCombine(layout.StartMenuRoot, excludedSubPath));
             }
         }
 

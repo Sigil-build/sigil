@@ -252,11 +252,11 @@ public class ShortcutCreateStepTests
         {
             installDir.Path,
             Path.Combine(installDir.Path, "Tools"),
-            machine.StartMenuFolder,
-            Path.Combine(machine.StartMenuFolder, "Programs", "Contoso"),
+            machine.StartMenuRoot,
+            Path.Combine(machine.StartMenuFolder, "Contoso"),
             machine.DesktopFolder,
-            user.StartMenuFolder,
-            Path.Combine(user.StartMenuFolder, "Programs", "Contoso"),
+            user.StartMenuRoot,
+            Path.Combine(user.StartMenuFolder, "Contoso"),
             user.DesktopFolder,
         };
 

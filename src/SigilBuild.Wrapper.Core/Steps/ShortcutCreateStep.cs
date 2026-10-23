@@ -221,9 +221,9 @@ internal sealed class ShortcutCreateStep : IStep
         return new[]
         {
             ctx.InstallDir!,
-            machine.StartMenuFolder,
+            machine.StartMenuRoot,
             machine.DesktopFolder,
-            user.StartMenuFolder,
+            user.StartMenuRoot,
             user.DesktopFolder,
         };
     }

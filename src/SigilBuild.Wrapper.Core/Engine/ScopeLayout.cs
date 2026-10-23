@@ -129,9 +129,19 @@ public sealed class ScopeLayout
         : Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
 
     /// <summary>
-    /// The per-user vs all-users Start Menu directory for shortcut placement.
+    /// The per-user vs all-users Start Menu <c>Programs</c> directory: where the
+    /// <c>start_menu</c> shortcut anchor writes, so shortcuts appear in the Start list. (R97)
     /// </summary>
     public string StartMenuFolder => IsMachine
+        ? Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms)
+        : Environment.GetFolderPath(Environment.SpecialFolder.Programs);
+
+    /// <summary>
+    /// The per-user vs all-users Start Menu root (the parent of <c>Programs</c> and
+    /// <c>Startup</c>). Containment checks anchor here so an explicit path anywhere in the
+    /// Start Menu subtree stays permitted. (R97)
+    /// </summary>
+    public string StartMenuRoot => IsMachine
         ? Environment.GetFolderPath(Environment.SpecialFolder.CommonStartMenu)
         : Environment.GetFolderPath(Environment.SpecialFolder.StartMenu);
 }

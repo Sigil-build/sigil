@@ -272,12 +272,14 @@ public sealed class UpdateFlowTests
     {
         // Arrange (R95)
         var vm = new UpdateViewModel(new BrandTokens());
+        using var started = new ManualResetEventSlim(false);
         using var release = new ManualResetEventSlim(false);
         var callerThread = Environment.CurrentManagedThreadId;
         int? runnerThread = null;
         vm.ConfigureRunner((report, ct) =>
         {
             runnerThread = Environment.CurrentManagedThreadId;
+            started.Set();
             release.Wait(TimeSpan.FromSeconds(10), ct);
             return Task.FromResult(0);
         });
@@ -288,6 +290,7 @@ public sealed class UpdateFlowTests
         // Assert
         vm.UpdateTask!.IsCompleted.Should().BeFalse(
             "Start must return before the runner's synchronous work, not run it inline");
+        started.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken).Should().BeTrue("the runner must start without the caller");
         release.Set();
         await vm.UpdateTask!;
         runnerThread.Should().NotBe(callerThread);

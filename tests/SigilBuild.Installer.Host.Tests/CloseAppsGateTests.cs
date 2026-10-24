@@ -93,6 +93,7 @@ public sealed class CloseAppsGateTests
         // the applications. (R94)
         var vm = Vm();
         var blockers = new List<string> { "dictum-gui.exe (pid 42)" };
+        using var started = new ManualResetEventSlim(false);
         using var release = new ManualResetEventSlim(false);
         var callerThread = Environment.CurrentManagedThreadId;
         int? closeThread = null;
@@ -101,6 +102,7 @@ public sealed class CloseAppsGateTests
             close: _ =>
             {
                 closeThread = Environment.CurrentManagedThreadId;
+                started.Set();
                 release.Wait(TimeSpan.FromSeconds(10));
                 blockers.Clear();
             });
@@ -116,6 +118,9 @@ public sealed class CloseAppsGateTests
         vm.CanActOnBlockers.Should().BeFalse("Retry and Close-for-me are disabled while closing");
         vm.CanGoNext.Should().BeFalse();
 
+        // Blocking here keeps this thread out of the pool, so the close can only
+        // have started on another one.
+        started.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken).Should().BeTrue("the close must start without the caller");
         release.Set();
         await closing;
 
@@ -234,12 +239,14 @@ public sealed class CloseAppsGateTests
     public async Task Pre_install_hooks_run_off_the_calling_thread_with_next_disabled()
     {
         var vm = Vm();
+        using var started = new ManualResetEventSlim(false);
         using var release = new ManualResetEventSlim(false);
         var callerThread = Environment.CurrentManagedThreadId;
         int? hookThread = null;
         vm.ConfigurePreInstallHooks((_, ct) =>
         {
             hookThread = Environment.CurrentManagedThreadId;
+            started.Set();
             release.Wait(TimeSpan.FromSeconds(10), ct);
             return Task.FromResult(true);
         });
@@ -252,6 +259,7 @@ public sealed class CloseAppsGateTests
         vm.CanGoNext.Should().BeFalse();
         vm.CanGoBack.Should().BeFalse();
 
+        started.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken).Should().BeTrue("the hooks must start without the caller");
         release.Set();
         await vm.PreInstallGateTask!;
 

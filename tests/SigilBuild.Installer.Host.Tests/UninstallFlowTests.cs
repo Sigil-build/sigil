@@ -79,12 +79,14 @@ public sealed class UninstallFlowTests
         // Arrange — synchronous opening work, as the real session does before its
         // first await. (R95)
         var vm = new UninstallViewModel(new BrandTokens());
+        using var started = new ManualResetEventSlim(false);
         using var release = new ManualResetEventSlim(false);
         var callerThread = Environment.CurrentManagedThreadId;
         int? runnerThread = null;
         vm.ConfigureRunner((progress, ct) =>
         {
             runnerThread = Environment.CurrentManagedThreadId;
+            started.Set();
             release.Wait(TimeSpan.FromSeconds(10), ct);
             return Task.FromResult(new InstallOutcome(true, null));
         });
@@ -97,6 +99,7 @@ public sealed class UninstallFlowTests
         vm.UninstallTask!.IsCompleted.Should().BeFalse(
             "Confirm must return before the runner's synchronous work, not run it inline");
 
+        started.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken).Should().BeTrue("the runner must start without the caller");
         release.Set();
         await vm.UninstallTask!;
 

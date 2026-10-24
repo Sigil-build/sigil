@@ -108,6 +108,7 @@ public sealed class InstallFlowTests
     {
         // Arrange — a runner whose opening work is synchronous and long, the way
         // InstallSession's payload load is before its first await. (R95)
+        using var started = new ManualResetEventSlim(false);
         using var release = new ManualResetEventSlim(false);
         var callerThread = Environment.CurrentManagedThreadId;
         int? runnerThread = null;
@@ -116,6 +117,7 @@ public sealed class InstallFlowTests
         var vm = ArrangeAtInstalling((progress, ct) =>
         {
             runnerThread = Environment.CurrentManagedThreadId;
+            started.Set();
             release.Wait(TimeSpan.FromSeconds(10), ct);
             return Task.FromResult(new InstallOutcome(true, null));
         });
@@ -126,6 +128,9 @@ public sealed class InstallFlowTests
         vm.InstallTask!.IsCompleted.Should().BeFalse(
             "StartInstallAsync must yield before the runner's synchronous work, not run it inline");
 
+        // Blocking here keeps this thread out of the pool, so the runner can only
+        // have started on another one.
+        started.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken).Should().BeTrue("the runner must start without the caller");
         release.Set();
         await vm.InstallTask!;
 

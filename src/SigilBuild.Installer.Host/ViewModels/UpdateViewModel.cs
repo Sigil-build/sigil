@@ -129,6 +129,8 @@ public sealed class UpdateViewModel : INotifyPropertyChanged
     /// <summary>
     /// Wire the real update driver (an <see cref="InstallSession"/>-backed
     /// delegate). Left null in unit tests that drive the step machine directly.
+    /// The runner is invoked on a thread-pool thread and must not touch this
+    /// view-model or any UI object. (R95)
     /// </summary>
     public void ConfigureRunner(Func<Action<string, bool>, CancellationToken, Task<int>> runner)
         => _runner = runner;
@@ -195,9 +197,15 @@ public sealed class UpdateViewModel : INotifyPropertyChanged
             uiUpdates.Report((message, isError));
         }
 
+        var runner = _runner;
+        var token = cts.Token;
+
         try
         {
-            var code = await _runner(Report, cts.Token).ConfigureAwait(true);
+            // The runner starts on a thread-pool thread so its synchronous opening
+            // work never holds the dispatcher; Report above is already safe to call
+            // from any thread. (R95)
+            var code = await Task.Run(() => runner(Report, token)).ConfigureAwait(true);
             OutcomeExitCode = code;
 
             if (!_sawNewerVersionAvailable && code == 0)

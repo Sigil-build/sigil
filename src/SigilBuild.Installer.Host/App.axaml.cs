@@ -160,18 +160,38 @@ public partial class App : Application
 
                 // Bind the wizard-collected parameter values into param.* and the
                 // option checkbox states into option.* for the engine at install
-                // time (read lazily at call time). The collected destination path
-                // becomes the effective install dir → {install_dir}.
-                _vm.ConfigureInstallRunner(async (progress, ct) =>
+                // time. The collected destination path becomes the effective install
+                // dir → {install_dir}. The runner executes on a thread-pool thread, so
+                // it reads the request the VM captured on the UI thread and never the
+                // VM itself. (R95)
+                var vm = _vm;
+                vm.ConfigureInstallRunner(async (request, progress, ct) =>
                 {
-                    session.CollectedInstallDir = _vm.InstallPath;
+                    session.CollectedInstallDir = request.InstallPath;
                     var outcome = await session.RunInstallAsync(
-                        _vm.CollectedParameterValues, _vm.CollectedOptionValues, progress, ct);
-                    // The reboot flag is only known after the run — copy it into the
-                    // VM before the Done screen renders (StartInstallAsync reads outcome next).
-                    _vm.SetRebootRequired(session.RebootRequired);
+                        request.ParameterValues, request.OptionValues, progress, ct).ConfigureAwait(false);
+                    // The reboot flag is only known after the run. Set it on the UI
+                    // thread, and before this runner completes, so the Done screen
+                    // StartInstallAsync shows next already carries it.
+                    var rebootRequired = session.RebootRequired;
+                    await Dispatcher.UIThread.InvokeAsync(() => vm.SetRebootRequired(rebootRequired));
                     return outcome;
                 });
+
+                // The manifest's pre_install hooks run before the wizard's own
+                // files-in-use scan, so an app's own --quit gets its chance before
+                // the Close-applications screen appears. Wired only when the phase
+                // exists. The session memoizes the outcome, so the install run that
+                // follows does not run the hooks a second time. (R93)
+                if (session.HasPreInstallHooks)
+                {
+                    vm.ConfigurePreInstallHooks((request, ct) =>
+                    {
+                        session.CollectedInstallDir = request.InstallPath;
+                        return session.RunPreInstallHooksAsync(
+                            request.ParameterValues, request.OptionValues, progress: null, ct);
+                    });
+                }
 
                 // Surface the /LOG path so the Failed screen can offer "Open log".
                 _vm.LogFilePath = session.LogFilePath;

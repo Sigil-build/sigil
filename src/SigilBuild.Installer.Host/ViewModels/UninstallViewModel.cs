@@ -110,6 +110,8 @@ public sealed class UninstallViewModel : INotifyPropertyChanged
     /// <summary>
     /// Wire the real uninstall driver (an <see cref="InstallSession"/>-backed
     /// delegate). Left null in unit tests that drive the step machine directly.
+    /// The runner is invoked on a thread-pool thread and must not touch this
+    /// view-model or any UI object. (R95)
     /// </summary>
     public void ConfigureRunner(Func<IProgress<StepProgress>, CancellationToken, Task<InstallOutcome>> runner)
         => _runner = runner;
@@ -162,11 +164,18 @@ public sealed class UninstallViewModel : INotifyPropertyChanged
         // SerialProgress, not Progress<T>: with no SynchronizationContext the BCL type
         // posts every report to the thread pool, so reports the engine made sequentially
         // can execute ApplyProgress concurrently and race LogLines. See SerialProgress.
+        // Constructed on the UI thread, so it captures the UI context and the
+        // background runner's reports are posted back to it.
         var progress = new SerialProgress<StepProgress>(ApplyProgress);
+        var runner = _runner;
+        var token = cts.Token;
 
         try
         {
-            var outcome = await _runner(progress, cts.Token).ConfigureAwait(true);
+            // The runner starts on a thread-pool thread: the uninstall's synchronous
+            // opening work (state load, hooks up to their first await) must not hold
+            // the dispatcher, or the Progress screen never renders. (R95)
+            var outcome = await Task.Run(() => runner(progress, token)).ConfigureAwait(true);
             if (outcome.Success)
             {
                 UninstallProgress = 1;

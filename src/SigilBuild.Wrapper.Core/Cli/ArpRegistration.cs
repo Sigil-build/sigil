@@ -42,13 +42,17 @@ internal static class ArpRegistration
     /// <param name="DisplayName">Shown to the end user as the program name.</param>
     /// <param name="DisplayVersion">Shown next to the program name in ARP.</param>
     /// <param name="Publisher">Vendor string.</param>
-    /// <param name="UninstallString">Full command line the OS runs on "Uninstall".</param>
+    /// <param name="UninstallString">Full command line the OS runs on "Uninstall" — the
+    /// interactive uninstall (see <see cref="BuildUninstallString"/>).</param>
     /// <param name="EstimatedSizeBytes">Total install footprint in bytes;
     /// the OS converts to KB when displaying the size column.</param>
     /// <param name="InstallLocation">The resolved install directory, written as the
     /// standard ARP <c>InstallLocation</c> value. Read back by
     /// <see cref="SigilBuild.Wrapper.Engine.InstalledStateResolver"/> to resolve the
     /// prior install dir for an upgrade. Empty → the value is not written.</param>
+    /// <param name="QuietUninstallString">The silent uninstall command line, written as
+    /// the standard ARP <c>QuietUninstallString</c> value (see
+    /// <see cref="BuildQuietUninstallString"/>). Empty → the value is not written.</param>
     public sealed record Entry(
         string AppId,
         string DisplayName,
@@ -56,7 +60,8 @@ internal static class ArpRegistration
         string Publisher,
         string UninstallString,
         long EstimatedSizeBytes,
-        string InstallLocation = "");
+        string InstallLocation = "",
+        string QuietUninstallString = "");
 
     /// <summary>
     /// Create or update the ARP key for <paramref name="entry"/> in the
@@ -75,6 +80,12 @@ internal static class ArpRegistration
         key.SetValue("DisplayVersion", entry.DisplayVersion);
         key.SetValue("Publisher", entry.Publisher);
         key.SetValue("UninstallString", entry.UninstallString);
+        // Deployment tooling that wants a silent removal reads QuietUninstallString;
+        // the Apps & features button reads UninstallString and gets the wizard. (R93)
+        if (!string.IsNullOrEmpty(entry.QuietUninstallString))
+        {
+            key.SetValue("QuietUninstallString", entry.QuietUninstallString);
+        }
         // Standard ARP InstallLocation — surfaces the install dir to Windows and lets
         // a later upgrade recover the prior install directory (InstalledStateResolver).
         if (!string.IsNullOrEmpty(entry.InstallLocation))
@@ -143,17 +154,37 @@ internal static class ArpRegistration
 
     /// <summary>
     /// Construct the <c>UninstallString</c> the OS calls when the user clicks
-    /// "Uninstall" in Add or Remove Programs. Points at <em>this</em> wrapper
-    /// exe with <c>/S /Uninstall</c> and the scope flag appended: a
-    /// per-machine install emits <c>/allusers</c>, a per-user install
+    /// "Uninstall" in Apps &amp; features / Add or Remove Programs. Points at
+    /// <em>this</em> wrapper exe with <c>/Uninstall</c> and the scope flag appended:
+    /// a per-machine install emits <c>/allusers</c>, a per-user install
     /// <c>/currentuser</c>, so the uninstall re-resolves to the same scope it was
     /// installed with regardless of the manifest default (HKLM vs HKCU ARP,
     /// %ProgramData% vs %LocalAppData% state, elevation).
     /// </summary>
+    /// <remarks>
+    /// Carries no <c>/S</c>: a person pressing Uninstall gets the interactive
+    /// confirm → progress → done window, so a failure — a running application
+    /// holding the install directory, a hook that aborted — is shown to them
+    /// instead of ending as a silent exit code nobody reads. The silent form is
+    /// <see cref="BuildQuietUninstallString"/>. (R93)
+    /// </remarks>
     public static string BuildUninstallString(string wrapperExePath, InstallScope scope)
     {
         ArgumentException.ThrowIfNullOrEmpty(wrapperExePath);
-        var scopeFlag = scope == InstallScope.Machine ? "/allusers" : "/currentuser";
-        return $"\"{wrapperExePath}\" /S /Uninstall {scopeFlag}";
+        return $"\"{wrapperExePath}\" /Uninstall {ScopeFlag(scope)}";
     }
+
+    /// <summary>
+    /// Construct the <c>QuietUninstallString</c>: the same command as
+    /// <see cref="BuildUninstallString"/> with <c>/S</c>, for deployment tooling and
+    /// scripts that remove the app without a window. (R93)
+    /// </summary>
+    public static string BuildQuietUninstallString(string wrapperExePath, InstallScope scope)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(wrapperExePath);
+        return $"\"{wrapperExePath}\" /S /Uninstall {ScopeFlag(scope)}";
+    }
+
+    private static string ScopeFlag(InstallScope scope) =>
+        scope == InstallScope.Machine ? "/allusers" : "/currentuser";
 }

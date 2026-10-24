@@ -22,7 +22,9 @@ At startup the installer reads the scope-correct ARP entry for `app.id`
 
 An upgrade over a **running** app is the other common non-zero outcome: files held
 open by a running process abort the run with exit **4** unless `/closeapps` was
-passed. See [the setup.exe reference](../setup-exe-reference.md).
+passed. See [the setup.exe reference](../setup-exe-reference.md). The
+`installer.hooks.pre_install` steps run before that check, so an app that ships its
+own `--quit` can be stopped by a hook instead — see below.
 
 The upgrade removes the old version by running **its own** `uninstall.exe`
 (not the new build's uninstall logic), because that binary owns the previous
@@ -100,14 +102,41 @@ as older than the incoming build (an upgrade, with a warning); an incoming
 
 ## Interaction with `pre_install` hooks
 
-Lifecycle `pre_install` hooks run as part of the **new** install, which happens
-*after* the previous version has already been removed. If you need logic that
-observes the old files (data migration, config capture), it cannot run in
-`pre_install` — by then the old version is gone. The upgrade path intentionally
-performs no migration beyond removing the old version and preserving the install
-directory; capture anything you need from the prior install before packaging the
-upgrade, or read it at install time with the data-retrieval expression functions
-(`registry_read`, `file_version`, …).
+Lifecycle `pre_install` hooks are the **first** thing an install runs, before
+anything else touches the machine. The order is:
+
+1. `installer.hooks.pre_install` steps;
+2. the files-in-use check (in the wizard, the Close-applications screen);
+3. `installer.prerequisites`;
+4. removal of the previous version (its own `uninstall.exe /S /Uninstall`);
+5. the journalled install body, then `post_install` hooks.
+
+So on an upgrade the hooks run while the **previous version is still installed**,
+and `{install_dir}` — which an upgrade resolves to the previous install directory —
+still holds its files. That is what makes the common teardown hook work:
+
+```yaml
+installer:
+  hooks:
+    pre_install:
+      - id: quit-running
+        type: run_program
+        program: "{install_dir}\\myapp.exe"
+        args: ["--quit"]
+        timeout_seconds: 30
+        on_failure: continue
+```
+
+On a **fresh** install the program does not exist yet and the step fails; with
+`on_failure: continue` that is logged and the install goes on. Leave it at the
+default `fail` and a fresh install aborts.
+
+A hook can also read the old files (configuration capture, for instance) — but it
+runs outside the rollback journal, so nothing it does is undone if the install
+fails later. The upgrade path itself performs no migration beyond removing the old
+version and preserving the install directory; the data-retrieval expression
+functions (`registry_read`, `file_version`, …) remain the way to read prior state
+into a `when` or a `var`.
 
 ## Not covered
 

@@ -175,15 +175,25 @@ public static partial class Program
         // nothing). Set before BOTH the headless and the GUI path below. (R76)
         session.InstanceLock = instanceLock;
 
+        // The run log goes to the always-on diagnostic log whenever /LOG did not
+        // name one, on the headless path as much as the headed one: a silent run
+        // started by deployment tooling has no window and often no console, so this
+        // file is the only place a refusal can be read afterwards. (R93)
+        session.DiagnosticLogPath = InstallerLog.LogPath;
+
         // Headless whenever /silent or /verysilent is present (this includes the
-        // ARP UninstallString's `/S /Uninstall`, and a scripted `/Update /silent`).
-        // An interactive uninstall (uninstall.exe double-clicked, no /S) or a
-        // non-silent /Update is NOT silent, so both fall through to the
-        // branded GUI below — App picks the right window from session.Mode.
+        // ARP QuietUninstallString's `/S /Uninstall`, and a scripted `/Update /silent`).
+        // An interactive uninstall (uninstall.exe double-clicked, or the ARP
+        // UninstallString Apps & features runs) or a non-silent /Update is NOT
+        // silent, so both fall through to the branded GUI below — App picks the right
+        // window from session.Mode.
         if (session.Silent)
         {
             AttachParentConsole();
-            return session.RunHeadlessAsync(Console.Out, Console.Error).GetAwaiter().GetResult();
+            InstallerLog.Info($"silent {session.Mode.ToString().ToLowerInvariant()} started");
+            var code = session.RunHeadlessAsync(Console.Out, Console.Error).GetAwaiter().GetResult();
+            InstallerLog.Info($"silent run exiting with code {code}");
+            return code;
         }
 
         // Interactive GUI: the install wizard, or the uninstall confirm flow —
@@ -291,6 +301,13 @@ public static partial class Program
         {
             InstallerLog.Error("wizard Main threw", ex);
             throw;
+        }
+        finally
+        {
+            // A payload extracted for the pre_install hooks the wizard ran before its
+            // files-in-use gate belongs to an install that may never have started —
+            // the window was closed on the Close-applications screen. (R93)
+            session.ReleasePreparedPayload();
         }
     }
 

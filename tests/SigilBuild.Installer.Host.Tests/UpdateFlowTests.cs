@@ -267,6 +267,36 @@ public sealed class UpdateFlowTests
         vm.CurrentStep.Should().Be(UpdateStep.Checking, "with no runner wired the state machine never advances");
     }
 
+    [Fact]
+    public async Task Update_runner_runs_off_the_calling_thread()
+    {
+        // Arrange (R95)
+        var vm = new UpdateViewModel(new BrandTokens());
+        using var started = new ManualResetEventSlim(false);
+        using var release = new ManualResetEventSlim(false);
+        var callerThread = Environment.CurrentManagedThreadId;
+        int? runnerThread = null;
+        vm.ConfigureRunner((report, ct) =>
+        {
+            runnerThread = Environment.CurrentManagedThreadId;
+            started.Set();
+            release.Wait(TimeSpan.FromSeconds(10), ct);
+            return Task.FromResult(0);
+        });
+
+        // Act
+        vm.Start();
+
+        // Assert
+        vm.UpdateTask!.IsCompleted.Should().BeFalse(
+            "Start must return before the runner's synchronous work, not run it inline");
+        started.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken).Should().BeTrue("the runner must start without the caller");
+        release.Set();
+        await vm.UpdateTask!;
+        runnerThread.Should().NotBe(callerThread);
+        vm.CurrentStep.Should().Be(UpdateStep.UpToDate);
+    }
+
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
         for (var i = 0; i < 100 && !condition(); i++)

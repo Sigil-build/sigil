@@ -139,7 +139,7 @@ Writes a `.lnk` to a named anchor or an explicit directory. The journal records 
 |Field|Notes|
 |---|---|
 |`target`|Path to the program.|
-|`location`|`start_menu`, `desktop`, or an explicit directory path — see the containment note below.|
+|`location`|`start_menu` (the Start Menu `Programs` folder of the install scope), `desktop`, or an explicit directory path — see the containment note below.|
 |`name`|Display name; `.lnk` is appended automatically.|
 |`args`|List of CLI args appended to the target.|
 |`working_dir`|Optional.|

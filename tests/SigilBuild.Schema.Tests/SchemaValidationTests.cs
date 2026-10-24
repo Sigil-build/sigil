@@ -240,6 +240,20 @@ public class SchemaValidationTests
     }
 
     [Fact]
+    public async Task ManifestRelativeBrandingFixture_IsValidAgainstSchema()
+    {
+        // Brand images and license as manifest-relative paths (R96), with built-in
+        // shortcut options whose target comes from run_after_install (R101).
+        var schema = await LoadSchemaAsync();
+        var json = YamlToJson(await File.ReadAllTextAsync("Fixtures/valid/manifest-relative-branding.yaml"));
+        var errors = schema.Validate(json);
+
+        errors.Should().BeEmpty(
+            "the manifest-relative-branding fixture must satisfy the schema; got: {0}",
+            string.Join("; ", errors.Select(e => e.ToString())));
+    }
+
+    [Fact]
     public async Task TeardownHooksFixture_IsValidAgainstSchema()
     {
         // The documented way to stop a running app before setup checks for files in

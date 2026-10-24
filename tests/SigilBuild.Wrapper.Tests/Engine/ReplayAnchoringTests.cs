@@ -413,7 +413,7 @@ public class ReplayAnchoringTests
         // auto-starting after uninstall — the anchor creating the persistence it exists to
         // prevent.
         using var installDir = new TempDir();
-        var startMenu = ScopeLayout.For(InstallScope.Machine).StartMenuFolder;
+        var startMenu = ScopeLayout.For(InstallScope.Machine).StartMenuRoot;
         var anchor = Anchor(installDir.Path);
         var startupLnk = Path.Combine(startMenu, "Programs", "Startup", "acme.lnk");
 
@@ -463,7 +463,7 @@ public class ReplayAnchoringTests
         // only against a uniquely-named file this test creates in the CURRENT USER's
         // Start Menu and removes in the finally.
         using var installDir = new TempDir();
-        var startMenu = ScopeLayout.For(InstallScope.User).StartMenuFolder;
+        var startMenu = ScopeLayout.For(InstallScope.User).StartMenuRoot;
         Directory.Exists(startMenu).Should().BeTrue(
             "the positive case needs the real per-user Start Menu folder to exist");
 

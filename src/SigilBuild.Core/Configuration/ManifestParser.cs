@@ -287,7 +287,7 @@ public static class ManifestParser
             // through the same ParseLocalizedText path as title/subtitle/
             // description. The actual file read + embed happens at PACK time
             // (ExeWrapperPackager.ReadLicenseText), which resolves each path
-            // against the pack source dir and emits SIG0250 (non-fatal, per
+            // against the manifest directory and emits SIG0250 (non-fatal, per
             // entry) / SIG0290 (fatal, on the post-read map). The type must not
             // be `string?`: GetScalar returns null with zero diagnostic for a
             // `license:` map, and the License screen vanishes without a trace.

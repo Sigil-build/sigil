@@ -53,6 +53,9 @@ internal static class ArpRegistration
     /// <param name="QuietUninstallString">The silent uninstall command line, written as
     /// the standard ARP <c>QuietUninstallString</c> value (see
     /// <see cref="BuildQuietUninstallString"/>). Empty → the value is not written.</param>
+    /// <param name="DisplayIcon">Path of the file whose first icon ARP shows beside the
+    /// entry: the deployed <c>uninstall.exe</c>, which carries the stamped installer icon.
+    /// Removed with the key. Empty → the value is not written. (R100)</param>
     public sealed record Entry(
         string AppId,
         string DisplayName,
@@ -61,7 +64,8 @@ internal static class ArpRegistration
         string UninstallString,
         long EstimatedSizeBytes,
         string InstallLocation = "",
-        string QuietUninstallString = "");
+        string QuietUninstallString = "",
+        string DisplayIcon = "");
 
     /// <summary>
     /// Create or update the ARP key for <paramref name="entry"/> in the
@@ -91,6 +95,10 @@ internal static class ArpRegistration
         if (!string.IsNullOrEmpty(entry.InstallLocation))
         {
             key.SetValue("InstallLocation", entry.InstallLocation);
+        }
+        if (!string.IsNullOrEmpty(entry.DisplayIcon))
+        {
+            key.SetValue("DisplayIcon", entry.DisplayIcon);
         }
         // EstimatedSize is documented as a DWORD in KB.
         var sizeKb = (int)Math.Min(int.MaxValue, Math.Max(0, entry.EstimatedSizeBytes / 1024));

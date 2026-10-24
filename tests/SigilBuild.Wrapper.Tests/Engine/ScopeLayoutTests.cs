@@ -66,12 +66,17 @@ public sealed class ScopeLayoutTests
         machine.DesktopFolder.Should().Be(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory));
         machine.StartMenuFolder.Should().Be(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms));
+        machine.StartMenuRoot.Should().Be(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonStartMenu));
 
         user.DesktopFolder.Should().Be(
             Environment.GetFolderPath(Environment.SpecialFolder.Desktop));
         user.StartMenuFolder.Should().Be(
+            Environment.GetFolderPath(Environment.SpecialFolder.Programs));
+        user.StartMenuRoot.Should().Be(
             Environment.GetFolderPath(Environment.SpecialFolder.StartMenu));
+        user.StartMenuFolder.Should().EndWith("Programs", "shortcuts belong in the Start list, not the Start Menu root (R97)");
     }
 
     /// <summary>

@@ -133,4 +133,71 @@ public sealed class ArpScopeTests
         Registry.CurrentUser.OpenSubKey($@"{UninstallRoot}\{appId}")
             .Should().BeNull("Remove must delete the scope-correct ARP key");
     }
+
+    [Fact]
+    public void Registration_writes_DisplayIcon_and_Remove_deletes_it_with_the_key()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        // Arrange
+        var appId = "sigil.arp.icon." + Guid.NewGuid().ToString("N");
+        const string iconPath = @"C:\x\uninstall.exe";
+        try
+        {
+            // Act
+            ArpRegistration.Register(new ArpRegistration.Entry(
+                appId, "N", "1.0", "P",
+                ArpRegistration.BuildUninstallString(iconPath, InstallScope.User), 0,
+                DisplayIcon: iconPath),
+                InstallScope.User);
+
+            // Assert
+            using (var key = Registry.CurrentUser.OpenSubKey($@"{UninstallRoot}\{appId}"))
+            {
+                key!.GetValue("DisplayIcon").Should().Be(iconPath);
+            }
+
+            ArpRegistration.Remove(appId, InstallScope.User);
+            Registry.CurrentUser.OpenSubKey($@"{UninstallRoot}\{appId}").Should().BeNull();
+        }
+        finally
+        {
+#pragma warning disable CA1031
+            try { ArpRegistration.Remove(appId, InstallScope.User); } catch { /* best-effort */ }
+#pragma warning restore CA1031
+        }
+    }
+
+    [Fact]
+    public void Registration_without_DisplayIcon_writes_no_value()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        // Arrange
+        var appId = "sigil.arp.noicon." + Guid.NewGuid().ToString("N");
+        try
+        {
+            // Act
+            ArpRegistration.Register(new ArpRegistration.Entry(
+                appId, "N", "1.0", "P",
+                ArpRegistration.BuildUninstallString(@"C:\x\uninstall.exe", InstallScope.User), 0),
+                InstallScope.User);
+
+            // Assert
+            using var key = Registry.CurrentUser.OpenSubKey($@"{UninstallRoot}\{appId}");
+            key!.GetValue("DisplayIcon").Should().BeNull();
+        }
+        finally
+        {
+#pragma warning disable CA1031
+            try { ArpRegistration.Remove(appId, InstallScope.User); } catch { /* best-effort */ }
+#pragma warning restore CA1031
+        }
+    }
 }

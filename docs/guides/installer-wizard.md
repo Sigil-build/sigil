@@ -9,7 +9,7 @@ The screen list is built at runtime from your manifest. Welcome, Choose Install 
 1. **Welcome** — branded splash with app name + version.
 2. **Choose Install Location** — **always rendered**, immediately after Welcome, whether or not your manifest declares any `parameters:` at all. It is not tied to declaring a parameter named `install_dir` — see the warning under [Parameters](parameters.md). Includes a TextBox, Browse..., and a live disk-space readout via `DriveInfo`. When the manifest sets `installer.scope: auto`, this screen also carries the **user / machine scope toggle**, and flipping it recomputes the default path for the chosen scope.
 3. **License** — the real license text from `installer.license`, shown only when the manifest declares one. Next is disabled until the user accepts.
-4. **Options** — the built-in components page, shown only when at least one `installer.options` component is enabled. Rendered as checkboxes: the built-ins first (desktop shortcut, Start Menu, add to PATH, file associations), then any app-defined `components[]` in declared order.
+4. **Options** — the built-in components page, shown only when at least one `installer.options` component is enabled. Rendered as checkboxes: the built-ins first (desktop shortcut, Start Menu, add to PATH, file associations), then any app-defined `components[]` in declared order. The generated **desktop** and **Start Menu** shortcuts target `installer.run_after_install.path` when it is declared, and otherwise `{install_dir}\<app.name>.exe` (R101); there is no separate `target:` field, so declare `run_after_install` — or write your own `shortcut_create` step — when the app's executable is not named after the app.
 5. **N x custom screens** — one page per `installer.screens[]` entry, in declared order. See [Custom screens](#custom-screens-installerscreens).
 6. **Installing** — progress feed driven by the step engine.
 7. **Finish** — completion summary.
@@ -47,12 +47,14 @@ Slots — this is the **complete** list. `installer.brand` is `additionalPropert
 
 |Field|What it does|
 |---|---|
-|`logo`|Header logo (SVG or PNG).|
-|`hero`|Welcome-screen hero artwork (SVG or PNG).|
+|`logo`|Header logo (SVG or PNG). A relative path resolves against the manifest file's directory.|
+|`hero`|Welcome-screen hero artwork (SVG or PNG). A relative path resolves against the manifest file's directory.|
 |`primaryColor`|Primary button + accent fill.|
 |`accentColor`|Secondary accent (progress + links).|
 
 > **The colour keys are camelCase**, unlike most of the manifest. `primary_color` and `accent_color` are refused (R80): the schema listed them until then while the parser read only the camelCase pair, so a snake_case manifest passed `sigil validate` and packed with **no brand colours at all**, silently falling back to the defaults. A wrong spelling is now a validation error rather than an unbranded installer.
+
+> **`logo`, `hero` and `installer.license` paths are manifest-relative** (R96), the same base as `installer.icon` — not relative to `build.source`. A declared `logo` or `hero` that cannot be read packs with the non-fatal warning `SIG0251` and the wizard renders without it; an unreadable licence file is `SIG0250`.
 
 All colours are `#RRGGBB` hex — the schema enforces the pattern. The full light and dark palette is **derived from those two colours** at pack time by the brand generator; there is no gradient, sidebar or per-surface colour field to set. `BrandTokenEmitter` enforces WCAG-AA contrast against white text at pack time; failing combos surface as a pack-time diagnostic, not a runtime surprise.
 

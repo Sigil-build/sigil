@@ -26,6 +26,7 @@ rail.downgrade_blocked = Заблоковано
 # --- welcome ---
 welcome.title = Ласкаво просимо до встановлення {appName}
 welcome.body = Цей майстер допоможе вам виконати встановлення. Натисніть «Далі», щоб продовжити.
+welcome.version = Версія {version}
 
 # --- license ---
 license.title = Ліцензійна угода
@@ -38,6 +39,10 @@ location.scope.user = Лише для мене (рекомендовано)
 location.scope.user_hint = Права адміністратора не потрібні
 location.scope.machine = Для всіх користувачів цього комп'ютера
 location.scope.machine_hint = Встановлюється до Program Files — Windows запитає дозвіл
+location.disk_free = Вільно на диску {drive}: {freeSpace}
+size.mb = {value} МБ
+size.gb = {value} ГБ
+size.tb = {value} ТБ
 
 # --- install location validation ---
 location.error.empty = Укажіть розташування для встановлення.

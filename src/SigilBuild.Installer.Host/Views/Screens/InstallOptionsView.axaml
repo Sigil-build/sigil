@@ -23,18 +23,18 @@
                IsVisible="{Binding HasUpgradeNotice}"
                Text="{Binding UpgradeNotice}" />
 
-    <!-- Upgrade banner ("Upgrading from x.y.z") on the ready/destination screen. -->
-    <TextBlock TextWrapping="Wrap" FontWeight="SemiBold"
-               Foreground="{DynamicResource AccentBrush}"
-               IsVisible="{Binding HasUpgradeNotice}"
-               Text="{Binding UpgradeNotice}" />
-
     <Grid ColumnDefinitions="*,Auto">
       <TextBox Grid.Column="0" x:Name="InstallPath"
                Text="{Binding InstallPath, Mode=TwoWay}" />
       <Button Grid.Column="1" x:Name="BrowseButton" Content="{x:Static loc:S.NavBrowse}"
               Margin="8,0,0,0" Click="OnBrowse" />
     </Grid>
+
+    <!-- Free space on the target drive; empty (hidden) for an invalid path or unavailable drive. -->
+    <TextBlock x:Name="FreeSpace" FontSize="12" TextWrapping="Wrap"
+               Foreground="{DynamicResource TextMutBrush}"
+               IsVisible="{Binding HasInstallPathFreeSpace}"
+               Text="{Binding InstallPathFreeSpace}" />
 
     <!-- Inline validation error: absolute / non-file / writable-or-elevatable. -->
     <TextBlock Foreground="{DynamicResource DangerTextBrush}" FontSize="12"

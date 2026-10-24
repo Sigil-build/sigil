@@ -34,6 +34,47 @@ public class ExeWrapperOptionStepTests
         Installer: new InstallerSection(null, Options: options),
         Location: SourceLocation.Unknown);
 
+    private static SigilManifest ManifestWithRunAfter(string? runAfterPath) => new(
+        "v1.0",
+        new AppSection("com.acme.Studio", "Acme Studio", "3.2.0", "Acme, Inc.", null, null),
+        new BuildSection("./out", null, null, true),
+        null, null, null, null,
+        Installer: new InstallerSection(
+            null,
+            Options: new InstallerOptions(
+                DesktopShortcut: new InstallerOption(Enabled: true, Default: true),
+                StartMenu: new InstallerOption(Enabled: true, Default: true)),
+            RunAfterInstall: runAfterPath is null ? null : new RunAfterInstall(runAfterPath)),
+        Location: SourceLocation.Unknown);
+
+    [Fact]
+    public void Shortcut_options_target_run_after_install_path_when_declared()
+    {
+        // Arrange
+        var manifest = ManifestWithRunAfter("{install_dir}\\bin\\studio.exe");
+
+        // Act
+        var s = Deserialize(ExeWrapperPackager.BuildBlobBytes(manifest, string.Empty));
+
+        // Assert
+        s.InstallSteps.Where(x => x.Type == "shortcut_create").Should().HaveCount(2)
+            .And.OnlyContain(x => x.Target == "{install_dir}\\bin\\studio.exe");
+    }
+
+    [Fact]
+    public void Shortcut_options_default_to_app_name_exe_without_run_after_install()
+    {
+        // Arrange
+        var manifest = ManifestWithRunAfter(null);
+
+        // Act
+        var s = Deserialize(ExeWrapperPackager.BuildBlobBytes(manifest, string.Empty));
+
+        // Assert
+        s.InstallSteps.Where(x => x.Type == "shortcut_create").Should().HaveCount(2)
+            .And.OnlyContain(x => x.Target == "{install_dir}\\Acme Studio.exe");
+    }
+
     [Fact]
     public void Enabled_components_generate_gated_steps_and_component_list()
     {

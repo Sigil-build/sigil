@@ -1802,7 +1802,8 @@ public sealed class InstallSession
             EstimatedSizeBytes: _blob.EstimatedSizeBytes,
             // Write InstallLocation so a later upgrade can recover the install dir.
             InstallLocation: uninstallDir,
-            QuietUninstallString: ArpRegistration.BuildQuietUninstallString(uninstallerPath, _scope)),
+            QuietUninstallString: ArpRegistration.BuildQuietUninstallString(uninstallerPath, _scope),
+            DisplayIcon: uninstallerPath),
             _scope);
     }
 

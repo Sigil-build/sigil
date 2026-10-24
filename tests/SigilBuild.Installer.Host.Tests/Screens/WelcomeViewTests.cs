@@ -21,4 +21,15 @@ public class WelcomeViewTests
 
         view.FindControl<TextBlock>("Heading")!.Text.Should().Contain("Acme Pro");
     }
+
+    [AvaloniaFact]
+    public void Welcome_ShowsTheVersionBeingInstalled()
+    {
+        var vm = new InstallerViewModel(new BrandTokens { AppName = "Acme Pro", AppVersion = "4.1.2" });
+        var view = new WelcomeView { DataContext = vm };
+
+        var line = view.FindControl<TextBlock>("VersionLine")!;
+        line.Text.Should().Contain("4.1.2");
+        line.IsVisible.Should().BeTrue();
+    }
 }

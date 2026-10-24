@@ -42,7 +42,7 @@ internal static class OptionStepGenerator
     /// enabled component).
     /// </summary>
     public static (IReadOnlyList<InstallStep> Steps, IReadOnlyList<InstallerOptionComponent> Components)
-        Generate(InstallerOptions? options, AppSection app)
+        Generate(InstallerOptions? options, AppSection app, string? runAfterInstallPath = null)
     {
         ArgumentNullException.ThrowIfNull(app);
 
@@ -53,10 +53,13 @@ internal static class OptionStepGenerator
             return (steps, components);
         }
 
-        // A best-effort default target for the generated shortcuts: the app's exe
-        // under the install dir. `{install_dir}` resolves at install time; a manifest author
-        // who needs an exact target writes a hand-authored shortcut_create step.
-        var target = "{install_dir}\\" + app.Name + ".exe";
+        // The generated shortcuts target installer.run_after_install.path when declared (the
+        // program the author names as "the app"); otherwise the best-effort default is
+        // `{install_dir}\<app.name>.exe`. Tokens resolve at install time; an author who needs
+        // a different target writes a hand-authored shortcut_create step. (R101)
+        var target = string.IsNullOrWhiteSpace(runAfterInstallPath)
+            ? "{install_dir}\\" + app.Name + ".exe"
+            : runAfterInstallPath;
 
         if (IsEnabled(options.DesktopShortcut))
         {

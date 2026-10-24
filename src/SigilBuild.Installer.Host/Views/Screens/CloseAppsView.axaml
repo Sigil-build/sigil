@@ -26,10 +26,20 @@
       </ScrollViewer>
     </Border>
 
+    <!-- Shown when Close for me returned and applications are still running:
+         the list above is the fresh scan, and this says the attempt did not
+         work rather than leaving the same list to look as if nothing happened. -->
+    <TextBlock Foreground="{DynamicResource DangerTextBrush}" TextWrapping="Wrap"
+               IsVisible="{Binding CloseAppsFailed}"
+               Text="{x:Static loc:S.CloseAppsCloseFailed}" />
+
     <StackPanel Orientation="Horizontal" Spacing="10">
-      <Button Content="{x:Static loc:S.NavRetry}" Click="OnRetry" />
+      <Button Content="{x:Static loc:S.NavRetry}" Click="OnRetry" IsEnabled="{Binding CanActOnBlockers}" />
       <Button Content="{x:Static loc:S.CloseAppsCloseForMe}" Click="OnCloseForMe"
+              IsEnabled="{Binding CanActOnBlockers}"
               Background="{DynamicResource AccentBrush}" Foreground="White" />
+      <TextBlock VerticalAlignment="Center" Foreground="#4B5563" IsVisible="{Binding IsClosingApps}"
+                 Text="{x:Static loc:S.CloseAppsClosing}" />
     </StackPanel>
     <TextBlock Foreground="#6B7280" FontSize="11" TextWrapping="Wrap"
                Text="{x:Static loc:S.CloseAppsCloseForMeHint}" />

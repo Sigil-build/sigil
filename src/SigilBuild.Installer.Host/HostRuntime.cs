@@ -17,4 +17,18 @@ internal static class HostRuntime
 {
     /// <summary>The install session for the current interactive (wizard) run, or null in headless mode.</summary>
     public static InstallSession? Session { get; set; }
+
+    /// <summary>
+    /// This process's original argument vector, kept so the wizard's machine-scope
+    /// handoff can rebuild it for the elevated child rather than inventing a command
+    /// line from nothing. Empty for a plain double-click, which is the common case.
+    /// </summary>
+    /// <remarks>
+    /// Needed because scope cannot be changed inside a running session (R90): picking
+    /// "All users of this computer" starts a new elevated run, and that run has to
+    /// inherit everything the user originally passed — <c>/LOG=</c>, <c>/lang=</c>, a
+    /// parameter value — with only the scope flag replaced.
+    /// </remarks>
+    public static System.Collections.Generic.IReadOnlyList<string> Args { get; set; }
+        = System.Array.Empty<string>();
 }

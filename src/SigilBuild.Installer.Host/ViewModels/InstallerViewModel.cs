@@ -37,12 +37,22 @@ public enum InstallerOutcomeCode
 /// <summary>A single line in the Installing / Failed screen log.</summary>
 public sealed record InstallLogLine(string Text, bool IsError);
 
+/// <summary>
+/// What the user chose, captured on the UI thread at the moment the install
+/// starts. The install runner executes on a thread-pool thread and reads this
+/// snapshot instead of the view-model, which belongs to the UI thread. (R95)
+/// </summary>
+public sealed record InstallRequest(
+    string InstallPath,
+    IReadOnlyDictionary<string, string> ParameterValues,
+    IReadOnlyDictionary<string, bool> OptionValues);
+
 public sealed class InstallerViewModel : INotifyPropertyChanged
 {
     private InstallerStep _step = InstallerStep.Welcome;
     private string _installPath;
     private CancellationTokenSource? _engineCts;
-    private Func<IProgress<StepProgress>, CancellationToken, Task<InstallOutcome>>? _installRunner;
+    private Func<InstallRequest, IProgress<StepProgress>, CancellationToken, Task<InstallOutcome>>? _installRunner;
 
     // The resolved chrome language for this session, captured once at
     // construction (SessionLanguage is set before any UI is built).
@@ -225,38 +235,219 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
             return true;
         }
 
-        var found = _blockerScan(InstallPath);
+        PublishBlockers(_blockerScan(InstallPath));
+        return Blockers.Count == 0;
+    }
+
+    private void PublishBlockers(IReadOnlyList<string> found)
+    {
         Blockers.Clear();
         foreach (var b in found)
         {
             Blockers.Add(b);
         }
         OnPropertyChanged(nameof(HasBlockers));
-        return Blockers.Count == 0;
+    }
+
+    private bool _isClosingApps;
+
+    /// <summary>
+    /// True while "Close for me" is waiting on the Restart Manager. The screen shows
+    /// a closing notice and disables Retry, Close-for-me and Next until it returns. (R94)
+    /// </summary>
+    public bool IsClosingApps
+    {
+        get => _isClosingApps;
+        private set
+        {
+            if (_isClosingApps != value)
+            {
+                _isClosingApps = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(CanActOnBlockers));
+                OnPropertyChanged(nameof(CanGoNext));
+                OnPropertyChanged(nameof(CanGoBack));
+            }
+        }
+    }
+
+    /// <summary>True when Retry and Close-for-me can be pressed — not while a close is in flight.</summary>
+    public bool CanActOnBlockers => !_isClosingApps;
+
+    private bool _closeAppsFailed;
+
+    /// <summary>
+    /// True when the last "Close for me" left applications running. The screen then
+    /// says Setup could not close them, rather than showing the same list again as
+    /// though nothing had been tried. Cleared by the next attempt or Retry. (R94)
+    /// </summary>
+    public bool CloseAppsFailed
+    {
+        get => _closeAppsFailed;
+        private set
+        {
+            if (_closeAppsFailed != value)
+            {
+                _closeAppsFailed = value;
+                OnPropertyChanged();
+            }
+        }
     }
 
     /// <summary>
     /// "Close for me" — ask the Restart Manager to close the blocking applications,
     /// then re-scan. Advances into the install when that cleared them; otherwise the
-    /// screen stays put with the refreshed list (e.g. a declared app_mutex holder the
-    /// Restart Manager cannot close).
+    /// screen stays put with the refreshed list and says the close did not work (e.g.
+    /// a declared app_mutex holder the Restart Manager cannot close, or an app that
+    /// restarts itself).
     /// </summary>
-    public void CloseBlockingApps()
+    /// <remarks>
+    /// The close and the re-scan run on a thread-pool thread. A graceful
+    /// <c>RmShutdown</c> blocks for as long as the Restart Manager waits on the
+    /// applications, and on the UI thread that froze the window for the whole wait.
+    /// The re-scan is a fresh Restart Manager session, so the list it publishes
+    /// names the processes running now, not the ones the screen first showed. (R94)
+    /// </remarks>
+    public async Task CloseBlockingAppsAsync()
     {
-        _blockerClose?.Invoke(InstallPath);
+        if (_isClosingApps)
+        {
+            return;
+        }
+
+        var path = InstallPath;
+        var close = _blockerClose;
+        var scan = _blockerScan;
+        CloseAppsFailed = false;
+        IsClosingApps = true;
+        IReadOnlyList<string> remaining;
+        try
+        {
+            remaining = await Task.Run(() =>
+            {
+#pragma warning disable CA1031 // A failed close is reported by the re-scan below, never by a crash.
+                try
+                {
+                    close?.Invoke(path);
+                }
+                catch (Exception)
+                {
+                    // The re-scan decides what the user sees next.
+                }
+#pragma warning restore CA1031
+                return scan?.Invoke(path) ?? Array.Empty<string>();
+            }).ConfigureAwait(true);
+        }
+        finally
+        {
+            IsClosingApps = false;
+        }
+
+        PublishBlockers(remaining);
+        if (Blockers.Count == 0)
+        {
+            GoToInstalling();
+            return;
+        }
+        CloseAppsFailed = true;
+    }
+
+    /// <summary>"Retry" — the user closed the apps themselves; re-scan and continue when clear.</summary>
+    public void RetryBlockers()
+    {
+        if (_isClosingApps)
+        {
+            return;
+        }
+        CloseAppsFailed = false;
         if (RescanBlockers())
         {
             GoToInstalling();
         }
     }
 
-    /// <summary>"Retry" — the user closed the apps themselves; re-scan and continue when clear.</summary>
-    public void RetryBlockers()
+    // --- pre_install hooks ahead of the gate ---
+
+    private Func<InstallRequest, CancellationToken, Task<bool>>? _preInstallHooks;
+    private bool _preInstallHooksRan;
+
+    /// <summary>
+    /// Wire the manifest's <c>pre_install</c> hooks to run before the files-in-use
+    /// scan. The publisher's teardown hook — an app's own <c>--quit</c> — is the
+    /// right tool for an application the Restart Manager cannot close (a tray app
+    /// with no window, a daemon its GUI respawns), so it gets its chance before the
+    /// Close-applications screen is shown, not after. <paramref name="run"/> returns
+    /// <c>false</c> when a hook aborted the phase; the install then starts anyway
+    /// and reports that failure through the engine. Left unwired, the gate scans
+    /// immediately. (R93)
+    /// </summary>
+    public void ConfigurePreInstallHooks(Func<InstallRequest, CancellationToken, Task<bool>> run)
+        => _preInstallHooks = run ?? throw new ArgumentNullException(nameof(run));
+
+    private bool _isPreparing;
+
+    /// <summary>
+    /// True while the <c>pre_install</c> hooks run ahead of the files-in-use gate.
+    /// Next and Back are disabled and the footer says Setup is preparing. (R93)
+    /// </summary>
+    public bool IsPreparing
     {
-        if (RescanBlockers())
+        get => _isPreparing;
+        private set
         {
-            GoToInstalling();
+            if (_isPreparing != value)
+            {
+                _isPreparing = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(CanGoNext));
+                OnPropertyChanged(nameof(CanGoBack));
+            }
         }
+    }
+
+    /// <summary>
+    /// The pre-gate hook run started by the last Next into Installing, or null when
+    /// none was needed. Exposed so tests can await it.
+    /// </summary>
+    public Task? PreInstallGateTask { get; private set; }
+
+    /// <summary>
+    /// Run the <c>pre_install</c> hooks off the UI thread, then apply the
+    /// files-in-use gate and either start the install or divert to the
+    /// Close-applications screen. The hooks run at most once per wizard run; going
+    /// Back and forward again goes straight to the scan. (R93)
+    /// </summary>
+    private async Task RunPreInstallHooksThenGateAsync(int installingIndex, Func<InstallRequest, CancellationToken, Task<bool>> hooks)
+    {
+        var request = CaptureInstallRequest();
+        IsPreparing = true;
+        bool hooksSucceeded;
+        try
+        {
+            hooksSucceeded = await Task.Run(() => hooks(request, CancellationToken.None)).ConfigureAwait(true);
+        }
+#pragma warning disable CA1031 // A hook-runner fault falls through to the engine, which runs the phase itself.
+        catch (Exception)
+        {
+            hooksSucceeded = true;
+        }
+#pragma warning restore CA1031
+        finally
+        {
+            _preInstallHooksRan = true;
+            IsPreparing = false;
+        }
+
+        // An aborted hook phase skips the scan: the install starts and fails with the
+        // hook's own message, which is what the user needs to read.
+        if (hooksSucceeded && !RescanBlockers())
+        {
+            CurrentStep = InstallerStep.CloseApps;
+            return;
+        }
+
+        MoveTo(installingIndex);
+        InstallTask = StartInstallAsync();
     }
 
     // The version-aware classification for this run + the installed
@@ -509,6 +700,7 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
                 OnPropertyChanged(nameof(CanGoNext));
                 OnPropertyChanged(nameof(CanCancel));
                 OnPropertyChanged(nameof(IsTerminal));
+                OnPropertyChanged(nameof(NextNeedsElevation));
                 // When the step is set directly (tests, engine outcome) rather than
                 // through Next/Back, resync the flow cursor so navigation stays correct.
                 if (!_navigating)
@@ -536,8 +728,8 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
         // Terminal step (Finish/Failed) not in the linear flow: leave the cursor.
     }
 
-    public bool CanGoBack => _step is not InstallerStep.Welcome and not InstallerStep.Installing and not InstallerStep.Finish and not InstallerStep.Failed and not InstallerStep.DowngradeBlocked;
-    public bool CanGoNext => _step is not InstallerStep.Installing and not InstallerStep.Finish and not InstallerStep.Failed and not InstallerStep.DowngradeBlocked;
+    public bool CanGoBack => !_isPreparing && !_isClosingApps && _step is not InstallerStep.Welcome and not InstallerStep.Installing and not InstallerStep.Finish and not InstallerStep.Failed and not InstallerStep.DowngradeBlocked;
+    public bool CanGoNext => !_isPreparing && !_isClosingApps && _step is not InstallerStep.Installing and not InstallerStep.Finish and not InstallerStep.Failed and not InstallerStep.DowngradeBlocked;
 
     /// <summary>True on the Close-applications gate — drives its Retry / Close-for-me buttons.</summary>
     public bool IsCloseAppsStep => _step == InstallerStep.CloseApps;
@@ -807,19 +999,63 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
         get => _isMachineScope;
         set
         {
-            if (_isMachineScope != value)
+            if (_isMachineScope == value)
             {
-                _isMachineScope = value;
-                OnPropertyChanged();
-                OnPropertyChanged(nameof(IsUserScope));
-                // Toggling scope recomputes a clean default path for the new scope.
-                if (_defaultPathResolver is not null)
-                {
-                    InstallPath = _defaultPathResolver(_isMachineScope);
-                }
+                return;
+            }
+
+            _isMachineScope = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsUserScope));
+            // Selecting a scope stays a selection: it swaps the pre-filled path and
+            // nothing else, so the user can still see and edit the destination before
+            // committing. The elevation that machine scope needs happens on Next —
+            // where the shield is — not on this click. (R90)
+            OnPropertyChanged(nameof(NextNeedsElevation));
+            if (_defaultPathResolver is not null)
+            {
+                InstallPath = _defaultPathResolver(_isMachineScope);
             }
         }
     }
+
+    private Func<bool>? _machineScopeElevator;
+
+    /// <summary>
+    /// Wire the machine-scope handoff. Invoked when the user picks "All users of
+    /// this computer" and the session cannot honour it; returns <c>true</c> when an
+    /// elevated instance has taken over and this one is standing down, <c>false</c>
+    /// when it has not — the UAC prompt was declined — and the selection stays put.
+    /// </summary>
+    /// <remarks>
+    /// Left unwired the option behaves as it always did, which is what the unit tests
+    /// that only exercise path swapping rely on. The host wires it only when
+    /// <c>InstallSession.MachineScopeNeedsRelaunch</c> is true, so an already
+    /// machine-scoped session toggles the radio normally. (R90)
+    /// </remarks>
+    public void ConfigureMachineScopeElevation(Func<bool> elevator)
+    {
+        _machineScopeElevator = elevator ?? throw new ArgumentNullException(nameof(elevator));
+        OnPropertyChanged(nameof(NextNeedsElevation));
+    }
+
+    /// <summary>
+    /// True when pressing Next will ask Windows for approval: the destination screen
+    /// is showing, machine scope is selected, and this session cannot provide it.
+    /// Drives the shield on the Next button.
+    /// </summary>
+    /// <remarks>
+    /// The shield belongs on the control that actually triggers the prompt, which is
+    /// the Windows convention and also the honest placement — the scope radios only
+    /// change a path, and nothing about picking one is irreversible. It appears only
+    /// when the click will really elevate: not on a session already in machine scope
+    /// (the handoff is then unwired), not while user scope is selected, and not on
+    /// any other screen. (R90)
+    /// </remarks>
+    public bool NextNeedsElevation =>
+        _machineScopeElevator is not null
+        && _isMachineScope
+        && _step == InstallerStep.InstallOptions;
 
     /// <summary>The "Just for me" scope radio — the inverse of <see cref="IsMachineScope"/>.</summary>
     public bool IsUserScope
@@ -1047,15 +1283,48 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
     /// delegate). When set, entering the Installing screen kicks off the engine.
     /// Left null in unit tests, which drive the step machine directly.
     /// </summary>
+    /// <remarks>
+    /// The runner is invoked on a thread-pool thread, never the UI thread. It must
+    /// not touch this view-model or any UI object; use the overload taking an
+    /// <see cref="InstallRequest"/> for what the user chose. (R95)
+    /// </remarks>
     public void ConfigureInstallRunner(Func<IProgress<StepProgress>, CancellationToken, Task<InstallOutcome>> runner)
-        => _installRunner = runner;
+    {
+        ArgumentNullException.ThrowIfNull(runner);
+        _installRunner = (_, progress, ct) => runner(progress, ct);
+    }
+
+    /// <summary>
+    /// Wire the real install driver with the user's choices handed over as an
+    /// <see cref="InstallRequest"/> captured on the UI thread when the install starts.
+    /// </summary>
+    /// <remarks>
+    /// The runner is invoked on a thread-pool thread, never the UI thread: the
+    /// engine's first work — reading and decompressing the whole embedded payload —
+    /// is synchronous, and on the UI thread it froze the window before the
+    /// Installing screen could render. Progress reports still reach the UI thread
+    /// through the sink this view-model passes in. (R95)
+    /// </remarks>
+    public void ConfigureInstallRunner(Func<InstallRequest, IProgress<StepProgress>, CancellationToken, Task<InstallOutcome>> runner)
+        => _installRunner = runner ?? throw new ArgumentNullException(nameof(runner));
+
+    private InstallRequest CaptureInstallRequest() =>
+        new(InstallPath, CollectedParameterValues, CollectedOptionValues);
 
     public void Next()
     {
+        // A hook run or a close is in flight; the button is disabled, and a stray
+        // invocation must not start a second one.
+        if (_isPreparing || _isClosingApps)
+        {
+            return;
+        }
+
         // Leaving the Close-applications screen means the user pressed
         // Next after clearing blockers — re-scan and only advance when clear.
         if (_step == InstallerStep.CloseApps)
         {
+            CloseAppsFailed = false;
             if (!RescanBlockers())
             {
                 return; // still blocked — stay on the screen with the refreshed list.
@@ -1066,9 +1335,31 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
 
         // Destination gate: a blank / relative / file / unwritable path shows
         // an inline error and blocks advancing off the destination screen.
-        if (_flow[_flowIndex].Step == InstallerStep.InstallOptions && !ValidateDestination())
+        if (_flow[_flowIndex].Step == InstallerStep.InstallOptions)
         {
-            return;
+            if (!ValidateDestination())
+            {
+                return;
+            }
+
+            // Machine scope needs a session this process cannot become: scope fixes
+            // the containment roots install_dir is checked against and the elevation
+            // decision, both settled before this window existed. Honouring the choice
+            // means a fresh elevated run, and this is the moment to ask — the user has
+            // seen the destination and pressed the button carrying the shield. (R90)
+            if (_isMachineScope && _machineScopeElevator is not null)
+            {
+                if (_machineScopeElevator())
+                {
+                    // An elevated instance owns the install now; this one is closing.
+                    return;
+                }
+
+                // Declined, or the shell refused. Stay on the screen and say why —
+                // a Next that quietly does nothing is the worse failure.
+                InstallPathError = Strings.LocationErrorElevationDeclined(_lang);
+                return;
+            }
         }
 
         // License gate: stay put until "I accept" is checked.
@@ -1095,11 +1386,22 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
 
         // The last gate before the install starts. The destination is
         // settled by now, so scan for running apps holding it; if any, divert to the
-        // Close-applications screen instead of starting the engine.
-        if (_flow[next].Step == InstallerStep.Installing && !RescanBlockers())
+        // Close-applications screen instead of starting the engine. The manifest's
+        // pre_install hooks run first, off the UI thread, because stopping the
+        // application is often exactly what they do. (R93)
+        if (_flow[next].Step == InstallerStep.Installing)
         {
-            CurrentStep = InstallerStep.CloseApps;
-            return;
+            if (_preInstallHooks is { } hooks && !_preInstallHooksRan)
+            {
+                PreInstallGateTask = RunPreInstallHooksThenGateAsync(next, hooks);
+                return;
+            }
+
+            if (!RescanBlockers())
+            {
+                CurrentStep = InstallerStep.CloseApps;
+                return;
+            }
         }
 
         MoveTo(next);
@@ -1365,11 +1667,19 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
         // SerialProgress, not Progress<T>: with no SynchronizationContext the BCL type
         // posts every report to the thread pool, so reports the engine made sequentially
         // can execute ApplyProgress concurrently and race LogLines. See SerialProgress.
+        // Constructed here, on the UI thread, so it captures the UI context and every
+        // report the background runner makes is posted back to it.
         var progress = new SerialProgress<StepProgress>(ApplyProgress);
+        var request = CaptureInstallRequest();
+        var runner = _installRunner;
+        var token = cts.Token;
 
         try
         {
-            var outcome = await _installRunner(progress, cts.Token).ConfigureAwait(true);
+            // The runner starts on a thread-pool thread, so this method returns to the
+            // dispatcher at once and the Installing screen renders before any engine
+            // work happens. (R95)
+            var outcome = await Task.Run(() => runner(request, progress, token)).ConfigureAwait(true);
             if (outcome.Success)
             {
                 InstallProgress = 1;

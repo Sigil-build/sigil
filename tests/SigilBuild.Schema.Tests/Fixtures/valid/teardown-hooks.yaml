@@ -1,0 +1,38 @@
+# The teardown-hook pattern: a tray app whose daemon the GUI respawns cannot be
+# closed by the Restart Manager, so the publisher stops it with its own --quit.
+# pre_install / pre_uninstall run before the files-in-use check, so this clears
+# the running app before setup looks for it. On a fresh install the program does
+# not exist yet, which is why the hook continues on failure. (R93)
+spec: v1.0
+app:
+  id: com.example.TrayApp
+  name: TrayApp
+  version: 0.1.0
+  publisher: Example Inc.
+build:
+  source: ./out
+installer:
+  hooks:
+    pre_install:
+      - id: quit-running
+        type: run_program
+        program: "{install_dir}\\trayapp-gui.exe"
+        args: ["--quit"]
+        wait: true
+        timeout_seconds: 30
+        expected_exit_codes: [0, 1]
+        on_failure: continue
+    pre_uninstall:
+      - id: quit-running
+        type: run_program
+        program: "{install_dir}\\trayapp-gui.exe"
+        args: ["--quit"]
+        wait: true
+        timeout_seconds: 30
+        expected_exit_codes: [0, 1]
+        on_failure: continue
+      - id: remove-login-item
+        type: run_program
+        program: "{install_dir}\\trayapp.exe"
+        args: ["daemon", "--uninstall-autostart"]
+        on_failure: continue

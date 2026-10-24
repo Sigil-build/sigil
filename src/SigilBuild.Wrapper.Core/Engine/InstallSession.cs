@@ -141,6 +141,20 @@ public sealed class InstallSession
     /// </summary>
     public string? LogFilePath => _parsed.LogRequested ? ResolveLogPath() : null;
 
+    /// <summary>
+    /// The host's always-on diagnostic log, which this session's run log writes to
+    /// when <c>/LOG</c> was not requested. <c>/LOG</c> wins when both exist. Set by
+    /// the stamped host before any run starts; <c>null</c> (tests, the console
+    /// wrapper) keeps the run log off unless <c>/LOG</c> asks for it.
+    /// </summary>
+    /// <remarks>
+    /// A silent run has no window, and the one Apps &amp; features starts has no
+    /// console either, so without this a refused run — files in use, an aborted
+    /// hook — ends as an exit code and nothing else. Lines are redacted exactly as in
+    /// the <c>/LOG</c> file. (R93)
+    /// </remarks>
+    public string? DiagnosticLogPath { get; set; }
+
     private string ResolveLogPath() =>
         _parsed.LogPath ?? Path.Combine(Path.GetTempPath(), $"sigil-{SanitizeAppId(_blob.AppId)}.log");
 
@@ -158,21 +172,24 @@ public sealed class InstallSession
     }
 
     /// <summary>
-    /// Open the <c>/LOG</c> sink (idempotent) and write the header line. No-op when
-    /// logging was not requested or already opened. Returns the log (or null).
+    /// Open the run log (idempotent) and write the header line: the <c>/LOG</c>
+    /// file when requested, else <see cref="DiagnosticLogPath"/>. No-op when neither
+    /// exists or the log is already open. Returns the log (or null).
     /// </summary>
     private InstallLog? EnsureLog()
     {
-        if (!_parsed.LogRequested)
-        {
-            return null;
-        }
         if (_log is not null)
         {
             return _log;
         }
 
-        _log = InstallLog.TryOpen(ResolveLogPath());
+        var path = _parsed.LogRequested ? ResolveLogPath() : DiagnosticLogPath;
+        if (path is null)
+        {
+            return null;
+        }
+
+        _log = InstallLog.TryOpen(path);
         _log?.WriteLine(
             $"=== sigil {_mode.ToString().ToLowerInvariant()} log | app={_blob.AppId} | scope={_scope} | args=[{_parsed.AuditSafeRendering()}] ===");
         if (_languageConflictNote is not null)
@@ -188,8 +205,8 @@ public sealed class InstallSession
     /// <see cref="IProgress{T}"/>, so a call site with no user-facing progress
     /// stream of its own must still hand it something or the refusal is written to
     /// nowhere. Nothing reaches the console or the wizard, but the <c>/LOG</c> file
-    /// records it. <c>null</c> when <c>/LOG</c> was not requested — there is then no
-    /// sink to write to at all. (R1)
+    /// records it. <c>null</c> when no run log is open — there is then no sink to
+    /// write to at all. (R1)
     /// </summary>
     private IProgress<StepProgress>? StateProgress =>
         _log is null ? null : new LoggingProgress(null, _log);
@@ -199,8 +216,8 @@ public sealed class InstallSession
     /// is a byte-for-byte copy of the setup exe, so double-clicking it — with
     /// no <c>/Uninstall</c> flag — must still uninstall. When no explicit mode flag
     /// was parsed and the running image is named <c>uninstall.exe</c>, imply
-    /// <see cref="WrapperMode.Uninstall"/>. The ARP <c>UninstallString</c> path
-    /// (<c>/S /Uninstall</c>) already parses to Uninstall and is unaffected.
+    /// <see cref="WrapperMode.Uninstall"/>. The ARP <c>UninstallString</c> and
+    /// <c>QuietUninstallString</c> paths carry <c>/Uninstall</c> and are unaffected.
     /// </summary>
     private static WrapperMode ResolveEffectiveMode(WrapperMode parsedMode)
     {
@@ -509,6 +526,54 @@ public sealed class InstallSession
     /// </exception>
     internal IReadOnlyList<string> BuildElevationRelaunchArgs(IReadOnlyList<string> originalArgs) =>
         ElevationSecretHandoff.PrepareRelaunchArgs(originalArgs, _parsed);
+
+    /// <summary>
+    /// True when this session cannot honour a machine-scope install and the wizard's
+    /// "All users of this computer" option therefore needs a fresh, elevated run.
+    /// </summary>
+    /// <remarks>
+    /// The condition is the resolved scope, not elevation: an already-elevated process
+    /// whose scope resolved to <c>user</c> cannot honour the choice either, because
+    /// scope is fixed when the session is created — before the window exists — and
+    /// <c>install_dir</c> containment is checked against that scope's layout. Toggling
+    /// a radio afterwards only ever changed the path, which is what made the option a
+    /// guaranteed failure rather than a choice. (R90)
+    /// </remarks>
+    public bool MachineScopeNeedsRelaunch => _scope != InstallScope.Machine;
+
+    /// <summary>
+    /// The argument vector for the wizard's machine-scope relaunch: the original
+    /// command line with any explicit scope flag replaced by <c>/allusers</c>, routed
+    /// through the same secret handoff as every other elevated relaunch (R18).
+    /// </summary>
+    /// <remarks>
+    /// Scope is re-decided by re-running <see cref="Create"/> in the child rather than
+    /// by mutating this session, so the child resolves its own destination, its own
+    /// upgrade plan against the machine hive, and its own containment roots. Nothing
+    /// the user has typed is forwarded because nothing has been typed yet — the choice
+    /// is made on the Destination screen, before any other value is collected, and the
+    /// child computes the machine default itself. (R90)
+    /// </remarks>
+    public IReadOnlyList<string> BuildMachineScopeRelaunchArgs(IReadOnlyList<string> originalArgs)
+    {
+        ArgumentNullException.ThrowIfNull(originalArgs);
+
+        var rewritten = new List<string>(originalArgs.Count + 1);
+        foreach (var arg in originalArgs)
+        {
+            // Drop any scope flag the parent was given; /allusers replaces it. Leaving
+            // both on the line would hand the child a contradiction to resolve.
+            if (arg.Equals("/currentuser", StringComparison.OrdinalIgnoreCase) ||
+                arg.Equals("/allusers", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            rewritten.Add(arg);
+        }
+        rewritten.Add("/allusers");
+
+        return BuildElevationRelaunchArgs(rewritten);
+    }
 
     /// <summary>
     /// Run to completion without any UI. Routes by mode, echoing the engine's
@@ -832,7 +897,7 @@ public sealed class InstallSession
     }
 
     public Task<InstallOutcome> RunInstallAsync(IProgress<StepProgress>? progress, CancellationToken ct = default)
-        => RunInstallCoreAsync(WrapperBlob.LoadPayloadBytes(), progress, ct);
+        => RunInstallCoreAsync(WrapperBlob.LoadPayloadBytes, progress, ct);
 
     /// <summary>
     /// GUI entry point: run the install pipeline binding the wizard-collected
@@ -847,7 +912,7 @@ public sealed class InstallSession
         CancellationToken ct = default)
     {
         _collectedValues = collectedValues;
-        return RunInstallCoreAsync(WrapperBlob.LoadPayloadBytes(), progress, ct);
+        return RunInstallCoreAsync(WrapperBlob.LoadPayloadBytes, progress, ct);
     }
 
     /// <summary>
@@ -868,8 +933,130 @@ public sealed class InstallSession
     {
         _collectedValues = collectedValues;
         _collectedOptions = collectedOptions;
-        return RunInstallCoreAsync(WrapperBlob.LoadPayloadBytes(), progress, ct);
+        return RunInstallCoreAsync(WrapperBlob.LoadPayloadBytes, progress, ct);
     }
+
+    /// <summary>
+    /// True when the manifest declares <c>installer.hooks.pre_install</c>. The wizard
+    /// wires its pre-gate hook call only then, so a manifest without the phase keeps
+    /// the gate synchronous and extracts nothing early.
+    /// </summary>
+    public bool HasPreInstallHooks => _blob.HookPreInstall is { Count: > 0 };
+
+    /// <summary>
+    /// Run the <c>pre_install</c> hook phase now, ahead of the wizard's own
+    /// files-in-use gate, so a publisher's teardown hook (an app's own <c>--quit</c>)
+    /// gets its chance to clear a running application before the Close-applications
+    /// screen is shown. Returns <c>false</c> when a hook with <c>on_failure: fail</c>
+    /// aborted the phase. (R93)
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The phase runs at most once per install run. The outcome is memoized, and
+    /// <see cref="RunInstallCoreAsync(Func{byte[]}, IProgress{StepProgress}, CancellationToken)"/>
+    /// replays it instead of running the hooks again — so an abort here surfaces as
+    /// the install's failure, through the engine's normal failure path, and the
+    /// wizard needs no failure handling of its own.
+    /// </para>
+    /// <para>
+    /// The hooks see the same context the engine would give them: the collected
+    /// destination, parameters and options, and the extracted payload, so a
+    /// <c>payload://</c> hook resolves here exactly as it does on the silent path.
+    /// The extraction is kept and handed to the install run that follows;
+    /// <see cref="ReleasePreparedPayload"/> removes it when no run follows.
+    /// </para>
+    /// <para>
+    /// A destination the resolver refuses is not reported here: the method returns
+    /// <c>true</c> without running anything, and the install run refuses it with its
+    /// usual message.
+    /// </para>
+    /// </remarks>
+    public async Task<bool> RunPreInstallHooksAsync(
+        IReadOnlyDictionary<string, string>? collectedValues,
+        IReadOnlyDictionary<string, bool>? collectedOptions,
+        IProgress<StepProgress>? progress,
+        CancellationToken ct = default)
+    {
+        if (!HasPreInstallHooks || _plan.Action == UpgradeAction.DowngradeBlocked)
+        {
+            return true;
+        }
+        if (_preHookOutcome is { } done)
+        {
+            return done.Success;
+        }
+
+        EnsureLog();
+        _collectedValues = collectedValues;
+        _collectedOptions = collectedOptions;
+
+        _preparedPayload ??= ExtractPayload(WrapperBlob.LoadPayloadBytes);
+
+        StepContext ctx;
+        try
+        {
+            ctx = BuildInstallContext(_preparedPayload?.Root);
+        }
+        catch (InstallDirRejectedException)
+        {
+            return true;
+        }
+
+        _log?.SetSecrets(ctx.SecretValues);
+        var effectiveProgress = _log is null ? progress : new LoggingProgress(progress, _log);
+        var outcome = await RunPreHooksOnceAsync(
+            "pre_install", _blob.HookPreInstall, ctx, effectiveProgress, ct).ConfigureAwait(false);
+        return outcome.Success;
+    }
+
+    /// <summary>
+    /// Remove a payload <see cref="RunPreInstallHooksAsync"/> extracted for an install
+    /// run that never started — the wizard was closed on the Close-applications
+    /// screen. A no-op when nothing is held. (R93)
+    /// </summary>
+    public void ReleasePreparedPayload()
+    {
+        _preparedPayload?.Dispose();
+        _preparedPayload = null;
+    }
+
+    // The memoized outcome of this install run's pre_install hooks. Cleared when the
+    // run ends, so the phase runs at most once per run whichever caller — the
+    // wizard's gate or the engine — reaches it first. (R93)
+    private HookOutcome? _preHookOutcome;
+
+    // A payload extracted ahead of the install run, so the pre_install hooks the
+    // wizard runs before its gate resolve payload:// exactly as the engine's would.
+    // Taken over (and disposed) by the install run. (R93)
+    private PayloadExtraction? _preparedPayload;
+
+    private async Task<HookOutcome> RunPreHooksOnceAsync(
+        string phaseLabel,
+        IReadOnlyList<InstallStep>? hooks,
+        StepContext ctx,
+        IProgress<StepProgress>? progress,
+        CancellationToken ct)
+    {
+        if (_preHookOutcome is { } done)
+        {
+            return done;
+        }
+        var outcome = await HookRunner.RunAsync(phaseLabel, hooks, ctx, progress, ct).ConfigureAwait(false);
+        _preHookOutcome = outcome;
+        return outcome;
+    }
+
+    private PayloadExtraction? ExtractPayload(Func<byte[]> payloadSource)
+    {
+        var bytes = payloadSource();
+        return bytes.Length > 0 ? PayloadExtraction.Extract(bytes, _blob.AppId) : null;
+    }
+
+    private StepContext BuildInstallContext(string? payloadRoot) =>
+        StepContext.From(
+            _blob, _parsed, payloadRoot, _collectedValues, _scope, _collectedOptions, CollectedInstallDir,
+            // An upgrade installs into the prior location (default destination).
+            priorInstallDir: PriorInstallDirDefault);
 
     /// <summary>
     /// Core install lifecycle shared by every entry path: extract the embedded
@@ -888,13 +1075,20 @@ public sealed class InstallSession
     /// un-stamped runtime) skips extraction and leaves the payload root
     /// <c>null</c>.
     /// </remarks>
-    internal async Task<InstallOutcome> RunInstallCoreAsync(
+    internal Task<InstallOutcome> RunInstallCoreAsync(
         byte[] payloadBytes,
         IProgress<StepProgress>? progress,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(payloadBytes);
+        return RunInstallCoreAsync(() => payloadBytes, progress, ct);
+    }
 
+    private async Task<InstallOutcome> RunInstallCoreAsync(
+        Func<byte[]> payloadSource,
+        IProgress<StepProgress>? progress,
+        CancellationToken ct)
+    {
         // Ensure the /LOG sink is open (idempotent — the headless path may have
         // opened it already; the GUI path opens it here).
         EnsureLog();
@@ -917,23 +1111,19 @@ public sealed class InstallSession
         }
 
 
-        PayloadExtraction? payload = null;
+        // A payload the wizard's pre-gate hook call already extracted is taken over
+        // here, so the run neither extracts twice nor leaves the first copy behind.
+        PayloadExtraction? payload = _preparedPayload;
+        _preparedPayload = null;
         try
         {
-            string? payloadRoot = null;
-            if (payloadBytes.Length > 0)
-            {
-                payload = PayloadExtraction.Extract(payloadBytes, _blob.AppId);
-                payloadRoot = payload.Root;
-            }
+            payload ??= ExtractPayload(payloadSource);
+            var payloadRoot = payload?.Root;
 
             StepContext ctx;
             try
             {
-                ctx = StepContext.From(
-                    _blob, _parsed, payloadRoot, _collectedValues, _scope, _collectedOptions, CollectedInstallDir,
-                    // An upgrade installs into the prior location (default destination).
-                    priorInstallDir: PriorInstallDirDefault);
+                ctx = BuildInstallContext(payloadRoot);
             }
             catch (InstallDirRejectedException ex)
             {
@@ -949,10 +1139,29 @@ public sealed class InstallSession
             _log?.SetSecrets(ctx.SecretValues);
             var effectiveProgress = _log is null ? progress : new LoggingProgress(progress, _log);
 
+            // pre_install hooks run FIRST: outside and before the journal, and before
+            // the files-in-use gate, so a publisher's teardown hook (the app's own
+            // --quit) clears a running application before the gate scans for it. A
+            // hook that fails (default on_failure: fail) aborts here and nothing else
+            // runs. The prior version is still installed at this point, so a hook
+            // naming {install_dir}\app.exe reaches the program it means; on a fresh
+            // install that program does not exist yet and the hook fails exactly as
+            // it always has, governed by its own on_failure. At most once per run:
+            // when the wizard already ran the phase before its own gate, its outcome
+            // is replayed here rather than the hooks running again. (R93)
+            var preHook = await RunPreHooksOnceAsync(
+                "pre_install", _blob.HookPreInstall, ctx, effectiveProgress, ct).ConfigureAwait(false);
+            if (!preHook.Success)
+            {
+                var err = $"pre_install hook '{preHook.FailedStepId}' failed: {preHook.Error}";
+                _log?.WriteLine($"result: aborted before install — {ctx.Redact(err)}");
+                return new InstallOutcome(false, err);
+            }
+
             // Files-in-use gate. The destination is now resolved, so scan the declared
-            // app mutexes + Restart Manager over it. Runs FIRST — before prerequisites
+            // app mutexes + Restart Manager over it. Runs before prerequisites
             // download anything, before the prior version is torn down, and before the
-            // journal opens — so a blocked run changes nothing.
+            // journal opens — so a blocked run changes nothing the hooks did not.
             var blocked = CheckFilesInUse(ctx, ctx.InstallDir, effectiveProgress);
             if (blocked is not null)
             {
@@ -960,9 +1169,9 @@ public sealed class InstallSession
             }
 
             // Prerequisites (detect → install → re-detect) run OUTSIDE and BEFORE the
-            // pre_install hooks AND before the journal opens — and BEFORE the
-            // re-install cleanup below, so a prerequisite failure aborts with the prior
-            // install still intact (no data loss). An accepted 3010 sets the session
+            // journal opens — and BEFORE the re-install cleanup below, so a
+            // prerequisite failure aborts with the prior install still intact (no
+            // data loss). An accepted 3010 sets the session
             // reboot flag (Done-screen notice + silent exit 3010). Prereqs are never journaled.
             var prereq = await PrerequisiteRunner.RunAsync(
                 _blob.Prerequisites, ctx, _scope, effectiveProgress, ct).ConfigureAwait(false);
@@ -995,18 +1204,6 @@ public sealed class InstallSession
             else
             {
                 await PerformReinstallCleanupAsync(ctx.InstallDir, ct).ConfigureAwait(false);
-            }
-
-            // pre_install hooks run OUTSIDE and BEFORE the journal opens. A hook
-            // that fails (default on_failure: fail) aborts here — the InstallEngine,
-            // and therefore the rollback journal, never runs.
-            var preHook = await HookRunner.RunAsync(
-                "pre_install", _blob.HookPreInstall, ctx, effectiveProgress, ct).ConfigureAwait(false);
-            if (!preHook.Success)
-            {
-                var err = $"pre_install hook '{preHook.FailedStepId}' failed: {preHook.Error}";
-                _log?.WriteLine($"result: aborted before install — {ctx.Redact(err)}");
-                return new InstallOutcome(false, err);
             }
 
             EngineResult result;
@@ -1095,6 +1292,8 @@ public sealed class InstallSession
             // Runs on success, step-failure return, and the OperationCanceledException
             // rethrow — so the extracted payload temp dir never leaks.
             payload?.Dispose();
+            // The run is over: a later run in this session gets its own hook phase.
+            _preHookOutcome = null;
         }
     }
 
@@ -1603,6 +1802,7 @@ public sealed class InstallSession
             EstimatedSizeBytes: _blob.EstimatedSizeBytes,
             // Write InstallLocation so a later upgrade can recover the install dir.
             InstallLocation: uninstallDir,
+            QuietUninstallString: ArpRegistration.BuildQuietUninstallString(uninstallerPath, _scope),
             DisplayIcon: uninstallerPath),
             _scope);
     }
@@ -1707,18 +1907,10 @@ public sealed class InstallSession
         var progress = _log is null ? null : new LoggingProgress(null, _log);
         var ctx = BuildUninstallContext();
 
-        // uninstall.exe inherits the same parser, so it honors the same gate — a
-        // running app would block the journal replay from deleting its files.
-        // /closeapps closes them; otherwise refuse before anything is removed.
-        var blocked = CheckFilesInUse(ctx, ctx.InstallDir, progress);
-        if (blocked is not null)
-        {
-            error.WriteLine(blocked.Error);
-            return FilesInUseExitCode;
-        }
-
-        // pre_uninstall hooks run BEFORE the journal replays. A failure (default
-        // on_failure: fail) aborts the uninstall.
+        // pre_uninstall hooks run FIRST, before the files-in-use gate and before the
+        // journal replays, so a publisher's teardown hook (the app's own --quit)
+        // clears a running application before the gate scans for it. A failure
+        // (default on_failure: fail) aborts the uninstall. (R93)
         var preHook = await HookRunner.RunAsync(
             "pre_uninstall", _blob.HookPreUninstall, ctx, progress, ct).ConfigureAwait(false);
         if (!preHook.Success)
@@ -1727,6 +1919,16 @@ public sealed class InstallSession
             _log?.WriteLine($"result: uninstall aborted — {ctx.Redact(msg)}");
             error.WriteLine(msg);
             return 1;
+        }
+
+        // uninstall.exe inherits the same parser, so it honors the same gate — a
+        // running app would block the journal replay from deleting its files.
+        // /closeapps closes them; otherwise refuse before anything is removed.
+        var blocked = CheckFilesInUse(ctx, ctx.InstallDir, progress);
+        if (blocked is not null)
+        {
+            error.WriteLine(blocked.Error);
+            return FilesInUseExitCode;
         }
 
         // ctx.InstallDir is resolved from the signed blob / manifest / command line and
@@ -1901,9 +2103,11 @@ public sealed class InstallSession
     private string EffectiveInstallDir() => CollectedInstallDir ?? ResolveDefaultInstallDir();
 
     /// <summary>
-    /// The files-in-use gate. Runs after the destination is known and
-    /// BEFORE prerequisites, the prior-version teardown, and the rollback journal — so
-    /// a blocked run changes nothing at all. With <c>/closeapps</c> the blockers are
+    /// The files-in-use gate. Runs after the destination is known and after the
+    /// pre-phase hooks (<c>pre_install</c> / <c>pre_uninstall</c>), whose job may be to
+    /// stop the very application it would otherwise report (R93); and BEFORE
+    /// prerequisites, the prior-version teardown, and the rollback journal — so a
+    /// blocked run changes nothing the hooks did not. With <c>/closeapps</c> the blockers are
     /// closed via the Restart Manager and re-scanned; without it the run is refused
     /// (headless maps this onto <see cref="FilesInUseExitCode"/>). A wizard run has
     /// already cleared blockers on the Close-applications screen, so this is normally

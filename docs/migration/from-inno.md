@@ -191,8 +191,8 @@ tool. Sigil ships one built in (gap G15, shipped P12):
 | Inno construct | Sigil equivalent | Notes |
 |---|---|---|
 | Auto-generated `unins000.exe` | `uninstall.exe`, written on **every** successful install | Not packaged as a resource: at install time the wrapper copies its own running `Setup.exe` image, byte for byte, to `install_dir\uninstall.exe`. So it is the size of the whole Setup.exe and carries the same Authenticode signature. |
-| ARP `UninstallString` | (automatic) | Points at the deployed `uninstall.exe` and carries `/S /Uninstall` plus the scope flag (`/allusers` or `/currentuser`), so the uninstall re-resolves to the scope it was installed with. |
-| ARP `QuietUninstallString` | (never written) | Sigil writes no `QuietUninstallString` — it does not need one, because the `UninstallString` it writes already carries `/S`. The *behaviour* Inno gets from the pair is there; the second value is not. |
+| ARP `UninstallString` | (automatic) | Points at the deployed `uninstall.exe` and carries `/Uninstall` plus the scope flag (`/allusers` or `/currentuser`), so the uninstall re-resolves to the scope it was installed with. No `/S`: like Inno's, it opens the interactive uninstall. |
+| ARP `QuietUninstallString` | (automatic) | The same command with `/S` — the silent uninstall deployment tooling looks for, matching the pair Inno writes. |
 | `[UninstallDelete]` | `uninstall:` step list | The install journal already replays the reverse of every install step automatically; declare `uninstall:` only for extra tear-down the journal can't infer (stopping a service, clearing an AppData cache). |
 | `UninstallDisplayIcon` | (no equivalent) | No `DisplayIcon` value is written; see the `[Setup]` table above. `installer.icon` does stamp `Setup.exe`, the wizard and therefore `uninstall.exe`, so the icon usually reaches ARP anyway — incidentally, not by declaration. |
 

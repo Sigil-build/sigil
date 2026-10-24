@@ -2,6 +2,7 @@
 // Licensed under the Sigil License 1.0. See LICENSE in the repository root.
 
 using System.Collections.Generic;
+using System.Runtime.Versioning;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
@@ -143,20 +144,54 @@ public partial class App : Application
                         isMachine ? InstallScope.Machine : InstallScope.User),
                     session.ResolveDefaultInstallDir());
 
+                // Picking "All users of this computer" cannot be honoured by a session
+                // whose scope already resolved to `user` — scope selects the
+                // containment roots and the elevation decision, both fixed before this
+                // window existed. Wired only when that is the case; a session already
+                // in machine scope toggles the radio normally. (R90)
+                if (session.MachineScopeNeedsRelaunch && OperatingSystem.IsWindows())
+                {
+                    // The inner platform check is not redundant to the analyzer: it
+                    // cannot carry the guard above across the lambda boundary, and the
+                    // handoff is Windows-only (ShellExecuteExW "runas").
+                    _vm.ConfigureMachineScopeElevation(() =>
+                        OperatingSystem.IsWindows() && TryHandOffToElevatedInstance(session, desktop));
+                }
+
                 // Bind the wizard-collected parameter values into param.* and the
                 // option checkbox states into option.* for the engine at install
-                // time (read lazily at call time). The collected destination path
-                // becomes the effective install dir → {install_dir}.
-                _vm.ConfigureInstallRunner(async (progress, ct) =>
+                // time. The collected destination path becomes the effective install
+                // dir → {install_dir}. The runner executes on a thread-pool thread, so
+                // it reads the request the VM captured on the UI thread and never the
+                // VM itself. (R95)
+                var vm = _vm;
+                vm.ConfigureInstallRunner(async (request, progress, ct) =>
                 {
-                    session.CollectedInstallDir = _vm.InstallPath;
+                    session.CollectedInstallDir = request.InstallPath;
                     var outcome = await session.RunInstallAsync(
-                        _vm.CollectedParameterValues, _vm.CollectedOptionValues, progress, ct);
-                    // The reboot flag is only known after the run — copy it into the
-                    // VM before the Done screen renders (StartInstallAsync reads outcome next).
-                    _vm.SetRebootRequired(session.RebootRequired);
+                        request.ParameterValues, request.OptionValues, progress, ct).ConfigureAwait(false);
+                    // The reboot flag is only known after the run. Set it on the UI
+                    // thread, and before this runner completes, so the Done screen
+                    // StartInstallAsync shows next already carries it.
+                    var rebootRequired = session.RebootRequired;
+                    await Dispatcher.UIThread.InvokeAsync(() => vm.SetRebootRequired(rebootRequired));
                     return outcome;
                 });
+
+                // The manifest's pre_install hooks run before the wizard's own
+                // files-in-use scan, so an app's own --quit gets its chance before
+                // the Close-applications screen appears. Wired only when the phase
+                // exists. The session memoizes the outcome, so the install run that
+                // follows does not run the hooks a second time. (R93)
+                if (session.HasPreInstallHooks)
+                {
+                    vm.ConfigurePreInstallHooks((request, ct) =>
+                    {
+                        session.CollectedInstallDir = request.InstallPath;
+                        return session.RunPreInstallHooksAsync(
+                            request.ParameterValues, request.OptionValues, progress: null, ct);
+                    });
+                }
 
                 // Surface the /LOG path so the Failed screen can offer "Open log".
                 _vm.LogFilePath = session.LogFilePath;
@@ -191,6 +226,56 @@ public partial class App : Application
             };
         }
         base.OnFrameworkInitializationCompleted();
+    }
+
+    /// <summary>
+    /// Hand the install to a fresh elevated instance running in machine scope, and
+    /// shut this one down. Returns <c>false</c> when no elevated instance was
+    /// started — the UAC prompt was declined, the shell refused, or the relaunch
+    /// vector could not be built — in which case this process keeps the run and the
+    /// wizard reverts the selection. (R90)
+    /// </summary>
+    /// <remarks>
+    /// Deliberately does not wait for the child. The call happens with a window on
+    /// screen, and blocking the UI thread for the length of an elevated install would
+    /// leave a frozen window sitting behind it. It also could not tell a declined
+    /// prompt from a child the user cancelled — both surface as the same exit code —
+    /// and that distinction is the only thing the caller acts on.
+    /// <para>
+    /// This process then exits <c>0</c>, which reports that it did its own job — hand
+    /// off — and not that anything was installed. The elevated instance owns the
+    /// install and reports its own outcome to the user. Nothing reads this code in
+    /// practice: the path is reachable only by clicking a radio button, and a script
+    /// selects scope with <c>/allusers</c> instead.
+    /// </para>
+    /// </remarks>
+    [SupportedOSPlatform("windows")]
+    private static bool TryHandOffToElevatedInstance(
+        InstallSession session, IClassicDesktopStyleApplicationLifetime desktop)
+    {
+        IReadOnlyList<string> relaunchArgs;
+        try
+        {
+            relaunchArgs = session.BuildMachineScopeRelaunchArgs(HostRuntime.Args);
+        }
+        catch (UsageException ex)
+        {
+            // The secret handoff envelope could not be written. Refusing to relaunch
+            // is the point — the alternative is elevating with a parameter value on
+            // the command line, where every process-creation auditor sees it. (R18)
+            InstallerLog.Error("machine-scope relaunch refused", ex);
+            return false;
+        }
+
+        if (!Elevation.TryRelaunchElevated(relaunchArgs))
+        {
+            InstallerLog.Info("machine scope declined: no elevated instance was started");
+            return false;
+        }
+
+        InstallerLog.Info("machine scope chosen: handed off to an elevated instance");
+        desktop.Shutdown();
+        return true;
     }
 
     /// <summary>

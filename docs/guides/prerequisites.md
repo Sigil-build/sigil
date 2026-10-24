@@ -9,8 +9,9 @@ missing, and Sigil does the rest.
 
 ## How it works
 
-Each prerequisite runs **before** the transactional install body and the
-`pre_install` hooks — and **before the rollback journal opens** — sequentially:
+Each prerequisite runs **after** the `pre_install` hooks and the files-in-use check,
+and **before** the removal of a previous version, the transactional install body and
+the rollback journal — sequentially:
 
 1. **Detect.** The `detect` expression is evaluated. If it is already true, the
    prerequisite is skipped entirely (no download, no run).

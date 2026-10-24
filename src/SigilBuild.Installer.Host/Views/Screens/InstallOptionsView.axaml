@@ -53,6 +53,9 @@
       </RadioButton>
       <RadioButton GroupName="scope" IsChecked="{Binding IsMachineScope, Mode=TwoWay}">
         <StackPanel>
+          <!-- No shield here on purpose: picking a scope only swaps the pre-filled
+               path, and nothing about it is irreversible. The shield sits on Next,
+               which is the control that actually triggers the prompt. -->
           <TextBlock Text="{x:Static loc:S.LocationScopeMachine}" FontWeight="SemiBold" />
           <TextBlock Text="{x:Static loc:S.LocationScopeMachineHint}"
                      Foreground="{DynamicResource TextMutBrush}" FontSize="12" />

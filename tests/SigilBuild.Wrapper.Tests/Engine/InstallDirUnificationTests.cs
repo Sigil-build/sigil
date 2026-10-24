@@ -55,10 +55,10 @@ public sealed class InstallDirUnificationTests
         outcome.Success.Should().BeTrue("the synthetic install pipeline must complete");
     }
 
-    private static string? ReadUninstallString(string appId)
+    private static string? ReadUninstallString(string appId, string valueName = "UninstallString")
     {
         using var key = Registry.CurrentUser.OpenSubKey($@"{UninstallRoot}\{appId}");
-        return key?.GetValue("UninstallString") as string;
+        return key?.GetValue(valueName) as string;
     }
 
     [Fact]
@@ -96,8 +96,11 @@ public sealed class InstallDirUnificationTests
             Path.GetDirectoryName(uninstaller).Should().Be(stepInstallDir);
 
             ReadUninstallString(appId).Should().Be(
-                $"\"{uninstaller}\" /S /Uninstall /currentuser",
+                $"\"{uninstaller}\" /Uninstall /currentuser",
                 "the ARP UninstallString must target the uninstaller inside the resolved install dir");
+            ReadUninstallString(appId, "QuietUninstallString").Should().Be(
+                $"\"{uninstaller}\" /S /Uninstall /currentuser",
+                "the silent form must target the same uninstaller");
         }
         finally
         {
@@ -135,6 +138,8 @@ public sealed class InstallDirUnificationTests
             Path.GetDirectoryName(uninstaller).Should().Be(stepInstallDir);
 
             ReadUninstallString(appId).Should().Be(
+                $"\"{uninstaller}\" /Uninstall /currentuser");
+            ReadUninstallString(appId, "QuietUninstallString").Should().Be(
                 $"\"{uninstaller}\" /S /Uninstall /currentuser");
         }
         finally

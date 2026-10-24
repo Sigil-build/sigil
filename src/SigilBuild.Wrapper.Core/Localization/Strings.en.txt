@@ -53,6 +53,7 @@ location.error.empty = Enter an install location.
 location.error.not_absolute = Enter an absolute path (for example C:\Program Files\App).
 location.error.is_file = That location is a file. Choose a folder.
 location.error.denied = You don't have permission to install there. Choose another folder.
+location.error.elevation_declined = Installing for all users needs administrator approval. Setup is still set to install just for you.
 
 # --- options ---
 options.title = Options

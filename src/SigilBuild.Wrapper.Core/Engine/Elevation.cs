@@ -117,10 +117,98 @@ public static partial class Elevation
 
         childMayStillBeRunning = false;
 
+        if (!TryStartElevated(args, out var hProcess))
+        {
+            // ERROR_CANCELLED (1223) => user declined the UAC prompt. Any other
+            // failure also surfaces as "cancelled": we could not run elevated,
+            // so the machine install did not proceed. No process was created.
+            return cancelledExitCode;
+        }
+
+        if (hProcess == IntPtr.Zero)
+        {
+            // SEE_MASK_NOCLOSEPROCESS was requested, so a successful call should
+            // have handed back a handle. It did not, so there is nothing to wait
+            // on — yet the shell reported success, which means a child MAY have
+            // been created and may still be starting. Surfacing that is the whole
+            // point of the out parameter: the caller must not tidy up behind a
+            // process it cannot see.
+            childMayStillBeRunning = true;
+            return cancelledExitCode;
+        }
+
+        try
+        {
+            // A failed wait leaves the child's state unknown — it was created and
+            // this call cannot vouch that it has exited.
+            childMayStillBeRunning = WaitForSingleObject(hProcess, INFINITE) != WAIT_OBJECT_0;
+            return GetExitCodeProcess(hProcess, out uint code) ? (int)code : cancelledExitCode;
+        }
+        finally
+        {
+            CloseHandle(hProcess);
+        }
+    }
+
+    /// <summary>
+    /// Start an elevated copy of this process and return as soon as the shell has
+    /// accepted it, <b>without waiting</b> for it to finish. <c>true</c> means a
+    /// child was created and this process should stand down; <c>false</c> means it
+    /// was not — the UAC prompt was declined, or the shell refused — and the caller
+    /// still owns the run.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="RelaunchElevatedAndWait(System.Collections.Generic.IReadOnlyList{string}, int)"/>
+    /// because the wizard cannot wait. Its relaunch happens with a window on screen,
+    /// and blocking the UI thread for the length of an entire elevated install would
+    /// leave a frozen, not-responding window behind the child. The handoff is total:
+    /// the elevated instance owns the install and reports its own outcome to the
+    /// user, so there is no exit code for this process to propagate and nothing to
+    /// wait for.
+    /// <para>
+    /// It also cannot distinguish a declined prompt from any other shell failure, and
+    /// deliberately does not try: both mean "no elevated child exists", which is the
+    /// only distinction the caller acts on. Unlike the waiting overload there is no
+    /// handoff envelope in flight here — the wizard has collected nothing yet — so
+    /// there is nothing a still-starting child could race the caller to consume.
+    /// </para>
+    /// </remarks>
+    [SupportedOSPlatform("windows")]
+    public static bool TryRelaunchElevated(System.Collections.Generic.IReadOnlyList<string> args)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+
+        if (!TryStartElevated(args, out var hProcess))
+        {
+            return false;
+        }
+
+        // A success with no handle still means a child was created (see the waiting
+        // overload); there is simply nothing to close.
+        if (hProcess != IntPtr.Zero)
+        {
+            CloseHandle(hProcess);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// The shared <c>ShellExecuteExW("runas")</c> call behind both relaunch entry
+    /// points. <c>true</c> when the shell accepted the request; <paramref name="hProcess"/>
+    /// then carries the child's handle, or <see cref="IntPtr.Zero"/> when the shell
+    /// reported success without one. The caller owns closing a non-zero handle.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private static bool TryStartElevated(
+        System.Collections.Generic.IReadOnlyList<string> args, out IntPtr hProcess)
+    {
+        hProcess = IntPtr.Zero;
+
         var exe = Environment.ProcessPath;
         if (string.IsNullOrEmpty(exe))
         {
-            return cancelledExitCode;
+            return false;
         }
 
         var parameters = BuildCommandLine(args);
@@ -144,35 +232,11 @@ public static partial class Elevation
 
             if (!ShellExecuteExW(ref info))
             {
-                // ERROR_CANCELLED (1223) => user declined the UAC prompt. Any other
-                // failure also surfaces as "cancelled": we could not run elevated,
-                // so the machine install did not proceed. No process was created.
-                return cancelledExitCode;
+                return false;
             }
 
-            if (info.hProcess == IntPtr.Zero)
-            {
-                // SEE_MASK_NOCLOSEPROCESS was requested, so a successful call should
-                // have handed back a handle. It did not, so there is nothing to wait
-                // on — yet the shell reported success, which means a child MAY have
-                // been created and may still be starting. Surfacing that is the whole
-                // point of the out parameter: the caller must not tidy up behind a
-                // process it cannot see.
-                childMayStillBeRunning = true;
-                return cancelledExitCode;
-            }
-
-            try
-            {
-                // A failed wait leaves the child's state unknown — it was created and
-                // this call cannot vouch that it has exited.
-                childMayStillBeRunning = WaitForSingleObject(info.hProcess, INFINITE) != WAIT_OBJECT_0;
-                return GetExitCodeProcess(info.hProcess, out uint code) ? (int)code : cancelledExitCode;
-            }
-            finally
-            {
-                CloseHandle(info.hProcess);
-            }
+            hProcess = info.hProcess;
+            return true;
         }
         finally
         {

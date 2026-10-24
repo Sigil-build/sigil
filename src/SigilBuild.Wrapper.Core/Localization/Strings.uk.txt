@@ -44,6 +44,7 @@ location.error.empty = Укажіть розташування для встан
 location.error.not_absolute = Укажіть абсолютний шлях (наприклад, C:\Program Files\App).
 location.error.is_file = Це розташування є файлом. Виберіть папку.
 location.error.denied = У вас немає дозволу на встановлення в цю папку. Виберіть іншу.
+location.error.elevation_declined = Встановлення для всіх користувачів потребує підтвердження адміністратора. Залишено встановлення лише для вас.
 
 # --- options ---
 options.title = Параметри

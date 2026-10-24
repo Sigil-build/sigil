@@ -190,6 +190,7 @@ public static partial class Program
         // App picks the window from session.Mode. Both drive the same InstallSession
         // engine.
         HostRuntime.Session = session;
+        HostRuntime.Args = args;
 
         // A stamped Setup.exe carries the host's Skia/ANGLE/HarfBuzz native DLLs in
         // its SIGIL_RUNTIME_V1 resource rather than beside the exe. Extract them to a

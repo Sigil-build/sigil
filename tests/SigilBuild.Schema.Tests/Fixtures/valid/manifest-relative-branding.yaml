@@ -1,0 +1,24 @@
+# Brand images and the license resolve against this manifest's directory, like
+# installer.icon (R96). The built-in desktop_shortcut / start_menu options target
+# run_after_install.path when it is declared, so an app whose launcher is not named
+# after the product gets working shortcuts without hand-written steps (R101).
+spec: v1.0
+app:
+  id: com.example.TrayApp
+  name: TrayApp
+  version: 0.1.0
+  publisher: Example Inc.
+build:
+  source: ./out
+installer:
+  icon: ./brand/trayapp.ico
+  brand:
+    logo: ./brand/trayapp-256.png
+    hero: ./brand/hero.png
+  license: ./LICENSE.txt
+  options:
+    desktop_shortcut:
+      default: false
+    start_menu: true
+  run_after_install:
+    path: "{install_dir}\\trayapp-gui.exe"

@@ -19,6 +19,7 @@ public class ManifestParserFullTests
           publisher: Example Inc.
           description: Full coverage manifest
           homepage: https://example.com
+          copyright: "Copyright (c) 2026 Example Inc."
         build:
           source: ./out
           include: ["**/*"]
@@ -74,6 +75,7 @@ public class ManifestParserFullTests
 
         m!.App.Description.Should().Be("Full coverage manifest");
         m.App.Homepage.Should().Be("https://example.com");
+        m.App.Copyright.Should().Be("Copyright (c) 2026 Example Inc.");
 
         m.Build.Include.Should().Equal("**/*");
         m.Build.Exclude.Should().Equal("**/*.pdb");
@@ -133,6 +135,24 @@ public class ManifestParserFullTests
 
         m!.Sign!.Provider.Should().Be(SignProvider.Local);
         m.Sign.Local!.TimestampUrl.Should().Be("http://timestamp.digicert.com");
+    }
+
+    [Fact]
+    public void Parse_AppCopyrightOmitted_IsNull()
+    {
+        // Arrange — no app.copyright: the packed installer's LegalCopyright is then
+        // left empty, never filled with anything of Sigil's. (R105)
+        const string yaml = """
+            spec: v1.0
+            app: { id: com.example.App, name: App, version: 0.1.0, publisher: P }
+            build: { source: ./out }
+            """;
+
+        // Act
+        var m = ManifestParser.Parse(yaml, "x.yaml").Manifest;
+
+        // Assert
+        m!.App.Copyright.Should().BeNull();
     }
 
     [Fact]

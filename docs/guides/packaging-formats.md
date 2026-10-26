@@ -44,6 +44,32 @@ A self-extracting `<App.Name>-<version>-<arch>-Setup.exe` with Sigil's branded w
 
 Best for: full Windows installers with a wizard, install steps, and an uninstaller.
 
+#### Installer file properties
+
+`sigil pack` replaces the installer host's own version resource with one built from your manifest, so Explorer's **Properties → Details** on the produced `Setup.exe` (and on the `WebSetup.exe` stub) describes your installer, not the stock host it was stamped from:
+
+| Details field | Comes from | Example |
+|---|---|---|
+| File description | `app.name` + ` Setup` | `Dictum Setup` |
+| Product name | `app.name` | `Dictum` |
+| Company | `app.publisher`, verbatim | `Dictum Labs` |
+| File version / Product version | `app.version`, verbatim — prerelease and build metadata included | `1.2.3-rc.1+build.42` |
+| Original filename / Internal name | the produced file's name | `Dictum-1.2.3-rc.1+build.42-x64-Setup.exe` |
+| Copyright | `app.copyright` — **empty when you omit it** | `Copyright (c) 2026 Dictum Labs` |
+
+```yaml
+app:
+  id: com.example.Dictum
+  name: Dictum
+  version: 1.2.3-rc.1+build.42
+  publisher: Dictum Labs
+  copyright: "Copyright (c) 2026 Dictum Labs"   # optional
+```
+
+Windows also keeps a numeric four-part version (what `(Get-Item Setup.exe).VersionInfo.FileMajorPart` and friends report, and what some deployment tools compare). Sigil takes it from the SemVer core: `major.minor.patch.0`. Each part is clamped to 0–65535, the fourth part is always `0`, and prerelease and build metadata stay out of it — `1.2.3-rc.1+build.42` becomes `1.2.3.0` — but a prerelease version sets the file's *prerelease* flag. The resource is language-neutral, and values longer than 1024 characters are cut there.
+
+The version resource is written at pack time, before `sigil sign`, so the signature covers it. `uninstall.exe` is a copy of the running `Setup.exe` and shows the same details.
+
 ## Decision matrix
 
 |Use case|`exe`|`msix`|`zip`|

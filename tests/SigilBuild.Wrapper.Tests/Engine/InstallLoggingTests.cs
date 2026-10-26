@@ -271,16 +271,18 @@ public sealed class InstallLoggingTests
         using var tmp = new TempDir();
         var logPath = Path.Combine(tmp.Path, "uninstall.log");
 
-        // No install state for the Empty blob's "<unset>" app → uninstall exits 1,
-        // but the log is still written with the uninstall header + exit code.
+        // No install state for the Empty blob's "<unset>" app → nothing is installed, so
+        // the uninstall exits 0 (R107), and the log is still written with the uninstall
+        // header, the not-installed result and the exit code.
         var session = InstallSession.Create(new[] { "/Uninstall", $"/LOG={logPath}" });
         var code = await session.RunHeadlessAsync(new StringWriter(), new StringWriter());
 
-        code.Should().Be(1);
+        code.Should().Be(0);
         File.Exists(logPath).Should().BeTrue();
         var log = File.ReadAllText(logPath);
         log.Should().Contain("=== sigil uninstall log");
-        log.Should().Contain("exit code: 1");
+        log.Should().Contain("result: not installed");
+        log.Should().Contain("exit code: 0");
     }
 
     private static void SafeDelete(string path)

@@ -24,6 +24,11 @@ internal static class Program
             return 0;
         }
 
+        // An uninstall.exe leaves the install directory as its current directory before
+        // anything else runs (a process's current directory cannot be removed), with a
+        // relative /LOG= resolved first so it still names the same file. (R106)
+        args = UninstallerRelaunch.PrepareProcess(args);
+
         try
         {
             // The console shell is always headless; the Avalonia host shares the
@@ -130,6 +135,22 @@ internal static class Program
             // nothing). (R76)
             session.InstanceLock = instanceLock;
 
+            // An uninstall.exe in the install directory hands its run to a private
+            // temporary copy of itself and waits for it, exiting with its exit code, so
+            // the copy can remove the install directory — this uninstaller included.
+            // After the guard, because the copy is admitted on this process's handoff.
+            // When no copy could be started the uninstall runs here, in place. Mirrors
+            // the host entry path. (R106)
+            if (UninstallerRelaunch.ShouldRelaunch(session))
+            {
+                var copyExitCode = UninstallerRelaunch.TryRunFromTemporaryCopy(session, args, WriteNote);
+                if (copyExitCode is int exitCode)
+                {
+                    return exitCode;
+                }
+            }
+            UninstallerRelaunch.ConfigureRelaunchedCopy(session, WriteNote);
+
             return await session.RunHeadlessAsync(Console.Out, Console.Error).ConfigureAwait(false);
         }
         catch (UsageException ex)
@@ -138,4 +159,9 @@ internal static class Program
             return 64; // EX_USAGE per sysexits.h convention
         }
     }
+
+    // This console shell has no diagnostic log of its own, so the relaunch's notes go
+    // to stderr, where the other guard notes already go.
+    private static void WriteNote(string message, bool isError) =>
+        Console.Error.WriteLine((isError ? "warning: " : "note: ") + message);
 }

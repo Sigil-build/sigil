@@ -55,6 +55,26 @@ Both enter the wrapper in `Uninstall` mode:
 
 Every run writes a log even without `/LOG`: the stamped `Setup.exe` / `uninstall.exe` writes its run log into the always-on diagnostic log, `%TEMP%\sigil-wizard-<timestamp>-<pid>.log`, on the silent path as well as in the wizard. `/LOG` (or `/LOG=<path>`) moves it to a file you name.
 
+## How `uninstall.exe` removes itself
+
+A running program cannot delete its own executable, so an uninstaller that ran from the install directory would leave itself — a copy of the whole `Setup.exe` — in that directory until the next restart. `uninstall.exe` does what the NSIS and Inno Setup uninstallers do instead: it runs the uninstall from a temporary copy of itself.
+
+1. Started from the install directory in uninstall mode (interactive or `/S`), `uninstall.exe` first moves its current directory out of the install directory — a folder that is some process's current directory cannot be removed, and Explorer starts a double-clicked program in its own folder. A relative `/LOG=<path>` is resolved first, so it still names the same file.
+2. A machine-scope uninstall elevates at this point, exactly as before. Everything below runs with whatever privilege the uninstall has: the copy is started directly, so it inherits it — it never elevates and never drops privilege.
+3. After taking the single-instance guard, `uninstall.exe` copies itself into a fresh, randomly named private directory — `%ProgramData%\sigil-uninstall-<guid>`, writable only by administrators, for an elevated uninstall; `%TEMP%\sigil-uninstall-<guid>`, accessible only to the current user, SYSTEM and administrators, otherwise. It checks the copy's SHA-256 against its own bytes from a handle that stops anything replacing the file, starts the copy while still holding that handle, and hands it the guard.
+4. It then **waits** for the copy and exits with the copy's exit code. That is what a `QuietUninstallString` caller, a script and an upgrading `Setup.exe` read, and it is when Apps & features refreshes its list, so the interactive uninstall waits too. Its own diagnostic log records the handoff and the copy's exit code; the copy writes the run log (and the `/LOG` file) as before.
+5. The copy finds the install the way the original does — the app id from the installer it carries, the scope from the command line, the install directory from the uninstall state and the Add/Remove Programs entry — and runs the steps above. When the journal reaches the uninstaller itself, the original is still the image of the waiting process and cannot be deleted, so it is **moved** into the copy's private directory instead. The install directory is then empty and is removed with the rest of the journal.
+6. When the copy exits, the original process deletes the copy, and schedules the private directory — which by then holds only its own renamed executable — for deletion at the next restart.
+
+What is left behind:
+
+- **Nothing in the install directory.** The folder itself is removed when the install created it.
+- **One file in the private temporary directory** until the next restart. An elevated (machine-scope) uninstall schedules it for deletion at the next restart. An unelevated per-user uninstall cannot — Windows only lets administrators schedule that — so it stays in `%TEMP%` until the temporary folder is cleaned up, for example by Storage Sense or Disk Cleanup.
+
+When the copy cannot be made — no private directory could be created, the copy does not verify, or it will not start — `uninstall.exe` uninstalls in place, as it did before: the run continues and only the uninstaller itself stays in the install directory until the next restart (machine scope) or until it is deleted (per-user). The same happens when the install directory and the temporary directory are on different volumes, because a running program can be renamed only within one volume. A copy that does not verify is never started.
+
+An upgrade still works the same way: the new `Setup.exe` runs the previous version's `uninstall.exe /S`, waits for it, and requires exit code `0`. That uninstaller hands the single-instance guard it was admitted on to its own copy, so the copy runs inside the upgrade instead of being refused as a second setup. An `uninstall.exe` from a version before this change uninstalls in place, as it always did.
+
 ## The `uninstall:` block
 
 The journal reverses the install steps it recorded, within the bounds described under [Anchored replay](#anchored-replay-and-refused-records). Use `uninstall:` only for tear-down the journal can't infer:
@@ -160,12 +180,19 @@ Pressing **Uninstall** in Apps & features (or Add or Remove Programs) runs the `
 
 ## The uninstall window
 
-The interactive uninstall is **Confirm → [Close apps] → Progress → Done | Failed**.
+The interactive uninstall is **Confirm → [Close apps] → Progress → Done | Failed**, or **Not installed** when there is nothing to remove.
 
 - **Confirm.** Uninstall starts the run; Cancel leaves with exit code `2`.
 - **Close apps** — shown only when something is running. Pressing Uninstall runs the `pre_uninstall` hooks and then the files-in-use check; if an application is still holding the install, the run stops there, before anything is removed, and the window shows the same Close-applications screen as the install wizard: each blocking application with its process id, **Retry** (re-scan after closing them yourself), **Close for me** (asks each application to shut down normally through the Restart Manager, in the background, then re-scans and says so if any are still running), and **Cancel** (exit code `2`, nothing removed — the `pre_uninstall` hooks have already run by then). Once nothing is blocking, the uninstall continues to Progress without running the hooks again.
 - **Progress** grows the reversal log as the journal replays. The title bar's X (and Alt+F4) is refused while it runs: stopping half-way would leave a partly removed install. On Confirm and Close apps the X means Cancel.
 - **Done** or **Failed** close with exit code `0` or `1`.
+- **Not installed** — shown instead of Confirm when there is nothing to remove: no uninstall state exists for the app in that scope, which is what a leftover `uninstall.exe` of an already-removed app finds. It says "<App> is not installed", runs no hook, and closes with exit code `0`.
+
+## When the app is not installed
+
+An uninstall that finds no uninstall state for the app in its scope has nothing to remove, and that is not a failure. The window opens on its **Not installed** screen (above); the silent path prints `<App> is not installed … there is nothing to uninstall`, writes `result: not installed` to the log, and exits `0`. No `pre_uninstall` or `post_uninstall` hook runs. An upgrade whose previous version's `uninstall.exe` finds no state therefore proceeds instead of being refused; an `uninstall.exe` from before this behaviour still exits `1` there.
+
+This is only for state that is **absent**. State that exists but is refused — a machine-scope state file an ordinary user could have written, or one that will not parse — still fails the uninstall exactly as before, naming the refusal: reporting it as "not installed" would hide the very thing the refusal exists to surface.
 
 ## See also
 

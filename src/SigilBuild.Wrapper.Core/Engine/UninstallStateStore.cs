@@ -66,6 +66,20 @@ internal static class UninstallStateStore
         Path.Combine(DirectoryFor(appId, scope), "uninstall.json");
 
     /// <summary>
+    /// True when NO state file exists for <paramref name="appId"/> in the directory
+    /// <see cref="Load"/> would read for <paramref name="preferredScope"/> — exactly the
+    /// case <see cref="Load"/> reports as an absence. A file that exists is never absent,
+    /// whatever <see cref="Load"/> later decides about it: a refused state is a failure,
+    /// not "not installed" (R1). (R107)
+    /// </summary>
+    public static bool IsAbsent(string appId, InstallScope preferredScope)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(appId);
+        var dirScope = preferredScope == InstallScope.Machine ? InstallScope.Machine : InstallScope.User;
+        return !File.Exists(PathFor(appId, dirScope));
+    }
+
+    /// <summary>
     /// Where a committed install's <c>.sigil-bak</c> stashes live (R28):
     /// <c>&lt;StateRoot&gt;\Sigil\&lt;AppId&gt;\backups</c>. A subdirectory of the per-app
     /// state directory, so it inherits that directory's hardened DACL in machine scope and

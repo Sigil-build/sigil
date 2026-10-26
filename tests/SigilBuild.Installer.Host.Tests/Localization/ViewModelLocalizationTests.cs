@@ -51,6 +51,23 @@ public sealed class ViewModelLocalizationTests : IDisposable
         vm.RailSteps.Should().OnlyContain(s => !string.IsNullOrWhiteSpace(s.Label));
     }
 
+    /// <summary>The uninstall window's not-installed screen is localized. (R107)</summary>
+    [Fact]
+    public void NotInstalledScreen_IsLocalized()
+    {
+        // Arrange
+        SessionLanguage.SetForTesting(Lang.Uk);
+        var vm = new UninstallViewModel(new BrandTokens { AppName = "Acme" });
+
+        // Act
+        vm.ShowNotInstalled();
+
+        // Assert
+        vm.NotInstalledMessage.Should().Be("Acme не встановлено");
+        Strings.UninstallNotInstalled(Lang.En, "Acme").Should().Be("Acme is not installed");
+        Strings.UninstallNotInstalledBody(Lang.Uk).Should().NotBe(Strings.UninstallNotInstalledBody(Lang.En));
+    }
+
     [Fact]
     public void DowngradeNotice_IsOneKey_NotThreeFragments()
     {

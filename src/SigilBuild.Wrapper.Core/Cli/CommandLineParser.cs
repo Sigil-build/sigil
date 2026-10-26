@@ -145,6 +145,17 @@ public sealed class ParsedCommandLine
     public string? Lang { get; init; }
 
     /// <summary>
+    /// The original <c>uninstall.exe</c> this process was relaunched from, carried by
+    /// the reserved <c>/RelaunchedFrom=&lt;path&gt;</c> token; <c>null</c> on every run
+    /// that is not that relaunch. Not user-facing: the uninstaller in the install
+    /// directory copies itself to a private temporary directory and runs the copy with
+    /// this token, so the copy can remove the original. The value is a claim, not a
+    /// trust decision — <see cref="UninstallerRelaunch.VerifyOriginal"/> decides what it
+    /// is worth. (R106)
+    /// </summary>
+    public string? RelaunchedFrom { get; init; }
+
+    /// <summary>
     /// Re-renders the parsed args as a single space-joined string, with secret
     /// parameter values replaced by <c>***</c>. Suitable for logging without
     /// leaking license keys / passwords / tokens.
@@ -243,6 +254,12 @@ public sealed class ParsedCommandLine
             sb.Append("/lang=").Append(Lang);
         }
 
+        if (RelaunchedFrom is not null)
+        {
+            Space();
+            sb.Append(UninstallerRelaunch.Switch).Append(RelaunchedFrom);
+        }
+
         foreach (var kv in Values)
         {
             Space();
@@ -299,6 +316,9 @@ public sealed class ParsedCommandLine
 ///   user-facing: the elevated relaunch's secret channel (R18). Consumed before
 ///   parameter binding by <see cref="ElevationSecretHandoff"/>; see
 ///   <see cref="ConsumeSecretHandoff"/>.</description></item>
+///   <item><description><c>/RelaunchedFrom=&lt;path&gt;</c> — <b>reserved</b>, not
+///   user-facing: names the original <c>uninstall.exe</c> when the uninstaller runs
+///   from its private temporary copy (R106). See <see cref="UninstallerRelaunch"/>.</description></item>
 /// </list>
 /// Anything else is a <see cref="UsageException"/> — the parser is intentionally
 /// closed so silent typos never reach the step engine.
@@ -366,6 +386,7 @@ public static class CommandLineParser
         var launch = false;
         var closeApps = false;
         string? lang = null;
+        string? relaunchedFrom = null;
 
         // The reserved /SecretHandoff=<path> switch is consumed BEFORE the token loop,
         // and its decrypted pairs are seeded into `values` through the same
@@ -508,6 +529,22 @@ public static class CommandLineParser
                 continue;
             }
 
+            // /RelaunchedFrom=<path> — reserved: the original uninstall.exe, handed to its
+            // private temporary copy. No collision: no other token starts with 'R'. The
+            // value is stored, never trusted here; UninstallerRelaunch.VerifyOriginal
+            // decides what it is worth. (R106)
+            if (rawArg.StartsWith(UninstallerRelaunch.Switch, StringComparison.OrdinalIgnoreCase))
+            {
+                var original = rawArg.Substring(UninstallerRelaunch.Switch.Length);
+                if (original.Length == 0)
+                {
+                    throw new UsageException(
+                        $"'{UninstallerRelaunch.Switch}' requires a path (offending token: '{rawArg}')");
+                }
+                relaunchedFrom = original;
+                continue;
+            }
+
             // /PName=Value — declared parameter or built-in option override.
             // /Poption.Name=Value — namespaced app-defined custom component.
             if (body.Length >= 1 && (body[0] == 'P' || body[0] == 'p'))
@@ -558,6 +595,7 @@ public static class CommandLineParser
             Launch = launch,
             CloseApps = closeApps,
             Lang = lang,
+            RelaunchedFrom = relaunchedFrom,
         };
     }
 

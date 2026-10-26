@@ -82,10 +82,13 @@ public sealed class UninstallEngine
                 "an administrator and reinstall, or investigate who created it.");
         }
 
+        // Absent, not refused: there is no install of this app in this scope to remove.
+        // Reported as such — distinct from a failure — so a leftover uninstall.exe says
+        // "not installed" instead of "uninstall failed". (R107)
         var loaded = attempt.State;
         if (loaded is null)
         {
-            return EngineResult.Failed(
+            return EngineResult.Absent(
                 new RollbackJournal(),
                 $"no uninstall state found for '{appId}' (expected at {UninstallStateStore.PathFor(appId, preferredScope)})");
         }

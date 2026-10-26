@@ -30,6 +30,14 @@ public sealed record InstallOutcome(bool Success, string? Error)
 
     /// <summary>True when the files-in-use gate refused the run (<see cref="Blockers"/> is non-empty). (R103)</summary>
     public bool IsBlocked => Blockers.Count > 0;
+
+    /// <summary>
+    /// True when an uninstall found nothing to remove: no uninstall state exists for the
+    /// app in its scope. Nothing ran and nothing failed — the wizard says the app is not
+    /// installed and exits <c>0</c>. Never set for a refused state, which stays a failure
+    /// (R1). (R107)
+    /// </summary>
+    public bool NotInstalled { get; init; }
 }
 
 /// <summary>
@@ -483,6 +491,41 @@ public sealed class InstallSession
     /// </summary>
     internal SetupInstanceLock? InstanceLock { get; set; }
 
+    /// <summary>
+    /// True when this session runs a packed blob — a real <c>Setup.exe</c> or
+    /// <c>uninstall.exe</c> — rather than the un-stamped development runtime.
+    /// </summary>
+    internal bool IsStamped => !ReferenceEquals(_blob, WrapperBlob.Empty);
+
+    /// <summary>
+    /// The verified original <c>uninstall.exe</c> when this process is its private
+    /// temporary copy, else <c>null</c>. Set only by
+    /// <see cref="UninstallerRelaunch.ConfigureRelaunchedCopy"/>, after
+    /// <see cref="UninstallerRelaunch.VerifyOriginal"/> accepted it. (R106)
+    /// </summary>
+    internal string? OriginalUninstallerImage { get; set; }
+
+    /// <summary>
+    /// Every image the files-in-use gate treats as this installer: the running image,
+    /// plus the verified original <c>uninstall.exe</c> when this is its temporary copy —
+    /// the relaunch parent waiting on this process runs that image from inside the very
+    /// directory the gate sweeps. (R58, R106)
+    /// </summary>
+    private List<string> InstallerImages()
+    {
+        var images = new List<string>(2);
+        var self = FilesInUse.SelfImagePath();
+        if (self is not null)
+        {
+            images.Add(self);
+        }
+        if (OriginalUninstallerImage is not null)
+        {
+            images.Add(OriginalUninstallerImage);
+        }
+        return images;
+    }
+
     /// <summary>True when <c>/silent</c>, <c>/S</c>, or <c>/verysilent</c> was supplied.</summary>
     public bool Silent => _parsed.Silent;
 
@@ -629,7 +672,7 @@ public sealed class InstallSession
                 return await RunUpdateAsync(output, error, ct).ConfigureAwait(false);
 
             case WrapperMode.Uninstall:
-                return await RunUninstallAsync(error, ct).ConfigureAwait(false);
+                return await RunUninstallAsync(output, error, ct).ConfigureAwait(false);
 
             case WrapperMode.Install:
             default:
@@ -1996,8 +2039,20 @@ public sealed class InstallSession
             TempDirectory: Path.GetTempPath(),
             SilentChild: silentChild);
 
-    private async Task<int> RunUninstallAsync(TextWriter error, CancellationToken ct)
+    private async Task<int> RunUninstallAsync(TextWriter output, TextWriter error, CancellationToken ct)
     {
+        // Nothing installed is not a failure: a leftover uninstall.exe, or a script that
+        // removes an app twice, exits 0 and says why — before any hook runs, because
+        // there is no installed application for a hook to act on. A state file that
+        // exists is never "not installed", however the load below judges it (R1). (R107)
+        if (IsNotInstalled())
+        {
+            var notice = NotInstalledNotice();
+            _log?.WriteLine($"result: not installed — {notice}");
+            output.WriteLine(notice);
+            return 0;
+        }
+
         // uninstall.exe honors /LOG too — tee the reversal trail into the log.
         var progress = _log is null ? null : new LoggingProgress(null, _log);
         var ctx = BuildUninstallContext();
@@ -2039,6 +2094,13 @@ public sealed class InstallSession
                 progress,
                 ct)
             .ConfigureAwait(false);
+        if (result.NotInstalled)
+        {
+            // The state went away between the check above and the replay. (R107)
+            _log?.WriteLine($"result: not installed — {result.Error}");
+            output.WriteLine(NotInstalledNotice());
+            return 0;
+        }
         if (!result.Success)
         {
             _log?.WriteLine($"result: uninstall failed — {result.Error}");
@@ -2143,6 +2205,15 @@ public sealed class InstallSession
         EnsureLog();
         var effectiveProgress = _log is null ? progress : new LoggingProgress(progress, _log);
 
+        // Nothing installed: the window says so and exits 0, and no hook runs. A state
+        // that exists and is refused is not this case — it fails below as before. (R1, R107)
+        if (IsNotInstalled())
+        {
+            var notice = NotInstalledNotice();
+            _log?.WriteLine($"result: not installed — {notice}");
+            return new InstallOutcome(false, notice) { NotInstalled = true };
+        }
+
         StepContext ctx;
         try
         {
@@ -2193,6 +2264,13 @@ public sealed class InstallSession
                 ct)
             .ConfigureAwait(false);
 
+        if (result.NotInstalled)
+        {
+            // The state went away between the check above and the replay. (R107)
+            _log?.WriteLine($"result: not installed — {result.Error}");
+            return new InstallOutcome(false, NotInstalledNotice()) { NotInstalled = true };
+        }
+
         if (result.Success)
         {
             await HookRunner.RunAsync(
@@ -2201,6 +2279,24 @@ public sealed class InstallSession
 
         _log?.WriteLine(result.Success ? "result: uninstall success" : $"result: uninstall failed — {result.Error}");
         return new InstallOutcome(result.Success, result.Error);
+    }
+
+    /// <summary>
+    /// True when there is nothing to uninstall: no uninstall state exists for this app in
+    /// this session's scope. The uninstall window opens on its "not installed" screen
+    /// instead of the confirmation. A state file that exists — even one the replay will
+    /// refuse — is never "not installed" (R1). (R107)
+    /// </summary>
+    public bool IsNotInstalled() => UninstallStateStore.IsAbsent(_blob.AppId, _scope);
+
+    // Not localized: it is the silent path's console line and a log line, like the
+    // other result lines. The window shows its own localized screen. (R107)
+    private string NotInstalledNotice()
+    {
+        var name = string.IsNullOrWhiteSpace(_blob.DisplayName) ? _blob.AppId : _blob.DisplayName!;
+        var scope = _scope == InstallScope.Machine ? "for all users" : "for the current user";
+        return $"{name} is not installed {scope} — there is nothing to uninstall " +
+               $"(no uninstall state at {UninstallStateStore.PathFor(_blob.AppId, _scope)})";
     }
 
     // --- files-in-use ---
@@ -2213,7 +2309,7 @@ public sealed class InstallSession
     /// defensively, by the install path itself.
     /// </summary>
     public IReadOnlyList<AppBlocker> ScanBlockers(string? installDir = null)
-        => FilesInUse.Scan(_blob.AppMutex, installDir ?? EffectiveInstallDir());
+        => FilesInUse.Scan(_blob.AppMutex, installDir ?? EffectiveInstallDir(), InstallerImages());
 
     /// <summary>
     /// Ask the Restart Manager to gracefully close the applications holding the
@@ -2235,7 +2331,7 @@ public sealed class InstallSession
     /// wizard's Retry sees exactly what the gate will. (R103)
     /// </summary>
     public IReadOnlyList<AppBlocker> ScanUninstallBlockers()
-        => FilesInUse.Scan(_blob.AppMutex, UninstallGateDir());
+        => FilesInUse.Scan(_blob.AppMutex, UninstallGateDir(), InstallerImages());
 
     /// <summary>
     /// <see cref="CloseBlockers"/> for the uninstall — the uninstall wizard's
@@ -2275,7 +2371,7 @@ public sealed class InstallSession
     /// </summary>
     private InstallOutcome? CheckFilesInUse(StepContext ctx, string? installDir, IProgress<StepProgress>? progress)
     {
-        var blockers = FilesInUse.Scan(_blob.AppMutex, installDir);
+        var blockers = FilesInUse.Scan(_blob.AppMutex, installDir, InstallerImages());
         if (blockers.Count == 0)
         {
             return null; // clear
@@ -2285,7 +2381,7 @@ public sealed class InstallSession
         {
             Report(progress, ctx, $"close-apps: closing {blockers.Count} blocking application(s)…", isError: false);
             FilesInUse.CloseBlockers(installDir);
-            blockers = FilesInUse.Scan(_blob.AppMutex, installDir);
+            blockers = FilesInUse.Scan(_blob.AppMutex, installDir, InstallerImages());
             if (blockers.Count == 0)
             {
                 Report(progress, ctx, "close-apps: all blocking applications closed", isError: false);

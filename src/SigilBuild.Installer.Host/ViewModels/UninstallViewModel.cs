@@ -22,8 +22,10 @@ namespace SigilBuild.Installer.Host.ViewModels;
 /// separate from <see cref="InstallerViewModel"/> — the uninstall window is its own
 /// minimal flow, so the two never share navigation/rail state. They share only the
 /// Close-applications screen, through <see cref="ICloseAppsGate"/>. (R103)
+/// <c>NotInstalled</c> is the neutral terminal for an app with nothing left to remove —
+/// a leftover <c>uninstall.exe</c> — and exits <c>0</c>. (R107)
 /// </summary>
-public enum UninstallStep { Confirm, CloseApps, Progress, Done, Failed }
+public enum UninstallStep { Confirm, CloseApps, Progress, Done, Failed, NotInstalled }
 
 public sealed class UninstallViewModel : ICloseAppsGate
 {
@@ -66,6 +68,7 @@ public sealed class UninstallViewModel : ICloseAppsGate
                 OnPropertyChanged(nameof(IsProgress));
                 OnPropertyChanged(nameof(IsDone));
                 OnPropertyChanged(nameof(IsFailed));
+                OnPropertyChanged(nameof(IsNotInstalled));
                 OnPropertyChanged(nameof(IsFinished));
                 OnPropertyChanged(nameof(IsCancellable));
             }
@@ -77,9 +80,13 @@ public sealed class UninstallViewModel : ICloseAppsGate
     public bool IsProgress => _step == UninstallStep.Progress;
     public bool IsDone => _step == UninstallStep.Done;
     public bool IsFailed => _step == UninstallStep.Failed;
+    public bool IsNotInstalled => _step == UninstallStep.NotInstalled;
 
-    /// <summary>True on either terminal screen (Done / Failed) — the footer shows a single Close.</summary>
-    public bool IsFinished => _step is UninstallStep.Done or UninstallStep.Failed;
+    /// <summary>
+    /// True on every terminal screen (Done / Failed / NotInstalled) — the footer shows a
+    /// single Close.
+    /// </summary>
+    public bool IsFinished => _step is UninstallStep.Done or UninstallStep.Failed or UninstallStep.NotInstalled;
 
     /// <summary>
     /// True on the steps where leaving removes nothing — Confirm and Close
@@ -94,6 +101,24 @@ public sealed class UninstallViewModel : ICloseAppsGate
     public string ConfirmTitle => Strings.UninstallTitle(_lang, Brand.AppName);
 
     public string DoneMessage => Strings.UninstallDone(_lang, Brand.AppName);
+
+    /// <summary>The not-installed screen's heading, e.g. "Acme Studio is not installed". (R107)</summary>
+    public string NotInstalledMessage => Strings.UninstallNotInstalled(_lang, Brand.AppName);
+
+    /// <summary>
+    /// There is nothing to uninstall: show the neutral not-installed screen instead of the
+    /// confirmation, and leave with exit code <c>0</c>. A no-op once the uninstall has
+    /// started. (R107)
+    /// </summary>
+    public void ShowNotInstalled()
+    {
+        if (_step is not (UninstallStep.Confirm or UninstallStep.CloseApps or UninstallStep.Progress))
+        {
+            return;
+        }
+        OutcomeCode = InstallerOutcomeCode.Completed;
+        CurrentStep = UninstallStep.NotInstalled;
+    }
 
     /// <summary>The rail's version line, bound by UninstallWindow.axaml.</summary>
     public string VersionLine => Strings.UninstallVersion(_lang, Brand.AppVersion);
@@ -339,7 +364,12 @@ public sealed class UninstallViewModel : ICloseAppsGate
             // opening work (state load, hooks up to their first await) must not hold
             // the dispatcher, or the Progress screen never renders. (R95)
             var outcome = await Task.Run(() => runner(progress, token)).ConfigureAwait(true);
-            if (outcome.IsBlocked)
+            if (outcome.NotInstalled)
+            {
+                // Nothing to remove — not a failure. (R107)
+                ShowNotInstalled();
+            }
+            else if (outcome.IsBlocked)
             {
                 // The gate refused before the replay: nothing was removed. Name the
                 // applications and let the user clear them. (R103)

@@ -517,6 +517,41 @@ restarts — over a running copy, and uninstalling it, found three defects.
   install show done and Install shows a cross. The marks are drawn vector paths,
   so they do not depend on a font carrying the glyph.
 
+### Fixed — what the uninstaller leaves behind (R106, R107)
+
+- **R106 — `uninstall.exe` stayed in the install directory until the next
+  reboot.** A running program cannot delete its own executable, so after a
+  successful uninstall the install folder still held one file — the uninstaller,
+  a full copy of `Setup.exe` — scheduled for deletion at a restart a per-user
+  uninstall was not even allowed to schedule. `uninstall.exe` now does what the
+  NSIS and Inno Setup uninstallers do: it copies itself into a fresh private
+  directory (`%ProgramData%\sigil-uninstall-<guid>`, administrator-only, when
+  elevated; a private `%TEMP%\sigil-uninstall-<guid>` otherwise), verifies the
+  copy against its own bytes from a handle that blocks replacement, runs the
+  uninstall from the copy with the same privilege and the same arguments, waits
+  for it and exits with its exit code. The copy moves the original out of the
+  install directory, so the directory is removed with the rest of the uninstall,
+  and the private directory is cleaned up or scheduled for the next restart.
+  - The interactive uninstall waits too, so Apps & features refreshes its list
+    only once the app is gone.
+  - An upgrade's removal of the previous version keeps working: the previous
+    version's `uninstall.exe` hands the single-instance guard it was admitted on
+    to its copy. An `uninstall.exe` from before this change uninstalls in place,
+    as it always did.
+  - `uninstall.exe` now moves its current directory off the install directory
+    before doing anything else, and resolves a relative `/LOG=` first.
+  - When no copy can be made — or the install and temporary directories are on
+    different volumes — the uninstall runs in place, as before.
+  - New reserved token `/RelaunchedFrom=<path>`, passed only from the uninstaller
+    to its own copy; see `docs/setup-exe-reference.md`.
+- **R107 — a leftover `uninstall.exe` reported a raw failure.** Running the
+  uninstaller of an app that was already removed opened the uninstall window on
+  **Uninstall failed** with `no uninstall state found for '<AppId>' (expected at
+  …\uninstall.json)`. The app is simply not installed: the window now opens on a
+  neutral "<App> is not installed" screen (English and Ukrainian) and closes with
+  exit `0`, and the silent path says so, logs `result: not installed` and exits
+  `0`. No hook runs. State that exists but is refused still fails as before (R1).
+
 ### Known limitations
 
 > **Sigil 0.1.0-alpha is Windows-only and pre-production.** It builds and

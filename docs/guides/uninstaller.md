@@ -47,8 +47,8 @@ setup.exe /Uninstall                        # interactive, from the original set
 
 Both enter the wrapper in `Uninstall` mode:
 
-1. Run the `installer.hooks.pre_uninstall` steps. They run **first**, before anything checks for running applications, so a hook that stops your app — its own `--quit`, for instance — clears it out of the way. A hook that fails with `on_failure: fail` (the default) aborts the uninstall here.
-2. On the silent path, check for files in use: a declared `installer.app_mutex` that is held, or a process the Restart Manager reports holding a file in the install directory, refuses the run with exit code **4** unless `/closeapps` was passed. The refusal names each blocker in the log.
+1. Run the `installer.hooks.pre_uninstall` steps. They run **first**, before anything checks for running applications, so a hook that stops your app — its own `--quit`, for instance — clears it out of the way. A hook that fails with `on_failure: fail` (the default) aborts the uninstall here. They run once per uninstall, however many times the check below is retried.
+2. Check for files in use, on both paths, before anything is removed: a declared `installer.app_mutex` that is held, or a process the Restart Manager reports holding a file in the install directory, blocks the run. `/closeapps` asks the blockers to close first. On the silent path a block refuses the run with exit code **4** and names each blocker in the log; in the uninstall window it opens the Close-applications step (see [The uninstall window](#the-uninstall-window)).
 3. Run the manifest's `uninstall:` step list (top to bottom).
 4. Replay the rollback journal in reverse order - file restores, registry restores, env-var restores, service stops + deletes, shortcut deletions, etc. Every record is checked against the installation it belongs to before it is replayed; see [Anchored replay and refused records](#anchored-replay-and-refused-records).
 5. Remove the ARP entry, then run the `installer.hooks.post_uninstall` steps.
@@ -156,7 +156,16 @@ This is reachable in practice for an **unsigned** machine-scope install whose di
 
 `/S` suppresses any wizard chrome the uninstall flow would otherwise show. Sigil registers it as the `QuietUninstallString`, which is what deployment tooling and scripts that remove software unattended look for.
 
-Pressing **Uninstall** in Apps & features (or Add or Remove Programs) runs the `UninstallString`, which carries no `/S`, so the person who asked for the removal sees the uninstall window: Confirm → Progress → Done (or Failed). That is deliberate — a silent run that is refused (an application still running, a `pre_uninstall` hook that aborted) has nobody to tell, and from the user's side it looks as if the button did nothing. Double-clicking `<install_dir>\uninstall.exe` directly, with no flags, opens the same window.
+Pressing **Uninstall** in Apps & features (or Add or Remove Programs) runs the `UninstallString`, which carries no `/S`, so the person who asked for the removal sees the uninstall window (below). That is deliberate — a silent run that is refused (an application still running, a `pre_uninstall` hook that aborted) has nobody to tell, and from the user's side it looks as if the button did nothing. Double-clicking `<install_dir>\uninstall.exe` directly, with no flags, opens the same window.
+
+## The uninstall window
+
+The interactive uninstall is **Confirm → [Close apps] → Progress → Done | Failed**.
+
+- **Confirm.** Uninstall starts the run; Cancel leaves with exit code `2`.
+- **Close apps** — shown only when something is running. Pressing Uninstall runs the `pre_uninstall` hooks and then the files-in-use check; if an application is still holding the install, the run stops there, before anything is removed, and the window shows the same Close-applications screen as the install wizard: each blocking application with its process id, **Retry** (re-scan after closing them yourself), **Close for me** (asks each application to shut down normally through the Restart Manager, in the background, then re-scans and says so if any are still running), and **Cancel** (exit code `2`, nothing removed — the `pre_uninstall` hooks have already run by then). Once nothing is blocking, the uninstall continues to Progress without running the hooks again.
+- **Progress** grows the reversal log as the journal replays. The title bar's X (and Alt+F4) is refused while it runs: stopping half-way would leave a partly removed install. On Confirm and Close apps the X means Cancel.
+- **Done** or **Failed** close with exit code `0` or `1`.
 
 ## See also
 

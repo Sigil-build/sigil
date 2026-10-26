@@ -452,6 +452,29 @@ restarts — over a running copy, and uninstalling it, found three defects.
     loading it by name.
   - The silent path is unchanged: it never loads these libraries.
 
+### Fixed — the uninstall window (R103, R104)
+
+- **R103 — the interactive uninstall never checked for running applications.**
+  Only the silent path ran the files-in-use check, and since R93 Apps & features
+  opens the interactive uninstall, so every user took the unchecked path. An app
+  daemon still running after the publisher's `pre_uninstall` `--quit` hook sent
+  the uninstall straight into the journal replay, which failed on every file the
+  daemon held and told the user to "re-run the uninstaller after closing the
+  application" without naming it. The interactive uninstall now runs the
+  `pre_uninstall` hooks, then the files-in-use check, before anything is removed
+  — the silent path's order — and the uninstall window gains the install
+  wizard's Close-applications step: it lists each blocking application with its
+  process id, Retry re-scans, Close for me asks the applications to shut down in
+  the background and says so if any are still running, and Cancel exits `2` with
+  nothing removed. Once they are closed the uninstall continues without running
+  the hooks a second time.
+- **R104 — the uninstall window had no title bar.** It and the headed `/Update`
+  window were frameless (`BorderOnly`), so they had no title, no X, and could
+  not be moved; the install wizard had already been given its title bar. All
+  three windows now have the same title bar and can be dragged by the rail. In
+  the uninstall window the X means Cancel before anything is removed, closes on
+  Done or Failed, and is refused while the uninstall is removing files.
+
 ### Known limitations
 
 > **Sigil 0.1.0-alpha is Windows-only and pre-production.** It builds and

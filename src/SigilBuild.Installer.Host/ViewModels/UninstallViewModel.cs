@@ -2,6 +2,7 @@
 // Licensed under the Sigil License 1.0. See LICENSE in the repository root.
 
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
@@ -14,16 +15,17 @@ using SigilBuild.Wrapper.Engine;
 namespace SigilBuild.Installer.Host.ViewModels;
 
 /// <summary>
-/// The three-state interactive uninstall flow (design brief): a branded
-/// <c>confirm → progress → done</c> sequence (plus a <c>failed</c> terminal) that
-/// drives the real <see cref="UninstallEngine"/> through
+/// The steps of the interactive uninstall flow (design brief): a branded
+/// <c>confirm → [close apps] → progress → done</c> sequence (plus a <c>failed</c>
+/// terminal) that drives the real <see cref="UninstallEngine"/> through
 /// <see cref="InstallSession.RunUninstallInteractiveAsync"/>. Deliberately kept
 /// separate from <see cref="InstallerViewModel"/> — the uninstall window is its own
-/// minimal flow, so the two never share navigation/rail state.
+/// minimal flow, so the two never share navigation/rail state. They share only the
+/// Close-applications screen, through <see cref="ICloseAppsGate"/>. (R103)
 /// </summary>
-public enum UninstallStep { Confirm, Progress, Done, Failed }
+public enum UninstallStep { Confirm, CloseApps, Progress, Done, Failed }
 
-public sealed class UninstallViewModel : INotifyPropertyChanged
+public sealed class UninstallViewModel : ICloseAppsGate
 {
     private Func<IProgress<StepProgress>, CancellationToken, Task<InstallOutcome>>? _runner;
     private CancellationTokenSource? _cts;
@@ -60,21 +62,31 @@ public sealed class UninstallViewModel : INotifyPropertyChanged
                 _step = value;
                 OnPropertyChanged();
                 OnPropertyChanged(nameof(IsConfirm));
+                OnPropertyChanged(nameof(IsCloseApps));
                 OnPropertyChanged(nameof(IsProgress));
                 OnPropertyChanged(nameof(IsDone));
                 OnPropertyChanged(nameof(IsFailed));
                 OnPropertyChanged(nameof(IsFinished));
+                OnPropertyChanged(nameof(IsCancellable));
             }
         }
     }
 
     public bool IsConfirm => _step == UninstallStep.Confirm;
+    public bool IsCloseApps => _step == UninstallStep.CloseApps;
     public bool IsProgress => _step == UninstallStep.Progress;
     public bool IsDone => _step == UninstallStep.Done;
     public bool IsFailed => _step == UninstallStep.Failed;
 
     /// <summary>True on either terminal screen (Done / Failed) — the footer shows a single Close.</summary>
     public bool IsFinished => _step is UninstallStep.Done or UninstallStep.Failed;
+
+    /// <summary>
+    /// True on the steps where leaving removes nothing — Confirm and Close
+    /// applications. The footer shows Cancel there, and closing the window records a
+    /// user-cancelled outcome. (R103)
+    /// </summary>
+    public bool IsCancellable => _step is UninstallStep.Confirm or UninstallStep.CloseApps;
 
     /// <summary>The confirm-screen body copy (design brief wording).</summary>
     public string ConfirmMessage => Strings.UninstallBody(_lang, Brand.AppName);
@@ -113,12 +125,20 @@ public sealed class UninstallViewModel : INotifyPropertyChanged
     /// The runner is invoked on a thread-pool thread and must not touch this
     /// view-model or any UI object. (R95)
     /// </summary>
+    /// <remarks>
+    /// The runner may be invoked more than once: a blocked outcome
+    /// (<see cref="InstallOutcome.IsBlocked"/>) moves the flow to the
+    /// Close-applications step, and clearing it invokes the runner again to resume.
+    /// The session runs its <c>pre_uninstall</c> hooks once and starts the replay only
+    /// past a clear gate, so a second call is safe. (R103)
+    /// </remarks>
     public void ConfigureRunner(Func<IProgress<StepProgress>, CancellationToken, Task<InstallOutcome>> runner)
         => _runner = runner;
 
     /// <summary>
-    /// The running (or completed) uninstall operation started when the user confirms.
-    /// Null until then. Exposed so the shell and tests can await completion.
+    /// The running (or completed) uninstall operation started when the user confirms,
+    /// or resumed from the Close-applications step. Null until then. Exposed so the
+    /// shell and tests can await completion.
     /// </summary>
     public Task? UninstallTask { get; private set; }
 
@@ -132,20 +152,165 @@ public sealed class UninstallViewModel : INotifyPropertyChanged
         {
             return;
         }
-        CurrentStep = UninstallStep.Progress;
-        UninstallTask = StartUninstallAsync();
+        LogLines.Clear();
+        UninstallProgress = 0;
+        StartOrResume();
     }
 
     /// <summary>
-    /// The user dismissed the Confirm screen without uninstalling. Records a
-    /// user-cancelled outcome (exit 2); the caller closes the window.
+    /// The user left without uninstalling — Cancel on the Confirm or
+    /// Close-applications step, or the window's close gesture there. Records a
+    /// user-cancelled outcome (exit 2); nothing has been removed. The caller closes
+    /// the window. A no-op on any other step. (R103)
     /// </summary>
-    public void CancelConfirm()
+    public void Cancel()
     {
-        if (_step == UninstallStep.Confirm)
+        if (IsCancellable)
         {
             OutcomeCode = InstallerOutcomeCode.UserCancelled;
         }
+    }
+
+    // --- Close-running-applications gate (R103) ---
+
+    private Func<IReadOnlyList<string>>? _blockerScan;
+    private Action? _blockerClose;
+
+    /// <inheritdoc />
+    public ObservableCollection<string> Blockers { get; } = new();
+
+    /// <summary>True when the last scan found something blocking.</summary>
+    public bool HasBlockers => Blockers.Count > 0;
+
+    /// <summary>
+    /// Wire the files-in-use probes for the Close-applications step:
+    /// <paramref name="scan"/> returns the current blocker descriptions over the
+    /// directory the uninstall's own gate sweeps; <paramref name="close"/> asks the
+    /// Restart Manager to close them. Left unwired, Retry and Close-for-me resume the
+    /// run directly and the session's gate decides. (R103)
+    /// </summary>
+    public void ConfigureBlockerProbe(Func<IReadOnlyList<string>> scan, Action close)
+    {
+        _blockerScan = scan ?? throw new ArgumentNullException(nameof(scan));
+        _blockerClose = close ?? throw new ArgumentNullException(nameof(close));
+    }
+
+    private bool _isClosingApps;
+
+    /// <summary>
+    /// True while "Close for me" is waiting on the Restart Manager. The screen shows
+    /// a closing notice and disables Retry and Close-for-me until it returns. (R103)
+    /// </summary>
+    public bool IsClosingApps
+    {
+        get => _isClosingApps;
+        private set
+        {
+            if (_isClosingApps != value)
+            {
+                _isClosingApps = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(CanActOnBlockers));
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public bool CanActOnBlockers => !_isClosingApps;
+
+    private bool _closeAppsFailed;
+
+    /// <inheritdoc />
+    public string CloseAppsBody => Strings.CloseAppsUninstallBody(_lang);
+
+    /// <summary>
+    /// True when the last "Close for me" left applications running; the screen then
+    /// says Setup could not close them. Cleared by the next attempt or Retry. (R103)
+    /// </summary>
+    public bool CloseAppsFailed
+    {
+        get => _closeAppsFailed;
+        private set
+        {
+            if (_closeAppsFailed != value)
+            {
+                _closeAppsFailed = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    /// <summary>
+    /// "Retry" — the user closed the apps themselves. Re-scans and resumes the
+    /// uninstall when clear; otherwise stays with the refreshed list. (R103)
+    /// </summary>
+    public void RetryBlockers()
+    {
+        if (_step != UninstallStep.CloseApps || _isClosingApps)
+        {
+            return;
+        }
+        CloseAppsFailed = false;
+        if (_blockerScan is not null)
+        {
+            PublishBlockers(_blockerScan());
+            if (Blockers.Count > 0)
+            {
+                return;
+            }
+        }
+        StartOrResume();
+    }
+
+    /// <summary>
+    /// "Close for me" — ask the Restart Manager to close the blocking applications
+    /// off the UI thread, then re-scan. Resumes the uninstall when that cleared them;
+    /// otherwise stays with the fresh list and says Setup could not close them. (R103)
+    /// </summary>
+    public async Task CloseBlockingAppsAsync()
+    {
+        if (_step != UninstallStep.CloseApps || _isClosingApps)
+        {
+            return;
+        }
+
+        var close = _blockerClose;
+        var scan = _blockerScan;
+        CloseAppsFailed = false;
+        IsClosingApps = true;
+        IReadOnlyList<string> remaining;
+        try
+        {
+            remaining = await CloseAppsWork.CloseThenRescanAsync(close, scan).ConfigureAwait(true);
+        }
+        finally
+        {
+            IsClosingApps = false;
+        }
+
+        PublishBlockers(remaining);
+        if (Blockers.Count == 0)
+        {
+            StartOrResume();
+            return;
+        }
+        CloseAppsFailed = true;
+    }
+
+    private void PublishBlockers(IReadOnlyList<string> found)
+    {
+        Blockers.Clear();
+        foreach (var b in found)
+        {
+            Blockers.Add(b);
+        }
+        OnPropertyChanged(nameof(HasBlockers));
+    }
+
+    private void StartOrResume()
+    {
+        CurrentStep = UninstallStep.Progress;
+        UninstallTask = StartUninstallAsync();
     }
 
     private async Task StartUninstallAsync()
@@ -155,8 +320,6 @@ public sealed class UninstallViewModel : INotifyPropertyChanged
             return; // not wired (unit tests): navigation is driven manually.
         }
 
-        LogLines.Clear();
-        UninstallProgress = 0;
         ErrorMessage = null;
 
         var cts = new CancellationTokenSource();
@@ -176,7 +339,19 @@ public sealed class UninstallViewModel : INotifyPropertyChanged
             // opening work (state load, hooks up to their first await) must not hold
             // the dispatcher, or the Progress screen never renders. (R95)
             var outcome = await Task.Run(() => runner(progress, token)).ConfigureAwait(true);
-            if (outcome.Success)
+            if (outcome.IsBlocked)
+            {
+                // The gate refused before the replay: nothing was removed. Name the
+                // applications and let the user clear them. (R103)
+                var described = new List<string>(outcome.Blockers.Count);
+                foreach (var b in outcome.Blockers)
+                {
+                    described.Add(b.Describe());
+                }
+                PublishBlockers(described);
+                CurrentStep = UninstallStep.CloseApps;
+            }
+            else if (outcome.Success)
             {
                 UninstallProgress = 1;
                 OutcomeCode = InstallerOutcomeCode.Completed;

@@ -5,6 +5,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:SigilBuild.Installer.Host.ViewModels"
+        xmlns:screens="using:SigilBuild.Installer.Host.Views.Screens"
         xmlns:loc="clr-namespace:SigilBuild.Wrapper.Core.Localization;assembly=SigilBuild.Wrapper.Core"
         x:Class="SigilBuild.Installer.Host.Views.UninstallWindow"
         x:DataType="vm:UninstallViewModel"
@@ -12,13 +13,16 @@
         Width="800" Height="500"
         CanResize="False"
         WindowStartupLocation="CenterScreen"
-        WindowDecorations="BorderOnly"
+        WindowDecorations="Full"
         Background="{DynamicResource WinBgBrush}">
 
   <Grid ColumnDefinitions="240,*" RowDefinitions="*,56">
 
-    <!-- Sidebar (rail): brand block (shared with the install wizard) -->
-    <Border Grid.Row="0" Grid.Column="0" Grid.RowSpan="2" Background="{DynamicResource RailBgBrush}">
+    <!-- Sidebar (rail): brand block (shared with the install wizard). The title bar
+         is how the window is moved; dragging the rail is the same convenience the
+         install wizard offers. (R104) -->
+    <Border Grid.Row="0" Grid.Column="0" Grid.RowSpan="2" Background="{DynamicResource RailBgBrush}"
+            PointerPressed="OnChromePressed">
       <DockPanel Margin="24" LastChildFill="False">
         <StackPanel DockPanel.Dock="Top" Spacing="16">
           <Image Source="{Binding Brand.LogoImage}" Height="48" HorizontalAlignment="Left" />
@@ -31,7 +35,7 @@
       </DockPanel>
     </Border>
 
-    <!-- Content host: state-driven panels (confirm / progress / done / failed) -->
+    <!-- Content host: state-driven panels (confirm / close apps / progress / done / failed) -->
     <Panel Grid.Row="0" Grid.Column="1" Margin="32">
 
       <!-- Confirm -->
@@ -39,6 +43,11 @@
         <TextBlock FontSize="20" FontWeight="SemiBold" Text="{Binding ConfirmTitle}" />
         <TextBlock Text="{Binding ConfirmMessage}" Foreground="{DynamicResource TextSecBrush}" TextWrapping="Wrap" />
       </StackPanel>
+
+      <!-- Close applications: the install wizard's screen, bound through
+           ICloseAppsGate. Shown when the files-in-use gate refused the run before
+           anything was removed. (R103) -->
+      <screens:CloseAppsView IsVisible="{Binding IsCloseApps}" />
 
       <!-- Progress -->
       <StackPanel Spacing="16" VerticalAlignment="Center" IsVisible="{Binding IsProgress}">
@@ -92,8 +101,8 @@
     <!-- Footer -->
     <Border Grid.Row="1" Grid.Column="1" BorderBrush="{DynamicResource FrameBrush}" BorderThickness="0,1,0,0" Padding="16,8">
       <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right">
-        <!-- Confirm footer -->
-        <Button Content="{x:Static loc:S.NavCancel}" Click="OnCancelConfirm" IsVisible="{Binding IsConfirm}" />
+        <!-- Confirm / Close-applications footer: Cancel leaves with nothing removed (exit 2). -->
+        <Button Content="{x:Static loc:S.NavCancel}" Click="OnCancel" IsVisible="{Binding IsCancellable}" />
         <Button Content="{x:Static loc:S.UninstallAction}" Click="OnUninstall" IsVisible="{Binding IsConfirm}"
                 Background="{DynamicResource DangerTextBrush}" Foreground="White" />
         <!-- Terminal footer -->

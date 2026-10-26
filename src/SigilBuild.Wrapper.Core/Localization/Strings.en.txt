@@ -90,6 +90,7 @@ cancel.resume = Continue installing
 # --- close apps ---
 close_apps.title = Close these applications to continue
 close_apps.body = Setup needs to update files that these applications are using. Close them and choose Retry, or let Setup close them for you.
+close_apps.uninstall_body = These applications are using files that need to be removed. Close them and choose Retry, or let Setup close them for you.
 close_apps.close_for_me = Close for me
 close_apps.close_for_me_hint = Close for me asks each application to shut down normally — unsaved work is not discarded. Applications are not restarted afterwards.
 close_apps.closing = Closing applications…

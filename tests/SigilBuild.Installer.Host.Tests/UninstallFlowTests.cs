@@ -108,12 +108,12 @@ public sealed class UninstallFlowTests
     }
 
     [Fact]
-    public void CancelConfirm_records_user_cancelled_exit_2()
+    public void Cancel_on_confirm_records_user_cancelled_exit_2()
     {
         var vm = new UninstallViewModel(new BrandTokens());
         vm.CurrentStep.Should().Be(UninstallStep.Confirm);
 
-        vm.CancelConfirm();
+        vm.Cancel();
 
         vm.OutcomeCode.Should().Be(InstallerOutcomeCode.UserCancelled);
         ((int)vm.OutcomeCode).Should().Be(2);

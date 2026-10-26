@@ -19,6 +19,12 @@ public interface ICloseAppsGate : INotifyPropertyChanged
     /// <summary>The applications currently blocking the run, one description each (name + pid).</summary>
     ObservableCollection<string> Blockers { get; }
 
+    /// <summary>
+    /// The screen's explanation, which names what the run needs the files for:
+    /// updating them on install, removing them on uninstall.
+    /// </summary>
+    string CloseAppsBody { get; }
+
     /// <summary>True when the last "Close for me" left applications running.</summary>
     bool CloseAppsFailed { get; }
 

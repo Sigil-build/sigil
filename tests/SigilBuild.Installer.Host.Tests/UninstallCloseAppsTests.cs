@@ -261,4 +261,21 @@ public sealed class UninstallCloseAppsTests
         footer.Should().Contain(S.CloseAppsCloseForMe);
         footer.Should().NotContain(S.UninstallAction, "Uninstall belongs to the Confirm step only");
     }
+
+    [Fact]
+    public void The_close_apps_explanation_says_removing_on_uninstall_and_updating_on_install()
+    {
+        // Arrange
+        var uninstall = new UninstallViewModel(new BrandTokens());
+        var install = new InstallerViewModel(new BrandTokens());
+
+        // Act
+        var uninstallBody = uninstall.CloseAppsBody;
+        var installBody = install.CloseAppsBody;
+
+        // Assert
+        uninstallBody.Should().Be(S.CloseAppsUninstallBody);
+        installBody.Should().Be(S.CloseAppsBody);
+        uninstallBody.Should().NotBe(installBody, "an uninstall does not update files");
+    }
 }

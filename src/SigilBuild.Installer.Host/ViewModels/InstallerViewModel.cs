@@ -276,6 +276,9 @@ public sealed class InstallerViewModel : ICloseAppsGate
 
     private bool _closeAppsFailed;
 
+    /// <inheritdoc />
+    public string CloseAppsBody => Strings.CloseAppsBody(_lang);
+
     /// <summary>
     /// True when the last "Close for me" left applications running. The screen then
     /// says Setup could not close them, rather than showing the same list again as

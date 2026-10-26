@@ -220,6 +220,9 @@ public sealed class UninstallViewModel : ICloseAppsGate
 
     private bool _closeAppsFailed;
 
+    /// <inheritdoc />
+    public string CloseAppsBody => Strings.CloseAppsUninstallBody(_lang);
+
     /// <summary>
     /// True when the last "Close for me" left applications running; the screen then
     /// says Setup could not close them. Cleared by the next attempt or Retry. (R103)

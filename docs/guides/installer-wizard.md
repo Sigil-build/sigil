@@ -67,6 +67,8 @@ installer:
 
 The `.ico` is stamped into the produced `setup.exe`'s Explorer icon, into the wizard process, and into the deployed `uninstall.exe`. Omit the field and Sigil uses a bundled default (the Saki / Alexandre Moore icon, credited in the OSS README).
 
+The rest of the file's identity — the name, publisher, version and copyright Explorer shows under **Properties → Details** — comes from the `app` section, including the optional `app.copyright`. See [Installer file properties](packaging-formats.md#installer-file-properties).
+
 ## Per-parameter widget selection
 
 The wizard picks a widget per parameter from its declared shape:

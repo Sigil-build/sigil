@@ -286,6 +286,21 @@ public class SchemaValidationTests
             string.Join("; ", errors.Select(e => e.ToString())));
     }
 
+    [Fact]
+    public async Task AppCopyrightFixture_IsValidAgainstSchema()
+    {
+        // `additionalProperties: false` on `app` turns an undeclared key into a
+        // rejection, so this proves `app.copyright` is declared — with a non-ASCII
+        // notice, and next to a prerelease + build-metadata version. (R105)
+        var schema = await LoadSchemaAsync();
+        var json = YamlToJson(await File.ReadAllTextAsync("Fixtures/valid/app-copyright.yaml"));
+        var errors = schema.Validate(json);
+
+        errors.Should().BeEmpty(
+            "the app-copyright fixture must satisfy the schema; got: {0}",
+            string.Join("; ", errors.Select(e => e.ToString())));
+    }
+
     /// <summary>
     /// Every accepted <c>installer.require_signed_downloads</c> value, asserted
     /// individually. The valid fixture can only carry one of them, and an enum

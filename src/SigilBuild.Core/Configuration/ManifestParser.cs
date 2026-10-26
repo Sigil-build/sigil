@@ -92,7 +92,8 @@ public static class ManifestParser
         Version: GetScalar(node, "version") ?? "",
         Publisher: GetScalar(node, "publisher") ?? "",
         Description: GetScalar(node, "description"),
-        Homepage: GetScalar(node, "homepage"));
+        Homepage: GetScalar(node, "homepage"),
+        Copyright: GetScalar(node, "copyright"));
 
     private static BuildSection MapBuild(YamlMappingNode node) => new(
         Source: GetScalar(node, "source") ?? "",

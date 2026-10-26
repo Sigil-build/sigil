@@ -30,7 +30,10 @@ namespace SigilBuild.Packaging.ExeWrapper;
 /// <c>{OutputDirectory}/{App.Name}-Setup.exe</c>, then embeds the JSON
 /// step + parameter blob (<c>SIGIL_BLOB_V1</c>) and a deterministic zstd
 /// container of the source directory (<c>SIGIL_PAYLOAD_V2</c>) as Win32
-/// <c>RT_RCDATA</c> resources via <see cref="WrapperResourceWriter"/>.
+/// <c>RT_RCDATA</c> resources via <see cref="WrapperResourceWriter"/>, then
+/// replaces the host's icon (<see cref="IconResourceWriter"/>) and its
+/// <c>RT_VERSION</c> resource (<see cref="VersionResourceWriter"/>) with the
+/// publisher's. (R105)
 /// </remarks>
 public sealed class ExeWrapperPackager : IPackager
 {
@@ -226,6 +229,15 @@ public sealed class ExeWrapperPackager : IPackager
         {
             await IconResourceWriter.WriteAsync(outputPath, iconBytes, ct).ConfigureAwait(false);
         }
+
+        // Replace the host's own RT_VERSION with the publisher's: Properties →
+        // Details names the app, its publisher, version and copyright, and the
+        // produced file — never the stock host or Sigil. Its own update cycle,
+        // after the icon's, and before anything signs the file. Both the full
+        // package and the web stub pass through here. (R105)
+        await VersionResourceWriter.WriteAsync(
+            outputPath, VersionResourceFields.FromManifest(manifest.App, outputName), ct)
+            .ConfigureAwait(false);
 
         // Compute sha256 + size *after* the resource embed so the artifact
         // descriptor reflects the final on-disk shape.

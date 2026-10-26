@@ -31,6 +31,7 @@ Source: `schemas/sigil-schema.json` (JSON Schema, draft-07).
 | `publisher` | string | yes | - | Display name or X.500 distinguished name (CN=...). |
 | `description` | string | - | - | _(undocumented)_ |
 | `homepage` | string | - | - | _(undocumented)_ |
+| `copyright` | string | - | - | Copyright notice stamped into the packed Setup.exe's version resource (LegalCopyright, shown under Properties > Details), e.g. "Copyright (c) 2026 Example Inc.". When omitted, LegalCopyright is left empty. |
 
 ## `build`
 

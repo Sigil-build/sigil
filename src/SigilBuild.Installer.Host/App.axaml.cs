@@ -113,8 +113,12 @@ public partial class App : Application
 
                 // Load the enabled built-in option components (from the session's
                 // blob). When ≥ 1 is present the Options screen + its rail entry appear
-                // (after license); when none, they are omitted.
-                _vm.LoadOptions(session.Options);
+                // (after license); when none, they are omitted. Each checkbox opens on
+                // the session's resolved default — a /P override, else what the prior
+                // install recorded on an upgrade or reinstall, else the manifest
+                // default. Reading it here also loads the prior state before any
+                // teardown can delete it. (R98)
+                _vm.LoadOptions(session.Options, defaults: session.OptionDefaults);
 
                 // Load the embedded license text MAP (from the blob) and resolve it
                 // against the SAME ordered preference list the chrome language used

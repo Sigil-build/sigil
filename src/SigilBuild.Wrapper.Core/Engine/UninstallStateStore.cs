@@ -106,8 +106,16 @@ internal static class UninstallStateStore
     /// <c>/D=</c>-chosen destination is not recoverable any other way at uninstall time.
     /// (R1)
     /// </param>
+    /// <param name="Options">
+    /// The resolved <c>option.*</c> values the install recorded, keyed by component
+    /// name, or <c>null</c> for state written before the field existed. An upgrade or
+    /// reinstall seeds its option defaults from it. (R98)
+    /// </param>
     public sealed record LoadedState(
-        RollbackJournal Journal, InstallScope Scope, string? InstallDir);
+        RollbackJournal Journal,
+        InstallScope Scope,
+        string? InstallDir,
+        System.Collections.Generic.IReadOnlyDictionary<string, bool>? Options = null);
 
     /// <summary>
     /// The outcome of a load attempt. <paramref name="State"/> is the rehydrated
@@ -126,6 +134,9 @@ internal static class UninstallStateStore
     /// the console / wizard log / <c>/LOG</c> file; the store has no logger of its own.
     /// <paramref name="installDir"/> is the directory the install actually landed in and
     /// is recorded so the uninstall can anchor its replay to it. (R1)
+    /// <paramref name="options"/> is the resolved <c>option.*</c> value of each option
+    /// component that applied, recorded so a later upgrade or reinstall offers the same
+    /// choices again; <c>null</c> or empty records nothing. (R98)
     /// </summary>
     public static void Save(
         string appId,
@@ -133,7 +144,8 @@ internal static class UninstallStateStore
         InstallScope scope,
         System.Collections.Generic.IReadOnlyList<string>? secretValues = null,
         IProgress<StepProgress>? progress = null,
-        string? installDir = null)
+        string? installDir = null,
+        System.Collections.Generic.IReadOnlyDictionary<string, bool>? options = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(appId);
         ArgumentNullException.ThrowIfNull(journal);
@@ -166,6 +178,9 @@ internal static class UninstallStateStore
             Version = "1",
             Scope = scope,
             InstallDir = string.IsNullOrWhiteSpace(installDir) ? null : installDir,
+            Options = options is { Count: > 0 }
+                ? new System.Collections.Generic.Dictionary<string, bool>(options, StringComparer.Ordinal)
+                : null,
             Records = records,
         };
 
@@ -426,7 +441,12 @@ internal static class UninstallStateStore
         // that object is handled with. The field stays on the wire DTO for backward
         // compatibility with existing state files; reading it back must never be
         // reintroduced. (R1)
-        return new LoadAttempt(new LoadedState(journal, dirScope, s.InstallDir), null);
+        //
+        // The recorded options are read from the same file, after the same provenance
+        // gate, and only ever seed defaults the user sees and can change: they decide
+        // nothing about privilege, and a name the running manifest does not declare is
+        // ignored by the reader. (R98)
+        return new LoadAttempt(new LoadedState(journal, dirScope, s.InstallDir, s.Options), null);
     }
 
     /// <summary>

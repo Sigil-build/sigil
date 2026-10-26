@@ -581,11 +581,16 @@ public sealed class InstallerViewModel : ICloseAppsGate
     /// License screen); when none, they are omitted. Each checkbox
     /// is seeded from the component's resolved default; <c>locked</c> components
     /// render disabled (always applied). Only the interactive wizard consults this —
-    /// the headless <c>/silent</c> path resolves options to their manifest defaults.
+    /// the headless <c>/silent</c> path resolves the same chain in the engine.
+    /// <paramref name="defaults"/> is the session's resolved starting value per
+    /// component name (<c>InstallSession.OptionDefaults</c>: a <c>/P</c> override, else
+    /// the choice the prior install recorded); a component it does not name starts at
+    /// its manifest default, and a locked one always does. (R98)
     /// </summary>
     public void LoadOptions(
         IReadOnlyList<InstallerOptionComponent> options,
-        IReadOnlyList<string>? preferences = null)
+        IReadOnlyList<string>? preferences = null,
+        IReadOnlyDictionary<string, bool>? defaults = null)
     {
         // Custom components carry their own localizable label, so
         // resolve against the same preference list the declared screens use
@@ -604,7 +609,10 @@ public sealed class InstallerViewModel : ICloseAppsGate
             {
                 continue;
             }
-            OptionItems.Add(new OptionItemViewModel(component, prefs));
+            bool? initial = defaults is not null && defaults.TryGetValue(component.Name, out var seeded)
+                ? seeded
+                : null;
+            OptionItems.Add(new OptionItemViewModel(component, prefs, initial));
         }
         _hasOptions = OptionItems.Count > 0;
         RebuildFlow();
@@ -717,7 +725,9 @@ public sealed class InstallerViewModel : ICloseAppsGate
                 return;
             }
         }
-        // Terminal step (Finish/Failed) not in the linear flow: leave the cursor.
+        // Terminal step (Finish/Failed) not in the linear flow: leave the cursor, but
+        // redraw the rail so it shows the outcome. (R109)
+        RebuildRail();
     }
 
     public bool CanGoBack => !_isPreparing && !_isClosingApps && _step is not InstallerStep.Welcome and not InstallerStep.Installing and not InstallerStep.Finish and not InstallerStep.Failed and not InstallerStep.DowngradeBlocked;
@@ -924,10 +934,24 @@ public sealed class InstallerViewModel : ICloseAppsGate
         }
 #pragma warning restore CA1031
 
-        var root = System.IO.Path.GetPathRoot(path)?.TrimEnd('\\', '/') ?? string.Empty;
-        InstallPathFreeSpace = free is { } bytes && root.Length > 0
-            ? Strings.LocationDiskFree(_lang, root, FormatSize(bytes))
+        var drive = DriveLabel(System.IO.Path.GetPathRoot(path));
+        InstallPathFreeSpace = free is { } bytes && drive.Length > 0
+            ? Strings.LocationDiskFree(_lang, drive, FormatSize(bytes))
             : string.Empty;
+    }
+
+    /// <summary>
+    /// The drive as <c>location.disk_free</c> names it: the bare letter for a
+    /// drive-letter root (<c>C:\</c> → <c>C</c>), because the catalog string supplies
+    /// the colon itself; any other root (a UNC share) as-is, without its trailing
+    /// separator. (R108)
+    /// </summary>
+    internal static string DriveLabel(string? root)
+    {
+        var trimmed = root?.TrimEnd('\\', '/') ?? string.Empty;
+        return trimmed.Length == 2 && trimmed[1] == ':' && char.IsAsciiLetter(trimmed[0])
+            ? trimmed[..1]
+            : trimmed;
     }
 
     private static long? DefaultFreeSpaceProbe(string path)
@@ -1534,8 +1558,32 @@ public sealed class InstallerViewModel : ICloseAppsGate
                 InstallerStep.DowngradeBlocked => Strings.RailDowngradeBlocked(_lang),
                 _ => Strings.RailConfigure(_lang),
             };
-            RailSteps.Add(new RailStep(label, isCurrent: i == _flowIndex, isDone: i < _flowIndex));
+            RailSteps.Add(new RailStep(label, RailStateFor(i, node.Step)));
         }
+    }
+
+    /// <summary>
+    /// The rail state of flow node <paramref name="index"/>. Finish is not a flow node,
+    /// so on Finish every entry has been gone through. Failed is not one either: the
+    /// install fails inside the Installing step, so the entries before it are done and
+    /// Installing itself carries the failure. Everywhere else the flow cursor splits
+    /// done / current / pending. (R109)
+    /// </summary>
+    private RailStepState RailStateFor(int index, InstallerStep nodeStep)
+    {
+        if (_step == InstallerStep.Finish)
+        {
+            return RailStepState.Done;
+        }
+
+        if (_step == InstallerStep.Failed)
+        {
+            return nodeStep == InstallerStep.Installing ? RailStepState.Failed : RailStepState.Done;
+        }
+
+        return index < _flowIndex ? RailStepState.Done
+            : index == _flowIndex ? RailStepState.Current
+            : RailStepState.Pending;
     }
 
     /// <summary>

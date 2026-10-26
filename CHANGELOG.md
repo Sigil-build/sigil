@@ -428,6 +428,30 @@ restarts — over a running copy, and uninstalling it, found three defects.
   to Finish. The install, uninstall and headed `/Update` runs now start on a
   background thread; progress still reaches the window as before.
 
+### Security — the wizard loads its native libraries only from the verified cache (R102)
+
+- **A `libSkiaSharp.dll`, `libHarfBuzzSharp.dll` or `av_libglesv2.dll` beside
+  `Setup.exe` was loaded into the installer** — elevated after UAC, and after the
+  machine-scope relaunch — instead of the verified copies extracted from the
+  installer itself. The directory the exe runs from answered before the
+  administrator-only native-runtime cache (R4) was ever consulted, so anything
+  planted next to a downloaded `Setup.exe` ran as administrator. The same search
+  order made the interactive uninstall of an Avalonia application fail:
+  `uninstall.exe` loaded the application's own copies of those three DLLs from the
+  install directory and then could not delete them.
+  - The GUI path now takes the application directory off the process DLL search
+    path entirely: the default set is System32 plus the verified cache
+    (`LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_USER_DIRS`).
+  - Skia, HarfBuzz and ANGLE are loaded from the cache **by full path** straight
+    after it is verified, and .NET's native-library resolution for SkiaSharp,
+    HarfBuzzSharp and Avalonia's ANGLE import is pinned to those handles, so the
+    runtime's own probing — which tries the exe's directory first — never runs for
+    them.
+  - A library missing from the cache, or one the loader rejects, refuses to start
+    with exit `78`, exactly as an unverifiable cache does. There is no fallback to
+    loading it by name.
+  - The silent path is unchanged: it never loads these libraries.
+
 ### Known limitations
 
 > **Sigil 0.1.0-alpha is Windows-only and pre-production.** It builds and

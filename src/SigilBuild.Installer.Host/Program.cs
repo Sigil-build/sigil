@@ -220,11 +220,20 @@ public static partial class Program
         // is fatal here on purpose: this wizard IS Skia, so carrying on would crash a
         // few frames later with a worse message, having already searched the
         // untrusted directory. (R4)
+        //
+        // The directory this exe runs from is never trusted for these libraries:
+        // Setup.exe sits in Downloads beside whatever was planted there, and
+        // uninstall.exe sits in an install dir that may hold the application's own
+        // libSkiaSharp.dll. The bootstrap takes that directory off the Win32 search
+        // path and loads the verified copies by full path; the resolvers pinned here
+        // hand those handles to SkiaSharp, HarfBuzzSharp and Avalonia.Win32's ANGLE
+        // import before .NET's probing, which tries the exe's directory first, can
+        // run. (R102)
         if (OperatingSystem.IsWindows())
         {
             try
             {
-                NativeRuntimeBootstrap.EnsureNativeDependenciesLoadable(
+                var nativeCache = NativeRuntimeBootstrap.EnsureNativeDependenciesLoadable(
                     (message, isError) =>
                     {
                         if (isError)
@@ -236,6 +245,14 @@ public static partial class Program
                             InstallerLog.Info(message);
                         }
                     });
+
+                if (nativeCache is not null)
+                {
+                    NativeRuntimeBootstrap.PinDllImports(typeof(SkiaSharp.SKObject).Assembly);
+                    NativeRuntimeBootstrap.PinDllImports(typeof(HarfBuzzSharp.Blob).Assembly);
+                    NativeRuntimeBootstrap.PinDllImports(typeof(Win32PlatformOptions).Assembly);
+                    InstallerLog.Info($"native runtime: Skia, HarfBuzz and ANGLE pinned to '{nativeCache}'");
+                }
             }
             // IOException / UnauthorizedAccessException are caught alongside the typed
             // refusal on purpose. This call runs BEFORE the AppDomain.UnhandledException

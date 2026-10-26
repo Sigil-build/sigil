@@ -43,8 +43,26 @@
           <ItemsControl.ItemTemplate>
             <DataTemplate x:DataType="vm:RailStep">
               <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,5">
-                <Border Width="8" Height="8" CornerRadius="4" VerticalAlignment="Center"
-                        Background="{DynamicResource RailTextBrush}" Opacity="{Binding LabelOpacity}" />
+                <!-- One 12x12 slot per entry so labels stay aligned whichever mark it
+                     shows: the bullet while pending or current, a check mark once done,
+                     a cross on the step the install failed in. The marks are drawn
+                     paths, not glyphs, so they render with any bundled font and are
+                     not catalog text. (R109) -->
+                <Grid Width="12" Height="12" VerticalAlignment="Center">
+                  <Border Width="8" Height="8" CornerRadius="4"
+                          HorizontalAlignment="Center" VerticalAlignment="Center"
+                          Background="{DynamicResource RailTextBrush}" Opacity="{Binding LabelOpacity}"
+                          IsVisible="{Binding ShowsBullet}" />
+                  <Path Data="M 1.5,6.5 L 4.5,9.5 L 10.5,2.5"
+                        Stroke="{DynamicResource RailTextBrush}" StrokeThickness="2"
+                        StrokeLineCap="Round" StrokeJoin="Round"
+                        Opacity="{Binding LabelOpacity}"
+                        IsVisible="{Binding IsDone}" />
+                  <Path Data="M 2.5,2.5 L 9.5,9.5 M 9.5,2.5 L 2.5,9.5"
+                        Stroke="{DynamicResource RailTextBrush}" StrokeThickness="2"
+                        StrokeLineCap="Round"
+                        IsVisible="{Binding IsFailed}" />
+                </Grid>
                 <TextBlock Text="{Binding Label}" FontSize="13"
                            Foreground="{DynamicResource RailTextBrush}"
                            FontWeight="{Binding LabelWeight}" Opacity="{Binding LabelOpacity}" />

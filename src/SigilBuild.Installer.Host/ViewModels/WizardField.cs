@@ -596,22 +596,59 @@ public sealed class OptionItemViewModel : INotifyPropertyChanged
         => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name ?? string.Empty));
 }
 
+/// <summary>Where a rail entry stands relative to the wizard's progress. (R109)</summary>
+public enum RailStepState
+{
+    /// <summary>Not reached yet: muted bullet.</summary>
+    Pending,
+
+    /// <summary>The screen being shown: full-strength bullet, bold label.</summary>
+    Current,
+
+    /// <summary>Gone through: a check mark in place of the bullet.</summary>
+    Done,
+
+    /// <summary>The step the install failed in: a cross in place of the bullet.</summary>
+    Failed,
+}
+
 /// <summary>A single entry in the wizard's rail step indicator.</summary>
 public sealed class RailStep
 {
-    public RailStep(string label, bool isCurrent, bool isDone)
+    public RailStep(string label, RailStepState state)
     {
         Label = label;
-        IsCurrent = isCurrent;
-        IsDone = isDone;
+        State = state;
+    }
+
+    public RailStep(string label, bool isCurrent, bool isDone)
+        : this(label, isCurrent ? RailStepState.Current : isDone ? RailStepState.Done : RailStepState.Pending)
+    {
     }
 
     public string Label { get; }
-    public bool IsCurrent { get; }
-    public bool IsDone { get; }
 
-    /// <summary>Emphasise the current step; dim upcoming ones. Theme-neutral (opacity only).</summary>
-    public double LabelOpacity => IsCurrent ? 1.0 : IsDone ? 0.8 : 0.5;
+    /// <summary>The entry's progress state; the flags below are its bindable projections. (R109)</summary>
+    public RailStepState State { get; }
+
+    public bool IsCurrent => State == RailStepState.Current;
+    public bool IsDone => State == RailStepState.Done;
+    public bool IsFailed => State == RailStepState.Failed;
+
+    /// <summary>
+    /// True for a step that has no mark yet — pending or current — which shows the
+    /// bullet. A done step shows a check mark and a failed one a cross instead, both
+    /// drawn as vector paths so they never depend on a font carrying the glyph. (R109)
+    /// </summary>
+    public bool ShowsBullet => State is RailStepState.Pending or RailStepState.Current;
+
+    /// <summary>Emphasise the current and the failed step; dim upcoming ones. Theme-neutral (opacity only).</summary>
+    public double LabelOpacity => State switch
+    {
+        RailStepState.Current or RailStepState.Failed => 1.0,
+        RailStepState.Done => 0.8,
+        _ => 0.5,
+    };
 
     public Avalonia.Media.FontWeight LabelWeight =>
         IsCurrent ? Avalonia.Media.FontWeight.SemiBold : Avalonia.Media.FontWeight.Normal;

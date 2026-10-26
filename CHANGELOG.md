@@ -480,6 +480,14 @@ restarts — over a running copy, and uninstalling it, found three defects.
 - **R108 — the location screen read "Free space on drive C:: …".** The catalog
   string supplies the colon and the view model passed the drive root with its
   own. The drive is now passed as its bare letter; a UNC share is shown as-is.
+- **R109 — the step rail never marked a step as done.** A completed step looked
+  like a pending one apart from its opacity, and on the Finish screen nothing
+  said the steps had gone through — the rail still showed Install as current.
+  A done step now shows a check mark in place of its bullet; the current step
+  keeps the full-strength bullet and bold label, and pending steps stay muted.
+  On Finish every step shows done; on the Failed screen the steps before the
+  install show done and Install shows a cross. The marks are drawn vector paths,
+  so they do not depend on a font carrying the glyph.
 
 ### Known limitations
 

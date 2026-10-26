@@ -717,7 +717,9 @@ public sealed class InstallerViewModel : ICloseAppsGate
                 return;
             }
         }
-        // Terminal step (Finish/Failed) not in the linear flow: leave the cursor.
+        // Terminal step (Finish/Failed) not in the linear flow: leave the cursor, but
+        // redraw the rail so it shows the outcome. (R109)
+        RebuildRail();
     }
 
     public bool CanGoBack => !_isPreparing && !_isClosingApps && _step is not InstallerStep.Welcome and not InstallerStep.Installing and not InstallerStep.Finish and not InstallerStep.Failed and not InstallerStep.DowngradeBlocked;
@@ -1548,8 +1550,32 @@ public sealed class InstallerViewModel : ICloseAppsGate
                 InstallerStep.DowngradeBlocked => Strings.RailDowngradeBlocked(_lang),
                 _ => Strings.RailConfigure(_lang),
             };
-            RailSteps.Add(new RailStep(label, isCurrent: i == _flowIndex, isDone: i < _flowIndex));
+            RailSteps.Add(new RailStep(label, RailStateFor(i, node.Step)));
         }
+    }
+
+    /// <summary>
+    /// The rail state of flow node <paramref name="index"/>. Finish is not a flow node,
+    /// so on Finish every entry has been gone through. Failed is not one either: the
+    /// install fails inside the Installing step, so the entries before it are done and
+    /// Installing itself carries the failure. Everywhere else the flow cursor splits
+    /// done / current / pending. (R109)
+    /// </summary>
+    private RailStepState RailStateFor(int index, InstallerStep nodeStep)
+    {
+        if (_step == InstallerStep.Finish)
+        {
+            return RailStepState.Done;
+        }
+
+        if (_step == InstallerStep.Failed)
+        {
+            return nodeStep == InstallerStep.Installing ? RailStepState.Failed : RailStepState.Done;
+        }
+
+        return index < _flowIndex ? RailStepState.Done
+            : index == _flowIndex ? RailStepState.Current
+            : RailStepState.Pending;
     }
 
     /// <summary>

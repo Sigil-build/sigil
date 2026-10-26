@@ -475,7 +475,7 @@ restarts — over a running copy, and uninstalling it, found three defects.
   the uninstall window the X means Cancel before anything is removed, closes on
   Done or Failed, and is refused while the uninstall is removing files.
 
-### Fixed — what the uninstaller leaves behind (R106)
+### Fixed — what the uninstaller leaves behind (R106, R107)
 
 - **R106 — `uninstall.exe` stayed in the install directory until the next
   reboot.** A running program cannot delete its own executable, so after a
@@ -502,6 +502,13 @@ restarts — over a running copy, and uninstalling it, found three defects.
     different volumes — the uninstall runs in place, as before.
   - New reserved token `/RelaunchedFrom=<path>`, passed only from the uninstaller
     to its own copy; see `docs/setup-exe-reference.md`.
+- **R107 — a leftover `uninstall.exe` reported a raw failure.** Running the
+  uninstaller of an app that was already removed opened the uninstall window on
+  **Uninstall failed** with `no uninstall state found for '<AppId>' (expected at
+  …\uninstall.json)`. The app is simply not installed: the window now opens on a
+  neutral "<App> is not installed" screen (English and Ukrainian) and closes with
+  exit `0`, and the silent path says so, logs `result: not installed` and exits
+  `0`. No hook runs. State that exists but is refused still fails as before (R1).
 
 ### Known limitations
 

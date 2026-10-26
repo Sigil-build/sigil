@@ -71,6 +71,14 @@ public partial class App : Application
                 _uninstallVm.ConfigureBlockerProbe(
                     scan: () => DescribeBlockers(session.ScanUninstallBlockers()),
                     close: () => session.CloseUninstallBlockers());
+                // Nothing to remove — a leftover uninstall.exe: open on the neutral
+                // not-installed screen rather than offering an uninstall that can only
+                // fail. A refused state is not "not installed" and still fails. (R1, R107)
+                if (session.IsNotInstalled())
+                {
+                    InstallerLog.Info($"uninstall: {session.AppId} is not installed in this scope; nothing to remove");
+                    _uninstallVm.ShowNotInstalled();
+                }
                 desktop.MainWindow = new UninstallWindow { DataContext = _uninstallVm };
                 base.OnFrameworkInitializationCompleted();
                 return;

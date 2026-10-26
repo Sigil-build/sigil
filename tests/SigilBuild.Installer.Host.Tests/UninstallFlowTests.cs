@@ -73,6 +73,55 @@ public sealed class UninstallFlowTests
         ((int)vm.OutcomeCode).Should().Be(1);
     }
 
+    /// <summary>
+    /// A leftover <c>uninstall.exe</c> opens on a neutral not-installed screen, not on
+    /// the confirmation, and leaves with exit 0 — whether through Close or the window's
+    /// close gesture. (R107)
+    /// </summary>
+    [Fact]
+    public void An_app_that_is_not_installed_shows_the_not_installed_screen_and_exits_0()
+    {
+        // Arrange
+        var vm = new UninstallViewModel(new BrandTokens { AppName = "Acme Studio" });
+
+        // Act
+        vm.ShowNotInstalled();
+        vm.Cancel(); // the window's close gesture calls this on every step
+
+        // Assert
+        vm.CurrentStep.Should().Be(UninstallStep.NotInstalled);
+        vm.IsNotInstalled.Should().BeTrue();
+        vm.IsFinished.Should().BeTrue("the footer offers a single Close");
+        vm.IsCancellable.Should().BeFalse();
+        vm.NotInstalledMessage.Should().Be("Acme Studio is not installed");
+        vm.OutcomeCode.Should().Be(InstallerOutcomeCode.Completed);
+        ((int)vm.OutcomeCode).Should().Be(0);
+    }
+
+    /// <summary>
+    /// The state can also disappear between the window opening and the user confirming;
+    /// the session then reports not-installed rather than a failure, and the window lands
+    /// on the same neutral screen. (R107)
+    /// </summary>
+    [Fact]
+    public async Task A_not_installed_outcome_lands_on_the_not_installed_screen_not_failed()
+    {
+        // Arrange
+        var vm = new UninstallViewModel(new BrandTokens { AppName = "Acme Studio" });
+        vm.ConfigureRunner((progress, ct) =>
+            Task.FromResult(new InstallOutcome(false, "Acme Studio is not installed") { NotInstalled = true }));
+
+        // Act
+        vm.Confirm();
+        await vm.UninstallTask!;
+
+        // Assert
+        vm.CurrentStep.Should().Be(UninstallStep.NotInstalled);
+        vm.IsFailed.Should().BeFalse();
+        vm.ErrorMessage.Should().BeNull();
+        ((int)vm.OutcomeCode).Should().Be(0);
+    }
+
     [Fact]
     public async Task Uninstall_runner_runs_off_the_calling_thread_so_the_progress_screen_can_render()
     {

@@ -103,6 +103,8 @@ uninstall.progress = Вилучення…
 uninstall.done = {appName} вилучено
 uninstall.failed = Помилка вилучення
 uninstall.failed_body = Деякі компоненти могло бути не вилучено. Ви можете спробувати ще раз через «Програми та засоби».
+uninstall.not_installed = {appName} не встановлено
+uninstall.not_installed_body = Немає чого вилучати. Можливо, програму вже вилучено.
 
 # --- update (T12.4 headed /Update progress window) ---
 update.version = Версія {version}

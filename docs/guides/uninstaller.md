@@ -180,12 +180,19 @@ Pressing **Uninstall** in Apps & features (or Add or Remove Programs) runs the `
 
 ## The uninstall window
 
-The interactive uninstall is **Confirm → [Close apps] → Progress → Done | Failed**.
+The interactive uninstall is **Confirm → [Close apps] → Progress → Done | Failed**, or **Not installed** when there is nothing to remove.
 
 - **Confirm.** Uninstall starts the run; Cancel leaves with exit code `2`.
 - **Close apps** — shown only when something is running. Pressing Uninstall runs the `pre_uninstall` hooks and then the files-in-use check; if an application is still holding the install, the run stops there, before anything is removed, and the window shows the same Close-applications screen as the install wizard: each blocking application with its process id, **Retry** (re-scan after closing them yourself), **Close for me** (asks each application to shut down normally through the Restart Manager, in the background, then re-scans and says so if any are still running), and **Cancel** (exit code `2`, nothing removed — the `pre_uninstall` hooks have already run by then). Once nothing is blocking, the uninstall continues to Progress without running the hooks again.
 - **Progress** grows the reversal log as the journal replays. The title bar's X (and Alt+F4) is refused while it runs: stopping half-way would leave a partly removed install. On Confirm and Close apps the X means Cancel.
 - **Done** or **Failed** close with exit code `0` or `1`.
+- **Not installed** — shown instead of Confirm when there is nothing to remove: no uninstall state exists for the app in that scope, which is what a leftover `uninstall.exe` of an already-removed app finds. It says "<App> is not installed", runs no hook, and closes with exit code `0`.
+
+## When the app is not installed
+
+An uninstall that finds no uninstall state for the app in its scope has nothing to remove, and that is not a failure. The window opens on its **Not installed** screen (above); the silent path prints `<App> is not installed … there is nothing to uninstall`, writes `result: not installed` to the log, and exits `0`. No `pre_uninstall` or `post_uninstall` hook runs. An upgrade whose previous version's `uninstall.exe` finds no state therefore proceeds instead of being refused; an `uninstall.exe` from before this behaviour still exits `1` there.
+
+This is only for state that is **absent**. State that exists but is refused — a machine-scope state file an ordinary user could have written, or one that will not parse — still fails the uninstall exactly as before, naming the refusal: reporting it as "not installed" would hide the very thing the refusal exists to surface.
 
 ## See also
 

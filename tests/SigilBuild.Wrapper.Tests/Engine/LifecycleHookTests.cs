@@ -182,19 +182,28 @@ public sealed class LifecycleHookTests
         var appId = "com.acme.p2preu-" + Guid.NewGuid().ToString("N");
         var log = Path.Combine(tmp.Path, "u.log");
 
-        var blob = Blob(appId,
-            install: Array.Empty<InstallStep>(),
-            preUninstall: new[] { FailingCopy("badpreu", tmp.Path, OnFailure.Fail) });
+        // Seed uninstall state: with none, there is nothing installed and no hook runs (R107).
+        UninstallStateStore.Save(appId, new RollbackJournal(), InstallScope.User, Array.Empty<string>());
+        try
+        {
+            var blob = Blob(appId,
+                install: Array.Empty<InstallStep>(),
+                preUninstall: new[] { FailingCopy("badpreu", tmp.Path, OnFailure.Fail) });
 
-        var parsed = CommandLineParser.Parse(new[] { "/silent", "/Uninstall", $"/LOG={log}" }, blob.Parameters);
-        var session = InstallSession.ForTesting(blob, parsed);
+            var parsed = CommandLineParser.Parse(new[] { "/silent", "/Uninstall", $"/LOG={log}" }, blob.Parameters);
+            var session = InstallSession.ForTesting(blob, parsed);
 
-        var code = await session.RunHeadlessAsync(new StringWriter(), new StringWriter());
+            var code = await session.RunHeadlessAsync(new StringWriter(), new StringWriter());
 
-        code.Should().Be(1);
-        var logText = File.ReadAllText(log);
-        logText.Should().Contain("hook pre_uninstall");
-        logText.Should().Contain("uninstall aborted");
+            code.Should().Be(1);
+            var logText = File.ReadAllText(log);
+            logText.Should().Contain("hook pre_uninstall");
+            logText.Should().Contain("uninstall aborted");
+        }
+        finally
+        {
+            Cleanup(appId);
+        }
     }
 
     [Fact]

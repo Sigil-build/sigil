@@ -102,8 +102,11 @@ public sealed class InstallSessionTests
         outcome.Error.Should().BeNull();
     }
 
+    /// <summary>
+    /// No uninstall state means nothing is installed — not a failure. (R107)
+    /// </summary>
     [Fact]
-    public async Task Uninstall_without_state_exits_1()
+    public async Task Uninstall_without_state_exits_0_as_not_installed()
     {
         var session = InstallSession.Create(Uninstall);
         var output = new StringWriter();
@@ -111,7 +114,8 @@ public sealed class InstallSessionTests
 
         var code = await session.RunHeadlessAsync(output, error);
 
-        code.Should().Be(1);
+        code.Should().Be(0);
+        output.ToString().Should().Contain("is not installed");
     }
 
     private sealed class SyncProgress : IProgress<StepProgress>

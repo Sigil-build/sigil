@@ -96,6 +96,14 @@
         <TextBlock Text="{x:Static loc:S.UninstallFailedBody}"
                    Foreground="{DynamicResource TextSecBrush}" TextWrapping="Wrap" />
       </StackPanel>
+
+      <!-- Not installed: nothing left to remove (a leftover uninstall.exe). Neutral,
+           not an error; Close exits 0. (R107) -->
+      <StackPanel Spacing="12" VerticalAlignment="Center" IsVisible="{Binding IsNotInstalled}">
+        <TextBlock FontSize="20" FontWeight="SemiBold" Text="{Binding NotInstalledMessage}" TextWrapping="Wrap" />
+        <TextBlock Text="{x:Static loc:S.UninstallNotInstalledBody}"
+                   Foreground="{DynamicResource TextSecBrush}" TextWrapping="Wrap" />
+      </StackPanel>
     </Panel>
 
     <!-- Footer -->

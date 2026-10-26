@@ -1,0 +1,13 @@
+# app.copyright: the packed Setup.exe's LegalCopyright (Properties > Details).
+# A non-ASCII notice must be accepted as-is; the version resource is UTF-16. (R105)
+spec: v1.0
+
+app:
+  id: com.example.App
+  name: Диктум
+  version: 1.2.3-rc.1+build.42
+  publisher: ТОВ «Приклад»
+  copyright: "© 2026 ТОВ «Приклад». Усі права захищено."
+
+build:
+  source: ./out

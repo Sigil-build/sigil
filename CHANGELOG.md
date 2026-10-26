@@ -475,6 +475,22 @@ restarts — over a running copy, and uninstalling it, found three defects.
   the uninstall window the X means Cancel before anything is removed, closes on
   Done or Failed, and is refused while the uninstall is removing files.
 
+### Fixed — a packed installer's file properties named Sigil's host (R105)
+
+- **R105 — every packed `Setup.exe` carried the installer host's own version
+  resource.** `sigil pack` stamped the payload and the icon but left the host's
+  `RT_VERSION` in place, so Explorer's Properties → Details on a publisher's
+  installer (and on the `uninstall.exe` copied from it) showed the description
+  and product name `installer`, the original file name `installer.dll`, Sigil's
+  version and Sigil's copyright. Pack now replaces it with one built from the
+  manifest: file description `<app.name> Setup`, product name `app.name`,
+  company `app.publisher`, file and product version the full `app.version`,
+  original and internal name the produced file's name, and a numeric version of
+  `major.minor.patch.0` from the SemVer core (each part clamped to 0–65535).
+  Both the full package and the `--payload web` stub get it, before signing.
+- **New optional manifest field `app.copyright`** — the installer's
+  LegalCopyright. When it is omitted the field is left empty.
+
 ### Known limitations
 
 > **Sigil 0.1.0-alpha is Windows-only and pre-production.** It builds and

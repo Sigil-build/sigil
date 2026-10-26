@@ -81,7 +81,9 @@ internal static partial class WrapperResourceWriter
     {
         // BeginUpdateResource(deleteExistingResources: false) keeps the AOT
         // binary's pre-existing resources (manifest, version info, icon)
-        // intact and only adds/overrides the named resources we touch.
+        // intact and only adds/overrides the named resources we touch; the icon
+        // and version info are replaced afterwards by IconResourceWriter and
+        // VersionResourceWriter. (R105)
         var hUpdate = BeginUpdateResourceW(exePath, deleteExistingResources: false);
         if (hUpdate == IntPtr.Zero)
         {

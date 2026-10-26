@@ -309,7 +309,13 @@
           "minLength": 1
         },
         "description": { "type": "string" },
-        "homepage": { "type": "string", "format": "uri" }
+        "homepage": { "type": "string", "format": "uri" },
+        "copyright": {
+          "type": "string",
+          "description": "Copyright notice stamped into the packed Setup.exe's version resource (LegalCopyright, shown under Properties > Details), e.g. \"Copyright (c) 2026 Example Inc.\". When omitted, LegalCopyright is left empty.",
+          "minLength": 1,
+          "maxLength": 1024
+        }
       }
     },
     "build": {

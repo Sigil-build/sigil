@@ -1,0 +1,11 @@
+# app.copyright is optional, but declared it must say something: an empty
+# notice is the same as omitting the key, so the schema refuses it. (R105)
+spec: v1.0
+app:
+  id: com.example.App
+  name: Example
+  version: 0.1.0
+  publisher: Example Inc.
+  copyright: ""
+build:
+  source: ./out

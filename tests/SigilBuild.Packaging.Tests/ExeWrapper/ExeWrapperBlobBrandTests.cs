@@ -178,6 +178,49 @@ public class ExeWrapperBlobBrandTests
     }
 
     [Fact]
+    public void BuildBlobBytes_ManifestGivenAsRelativePath_ResolvesLogoAndLicenseBesideIt()
+    {
+        // Arrange — `sigil pack sigil.yaml` run beside the manifest records a bare file
+        // name, whose directory part is empty; the manifest's directory is then the
+        // current one. The assets sit there under unique names. (R96)
+        var cwd = Environment.CurrentDirectory;
+        var stem = "sigil-brand-" + Path.GetRandomFileName();
+        var logoName = stem + ".png";
+        var licenseName = stem + ".txt";
+        var sourceDir = Path.Combine(Path.GetTempPath(), stem);
+        Directory.CreateDirectory(sourceDir);
+        try
+        {
+            var logoBytes = new byte[] { 3, 1, 4 };
+            File.WriteAllBytes(Path.Combine(cwd, logoName), logoBytes);
+            File.WriteAllText(Path.Combine(cwd, licenseName), "Terms.");
+            var manifest = ManifestAt("sigil.yaml", "./" + logoName, null) with
+            {
+                Installer = new InstallerSection(
+                    new InstallerBrand("./" + logoName, null, "#312E81", "#4F46E5"),
+                    License: LocalizedText.Plain("./" + licenseName)),
+            };
+            var diagnostics = new List<Diagnostic>();
+
+            // Act
+            var s = Deserialize(ExeWrapperPackager.BuildBlobBytes(manifest, sourceDir, diagnostics));
+
+            // Assert
+            s.LogoBase64.Should().Be(System.Convert.ToBase64String(logoBytes));
+            s.LicenseText!["en"].Should().Be("Terms.");
+            diagnostics.Should().NotContain(d =>
+                d.Code == DiagnosticCodes.BrandImageUnreadable ||
+                d.Code == DiagnosticCodes.LicenseFileUnreadable);
+        }
+        finally
+        {
+            File.Delete(Path.Combine(cwd, logoName));
+            File.Delete(Path.Combine(cwd, licenseName));
+            Directory.Delete(sourceDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public void BuildBlobBytes_MissingBrandImage_WarnsWithSig0251_AndDoesNotFail()
     {
         // Arrange

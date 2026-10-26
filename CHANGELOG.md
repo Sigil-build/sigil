@@ -475,6 +475,34 @@ restarts — over a running copy, and uninstalling it, found three defects.
   the uninstall window the X means Cancel before anything is removed, closes on
   Done or Failed, and is refused while the uninstall is removing files.
 
+### Fixed — what the uninstaller leaves behind (R106)
+
+- **R106 — `uninstall.exe` stayed in the install directory until the next
+  reboot.** A running program cannot delete its own executable, so after a
+  successful uninstall the install folder still held one file — the uninstaller,
+  a full copy of `Setup.exe` — scheduled for deletion at a restart a per-user
+  uninstall was not even allowed to schedule. `uninstall.exe` now does what the
+  NSIS and Inno Setup uninstallers do: it copies itself into a fresh private
+  directory (`%ProgramData%\sigil-uninstall-<guid>`, administrator-only, when
+  elevated; a private `%TEMP%\sigil-uninstall-<guid>` otherwise), verifies the
+  copy against its own bytes from a handle that blocks replacement, runs the
+  uninstall from the copy with the same privilege and the same arguments, waits
+  for it and exits with its exit code. The copy moves the original out of the
+  install directory, so the directory is removed with the rest of the uninstall,
+  and the private directory is cleaned up or scheduled for the next restart.
+  - The interactive uninstall waits too, so Apps & features refreshes its list
+    only once the app is gone.
+  - An upgrade's removal of the previous version keeps working: the previous
+    version's `uninstall.exe` hands the single-instance guard it was admitted on
+    to its copy. An `uninstall.exe` from before this change uninstalls in place,
+    as it always did.
+  - `uninstall.exe` now moves its current directory off the install directory
+    before doing anything else, and resolves a relative `/LOG=` first.
+  - When no copy can be made — or the install and temporary directories are on
+    different volumes — the uninstall runs in place, as before.
+  - New reserved token `/RelaunchedFrom=<path>`, passed only from the uninstaller
+    to its own copy; see `docs/setup-exe-reference.md`.
+
 ### Known limitations
 
 > **Sigil 0.1.0-alpha is Windows-only and pre-production.** It builds and

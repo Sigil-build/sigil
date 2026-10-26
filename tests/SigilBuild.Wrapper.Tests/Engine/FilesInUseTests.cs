@@ -883,9 +883,11 @@ public sealed class FilesInUseTests
     }
 
     /// <summary>
-    /// The admission is one level deep. An admitted child does not own the guard, so it
-    /// cannot mint a handoff of its own: no chain of processes can walk the exemption
-    /// outwards. (R76)
+    /// The admission is one level deep for an upgrade teardown. An admitted child does not
+    /// own the guard, so it cannot mint a teardown handoff of its own: no chain of
+    /// upgrades can walk the exemption outwards. (R76) It may only relay the admission to
+    /// its own temporary copy — see
+    /// <see cref="An_admitted_uninstaller_relays_the_guard_to_its_temporary_copy_and_to_nothing_else"/>.
     /// </summary>
     [WindowsFact]
     public void An_admitted_child_cannot_mint_a_further_handoff()
@@ -908,6 +910,108 @@ public sealed class FilesInUseTests
         finally
         {
             Environment.SetEnvironmentVariable(SetupInstanceLock.HandoffVariable, null);
+        }
+    }
+
+    /// <summary>
+    /// An upgrade admits the prior version's <c>uninstall.exe</c>, which then runs from a
+    /// temporary copy of itself; the copy's real parent is the uninstaller, so the
+    /// uninstaller must be able to relay the admission or every upgrade over a relaunching
+    /// uninstaller fails with exit 5. The relay names the relaying process and this one
+    /// guard, exactly like a teardown handoff, and — like every handoff — admits an
+    /// uninstall only, never an install. (R76, R106)
+    /// </summary>
+    [WindowsFact]
+    public void An_admitted_uninstaller_relays_the_guard_to_its_temporary_copy_and_to_nothing_else()
+    {
+        // Arrange
+        var appId = "com.acme.r106relay-" + Guid.NewGuid().ToString("N");
+        var name = SetupInstanceLock.NameFor(appId, InstallScope.User);
+        using var installer = SetupInstanceLock.TryAcquire(appId, InstallScope.User);
+        installer.Should().NotBeNull();
+        Environment.SetEnvironmentVariable(SetupInstanceLock.HandoffVariable, RealParentHandoff(name));
+        try
+        {
+            using var admitted = AcquireAsChild(appId, WrapperMode.Uninstall, out var refusal);
+            refusal.Should().Be(SetupInstanceLock.SetupLockRefusal.AdmittedByParentInstaller);
+
+            // Act
+            var relay = admitted!.MintRelaunchHandoff();
+
+            // Assert
+            SetupInstanceLock.TryGetProcessCreationTime((uint)Environment.ProcessId, out var created)
+                .Should().BeTrue();
+            relay.Should().Be(
+                SetupInstanceLock.FormatHandoff((uint)Environment.ProcessId, created, name),
+                "the relay names the relaying process — the copy's real parent — and this guard");
+            admitted.MintChildHandoff().Should().BeNull(
+                "relaying to its own copy is not the right to hand the guard to an upgrade teardown");
+
+            // A relay token is an ordinary handoff: it can never admit a concurrent install.
+            Environment.SetEnvironmentVariable(SetupInstanceLock.HandoffVariable, relay);
+            using var install = SetupInstanceLock.TryAcquire(
+                appId, InstallScope.User, WrapperMode.Install,
+                SetupInstanceLock.ConsumeHandoffToken(), out var installRefusal);
+            install.Should().BeNull();
+            installRefusal.Should().Be(SetupInstanceLock.SetupLockRefusal.AnotherInstanceRunning);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(SetupInstanceLock.HandoffVariable, null);
+        }
+    }
+
+    /// <summary>
+    /// The owner relays too: an ordinary uninstall that took the guard itself hands it to
+    /// its temporary copy with the same token a teardown handoff would carry. (R106)
+    /// </summary>
+    [WindowsFact]
+    public void An_owning_uninstaller_relays_the_guard_to_its_temporary_copy()
+    {
+        // Arrange
+        var appId = "com.acme.r106own-" + Guid.NewGuid().ToString("N");
+        using var owner = SetupInstanceLock.TryAcquire(appId, InstallScope.User);
+
+        // Act
+        var relay = owner!.MintRelaunchHandoff();
+
+        // Assert
+        relay.Should().NotBeNull().And.Be(owner.MintChildHandoff());
+    }
+
+    /// <summary>
+    /// The temporary copy of a relaunched uninstaller sweeps the install directory while
+    /// its relaunch parent — running the ORIGINAL uninstall.exe from inside that directory
+    /// — waits on it. Scan must drop a process running any of the installer images it is
+    /// given, by file identity, and keep it when that image is not among them. (R58, R106)
+    /// </summary>
+    [WindowsFact]
+    public async Task Scan_drops_a_process_running_any_supplied_installer_image()
+    {
+        // Arrange
+        using var tmp = new TempDir();
+        using var elsewhere = new TempDir();
+        using var app = ImageInDirProcess.Start(tmp.Path, "uninstall.exe");
+        try
+        {
+            var pid = (uint)app.Id;
+            var copyImage = Path.Combine(elsewhere.Path, "uninstall.exe");
+            File.Copy(app.ImagePath, copyImage);
+            var kept = await WaitForBlockerAsync(
+                tmp.Path, pid, () => FilesInUse.Scan(null, tmp.Path, new[] { copyImage }));
+
+            // Act
+            var dropped = FilesInUse.Scan(null, tmp.Path, new[] { copyImage, app.ImagePath });
+
+            // Assert
+            kept.Should().Contain(b => b.ProcessId == pid,
+                "a byte-identical copy elsewhere is a different file, so it exempts nothing");
+            dropped.Should().NotContain(b => b.ProcessId == pid,
+                "the original the copy was relaunched from is the waiting parent's image");
+        }
+        finally
+        {
+            app.Kill();
         }
     }
 

@@ -29,6 +29,11 @@ public static partial class Program
             return 0;
         }
 
+        // An uninstall.exe leaves the install directory as its current directory before
+        // anything else runs (a process's current directory cannot be removed), with a
+        // relative /LOG= resolved first so it still names the same file. (R106)
+        args = UninstallerRelaunch.PrepareProcess(args);
+
         // The one CommandLineParser + WrapperBlob load, shared with the console
         // wrapper. A usage/validation error (bad flag, undeclared parameter, or a
         // required parameter missing in silent mode) exits 64.
@@ -180,6 +185,28 @@ public static partial class Program
         // started by deployment tooling has no window and often no console, so this
         // file is the only place a refusal can be read afterwards. (R93)
         session.DiagnosticLogPath = InstallerLog.LogPath;
+
+        // An uninstall.exe in the install directory hands its run to a private temporary
+        // copy of itself and waits for it, exiting with its exit code, so the copy can
+        // remove the install directory — this uninstaller included — rather than leave it
+        // until the next restart. After the guard, because the copy is admitted on this
+        // process's handoff; before the native bootstrap, so this process never loads the
+        // GUI's native libraries from anywhere. When no copy could be started the
+        // uninstall runs here, in place. The copy itself wires up to its original below.
+        // (R106)
+        if (UninstallerRelaunch.ShouldRelaunch(session))
+        {
+            if (session.Silent)
+            {
+                AttachParentConsole();
+            }
+            var copyExitCode = UninstallerRelaunch.TryRunFromTemporaryCopy(session, args, WriteDiagnostic);
+            if (copyExitCode is int exitCode)
+            {
+                return exitCode;
+            }
+        }
+        UninstallerRelaunch.ConfigureRelaunchedCopy(session, WriteDiagnostic);
 
         // Headless whenever /silent or /verysilent is present (this includes the
         // ARP QuietUninstallString's `/S /Uninstall`, and a scripted `/Update /silent`).
@@ -341,6 +368,19 @@ public static partial class Program
     public static string RenderWizardStartedLine(ParsedCommandLine commandLine) =>
         $"wizard started: pid={Environment.ProcessId}, " +
         $"args=[{commandLine.AuditSafeRendering()}], cwd={Environment.CurrentDirectory}";
+
+    // A (message, isError) sink onto the always-on diagnostic log.
+    private static void WriteDiagnostic(string message, bool isError)
+    {
+        if (isError)
+        {
+            InstallerLog.Error(message);
+        }
+        else
+        {
+            InstallerLog.Info(message);
+        }
+    }
 
     public static AppBuilder BuildAvaloniaApp() =>
         AppBuilder.Configure<App>()

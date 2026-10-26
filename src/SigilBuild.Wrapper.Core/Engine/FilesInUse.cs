@@ -90,7 +90,24 @@ public static partial class FilesInUse
     /// </remarks>
     internal static IReadOnlyList<AppBlocker> Scan(
         IReadOnlyList<string>? appMutexes, string? installDir, string? selfImagePath)
+        => Scan(
+            appMutexes,
+            installDir,
+            string.IsNullOrEmpty(selfImagePath) ? Array.Empty<string>() : new[] { selfImagePath });
+
+    /// <summary>
+    /// <see cref="Scan(IReadOnlyList{string}, string, string)"/> with every image that is
+    /// "this installer" supplied: the running image, and — for the temporary copy of a
+    /// relaunched uninstaller — the original <c>uninstall.exe</c> in the install directory,
+    /// which is the image of the relaunch parent (and of its own un-elevated parent) waiting
+    /// on this process. Each is matched by FILE IDENTITY exactly as the single image is:
+    /// supplying the original names one more specific file, it never widens the exclusion
+    /// into a name or content match. (R58, R106)
+    /// </summary>
+    internal static IReadOnlyList<AppBlocker> Scan(
+        IReadOnlyList<string>? appMutexes, string? installDir, IReadOnlyList<string> installerImages)
     {
+        ArgumentNullException.ThrowIfNull(installerImages);
         if (!OperatingSystem.IsWindows())
         {
             return Array.Empty<AppBlocker>();
@@ -98,7 +115,7 @@ public static partial class FilesInUse
 
         var found = new List<AppBlocker>();
         found.AddRange(ScanMutexes(appMutexes));
-        found.AddRange(ScanRestartManager(installDir, selfImagePath));
+        found.AddRange(ScanRestartManager(installDir, installerImages));
 
         // De-dupe on (name, pid) — a process can be reported by both probes.
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -147,7 +164,7 @@ public static partial class FilesInUse
     /// fresh install has nothing to block).
     /// </summary>
     [SupportedOSPlatform("windows")]
-    private static List<AppBlocker> ScanRestartManager(string? installDir, string? selfImagePath)
+    private static List<AppBlocker> ScanRestartManager(string? installDir, IReadOnlyList<string> installerImages)
     {
         var blockers = new List<AppBlocker>();
         var files = EnumerateExistingFiles(installDir);
@@ -166,7 +183,7 @@ public static partial class FilesInUse
             {
                 return blockers;
             }
-            blockers.AddRange(GetList(session, selfImagePath));
+            blockers.AddRange(GetList(session, installerImages));
         }
 #pragma warning disable CA1031 // Best-effort probe: a RM failure must never wedge a good install.
         catch (Exception)
@@ -248,7 +265,7 @@ public static partial class FilesInUse
     }
 
     [SupportedOSPlatform("windows")]
-    private static List<AppBlocker> GetList(uint session, string? selfImagePath)
+    private static List<AppBlocker> GetList(uint session, IReadOnlyList<string> installerImages)
     {
         var blockers = new List<AppBlocker>();
 
@@ -284,12 +301,15 @@ public static partial class FilesInUse
             // by: installer (pid N)", N being its own pid — before touching anything,
             // and /closeapps cannot rescue it because the Restart Manager cannot close
             // its own caller. The uninstaller's image is not the gate's problem: it is
-            // deleted by the reboot-scheduled MoveFileEx (RollbackRecord.RemoveUninstaller
-            // / SelfDelete), never by closing an application. This is the ONLY exclusion
+            // removed by RollbackRecord.RemoveUninstaller / SelfDelete — moved out of the
+            // install directory by the temporary copy the uninstall runs from (R106), or
+            // deleted at the next reboot — never by closing an application. The original
+            // uninstaller that copy was started from counts as the installer too: it is the
+            // image of the relaunch parent waiting on the copy. This is the ONLY exclusion
             // — a third-party process holding anything under the install directory is
             // still a blocker, including an app whose own image lives there, which is
             // the case the gate exists for. (R58)
-            if (IsRunningInstallerProcess(pid, selfImagePath))
+            if (IsRunningAnyInstallerImage(pid, installerImages))
             {
                 continue;
             }
@@ -344,6 +364,39 @@ public static partial class FilesInUse
 
         var image = TryGetProcessImagePath(processId);
         return image is not null && SameFile(selfImagePath, image);
+    }
+
+    /// <summary>
+    /// <see cref="IsRunningInstallerProcess(uint, string?)"/> against several installer
+    /// images: the process is the installer when it is this process or runs any one of
+    /// them, each compared by file identity. (R58, R106)
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    internal static bool IsRunningAnyInstallerImage(uint processId, IReadOnlyList<string> installerImages)
+    {
+        ArgumentNullException.ThrowIfNull(installerImages);
+        if (processId == (uint)Environment.ProcessId)
+        {
+            return true;
+        }
+        if (installerImages.Count == 0)
+        {
+            return false;
+        }
+
+        var image = TryGetProcessImagePath(processId);
+        if (image is null)
+        {
+            return false;
+        }
+        foreach (var candidate in installerImages)
+        {
+            if (!string.IsNullOrEmpty(candidate) && SameFile(candidate, image))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     /// <summary>

@@ -295,6 +295,41 @@ public sealed partial class SetupInstanceLock : IDisposable
             : null;
     }
 
+    /// <summary>
+    /// The token to put on the environment of this uninstaller's own private
+    /// temporary copy (<see cref="UninstallerRelaunch"/>), or <c>null</c> when this
+    /// process holds no reference to the guard (the <see cref="SetupLockRefusal.GuardUnavailable"/>
+    /// sentinel, or off Windows). (R76, R106)
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Unlike <see cref="MintChildHandoff"/> this is minted by an ADMITTED lock as well
+    /// as an owning one, because the relaunch has to keep working inside an upgrade: the
+    /// new Setup owns the guard, admits the prior version's <c>uninstall.exe</c>, and that
+    /// uninstaller then hands its run to its temporary copy. The copy's real parent is the
+    /// uninstaller, not the Setup, so without a relay here it would be refused as a second
+    /// instance and every upgrade over a relaunching uninstaller would fail with exit 5.
+    /// </para>
+    /// <para>
+    /// The relay grants nothing <see cref="HandoffAdmits"/> does not already concede: any
+    /// process may mint a token for its own child, and what a token admits is only an
+    /// uninstall run of this one app+scope whose live parent named it. The copy is that,
+    /// and this process stays blocked on it for the copy's whole run, so the teardown
+    /// still runs inside the critical section of whoever holds the guard.
+    /// </para>
+    /// </remarks>
+    internal string? MintRelaunchHandoff()
+    {
+        if (_handle == IntPtr.Zero || !OperatingSystem.IsWindows())
+        {
+            return null;
+        }
+        var self = (uint)Environment.ProcessId;
+        return TryGetProcessCreationTime(self, out var created)
+            ? FormatHandoff(self, created, Name)
+            : null;
+    }
+
     /// <summary>The handoff wire format. Shared by the minter and the tests.</summary>
     internal static string FormatHandoff(uint parentPid, long parentCreationTime, string lockName)
         => string.Create(

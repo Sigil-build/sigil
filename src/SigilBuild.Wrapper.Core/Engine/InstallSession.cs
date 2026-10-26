@@ -483,6 +483,41 @@ public sealed class InstallSession
     /// </summary>
     internal SetupInstanceLock? InstanceLock { get; set; }
 
+    /// <summary>
+    /// True when this session runs a packed blob — a real <c>Setup.exe</c> or
+    /// <c>uninstall.exe</c> — rather than the un-stamped development runtime.
+    /// </summary>
+    internal bool IsStamped => !ReferenceEquals(_blob, WrapperBlob.Empty);
+
+    /// <summary>
+    /// The verified original <c>uninstall.exe</c> when this process is its private
+    /// temporary copy, else <c>null</c>. Set only by
+    /// <see cref="UninstallerRelaunch.ConfigureRelaunchedCopy"/>, after
+    /// <see cref="UninstallerRelaunch.VerifyOriginal"/> accepted it. (R106)
+    /// </summary>
+    internal string? OriginalUninstallerImage { get; set; }
+
+    /// <summary>
+    /// Every image the files-in-use gate treats as this installer: the running image,
+    /// plus the verified original <c>uninstall.exe</c> when this is its temporary copy —
+    /// the relaunch parent waiting on this process runs that image from inside the very
+    /// directory the gate sweeps. (R58, R106)
+    /// </summary>
+    private List<string> InstallerImages()
+    {
+        var images = new List<string>(2);
+        var self = FilesInUse.SelfImagePath();
+        if (self is not null)
+        {
+            images.Add(self);
+        }
+        if (OriginalUninstallerImage is not null)
+        {
+            images.Add(OriginalUninstallerImage);
+        }
+        return images;
+    }
+
     /// <summary>True when <c>/silent</c>, <c>/S</c>, or <c>/verysilent</c> was supplied.</summary>
     public bool Silent => _parsed.Silent;
 
@@ -2129,7 +2164,7 @@ public sealed class InstallSession
     /// defensively, by the install path itself.
     /// </summary>
     public IReadOnlyList<AppBlocker> ScanBlockers(string? installDir = null)
-        => FilesInUse.Scan(_blob.AppMutex, installDir ?? EffectiveInstallDir());
+        => FilesInUse.Scan(_blob.AppMutex, installDir ?? EffectiveInstallDir(), InstallerImages());
 
     /// <summary>
     /// Ask the Restart Manager to gracefully close the applications holding the
@@ -2151,7 +2186,7 @@ public sealed class InstallSession
     /// wizard's Retry sees exactly what the gate will. (R103)
     /// </summary>
     public IReadOnlyList<AppBlocker> ScanUninstallBlockers()
-        => FilesInUse.Scan(_blob.AppMutex, UninstallGateDir());
+        => FilesInUse.Scan(_blob.AppMutex, UninstallGateDir(), InstallerImages());
 
     /// <summary>
     /// <see cref="CloseBlockers"/> for the uninstall — the uninstall wizard's
@@ -2191,7 +2226,7 @@ public sealed class InstallSession
     /// </summary>
     private InstallOutcome? CheckFilesInUse(StepContext ctx, string? installDir, IProgress<StepProgress>? progress)
     {
-        var blockers = FilesInUse.Scan(_blob.AppMutex, installDir);
+        var blockers = FilesInUse.Scan(_blob.AppMutex, installDir, InstallerImages());
         if (blockers.Count == 0)
         {
             return null; // clear
@@ -2201,7 +2236,7 @@ public sealed class InstallSession
         {
             Report(progress, ctx, $"close-apps: closing {blockers.Count} blocking application(s)…", isError: false);
             FilesInUse.CloseBlockers(installDir);
-            blockers = FilesInUse.Scan(_blob.AppMutex, installDir);
+            blockers = FilesInUse.Scan(_blob.AppMutex, installDir, InstallerImages());
             if (blockers.Count == 0)
             {
                 Report(progress, ctx, "close-apps: all blocking applications closed", isError: false);

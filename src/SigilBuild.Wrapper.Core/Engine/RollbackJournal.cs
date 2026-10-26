@@ -1044,8 +1044,9 @@ public abstract record RollbackRecord
     /// Removes the survivable <c>uninstall.exe</c> copied into the install dir as
     /// the final install step. Undo is delegated to
     /// <see cref="SelfDelete"/>, which tolerates the case where <see cref="Path"/>
-    /// is the <em>running</em> uninstaller image: it cannot delete its own live
-    /// image, so it schedules reboot-time deletion instead. Journal replay never
+    /// is a <em>running</em> uninstaller image: replayed by the uninstaller's private
+    /// temporary copy it moves the original out of the install dir (R106); replayed by
+    /// the image itself it schedules reboot-time deletion instead. Journal replay never
     /// aborts on this entry — the delete is best-effort and never throws.
     /// </summary>
     public sealed record RemoveUninstaller(string Path) : RollbackRecord

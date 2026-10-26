@@ -164,7 +164,7 @@ The interactive uninstall is **Confirm → [Close apps] → Progress → Done | 
 
 - **Confirm.** Uninstall starts the run; Cancel leaves with exit code `2`.
 - **Close apps** — shown only when something is running. Pressing Uninstall runs the `pre_uninstall` hooks and then the files-in-use check; if an application is still holding the install, the run stops there, before anything is removed, and the window shows the same Close-applications screen as the install wizard: each blocking application with its process id, **Retry** (re-scan after closing them yourself), **Close for me** (asks each application to shut down normally through the Restart Manager, in the background, then re-scans and says so if any are still running), and **Cancel** (exit code `2`, nothing removed — the `pre_uninstall` hooks have already run by then). Once nothing is blocking, the uninstall continues to Progress without running the hooks again.
-- **Progress** grows the reversal log as the journal replays.
+- **Progress** grows the reversal log as the journal replays. The title bar's X (and Alt+F4) is refused while it runs: stopping half-way would leave a partly removed install. On Confirm and Close apps the X means Cancel.
 - **Done** or **Failed** close with exit code `0` or `1`.
 
 ## See also

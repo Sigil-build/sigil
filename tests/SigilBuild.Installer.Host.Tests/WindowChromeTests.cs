@@ -119,4 +119,95 @@ public class WindowChromeTests
         visible.Should().Contain(S.NavCancel);
         visible.Should().NotContain(S.NavClose, "there is nothing to close yet — the install has not run");
     }
+
+    /// <summary>
+    /// All three windows carry a title bar. The uninstall and update windows were
+    /// <c>BorderOnly</c>: no title, no X, and no way to move them off whatever they
+    /// opened on top of. (R104)
+    /// </summary>
+    [AvaloniaFact]
+    public void Every_window_has_the_full_title_bar()
+    {
+        // Arrange
+        var windows = new Window[]
+        {
+            new InstallerWindow { DataContext = new InstallerViewModel(new BrandTokens()) },
+            new UninstallWindow { DataContext = new UninstallViewModel(new BrandTokens()) },
+            new UpdateWindow { DataContext = new UpdateViewModel(new BrandTokens()) },
+        };
+
+        // Act / Assert
+        foreach (var window in windows)
+        {
+            window.Show();
+            window.WindowDecorations.Should().Be(WindowDecorations.Full, "{0} needs a title bar", window.GetType().Name);
+        }
+    }
+
+    /// <summary>
+    /// With a title bar the uninstall window has an X. Before anything is removed it
+    /// means Cancel: the window closes and the run exits 2. (R104)
+    /// </summary>
+    [AvaloniaTheory]
+    [InlineData(UninstallStep.Confirm)]
+    [InlineData(UninstallStep.CloseApps)]
+    public void UninstallWindow_CloseGesture_BeforeTheReplay_CancelsWithExit2(UninstallStep step)
+    {
+        // Arrange
+        var vm = new UninstallViewModel(new BrandTokens()) { CurrentStep = step };
+        var window = new UninstallWindow { DataContext = vm };
+        window.Show();
+
+        // Act
+        window.Close();
+        Dispatcher.UIThread.RunJobs();
+
+        // Assert
+        window.IsVisible.Should().BeFalse();
+        vm.OutcomeCode.Should().Be(InstallerOutcomeCode.UserCancelled);
+        ((int)vm.OutcomeCode).Should().Be(2);
+    }
+
+    /// <summary>
+    /// While the journal replays the X is refused: stopping half-way would leave a
+    /// partly removed install. (R104)
+    /// </summary>
+    [AvaloniaFact]
+    public void UninstallWindow_CloseGesture_DuringTheReplay_IsRefused()
+    {
+        // Arrange
+        var vm = new UninstallViewModel(new BrandTokens()) { CurrentStep = UninstallStep.Progress };
+        var window = new UninstallWindow { DataContext = vm };
+        window.Show();
+
+        // Act
+        window.Close();
+        Dispatcher.UIThread.RunJobs();
+
+        // Assert
+        window.IsVisible.Should().BeTrue();
+        vm.OutcomeCode.Should().Be(InstallerOutcomeCode.Completed, "a refused close records nothing");
+    }
+
+    /// <summary>
+    /// On Done / Failed the X just closes; the outcome the run decided stands. (R104)
+    /// </summary>
+    [AvaloniaTheory]
+    [InlineData(UninstallStep.Done)]
+    [InlineData(UninstallStep.Failed)]
+    public void UninstallWindow_CloseGesture_OnATerminalScreen_ClosesWithoutCancelling(UninstallStep step)
+    {
+        // Arrange
+        var vm = new UninstallViewModel(new BrandTokens()) { CurrentStep = step };
+        var window = new UninstallWindow { DataContext = vm };
+        window.Show();
+
+        // Act
+        window.Close();
+        Dispatcher.UIThread.RunJobs();
+
+        // Assert
+        window.IsVisible.Should().BeFalse();
+        vm.OutcomeCode.Should().NotBe(InstallerOutcomeCode.UserCancelled, "a finished run is not cancelled by closing it");
+    }
 }

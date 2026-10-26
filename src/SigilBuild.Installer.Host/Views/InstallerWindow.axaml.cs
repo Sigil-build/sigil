@@ -117,9 +117,11 @@ public partial class InstallerWindow : Window
     }
 
     /// <summary>
-    /// Drags the window by its rail. <c>WindowDecorations="BorderOnly"</c> leaves
-    /// no title bar, so without this the window cannot be moved at all — it opens
-    /// centred and stays there, on top of whatever the user was reading.
+    /// Drags the window by its rail. The title bar is the discoverable way to move
+    /// the window; this is the convenience on top of it, and what keeps the window
+    /// movable if the chrome is ever made custom again — with
+    /// <c>WindowDecorations="BorderOnly"</c> there is no title bar. All three
+    /// windows carry the same title bar and the same rail drag. (R104)
     /// </summary>
     private void OnChromePressed(object? _, Avalonia.Input.PointerPressedEventArgs e)
     {

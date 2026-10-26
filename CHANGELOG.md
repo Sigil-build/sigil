@@ -428,7 +428,7 @@ restarts — over a running copy, and uninstalling it, found three defects.
   to Finish. The install, uninstall and headed `/Update` runs now start on a
   background thread; progress still reaches the window as before.
 
-### Fixed — the uninstall window (R103)
+### Fixed — the uninstall window (R103, R104)
 
 - **R103 — the interactive uninstall never checked for running applications.**
   Only the silent path ran the files-in-use check, and since R93 Apps & features
@@ -444,6 +444,12 @@ restarts — over a running copy, and uninstalling it, found three defects.
   the background and says so if any are still running, and Cancel exits `2` with
   nothing removed. Once they are closed the uninstall continues without running
   the hooks a second time.
+- **R104 — the uninstall window had no title bar.** It and the headed `/Update`
+  window were frameless (`BorderOnly`), so they had no title, no X, and could
+  not be moved; the install wizard had already been given its title bar. All
+  three windows now have the same title bar and can be dragged by the rail. In
+  the uninstall window the X means Cancel before anything is removed, closes on
+  Done or Failed, and is refused while the uninstall is removing files.
 
 ### Known limitations
 

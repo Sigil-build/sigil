@@ -69,7 +69,17 @@ A running program cannot delete its own executable, so an uninstaller that ran f
 What is left behind:
 
 - **Nothing in the install directory.** The folder itself is removed when the install created it.
-- **One file in the private temporary directory** until the next restart. An elevated (machine-scope) uninstall schedules it for deletion at the next restart. An unelevated per-user uninstall cannot — Windows only lets administrators schedule that — so it stays in `%TEMP%` until the temporary folder is cleaned up, for example by Storage Sense or Disk Cleanup.
+- **One private directory holding one file** (the original `uninstall.exe`, about the size of your `Setup.exe`). An elevated (machine-scope) uninstall schedules it for deletion at the next restart. An unelevated per-user uninstall cannot — Windows only lets administrators schedule that, and a per-user uninstall never asks for elevation — so the `%TEMP%\sigil-uninstall-<guid>` directory stays until the **next Sigil setup or uninstall run** on that account removes it (R114).
+
+**The leftover sweep.** Every Sigil `Setup.exe` and `uninstall.exe` run — wizard or silent, any app — starts by removing the directories earlier uninstalls left. It is housekeeping: it never stops a run, and what it does is written to the always-on diagnostic log described above (the console wrapper writes it to standard error). It removes a directory only when all of these hold:
+
+- it sits directly in the current user's `%TEMP%` (an unelevated run) or directly in `%ProgramData%` (an elevated run) and its name is exactly `sigil-uninstall-` followed by 32 lower-case hex digits;
+- it is a real directory, not a junction or symbolic link, and holds only plain files — a subfolder or a link of any kind leaves it alone;
+- under `%ProgramData%`, only administrators can write to it, which is how an elevated uninstall creates it;
+- it is at least two minutes old, so an uninstall that is copying itself right now is not disturbed, and it is not the directory the running process was started from;
+- every file in it can be opened exclusively at once. A copy that is still running keeps its executable locked, so the whole directory is left for a later run. Nothing is deleted until every file has passed this check.
+
+An elevated run does not sweep `%TEMP%`: other programs running as the same user, unelevated, can write there, and deleting files there with administrator rights is how planted links turn into deleted system files. The directories a per-user uninstall leaves are swept by the next unelevated run instead — and the first process of a per-machine setup is one, because it starts unelevated and asks for elevation afterwards. Only uninstaller copies are swept: the other private directories Sigil creates (for downloads, hooks and updates) are removed by the run that made them.
 
 When the copy cannot be made — no private directory could be created, the copy does not verify, or it will not start — `uninstall.exe` uninstalls in place, as it did before: the run continues and only the uninstaller itself stays in the install directory until the next restart (machine scope) or until it is deleted (per-user). The same happens when the install directory and the temporary directory are on different volumes, because a running program can be renamed only within one volume. A copy that does not verify is never started.
 

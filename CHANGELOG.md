@@ -477,6 +477,18 @@ restarts — over a running copy, and uninstalling it, found three defects.
 
 ### Fixed — wizard polish (R98, R108, R109)
 
+- **R98 — an upgrade forgot the options chosen at install.** 0.5.0 installed
+  with Add to PATH and a custom component ticked; the 0.5.1 upgrade's Options
+  screen showed both back at their manifest defaults, and a silent upgrade
+  applied the defaults. An install now records the resolved value of every
+  applicable option component in its uninstall state (`uninstall.json`, an
+  additive `options` field — older state still loads and simply has none). An
+  upgrade, forced downgrade or same-version reinstall reads it back before the
+  prior version is torn down and uses it as the Options screen's starting values
+  and the silent path's values. A `/P` override still wins, a `locked` component
+  keeps its manifest default, a component the new version dropped is ignored and
+  one it added starts at its default.
+
 - **R108 — the location screen read "Free space on drive C:: …".** The catalog
   string supplies the colon and the view model passed the drive root with its
   own. The drive is now passed as its bare letter; a UNC share is shown as-is.

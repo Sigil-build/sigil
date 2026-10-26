@@ -581,11 +581,16 @@ public sealed class InstallerViewModel : ICloseAppsGate
     /// License screen); when none, they are omitted. Each checkbox
     /// is seeded from the component's resolved default; <c>locked</c> components
     /// render disabled (always applied). Only the interactive wizard consults this —
-    /// the headless <c>/silent</c> path resolves options to their manifest defaults.
+    /// the headless <c>/silent</c> path resolves the same chain in the engine.
+    /// <paramref name="defaults"/> is the session's resolved starting value per
+    /// component name (<c>InstallSession.OptionDefaults</c>: a <c>/P</c> override, else
+    /// the choice the prior install recorded); a component it does not name starts at
+    /// its manifest default, and a locked one always does. (R98)
     /// </summary>
     public void LoadOptions(
         IReadOnlyList<InstallerOptionComponent> options,
-        IReadOnlyList<string>? preferences = null)
+        IReadOnlyList<string>? preferences = null,
+        IReadOnlyDictionary<string, bool>? defaults = null)
     {
         // Custom components carry their own localizable label, so
         // resolve against the same preference list the declared screens use
@@ -604,7 +609,10 @@ public sealed class InstallerViewModel : ICloseAppsGate
             {
                 continue;
             }
-            OptionItems.Add(new OptionItemViewModel(component, prefs));
+            bool? initial = defaults is not null && defaults.TryGetValue(component.Name, out var seeded)
+                ? seeded
+                : null;
+            OptionItems.Add(new OptionItemViewModel(component, prefs, initial));
         }
         _hasOptions = OptionItems.Count > 0;
         RebuildFlow();

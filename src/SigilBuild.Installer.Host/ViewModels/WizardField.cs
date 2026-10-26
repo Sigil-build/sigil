@@ -509,8 +509,16 @@ public sealed class CustomScreenViewModel
 /// </summary>
 public sealed class OptionItemViewModel : INotifyPropertyChanged
 {
+    /// <param name="component">The option component this row renders.</param>
+    /// <param name="preferences">The language preference list a custom component's text resolves against.</param>
+    /// <param name="initial">
+    /// The value the checkbox starts at — the session's resolved default (a <c>/P</c>
+    /// override, or the choice the prior install recorded) — or <c>null</c> for the
+    /// manifest default. Ignored for a <c>locked</c> component, which always shows its
+    /// manifest default. (R98)
+    /// </param>
     public OptionItemViewModel(
-        InstallerOptionComponent component, IReadOnlyList<string>? preferences = null)
+        InstallerOptionComponent component, IReadOnlyList<string>? preferences = null, bool? initial = null)
     {
         ArgumentNullException.ThrowIfNull(component);
         Name = component.Name;
@@ -526,7 +534,7 @@ public sealed class OptionItemViewModel : INotifyPropertyChanged
         Description = component.Custom && component.Description is not null
             ? Resolve(component.Description, preferences)
             : null;
-        _isChecked = component.Default;
+        _isChecked = component.Locked ? component.Default : initial ?? component.Default;
     }
 
     /// <summary>The canonical component key (e.g. <c>desktop_shortcut</c>) — the key the engine binds into <c>option.*</c>.</summary>

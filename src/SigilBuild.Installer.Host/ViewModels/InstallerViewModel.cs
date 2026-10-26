@@ -47,7 +47,7 @@ public sealed record InstallRequest(
     IReadOnlyDictionary<string, string> ParameterValues,
     IReadOnlyDictionary<string, bool> OptionValues);
 
-public sealed class InstallerViewModel : INotifyPropertyChanged
+public sealed class InstallerViewModel : ICloseAppsGate
 {
     private InstallerStep _step = InstallerStep.Welcome;
     private string _installPath;
@@ -323,20 +323,9 @@ public sealed class InstallerViewModel : INotifyPropertyChanged
         IReadOnlyList<string> remaining;
         try
         {
-            remaining = await Task.Run(() =>
-            {
-#pragma warning disable CA1031 // A failed close is reported by the re-scan below, never by a crash.
-                try
-                {
-                    close?.Invoke(path);
-                }
-                catch (Exception)
-                {
-                    // The re-scan decides what the user sees next.
-                }
-#pragma warning restore CA1031
-                return scan?.Invoke(path) ?? Array.Empty<string>();
-            }).ConfigureAwait(true);
+            remaining = await CloseAppsWork.CloseThenRescanAsync(
+                close is null ? null : () => close(path),
+                scan is null ? null : () => scan(path)).ConfigureAwait(true);
         }
         finally
         {

@@ -26,7 +26,7 @@ Three further screens exist but are not part of that linear flow — the wizard 
 
 The same host binary also renders two smaller flows:
 
-- **Uninstall.** Double-clicking `<install_dir>\uninstall.exe` with no flags, or pressing **Uninstall** in Apps & features / Add or Remove Programs (its `UninstallString` carries no `/S`): **Confirm → Progress → Done | Failed**. A script or deployment tool that wants no window runs the registered `QuietUninstallString`, which adds `/S` and skips all of it — see [Uninstaller](uninstaller.md).
+- **Uninstall.** Double-clicking `<install_dir>\uninstall.exe` with no flags, or pressing **Uninstall** in Apps & features / Add or Remove Programs (its `UninstallString` carries no `/S`): **Confirm → [Close apps] → Progress → Done | Failed**. Close apps appears only when an application is still holding the install after the `pre_uninstall` hooks have run; it is the install wizard's Close-applications screen, and nothing has been removed while it shows. A script or deployment tool that wants no window runs the registered `QuietUninstallString`, which adds `/S` and skips all of it — see [Uninstaller](uninstaller.md).
 - **Headed `/Update`.** A single status window rather than a paged flow: **Checking → Downloading → LaunchingChild → UpToDate | Done | Failed**. Headless `/Update` shows none of it.
 
 ## Brand slots

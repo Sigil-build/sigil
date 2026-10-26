@@ -55,14 +55,22 @@ public partial class App : Application
             var session = HostRuntime.Session;
 
             // An interactive uninstall (uninstall.exe double-clicked, no /S)
-            // gets its own minimal branded confirm → progress → done window, driving
-            // the real UninstallEngine. Kept entirely separate from the install
-            // wizard's flow/rail.
+            // gets its own minimal branded confirm → [close apps] → progress → done
+            // window, driving the real UninstallEngine. Kept entirely separate from
+            // the install wizard's flow/rail.
             if (session is not null && session.Mode == WrapperMode.Uninstall)
             {
                 _uninstallVm = new UninstallViewModel(tokens);
+                // The session runs pre_uninstall hooks, then the files-in-use gate,
+                // and returns a blocked outcome before any replay; the view-model shows
+                // the Close-applications step and invokes the runner again to resume. (R103)
                 _uninstallVm.ConfigureRunner((progress, ct) =>
                     session.RunUninstallInteractiveAsync(progress, ct));
+                // The same probes the install wizard wires below, over the directory
+                // the uninstall's own gate sweeps. (R103)
+                _uninstallVm.ConfigureBlockerProbe(
+                    scan: () => DescribeBlockers(session.ScanUninstallBlockers()),
+                    close: () => session.CloseUninstallBlockers());
                 desktop.MainWindow = new UninstallWindow { DataContext = _uninstallVm };
                 base.OnFrameworkInitializationCompleted();
                 return;
@@ -200,16 +208,7 @@ public partial class App : Application
                 // applications before starting the engine, and offer to close them
                 // via the Restart Manager.
                 _vm.ConfigureBlockerProbe(
-                    scan: dir =>
-                    {
-                        var blockers = session.ScanBlockers(dir);
-                        var described = new List<string>(blockers.Count);
-                        foreach (var b in blockers)
-                        {
-                            described.Add(b.Describe());
-                        }
-                        return described;
-                    },
+                    scan: dir => DescribeBlockers(session.ScanBlockers(dir)),
                     close: dir => session.CloseBlockers(dir));
 
                 // Wire the Done-screen "Launch <App>" checkbox to the session's
@@ -276,6 +275,17 @@ public partial class App : Application
         InstallerLog.Info("machine scope chosen: handed off to an elevated instance");
         desktop.Shutdown();
         return true;
+    }
+
+    /// <summary>The Close-applications list's lines: one description (name + pid) per blocker.</summary>
+    private static List<string> DescribeBlockers(IReadOnlyList<AppBlocker> blockers)
+    {
+        var described = new List<string>(blockers.Count);
+        foreach (var b in blockers)
+        {
+            described.Add(b.Describe());
+        }
+        return described;
     }
 
     /// <summary>

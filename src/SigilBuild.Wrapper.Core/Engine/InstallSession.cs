@@ -19,7 +19,18 @@ namespace SigilBuild.Wrapper.Engine;
 /// returned). Cancellation is surfaced as a thrown
 /// <see cref="OperationCanceledException"/>, not an <see cref="InstallOutcome"/>.
 /// </summary>
-public sealed record InstallOutcome(bool Success, string? Error);
+public sealed record InstallOutcome(bool Success, string? Error)
+{
+    /// <summary>
+    /// The running applications the files-in-use gate refused the run over; empty
+    /// for every other outcome. A blocked run has changed nothing past its pre-phase
+    /// hooks, so the wizard can show them, let the user clear them, and run again. (R103)
+    /// </summary>
+    public IReadOnlyList<AppBlocker> Blockers { get; init; } = Array.Empty<AppBlocker>();
+
+    /// <summary>True when the files-in-use gate refused the run (<see cref="Blockers"/> is non-empty). (R103)</summary>
+    public bool IsBlocked => Blockers.Count > 0;
+}
 
 /// <summary>
 /// The single install/uninstall driver shared by both stamped entry points —
@@ -2025,6 +2036,21 @@ public sealed class InstallSession
     /// headless <c>/S /Uninstall</c> path continues to use
     /// <see cref="RunHeadlessAsync"/>.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The order is the silent path's: <c>pre_uninstall</c> hooks, then the
+    /// files-in-use gate, then the journal replay. When the gate finds running
+    /// applications the call returns a blocked outcome (<see cref="InstallOutcome.IsBlocked"/>,
+    /// naming each one in <see cref="InstallOutcome.Blockers"/>) before the replay
+    /// starts, so nothing has been removed. (R103)
+    /// </para>
+    /// <para>
+    /// Calling again after the user clears them resumes the run: the hook phase runs
+    /// at most once per session, so the second call replays its memoized outcome and
+    /// goes straight to a fresh scan, and on to the replay when that is clear. The
+    /// wizard's Close-applications step is therefore just "call this again". (R103)
+    /// </para>
+    /// </remarks>
     public async Task<InstallOutcome> RunUninstallInteractiveAsync(
         IProgress<StepProgress>? progress, CancellationToken ct = default)
     {
@@ -2046,14 +2072,29 @@ public sealed class InstallSession
             return new InstallOutcome(false, ex.Message);
         }
 
-        // pre_uninstall hooks (abort on failure) around the journal replay.
-        var preHook = await HookRunner.RunAsync(
+        // pre_uninstall hooks run FIRST, before the files-in-use gate, so a
+        // publisher's teardown hook (the app's own --quit) clears a running
+        // application before the gate scans for it. At most once per session: a run
+        // resumed after the Close-applications step replays the memoized outcome
+        // rather than running the hooks again. A failure aborts. (R93, R103)
+        _preUninstallHookOutcome ??= await HookRunner.RunAsync(
             "pre_uninstall", _blob.HookPreUninstall, ctx, effectiveProgress, ct).ConfigureAwait(false);
+        var preHook = _preUninstallHookOutcome.Value;
         if (!preHook.Success)
         {
             var msg = $"pre_uninstall hook '{preHook.FailedStepId}' failed: {preHook.Error}";
             _log?.WriteLine($"result: uninstall aborted — {ctx.Redact(msg)}");
             return new InstallOutcome(false, msg);
+        }
+
+        // The files-in-use gate, before anything is removed. A running app would
+        // make the replay fail on every file it holds open, after the earlier records
+        // were already reversed; refusing here names the application instead and
+        // leaves the install intact for the wizard's Close-applications step. (R103)
+        var blocked = CheckFilesInUse(ctx, ctx.InstallDir, effectiveProgress);
+        if (blocked is not null)
+        {
+            return blocked;
         }
 
         // Anchored to the install dir resolved from the signed blob, and widened only
@@ -2099,6 +2140,41 @@ public sealed class InstallSession
     public bool CloseBlockers(string? installDir = null)
         => FilesInUse.CloseBlockers(installDir ?? EffectiveInstallDir());
 
+    // The memoized outcome of this session's pre_uninstall hooks, so an interactive
+    // uninstall resumed after the Close-applications step does not run them a second
+    // time. (R103)
+    private HookOutcome? _preUninstallHookOutcome;
+
+    /// <summary>
+    /// <see cref="ScanBlockers"/> for the uninstall: sweeps the directory
+    /// <see cref="RunUninstallInteractiveAsync"/>'s own gate sweeps, so the uninstall
+    /// wizard's Retry sees exactly what the gate will. (R103)
+    /// </summary>
+    public IReadOnlyList<AppBlocker> ScanUninstallBlockers()
+        => FilesInUse.Scan(_blob.AppMutex, UninstallGateDir());
+
+    /// <summary>
+    /// <see cref="CloseBlockers"/> for the uninstall — the uninstall wizard's
+    /// "Close for me", over the directory its gate sweeps. (R103)
+    /// </summary>
+    public bool CloseUninstallBlockers()
+        => FilesInUse.CloseBlockers(UninstallGateDir());
+
+    // The install dir the uninstall's files-in-use gate sweeps. A destination the
+    // resolver refuses sweeps nothing (mutexes only); the run itself reports the
+    // refusal. (R103)
+    private string? UninstallGateDir()
+    {
+        try
+        {
+            return BuildUninstallContext().InstallDir;
+        }
+        catch (InstallDirRejectedException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>The destination this run resolves to — the wizard's pick when made, else the computed default.</summary>
     private string EffectiveInstallDir() => CollectedInstallDir ?? ResolveDefaultInstallDir();
 
@@ -2140,7 +2216,7 @@ public sealed class InstallSession
             Report(progress, ctx, $"blocked by: {b.Describe()}", isError: true);
         }
         _log?.WriteLine($"result: blocked — {message}");
-        return new InstallOutcome(false, message);
+        return new InstallOutcome(false, message) { Blockers = blockers };
     }
 
     // Not localized: lowercase-prefixed log convention, and it names the CLI-only

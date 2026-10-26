@@ -10,10 +10,11 @@ namespace SigilBuild.Installer.Host.Views;
 
 /// <summary>
 /// The interactive uninstall window: a minimal branded
-/// <c>confirm → progress → done</c> flow, separate from the install
+/// <c>confirm → [close apps] → progress → done</c> flow, separate from the install
 /// <see cref="InstallerWindow"/>. State-driven panels are toggled by the
-/// view-model's <c>IsConfirm</c>/<c>IsProgress</c>/<c>IsDone</c>/<c>IsFailed</c>
-/// flags, so no per-step template swap is needed.
+/// view-model's <c>IsConfirm</c>/<c>IsCloseApps</c>/<c>IsProgress</c>/<c>IsDone</c>/<c>IsFailed</c>
+/// flags, so no per-step template swap is needed. The Close-applications panel is
+/// the install wizard's <c>CloseAppsView</c>. (R103)
 /// </summary>
 public partial class UninstallWindow : Window
 {
@@ -27,9 +28,9 @@ public partial class UninstallWindow : Window
     private void OnUninstall(object? _, RoutedEventArgs __)
         => (DataContext as UninstallViewModel)?.Confirm();
 
-    private void OnCancelConfirm(object? _, RoutedEventArgs __)
+    private void OnCancel(object? _, RoutedEventArgs __)
     {
-        (DataContext as UninstallViewModel)?.CancelConfirm();
+        (DataContext as UninstallViewModel)?.Cancel();
         Close();
     }
 

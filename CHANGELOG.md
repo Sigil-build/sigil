@@ -428,6 +428,23 @@ restarts — over a running copy, and uninstalling it, found three defects.
   to Finish. The install, uninstall and headed `/Update` runs now start on a
   background thread; progress still reaches the window as before.
 
+### Fixed — the uninstall window (R103)
+
+- **R103 — the interactive uninstall never checked for running applications.**
+  Only the silent path ran the files-in-use check, and since R93 Apps & features
+  opens the interactive uninstall, so every user took the unchecked path. An app
+  daemon still running after the publisher's `pre_uninstall` `--quit` hook sent
+  the uninstall straight into the journal replay, which failed on every file the
+  daemon held and told the user to "re-run the uninstaller after closing the
+  application" without naming it. The interactive uninstall now runs the
+  `pre_uninstall` hooks, then the files-in-use check, before anything is removed
+  — the silent path's order — and the uninstall window gains the install
+  wizard's Close-applications step: it lists each blocking application with its
+  process id, Retry re-scans, Close for me asks the applications to shut down in
+  the background and says so if any are still running, and Cancel exits `2` with
+  nothing removed. Once they are closed the uninstall continues without running
+  the hooks a second time.
+
 ### Known limitations
 
 > **Sigil 0.1.0-alpha is Windows-only and pre-production.** It builds and

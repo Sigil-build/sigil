@@ -11,17 +11,19 @@ namespace SigilBuild.Installer.Host.Views.Screens;
 /// <summary>
 /// The "Close applications" gate. Lists what is holding the install
 /// directory and offers Retry (the user closed them) or Close-for-me (Restart
-/// Manager graceful shutdown). Cancel is the shared footer button.
+/// Manager graceful shutdown). Cancel is the hosting window's footer button.
+/// Shared by the install and the uninstall wizard through
+/// <see cref="ICloseAppsGate"/>. (R103)
 /// </summary>
 public partial class CloseAppsView : UserControl
 {
     public CloseAppsView() { AvaloniaXamlLoader.Load(this); }
 
     private void OnRetry(object? _, RoutedEventArgs __)
-        => (DataContext as InstallerViewModel)?.RetryBlockers();
+        => (DataContext as ICloseAppsGate)?.RetryBlockers();
 
     // Not awaited: the view-model runs the close off the UI thread, owns the busy
     // state and handles its own failures, so the click returns at once. (R94)
     private void OnCloseForMe(object? _, RoutedEventArgs __)
-        => _ = (DataContext as InstallerViewModel)?.CloseBlockingAppsAsync();
+        => _ = (DataContext as ICloseAppsGate)?.CloseBlockingAppsAsync();
 }

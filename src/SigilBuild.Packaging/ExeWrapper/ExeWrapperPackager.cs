@@ -367,8 +367,8 @@ public sealed class ExeWrapperPackager : IPackager
         var userIcon = manifest.Installer?.Icon;
         if (!string.IsNullOrEmpty(userIcon))
         {
-            var manifestDir = Path.GetDirectoryName(manifest.Location.File);
-            var candidate = Path.IsPathRooted(userIcon) || string.IsNullOrEmpty(manifestDir)
+            var manifestDir = ManifestDirectory(manifest);
+            var candidate = Path.IsPathRooted(userIcon) || manifestDir is null
                 ? userIcon
                 : Path.GetFullPath(Path.Combine(manifestDir, userIcon));
             if (File.Exists(candidate)) return File.ReadAllBytes(candidate);
@@ -550,11 +550,27 @@ public sealed class ExeWrapperPackager : IPackager
         if (Path.IsPathRooted(path))
             return path;
 
-        var manifestDir = string.IsNullOrEmpty(manifest.Location.File)
-            ? null
-            : Path.GetDirectoryName(manifest.Location.File);
-        var baseDir = string.IsNullOrEmpty(manifestDir) ? sourceDirectory ?? string.Empty : manifestDir;
+        var baseDir = ManifestDirectory(manifest) ?? sourceDirectory ?? string.Empty;
         return Path.GetFullPath(Path.Combine(baseDir, path));
+    }
+
+    /// <summary>
+    /// The absolute directory of the manifest file, or <c>null</c> for a manifest that
+    /// came from a string (no file name, or a placeholder such as <c>&lt;inline&gt;</c>).
+    /// </summary>
+    /// <remarks>
+    /// <see cref="SourceLocation.File"/> holds the path as the CLI was given it, so
+    /// <c>sigil pack sigil.yaml</c> records a bare file name whose directory is empty.
+    /// Taking the full path first makes that the current directory, which is where the
+    /// manifest is, instead of falling through to the source directory. (R96)
+    /// </remarks>
+    private static string? ManifestDirectory(SigilManifest manifest)
+    {
+        var file = manifest.Location.File;
+        if (string.IsNullOrEmpty(file) || file.StartsWith('<'))
+            return null;
+
+        return Path.GetDirectoryName(Path.GetFullPath(file));
     }
 
     private static void AddBrandImageWarning(ICollection<Diagnostic>? diagnostics, string message)

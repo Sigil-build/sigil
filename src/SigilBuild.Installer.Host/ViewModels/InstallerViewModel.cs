@@ -122,6 +122,17 @@ public sealed class InstallerViewModel : ICloseAppsGate
     /// <summary>True when <see cref="WelcomeVersion"/> is shown.</summary>
     public bool HasWelcomeVersion => !string.IsNullOrWhiteSpace(Brand.AppVersion);
 
+    /// <summary>
+    /// The rail's "Version x.y.z" footer — the same catalog string the uninstall
+    /// window's rail shows; empty when the app declares no version. (R113)
+    /// </summary>
+    public string VersionLine => HasVersionLine
+        ? Strings.UninstallVersion(_lang, Brand.AppVersion)
+        : string.Empty;
+
+    /// <summary>True when <see cref="VersionLine"/> is shown. (R113)</summary>
+    public bool HasVersionLine => HasWelcomeVersion;
+
     /// <summary>The Finish screen's heading, bound by FinishView.axaml.</summary>
     public string FinishTitle => Strings.FinishTitle(_lang, Brand.AppName);
 

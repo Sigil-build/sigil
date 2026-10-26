@@ -567,6 +567,14 @@ restarts — over a running copy, and uninstalling it, found three defects.
   scope's default. Picking a different folder on a reinstall moves the app, the
   same way it does on an upgrade.
 
+### Fixed — the install wizard's rail (R113)
+
+- **R113 — the install wizard's rail did not show the version.** The uninstall
+  window's rail ends with a "Version x.y.z" line; the install wizard's did not,
+  so after the Welcome screen nothing on screen said which version was being
+  installed. The wizard's rail now ends with the same line, and shows none when
+  the app declares no version. The Welcome screen keeps its own version line.
+
 ### Known limitations
 
 > **Sigil 0.1.0-alpha is Windows-only and pre-production.** It builds and

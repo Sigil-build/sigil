@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
 using System.IO.Compression;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
@@ -21,8 +22,10 @@ namespace SigilBuild.Wrapper.Engine;
 /// host calls <see cref="EnsureNativeDependenciesLoadable"/>, which extracts the
 /// DLLs to a content-keyed cache directory — under an administrator-only root when
 /// the process is elevated — verifies every file in it against the embedded archive,
-/// and only then adds that directory to the process's native DLL search path so
-/// SkiaSharp/Avalonia native P/Invokes resolve.
+/// and only then adds that directory to the process's native DLL search path and
+/// loads the Skia, HarfBuzz and ANGLE libraries from it by full path, so
+/// SkiaSharp/Avalonia native P/Invokes resolve to the verified copies and never to a
+/// same-named DLL beside the exe. (R4, R102)
 /// </summary>
 /// <remarks>
 /// <para>
@@ -95,14 +98,59 @@ public static partial class NativeRuntimeBootstrap
 
     private static readonly List<string> LeasedDirectories = new();
 
-    // LOAD_LIBRARY_SEARCH_DEFAULT_DIRS = APPLICATION_DIR | SYSTEM32 | USER_DIRS.
-    private const uint LoadLibrarySearchDefaultDirs = 0x00001000;
+    private const uint LoadLibrarySearchDllLoadDir = 0x00000100;
+    private const uint LoadLibrarySearchUserDirs = 0x00000400;
+    private const uint LoadLibrarySearchSystem32 = 0x00000800;
+
+    /// <summary>
+    /// The process-wide default DLL search set this bootstrap installs:
+    /// <c>LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_USER_DIRS</c>. The
+    /// application directory is deliberately absent. A stamped <c>Setup.exe</c> is a
+    /// single file, so nothing it needs lives beside it — but whatever <em>else</em>
+    /// lives beside it is searched first under <c>LOAD_LIBRARY_SEARCH_DEFAULT_DIRS</c>:
+    /// a planted <c>libSkiaSharp.dll</c> in Downloads, or the installed application's
+    /// own copy beside <c>uninstall.exe</c>, would answer before the verified cache is
+    /// ever consulted. (R102)
+    /// </summary>
+    internal const uint DefaultDllSearchFlags = LoadLibrarySearchSystem32 | LoadLibrarySearchUserDirs;
+
+    /// <summary>
+    /// The native libraries the wizard host P/Invokes into, by file name, each loaded
+    /// from the verified cache by <b>full path</b> and handed to .NET through
+    /// <see cref="ResolvePinnedLibrary"/>: <c>libSkiaSharp</c> (SkiaSharp),
+    /// <c>libHarfBuzzSharp</c> (HarfBuzzSharp) and <c>av_libGLESv2.dll</c> (ANGLE, which
+    /// <c>Avalonia.Win32</c>'s <c>Win32AngleEglInterface</c> reaches through a plain
+    /// <c>DllImport</c>). Pinning matters on top of <see cref="DefaultDllSearchFlags"/>
+    /// because .NET's own <c>DllImport</c> probing tries the executable's directory by
+    /// full path before any Win32 search runs, and a full-path load of a different file
+    /// maps a second module even when one of the same base name is already loaded.
+    /// (R102)
+    /// </summary>
+    internal static readonly IReadOnlyList<string> PinnedLibraryFileNames = new[]
+    {
+        "libSkiaSharp.dll",
+        "libHarfBuzzSharp.dll",
+        "av_libglesv2.dll",
+    };
+
+    private static readonly object PinGate = new();
+
+    /// <summary>
+    /// Module handles of the pinned libraries, keyed by file name. Never freed: the
+    /// libraries stay mapped for the process's lifetime, exactly as a DllImport-loaded
+    /// library would. (R102)
+    /// </summary>
+    private static readonly Dictionary<string, IntPtr> PinnedHandles = new(StringComparer.OrdinalIgnoreCase);
+
+    private static readonly HashSet<Assembly> PinnedAssemblies = new();
 
     /// <summary>
     /// GUI-path bootstrap. If the running exe carries a
     /// <see cref="RuntimeResourceName"/> resource (a stamped <c>Setup.exe</c>),
-    /// extract the embedded native DLLs to a verified cache directory and add that
-    /// directory to the native DLL search path. Idempotent: a second call — or a
+    /// extract the embedded native DLLs to a verified cache directory, add that
+    /// directory to the native DLL search path with the application directory taken
+    /// off it, and load each of <see cref="PinnedLibraryFileNames"/> from it by full
+    /// path for <see cref="PinDllImports"/> to hand out (R102). Idempotent: a second call — or a
     /// re-run of the same stamped exe — reuses the already-extracted directory once
     /// its contents check out, and never duplicates work. Returns the extraction
     /// directory, or <c>null</c>
@@ -131,7 +179,171 @@ public static partial class NativeRuntimeBootstrap
         var elevated = Elevation.IsProcessElevated();
         var targetDir = PrepareCacheDirectory(archive, ResolveCacheRoot(elevated), elevated, report);
         AddNativeSearchDirectory(targetDir);
+
+        // Loaded straight after verification, by full path, so the handles .NET is
+        // given for these names are the verified files — whatever sits beside the exe.
+        // A pinned library the cache lacks is a refusal, never a by-name load. (R102)
+        var loaded = LoadPinnedLibraries(targetDir, PinnedLibraryFileNames);
+        lock (PinGate)
+        {
+            foreach (var (fileName, handle) in loaded)
+            {
+                PinnedHandles[fileName] = handle;
+            }
+        }
+
         return targetDir;
+    }
+
+    /// <summary>
+    /// Route every <c>DllImport</c> in <paramref name="assembly"/> through
+    /// <see cref="ResolvePinnedLibrary"/>, so a pinned library resolves to the module
+    /// <see cref="EnsureNativeDependenciesLoadable"/> loaded from the verified cache
+    /// before .NET's own probing — which tries the executable's directory first — can
+    /// run. Call it only after <see cref="EnsureNativeDependenciesLoadable"/> returned a
+    /// directory, and before the first P/Invoke into <paramref name="assembly"/>.
+    /// Idempotent per assembly. (R102)
+    /// </summary>
+    public static void PinDllImports(Assembly assembly)
+    {
+        ArgumentNullException.ThrowIfNull(assembly);
+
+        lock (PinGate)
+        {
+            if (!PinnedAssemblies.Add(assembly))
+            {
+                return;
+            }
+        }
+
+        NativeLibrary.SetDllImportResolver(assembly, ResolvePinnedLibrary);
+    }
+
+    /// <summary>
+    /// The <see cref="DllImportResolver"/> <see cref="PinDllImports"/> installs. A pinned
+    /// name answers the cache-loaded module; any other name answers
+    /// <see cref="IntPtr.Zero"/>, which hands it back to the runtime's default probing.
+    /// </summary>
+    /// <exception cref="NativeRuntimeTrustException">
+    /// A pinned name was requested but no verified copy was loaded. Falling through
+    /// would let the default probing find the copy beside the exe. (R102)
+    /// </exception>
+    public static IntPtr ResolvePinnedLibrary(
+        string libraryName, Assembly assembly, DllImportSearchPath? searchPath)
+    {
+        lock (PinGate)
+        {
+            return ResolvePinnedLibrary(libraryName, PinnedHandles);
+        }
+    }
+
+    /// <summary>
+    /// The decision behind <see cref="ResolvePinnedLibrary(string, Assembly, DllImportSearchPath?)"/>,
+    /// over an explicit handle table. (R102)
+    /// </summary>
+    internal static IntPtr ResolvePinnedLibrary(
+        string libraryName, IReadOnlyDictionary<string, IntPtr> handles)
+    {
+        var fileName = PinnedFileNameFor(libraryName);
+        if (fileName is null)
+        {
+            return IntPtr.Zero;
+        }
+
+        if (handles.TryGetValue(fileName, out var handle) && handle != IntPtr.Zero)
+        {
+            return handle;
+        }
+
+        throw new NativeRuntimeTrustException(
+            $"'{libraryName}' must come from the verified native runtime cache, and no verified copy " +
+            "was loaded; refusing to let the default DLL search find one anywhere else");
+    }
+
+    /// <summary>
+    /// The pinned file name a <c>DllImport</c> library name denotes — matched without
+    /// regard to case or a trailing <c>.dll</c>, as the Windows loader matches module
+    /// names — or <c>null</c> when the name is not pinned. A name carrying a directory is
+    /// never pinned: it is not a bare module name. (R102)
+    /// </summary>
+    internal static string? PinnedFileNameFor(string libraryName)
+    {
+        if (string.IsNullOrEmpty(libraryName)
+            || libraryName.Contains('\\', StringComparison.Ordinal)
+            || libraryName.Contains('/', StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        foreach (var fileName in PinnedLibraryFileNames)
+        {
+            if (string.Equals(libraryName, fileName, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(libraryName, Path.GetFileNameWithoutExtension(fileName), StringComparison.OrdinalIgnoreCase))
+            {
+                return fileName;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The full path a pinned library resolves to — always inside
+    /// <paramref name="cacheDirectory"/> — or <c>null</c> when
+    /// <paramref name="libraryName"/> is not pinned. (R102)
+    /// </summary>
+    internal static string? ResolvePinnedLibraryPath(string cacheDirectory, string libraryName)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(cacheDirectory);
+
+        var fileName = PinnedFileNameFor(libraryName);
+        return fileName is null ? null : Path.Combine(Path.GetFullPath(cacheDirectory), fileName);
+    }
+
+    /// <summary>
+    /// Load each of <paramref name="fileNames"/> from <paramref name="cacheDirectory"/> by
+    /// full path and return the module handles by file name. Dependencies of each library
+    /// resolve from its own directory and System32 only
+    /// (<c>LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32</c>), never the
+    /// application directory, the current directory or <c>PATH</c>. (R102)
+    /// </summary>
+    /// <exception cref="NativeRuntimeTrustException">
+    /// A library is absent from the cache or the loader refused it. The caller refuses to
+    /// start, exactly as for a cache that fails verification (R4).
+    /// </exception>
+    [SupportedOSPlatform("windows")]
+    internal static IReadOnlyDictionary<string, IntPtr> LoadPinnedLibraries(
+        string cacheDirectory, IReadOnlyList<string> fileNames)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(cacheDirectory);
+        ArgumentNullException.ThrowIfNull(fileNames);
+
+        var root = Path.GetFullPath(cacheDirectory);
+        var handles = new Dictionary<string, IntPtr>(StringComparer.OrdinalIgnoreCase);
+        foreach (var fileName in fileNames)
+        {
+            var fullPath = Path.Combine(root, fileName);
+            if (!File.Exists(fullPath))
+            {
+                throw new NativeRuntimeTrustException(
+                    $"the verified native runtime cache '{root}' does not contain '{fileName}'; refusing " +
+                    "to load it from anywhere else");
+            }
+
+            var handle = LoadLibraryExW(fullPath, IntPtr.Zero, LoadLibrarySearchDllLoadDir | LoadLibrarySearchSystem32);
+            if (handle == IntPtr.Zero)
+            {
+                var error = Marshal.GetLastWin32Error();
+                throw new NativeRuntimeTrustException(
+                    $"'{fullPath}' could not be loaded from the verified native runtime cache " +
+                    $"(Win32 error {error}); refusing to load it from anywhere else",
+                    new Win32Exception(error));
+            }
+
+            handles[fileName] = handle;
+        }
+
+        return handles;
     }
 
     /// <summary>
@@ -906,20 +1118,33 @@ public static partial class NativeRuntimeBootstrap
     /// <summary>
     /// Add <paramref name="directory"/> to the process's native DLL search path so
     /// subsequent <c>DllImport</c>/<c>LoadLibrary</c> resolution (SkiaSharp, ANGLE,
-    /// HarfBuzz) finds the extracted DLLs there. Uses the modern, safe search
-    /// mechanism: <c>SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS)</c>
-    /// establishes the process default set (application dir + System32 + user
-    /// dirs) and <c>AddDllDirectory</c> registers <paramref name="directory"/> as a
-    /// user dir. Idempotent — re-adding the same directory is harmless.
+    /// HarfBuzz) finds the extracted DLLs there.
+    /// <c>SetDefaultDllDirectories(</c><see cref="DefaultDllSearchFlags"/><c>)</c>
+    /// makes the process default set System32 plus user dirs — the application
+    /// directory is not in it — and <c>AddDllDirectory</c> registers
+    /// <paramref name="directory"/> as a user dir. Idempotent — re-adding the same
+    /// directory is harmless. (R102)
     /// </summary>
+    /// <exception cref="NativeRuntimeTrustException">
+    /// The default search set could not be narrowed, which would leave the application
+    /// directory searched ahead of <paramref name="directory"/>. (R102)
+    /// </exception>
     [SupportedOSPlatform("windows")]
     public static void AddNativeSearchDirectory(string directory)
     {
         ArgumentException.ThrowIfNullOrEmpty(directory);
 
-        // Establish the process-wide safe default search set so that plain
-        // DllImport resolution consults AddDllDirectory-registered directories.
-        _ = SetDefaultDllDirectories(LoadLibrarySearchDefaultDirs);
+        // The process-wide default search set: plain LoadLibrary and DllImport
+        // resolution consult System32 and AddDllDirectory-registered directories, and
+        // never the directory the exe was started from. (R102)
+        if (!SetDefaultDllDirectories(DefaultDllSearchFlags))
+        {
+            var error = Marshal.GetLastWin32Error();
+            throw new NativeRuntimeTrustException(
+                $"SetDefaultDllDirectories failed (Win32 error {error}); refusing to start with the " +
+                "application directory still on the DLL search path",
+                new Win32Exception(error));
+        }
 
         var cookie = AddDllDirectory(directory);
         if (cookie == IntPtr.Zero)
@@ -962,11 +1187,16 @@ public static partial class NativeRuntimeBootstrap
     [LibraryImport("kernel32.dll", EntryPoint = "AddDllDirectory",
         StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
     private static partial IntPtr AddDllDirectory(string newDirectory);
+
+    [LibraryImport("kernel32.dll", EntryPoint = "LoadLibraryExW",
+        StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    private static partial IntPtr LoadLibraryExW(string lpLibFileName, IntPtr hFile, uint dwFlags);
 }
 
 /// <summary>
 /// The native-dependency cache directory could not be established, cleaned or verified,
-/// so it was <b>not</b> added to the process DLL search path (R4). Distinct
+/// so it was <b>not</b> added to the process DLL search path (R4) — or a library that
+/// must be loaded from it by full path was missing or refused to load (R102). Distinct
 /// from a plain <see cref="IOException"/> because it is a deliberate refusal rather than
 /// an incidental I/O failure: the host reports it and exits instead of starting a wizard
 /// whose native code might not be ours.

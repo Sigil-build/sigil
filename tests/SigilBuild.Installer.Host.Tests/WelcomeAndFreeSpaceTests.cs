@@ -3,9 +3,11 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using FluentAssertions;
 using SigilBuild.Installer.Host.Branding;
 using SigilBuild.Installer.Host.ViewModels;
+using SigilBuild.Wrapper.Core.Localization;
 using Xunit;
 
 namespace SigilBuild.Installer.Host.Tests;
@@ -61,9 +63,50 @@ public sealed class WelcomeAndFreeSpaceTests
 
         // Assert
         vm.HasInstallPathFreeSpace.Should().BeTrue();
-        onC.Should().Contain("C:").And.Contain("12");
-        onD.Should().Contain("D:").And.Contain("512");
+        onC.Should().Contain("C:").And.Contain("12").And.NotContain("C::");
+        onD.Should().Contain("D:").And.Contain("512").And.NotContain("D::");
         probed.Should().Contain(new[] { @"C:\Apps\Acme", @"D:\Apps\Acme" });
+    }
+
+    [Fact]
+    public void Free_space_line_names_the_drive_with_a_single_colon()
+    {
+        // Arrange
+        var vm = Vm();
+        vm.SetFreeSpaceProbe(_ => 12 * Gb);
+
+        // Act
+        vm.InstallPath = @"C:\Apps\Acme";
+
+        // Assert — the catalog supplies the colon; the drive is passed bare. (R108)
+        vm.InstallPathFreeSpace.Should().Be(
+            Strings.LocationDiskFree(SessionLanguage.Current, "C", Strings.SizeGb(SessionLanguage.Current, 12.ToString("0.#", CultureInfo.CurrentCulture))));
+    }
+
+    [Theory]
+    [InlineData(Lang.En, "Free space on drive C: 12 GB")]
+    [InlineData(Lang.Uk, "Вільно на диску C: 12 GB")]
+    public void Disk_free_catalog_string_formats_a_bare_drive_letter_with_one_colon(Lang lang, string expected)
+    {
+        // Act
+        var text = Strings.LocationDiskFree(lang, InstallerViewModel.DriveLabel(@"C:\"), "12 GB");
+
+        // Assert
+        text.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(@"C:\", "C")]
+    [InlineData("C:", "C")]
+    [InlineData(@"d:/", "d")]
+    [InlineData(@"\\server\share\", @"\\server\share")]
+    [InlineData(@"\\server\share", @"\\server\share")]
+    [InlineData("", "")]
+    [InlineData(null, "")]
+    public void Drive_label_strips_only_a_drive_letters_colon(string? root, string expected)
+    {
+        // Act / Assert
+        InstallerViewModel.DriveLabel(root).Should().Be(expected);
     }
 
     [Theory]

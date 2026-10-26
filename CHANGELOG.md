@@ -475,6 +475,12 @@ restarts — over a running copy, and uninstalling it, found three defects.
   the uninstall window the X means Cancel before anything is removed, closes on
   Done or Failed, and is refused while the uninstall is removing files.
 
+### Fixed — wizard polish (R98, R108, R109)
+
+- **R108 — the location screen read "Free space on drive C:: …".** The catalog
+  string supplies the colon and the view model passed the drive root with its
+  own. The drive is now passed as its bare letter; a UNC share is shown as-is.
+
 ### Known limitations
 
 > **Sigil 0.1.0-alpha is Windows-only and pre-production.** It builds and

@@ -924,10 +924,24 @@ public sealed class InstallerViewModel : ICloseAppsGate
         }
 #pragma warning restore CA1031
 
-        var root = System.IO.Path.GetPathRoot(path)?.TrimEnd('\\', '/') ?? string.Empty;
-        InstallPathFreeSpace = free is { } bytes && root.Length > 0
-            ? Strings.LocationDiskFree(_lang, root, FormatSize(bytes))
+        var drive = DriveLabel(System.IO.Path.GetPathRoot(path));
+        InstallPathFreeSpace = free is { } bytes && drive.Length > 0
+            ? Strings.LocationDiskFree(_lang, drive, FormatSize(bytes))
             : string.Empty;
+    }
+
+    /// <summary>
+    /// The drive as <c>location.disk_free</c> names it: the bare letter for a
+    /// drive-letter root (<c>C:\</c> → <c>C</c>), because the catalog string supplies
+    /// the colon itself; any other root (a UNC share) as-is, without its trailing
+    /// separator. (R108)
+    /// </summary>
+    internal static string DriveLabel(string? root)
+    {
+        var trimmed = root?.TrimEnd('\\', '/') ?? string.Empty;
+        return trimmed.Length == 2 && trimmed[1] == ':' && char.IsAsciiLetter(trimmed[0])
+            ? trimmed[..1]
+            : trimmed;
     }
 
     private static long? DefaultFreeSpaceProbe(string path)

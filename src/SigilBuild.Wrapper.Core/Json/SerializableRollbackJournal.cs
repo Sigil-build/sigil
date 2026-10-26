@@ -47,6 +47,18 @@ internal sealed record SerializableRollbackJournal
     /// </summary>
     public string? InstallDir { get; init; }
 
+    /// <summary>
+    /// The resolved <c>option.*</c> value of every option component that applied to
+    /// this install, keyed by component name (built-ins and custom components alike).
+    /// A later upgrade or reinstall of the same app reads it back as the Options
+    /// screen's defaults and the silent path's values, so the choices made at install
+    /// time survive the next version. <c>null</c> for state written before the field
+    /// existed — the reader then falls back to the manifest defaults. Additive: an
+    /// older reader ignores the unknown property, so <see cref="Version"/> stays
+    /// <c>"1"</c>. (R98)
+    /// </summary>
+    public System.Collections.Generic.Dictionary<string, bool>? Options { get; init; }
+
     public SerializableRollbackRecord[] Records { get; init; }
         = Array.Empty<SerializableRollbackRecord>();
 }

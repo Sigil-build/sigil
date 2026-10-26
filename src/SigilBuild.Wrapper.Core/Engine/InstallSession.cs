@@ -851,21 +851,96 @@ public sealed class InstallSession
     /// and emit the refusal line twice. The scope and app id are fixed for the lifetime
     /// of a session, so the answer cannot change under us within one. (R1)
     /// </remarks>
-    public bool ExistingInstallDetected =>
-        _existingInstallDetected ??= ComputeExistingInstallDetected();
+    public bool ExistingInstallDetected => PriorState is not null;
 
-    private bool? _existingInstallDetected;
+    /// <summary>
+    /// The prior install's state in the resolved scope, loaded once per session, or
+    /// <c>null</c> when there is none (or it was refused). Shared by
+    /// <see cref="ExistingInstallDetected"/> and <see cref="PriorOptionValues"/>.
+    /// </summary>
+    /// <remarks>
+    /// The first read must happen before the run tears the prior version down: an
+    /// upgrade runs the prior version's own <c>uninstall.exe</c>, and the reinstall
+    /// cleanup replays the recorded journal — both delete this state directory before
+    /// the new install writes its own. The wizard reads it at startup (option
+    /// defaults, reinstall notice), and the run reads it when it builds its context,
+    /// which precedes the teardown; both land here, so the memo holds the prior
+    /// install's state for the rest of the session. (R98)
+    /// </remarks>
+    private UninstallStateStore.LoadedState? PriorState
+    {
+        get
+        {
+            if (!_priorStateLoaded)
+            {
+                _priorState = LoadPriorState();
+                _priorStateLoaded = true;
+            }
+            return _priorState;
+        }
+    }
 
-    private bool ComputeExistingInstallDetected()
+    private UninstallStateStore.LoadedState? _priorState;
+    private bool _priorStateLoaded;
+
+    private UninstallStateStore.LoadedState? LoadPriorState()
     {
         if (ReferenceEquals(_blob, WrapperBlob.Empty) || !OperatingSystem.IsWindows())
         {
-            return false;
+            return null;
         }
         // Pass the log sink: without it a refused machine-scope load would make this
         // property answer false with no trace anywhere — literally "no prior
         // install", which is the one reading it must never silently produce. (R1)
-        return UninstallStateStore.TryLoad(_blob.AppId, _scope, StateProgress) is not null;
+        return UninstallStateStore.TryLoad(_blob.AppId, _scope, StateProgress);
+    }
+
+    /// <summary>
+    /// The <c>option.*</c> values the prior install of this app recorded, keyed by
+    /// component name, or <c>null</c> when there is no prior install in this scope or
+    /// its state predates the field. Feeds the option resolution below the wizard's
+    /// checkboxes and the CLI <c>/P</c> overrides, and above the manifest defaults. (R98)
+    /// </summary>
+    internal IReadOnlyDictionary<string, bool>? PriorOptionValues => PriorState?.Options;
+
+    /// <summary>
+    /// The value each option component starts at on the Options screen, keyed by
+    /// component name: a <c>locked</c> component's manifest default; otherwise the
+    /// CLI <c>/P</c> override, then the value the prior install recorded (upgrade or
+    /// reinstall), then the manifest default. The silent path resolves the same chain
+    /// in <see cref="StepContext"/>, so the wizard opens on exactly what a silent run
+    /// would install. (R98)
+    /// </summary>
+    public IReadOnlyDictionary<string, bool> OptionDefaults
+    {
+        get
+        {
+            var prior = PriorOptionValues;
+            var defaults = new Dictionary<string, bool>(StringComparer.Ordinal);
+            foreach (var opt in Options)
+            {
+                var cliKey = opt.Custom ? "option." + opt.Name : opt.Name;
+                bool value;
+                if (opt.Locked)
+                {
+                    value = opt.Default;
+                }
+                else if (_parsed.Options.TryGetValue(cliKey, out var cli) && bool.TryParse(cli, out var cliB))
+                {
+                    value = cliB;
+                }
+                else if (prior is not null && prior.TryGetValue(opt.Name, out var recorded))
+                {
+                    value = recorded;
+                }
+                else
+                {
+                    value = opt.Default;
+                }
+                defaults[opt.Name] = value;
+            }
+            return defaults;
+        }
     }
 
     /// <summary>
@@ -1110,7 +1185,9 @@ public sealed class InstallSession
         StepContext.From(
             _blob, _parsed, payloadRoot, _collectedValues, _scope, _collectedOptions, CollectedInstallDir,
             // An upgrade installs into the prior location (default destination).
-            priorInstallDir: PriorInstallDirDefault);
+            priorInstallDir: PriorInstallDirDefault,
+            // Read here, before the prior version is torn down — see PriorState. (R98)
+            priorOptions: PriorOptionValues);
 
     /// <summary>
     /// Core install lifecycle shared by every entry path: extract the embedded
@@ -1305,7 +1382,7 @@ public sealed class InstallSession
 #pragma warning disable CA1031 // A completion failure must become a typed install failure, never an escape.
                 try
                 {
-                    PersistCompletion(result.Journal, ctx.SecretValues, ctx.InstallDir);
+                    PersistCompletion(result.Journal, ctx.SecretValues, ctx.InstallDir, ctx.ResolvedOptions);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -1791,7 +1868,8 @@ public sealed class InstallSession
     private void PersistCompletion(
         RollbackJournal journal,
         IReadOnlyList<string> secretValues,
-        string? resolvedInstallDir)
+        string? resolvedInstallDir,
+        IReadOnlyDictionary<string, bool>? resolvedOptions = null)
     {
         if (ReferenceEquals(_blob, WrapperBlob.Empty))
         {
@@ -1842,8 +1920,14 @@ public sealed class InstallSession
         journal.RelocateCommittedStashes(
             UninstallStateStore.StashDirectoryFor(_blob.AppId, _scope));
 
+        // The resolved option values ride with the journal so the next upgrade or
+        // reinstall opens on the same choices. The per-app state is the install record
+        // to extend rather than the ARP key: it already carries the R1 hardening (an
+        // admin-only DACL in machine scope, an ownership check on every load, an
+        // atomic replace) and a versioned, source-generated schema, and it is removed
+        // with the app. (R98)
         UninstallStateStore.Save(
-            _blob.AppId, journal, _scope, secretValues, StateProgress, uninstallDir);
+            _blob.AppId, journal, _scope, secretValues, StateProgress, uninstallDir, resolvedOptions);
         // Register the REAL manifest.App.* fields + packed size threaded through the
         // blob. The fallbacks only fire for a (theoretical) blob that omitted them —
         // a real packed blob always carries them.
@@ -2368,7 +2452,7 @@ public sealed class InstallSession
             var ctx = StepContext.From(
                 _blob, _parsed, payloadRoot: null, collected: _collectedValues,
                 scope: _scope, collectedOptions: _collectedOptions, collectedInstallDir: CollectedInstallDir,
-                priorInstallDir: PriorInstallDirDefault);
+                priorInstallDir: PriorInstallDirDefault, priorOptions: PriorOptionValues);
 
             var path = ctx.ResolvePath(_blob.RunAfterInstallPath!);
             System.Collections.Generic.List<string>? args = null;

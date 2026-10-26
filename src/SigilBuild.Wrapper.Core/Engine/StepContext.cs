@@ -91,6 +91,16 @@ public sealed class StepContext
     /// </summary>
     public string? InstallDir { get; }
 
+    /// <summary>
+    /// The resolved <c>option.*</c> value of every option component that applied to
+    /// this run, keyed by component name. A custom component whose <c>when</c> made it
+    /// inapplicable is left out: its <c>false</c> is not a choice anyone made, and
+    /// recording it would override the manifest default on the next version. This is
+    /// what the install persists for the next upgrade to offer again. (R98)
+    /// </summary>
+    internal System.Collections.Generic.IReadOnlyDictionary<string, bool> ResolvedOptions { get; private init; }
+        = new System.Collections.Generic.Dictionary<string, bool>(System.StringComparer.Ordinal);
+
     public static StepContext Empty { get; } =
         new StepContext(new System.Collections.Generic.Dictionary<string, object?>());
 
@@ -358,7 +368,8 @@ public sealed class StepContext
         InstallScope scope = InstallScope.User,
         System.Collections.Generic.IReadOnlyDictionary<string, bool>? collectedOptions = null,
         string? collectedInstallDir = null,
-        string? priorInstallDir = null)
+        string? priorInstallDir = null,
+        System.Collections.Generic.IReadOnlyDictionary<string, bool>? priorOptions = null)
     {
         System.ArgumentNullException.ThrowIfNull(blob);
         System.ArgumentNullException.ThrowIfNull(parsed);
@@ -474,7 +485,11 @@ public sealed class StepContext
         // hand-written step can gate on `option.*`. Resolution precedence mirrors
         // parameters: a `locked` component is fixed at its default (the user can't
         // change it); otherwise GUI-collected checkbox → CLI `/P<name>` override →
-        // component default. Mirrors how `param.*` and `scope` are seeded.
+        // the value the prior install recorded (upgrade / reinstall) → component
+        // default. Mirrors how `param.*` and `scope` are seeded. A recorded name the
+        // manifest no longer declares is never looked up; a component new in this
+        // version has no recorded value and takes its default. (R98)
+        var resolvedOptions = new System.Collections.Generic.Dictionary<string, bool>(System.StringComparer.Ordinal);
         if (blob.Options is { } options)
         {
             foreach (var opt in options)
@@ -508,12 +523,17 @@ public sealed class StepContext
                 {
                     value = cliB;
                 }
+                else if (priorOptions is not null && priorOptions.TryGetValue(opt.Name, out var prior))
+                {
+                    value = prior;
+                }
                 else
                 {
                     value = opt.Default;
                 }
 
                 dict["option." + opt.Name] = value;
+                resolvedOptions[opt.Name] = value;
             }
         }
 
@@ -523,7 +543,10 @@ public sealed class StepContext
         // secretness and land in `secrets` for redaction.
         VarResolver.Populate(blob.Vars, dict, new Expressions.Evaluator(), secretIds, secrets);
 
-        return new StepContext(dict, payloadRoot, secrets, layout.Scope, installDir, blob.AppName, blob.AppId);
+        return new StepContext(dict, payloadRoot, secrets, layout.Scope, installDir, blob.AppName, blob.AppId)
+        {
+            ResolvedOptions = resolvedOptions,
+        };
     }
 
     /// <summary>

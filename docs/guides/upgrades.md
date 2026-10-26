@@ -70,6 +70,31 @@ different scope root). Precedence for the destination is:
 4. `installer.install_dir`, then
 5. the default `<scope root>\<App.Name>`.
 
+### Option choices are preserved
+
+Every install records the resolved value of each `installer.options` component —
+the built-ins and your `components[]` — with its uninstall state
+(`uninstall.json` in `%LOCALAPPDATA%\Sigil\<app id>\`, or `%ProgramData%` for a
+per-machine install). An upgrade, a forced downgrade or a same-version reinstall
+of the same app reads it back, so a user who ticked **Add to PATH** at 1.0 sees
+it ticked again on 1.1's Options screen, and a silent upgrade applies it again.
+Precedence for each component is:
+
+1. a `locked` component's manifest `default` — always, then
+2. the wizard checkbox (interactive runs), then
+3. `/P<name>=` / `/Poption.<name>=` on the command line, then
+4. **the value the previous install recorded**, then
+5. the component's manifest `default`.
+
+A component the new version no longer declares is ignored; one it adds starts at
+its default. A custom component whose `when` made it inapplicable is not recorded,
+so a forced-off value nobody chose never overrides the default later. The prior
+version's teardown deletes its state, so the new version reads the recorded values
+when the run starts — before that teardown — and writes its own once the install
+completes. State written by a Sigil build that predates this has no recorded
+options; that upgrade uses the manifest defaults, and records its own for next time.
+Nothing is carried across a scope change, because each scope keeps its own state.
+
 ## `/force-downgrade`
 
 ```text

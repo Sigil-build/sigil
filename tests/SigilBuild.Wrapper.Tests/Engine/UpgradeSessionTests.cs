@@ -204,4 +204,151 @@ public sealed class UpgradeSessionTests
         outcome.Success.Should().BeFalse();
         outcome.Error.Should().Contain("uninstaller was not found");
     }
+
+    // ── R112: a same-version reinstall keeps the recorded install directory ──
+
+    private static readonly string CustomDir =
+        Path.Combine(ScopeLayout.For(InstallScope.User).InstallRoot, "Acme12");
+
+    private static UpgradeState InstalledIn(string dir, string version, InstallScope scope = InstallScope.User) =>
+        new(Found: true, InstalledVersion: version,
+            PriorInstallDir: dir,
+            PriorUninstallExe: Path.Combine(dir, "uninstall.exe"),
+            FoundScope: scope);
+
+    [Fact]
+    public void Same_version_reinstall_prefills_the_wizard_destination_with_the_recorded_custom_dir()
+    {
+        // Arrange — 2.0.0 is installed in a folder the user picked, not the default.
+        var session = Session(Blob("2.0.0"), InstalledIn(CustomDir, "2.0.0"));
+
+        // Act
+        var prefill = session.ResolveDefaultInstallDir();
+
+        // Assert
+        session.UpgradeAction.Should().Be(UpgradeAction.Same);
+        prefill.Should().Be(CustomDir, "a reinstall must not move the app to the default folder");
+    }
+
+    [Fact]
+    public void Same_version_silent_reinstall_installs_into_the_recorded_custom_dir()
+    {
+        // Arrange
+        var session = Session(Blob("2.0.0"), InstalledIn(CustomDir, "2.0.0"), "/silent");
+
+        // Act
+        var ctx = session.BuildInstallContextForTesting();
+
+        // Assert
+        ctx.InstallDir.Should().Be(CustomDir, "{install_dir} on the silent path is the existing location");
+    }
+
+    [Fact]
+    public void Same_version_wizard_reinstall_installs_into_the_prefilled_dir()
+    {
+        // Arrange — the wizard echoes its pre-fill back as the collected path.
+        var session = Session(Blob("2.0.0"), InstalledIn(CustomDir, "2.0.0"));
+        session.CollectedInstallDir = session.ResolveDefaultInstallDir();
+
+        // Act
+        var ctx = session.BuildInstallContextForTesting();
+
+        // Assert
+        ctx.InstallDir.Should().Be(CustomDir);
+    }
+
+    [Fact]
+    public void D_override_wins_over_the_recorded_dir_on_a_reinstall()
+    {
+        // Arrange
+        var other = Path.Combine(ScopeLayout.For(InstallScope.User).InstallRoot, "AcmeElsewhere");
+        var session = Session(Blob("2.0.0"), InstalledIn(CustomDir, "2.0.0"), "/silent", "/D=" + other);
+
+        // Act
+        var prefill = session.ResolveDefaultInstallDir();
+        var ctx = session.BuildInstallContextForTesting();
+
+        // Assert
+        prefill.Should().Be(other);
+        ctx.InstallDir.Should().Be(other, "/D= beats the prior install directory");
+    }
+
+    [Fact]
+    public void Cross_scope_same_version_reinstall_uses_the_new_scopes_default()
+    {
+        // Arrange — 2.0.0 per-user in a custom folder; the same build re-run with /allusers.
+        var session = Session(Blob("2.0.0"), InstalledIn(CustomDir, "2.0.0"), "/silent", "/allusers");
+
+        // Act
+        var prefill = session.ResolveDefaultInstallDir();
+        var ctx = session.BuildInstallContextForTesting();
+
+        // Assert
+        session.ResolvedScope.Should().Be(InstallScope.Machine);
+        prefill.Should().Be(InstallDirResolver.ScopeDefault(InstallScope.Machine, null, "com.acme.Studio"));
+        ctx.InstallDir.Should().NotBe(CustomDir, "the prior dir is never carried across a scope change");
+    }
+
+    [Fact]
+    public void The_scope_toggle_prefills_the_prior_dir_only_for_the_prior_installs_scope()
+    {
+        // Arrange
+        var session = Session(Blob("2.0.0"), InstalledIn(CustomDir, "2.0.0"));
+
+        // Act
+        var user = session.ResolveDefaultInstallDir(InstallScope.User);
+        var machine = session.ResolveDefaultInstallDir(InstallScope.Machine);
+
+        // Assert
+        user.Should().Be(CustomDir);
+        machine.Should().NotBe(CustomDir);
+    }
+
+    [Fact]
+    public void Upgrade_still_installs_into_the_recorded_custom_dir()
+    {
+        // Arrange
+        var session = Session(Blob("2.0.0"), InstalledIn(CustomDir, "1.0.0"), "/silent");
+
+        // Act
+        var prefill = session.ResolveDefaultInstallDir();
+        var ctx = session.BuildInstallContextForTesting();
+
+        // Assert
+        session.UpgradeAction.Should().Be(UpgradeAction.Upgrade);
+        prefill.Should().Be(CustomDir);
+        ctx.InstallDir.Should().Be(CustomDir);
+    }
+
+    [Fact]
+    public void Blocked_downgrade_does_not_claim_the_prior_dir()
+    {
+        // Arrange
+        var session = Session(Blob("1.0.0"), InstalledIn(CustomDir, "2.0.0"));
+
+        // Act
+        var prefill = session.ResolveDefaultInstallDir();
+
+        // Assert
+        session.IsDowngradeBlocked.Should().BeTrue();
+        prefill.Should().NotBe(CustomDir);
+    }
+
+    [Theory]
+    [InlineData(UpgradeAction.Fresh, false)]
+    [InlineData(UpgradeAction.Same, true)]
+    [InlineData(UpgradeAction.Upgrade, true)]
+    [InlineData(UpgradeAction.DowngradeBlocked, false)]
+    [InlineData(UpgradeAction.DowngradeForced, true)]
+    public void Replaces_prior_install_covers_reinstall_upgrade_and_forced_downgrade(UpgradeAction action, bool expected)
+    {
+        // Arrange
+        var plan = UpgradePlan.Fresh with { Action = action };
+
+        // Act
+        var replaces = plan.ReplacesPriorInstall;
+
+        // Assert
+        replaces.Should().Be(expected);
+    }
 }

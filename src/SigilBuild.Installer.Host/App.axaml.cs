@@ -151,7 +151,8 @@ public partial class App : Application
                 // Tell the wizard whether this run is an upgrade — show the
                 // "Upgrading from x.y.z" banner — or a blocked downgrade, which routes
                 // straight to the notice screen with the dedicated exit code. The prior
-                // install dir is already honored by ResolveDefaultInstallDir below.
+                // install dir of a reinstall, upgrade or forced downgrade is honored by
+                // ResolveDefaultInstallDir below. (R112)
                 _vm.SetUpgradeState(session.UpgradeAction, session.InstalledVersion);
 
                 // Seed the Destination screen from the session — the scope-aware

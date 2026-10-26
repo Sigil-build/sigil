@@ -16,7 +16,7 @@ At startup the installer reads the scope-correct ARP entry for `app.id`
 | Installed vs. this build | What happens |
 | --- | --- |
 | **Nothing installed** | Fresh install. |
-| **Same version** | Repair / reinstall — the recorded install is replayed in reverse, then re-applied (idempotent: no duplicate PATH entries, shortcuts, or ARP rows). |
+| **Same version** | Repair / reinstall — the recorded install is replayed in reverse, then re-applied in the **same install directory** (idempotent: no duplicate PATH entries, shortcuts, or ARP rows). |
 | **Older installed** | **Upgrade.** The previous version's `uninstall.exe /S /Uninstall` is run first (and must exit `0`), then the new version installs into the **previous install directory** so user data outside the install journal is preserved. |
 | **Newer installed** | **Downgrade — blocked.** The wizard shows a notice screen; a silent install exits with code **3**. Pass `/force-downgrade` to override. |
 
@@ -60,15 +60,24 @@ directory is **not** carried across a scope change.
 
 ### Install directory is preserved
 
-An upgrade installs into the prior location even when the new build's default
-destination differs (a changed `installer.install_dir`, a renamed app, a
-different scope root). Precedence for the destination is:
+An upgrade, a forced downgrade and a same-version reinstall install into the
+prior location even when the build's default destination differs (a folder the
+user picked at the first install, a changed `installer.install_dir`, a renamed
+app, a different scope root). The wizard's location screen opens on that folder,
+and a silent run uses it. Precedence for the destination is:
 
 1. the wizard-collected path, then
 2. `/D=<path>`, then
-3. **the prior install directory (upgrade)**, then
+3. **the prior install directory (upgrade, forced downgrade or reinstall, same
+   scope only)**, then
 4. `installer.install_dir`, then
 5. the default `<scope root>\<App.Name>`.
+
+Choosing a different folder — on the location screen or with `/D=` — moves the
+app: the previous install is removed from the folder it was recorded in, and the
+new one goes into the folder you chose. Files the install did not lay down
+(settings or data the app wrote next to itself) stay in the old folder. An
+upgrade and a reinstall behave the same way here.
 
 ### Option choices are preserved
 

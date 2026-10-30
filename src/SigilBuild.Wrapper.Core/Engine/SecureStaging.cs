@@ -497,9 +497,10 @@ internal sealed class SecureStaging : IDisposable
         return (commonAppData, true);
     }
 
-    // NOTE — there is deliberately NO orphan sweep here, and adding one needs more care
-    // than it looks. Sweeping `sigil-*` siblings older than 24 h has two independent
-    // defects:
+    // NOTE — there is deliberately NO general orphan sweep here, and adding one needs more
+    // care than it looks. The one sweep that exists is StaleStagingSweep, for the
+    // `uninstall` purpose only, built to the rules at the end of this note (R114).
+    // Sweeping `sigil-*` siblings older than 24 h has two independent defects:
     //
     //   * the glob also matches %ProgramData%\sigil-runtime, the native-runtime DLL cache
     //     — so resolving {staging_dir} can recursively delete the very directory the

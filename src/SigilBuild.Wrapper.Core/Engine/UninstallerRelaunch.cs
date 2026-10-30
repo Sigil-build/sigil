@@ -51,7 +51,9 @@ using SigilBuild.Wrapper.Cli;
 /// <see cref="SelfDelete"/> moves it into the copy's directory, the install directory is
 /// left empty, and the journal's <c>remove_directory</c> records remove it. When this
 /// process wakes it deletes the copy and schedules what remains of the private directory
-/// — its own renamed image — for deletion at the next restart.
+/// — its own renamed image — for deletion at the next restart. Unelevated it cannot
+/// schedule that, and <see cref="StaleStagingSweep"/> removes the directory at the start
+/// of the next setup or uninstall run instead. (R114)
 /// </para>
 /// <para>
 /// <b>Fail-safe.</b> Any failure before the copy has started — no hardened directory, a
@@ -421,7 +423,7 @@ public static partial class UninstallerRelaunch
             log(scheduled
                     ? $"uninstall: '{directory}' is removed at the next restart"
                     : $"uninstall: '{directory}' could not be scheduled for removal (that needs " +
-                      "administrator rights); it stays in the temporary folder until it is cleaned up",
+                      "administrator rights); the next setup or uninstall run removes it (R114)",
                 false);
         }
         catch (Exception ex)

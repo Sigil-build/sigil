@@ -83,13 +83,14 @@ ignores it. A run carrying the token never relaunches again.
 
 `/D=` is a **destination override, not a parameter**. It participates in one
 resolution chain together with the wizard-collected path, the prior install
-directory (on an upgrade), the manifest's `installer.install_dir`, and the
+directory (on an upgrade or reinstall), the manifest's `installer.install_dir`, and the
 scope-root default — highest precedence first
 (`InstallDirResolver.cs:15-23`):
 
 1. the wizard-collected destination path (interactive only);
 2. `/D=path`;
-3. the prior install directory, when this run is an upgrade;
+3. the prior install directory, when this run is a same-scope upgrade, forced
+   downgrade or same-version reinstall;
 4. `installer.install_dir` (manifest);
 5. the default, `<scope root>\<App.Name>`.
 

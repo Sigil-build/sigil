@@ -552,6 +552,44 @@ restarts — over a running copy, and uninstalling it, found three defects.
   exit `0`, and the silent path says so, logs `result: not installed` and exits
   `0`. No hook runs. State that exists but is refused still fails as before (R1).
 
+### Fixed — reinstalling (R112)
+
+- **R112 — running the same `Setup.exe` again moved the app to the default
+  folder.** 0.5.6 was installed per-user into a folder the user picked
+  (`…\Programs\Dictum12`), and the 0.5.7 upgrade correctly stayed there; running
+  the 0.5.7 `Setup.exe` a second time opened the location screen on the default
+  `…\Programs\Dictum`, removed the copy in `Dictum12` and installed into
+  `Dictum`. A same-version reinstall now keeps the recorded install directory as
+  its default exactly like an upgrade or forced downgrade: the location screen
+  opens on it, a silent run installs into it, and `{install_dir}` expands to it.
+  `/D=` and a folder picked in the wizard still win, and a reinstall into a
+  different scope (`/allusers` over a per-user install) still uses the new
+  scope's default. Picking a different folder on a reinstall moves the app, the
+  same way it does on an upgrade.
+
+### Fixed — the install wizard's rail (R113)
+
+- **R113 — the install wizard's rail did not show the version.** The uninstall
+  window's rail ends with a "Version x.y.z" line; the install wizard's did not,
+  so after the Welcome screen nothing on screen said which version was being
+  installed. The wizard's rail now ends with the same line, and shows none when
+  the app declares no version. The Welcome screen keeps its own version line.
+
+### Fixed — what a per-user uninstall leaves in `%TEMP%` (R114)
+
+- **R114 — every per-user uninstall left a `%TEMP%\sigil-uninstall-<guid>`
+  directory.** The R106 relaunch's waiting parent cannot delete its own image
+  and, unelevated, cannot schedule it for deletion at the next restart, so each
+  per-user uninstall left about 60 MB behind. The uninstaller is still never
+  elevated. Instead every setup and uninstall run, wizard or silent, starts with
+  a sweep that removes those directories: exactly `sigil-uninstall-` plus 32 hex
+  digits, directly in the current user's `%TEMP%` (or, in an elevated run,
+  directly in `%ProgramData%` and only when administrator-only), at least two
+  minutes old, not a junction or link and holding only plain files, and with
+  every file free to open exclusively — a copy that is still running keeps its
+  directory. It never stops a run and logs what it did. An elevated run does
+  not sweep `%TEMP%`. See `docs/guides/uninstaller.md`.
+
 ### Known limitations
 
 > **Sigil 0.1.0-alpha is Windows-only and pre-production.** It builds and

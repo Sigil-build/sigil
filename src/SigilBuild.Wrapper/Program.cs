@@ -44,6 +44,12 @@ internal static class Program
             // additionally write it to.
             session.ResolveSessionLanguage();
 
+            // Remove the private directories earlier per-user uninstalls had to leave in
+            // %TEMP% (or, elevated, in %ProgramData%). Before the elevation branch, so
+            // the unelevated first process sweeps %TEMP% too. Never fatal. Mirrors the
+            // host entry path. (R114)
+            StaleStagingSweep.Run(WriteNote);
+
             // Read the single-instance handoff and CLEAR it here — before the
             // elevation branch below, which is the first thing this process can
             // spawn. The guard is taken further down, after that branch, and the

@@ -70,6 +70,12 @@
             </DataTemplate>
           </ItemsControl.ItemTemplate>
         </ItemsControl>
+
+        <!-- Version footer, matching the uninstall window's rail; hidden when the
+             app declares no version. (R113) -->
+        <TextBlock x:Name="RailVersion" DockPanel.Dock="Bottom"
+                   Text="{Binding VersionLine}" IsVisible="{Binding HasVersionLine}"
+                   Foreground="{DynamicResource RailMutedBrush}" FontSize="12" />
       </DockPanel>
     </Border>
 

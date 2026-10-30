@@ -19,8 +19,8 @@ using SigilBuild.Core.Manifest;
 /// <list type="number">
 ///   <item><description>the wizard-collected destination path (GUI), then</description></item>
 ///   <item><description><c>/D=path</c> (silent + GUI prefill), then</description></item>
-///   <item><description>the prior install directory during an upgrade (preserve
-///   the existing location / user data), then</description></item>
+///   <item><description>the prior install directory on a same-scope upgrade, forced
+///   downgrade or reinstall (the app never moves; R112), then</description></item>
 ///   <item><description><c>installer.install_dir</c> (manifest override), then</description></item>
 ///   <item><description>the default <c>&lt;scope root&gt;\&lt;App.Name&gt;</c>.</description></item>
 /// </list>

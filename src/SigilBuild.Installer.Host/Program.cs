@@ -49,6 +49,12 @@ public static partial class Program
             return 64;
         }
 
+        // Remove the private directories earlier per-user uninstalls had to leave in
+        // %TEMP% (or, elevated, in %ProgramData%). Before the elevation branch, so the
+        // unelevated first process of a per-machine setup sweeps %TEMP% too. Never
+        // fatal; every line goes to the always-on diagnostic log. (R114)
+        StaleStagingSweep.Run(WriteDiagnostic);
+
         // Resolve this session's chrome language now — installer.language
         // (fixed) -> /lang -> the OS UI-language preference list -> en — and set
         // SessionLanguage.Current. MUST run before ANY UI is constructed, including

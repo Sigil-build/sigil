@@ -805,9 +805,9 @@ public sealed class InstallSession
                 manifestInstallDir: _blob.InstallDir,
                 cliOverride: _parsed.InstallDir,
                 collected: null,
-                // An upgrade pre-fills the prior install dir so the Destination screen
-                // defaults to the existing location (preserving user data).
-                priorInstallDir: PriorInstallDirDefault);
+                // A reinstall, upgrade or forced downgrade pre-fills the prior install
+                // dir so the Destination screen defaults to the existing location. (R112)
+                priorInstallDir: PriorInstallDirFor(effective));
         }
         catch (InstallDirRejectedException ex)
         {
@@ -901,6 +901,15 @@ public sealed class InstallSession
     /// its state predates the field. Feeds the option resolution below the wizard's
     /// checkboxes and the CLI <c>/P</c> overrides, and above the manifest defaults. (R98)
     /// </summary>
+    /// <remarks>
+    /// Sourced from this scope's state store, the same source the reinstall cleanup
+    /// keys on, so a prior install that is torn down always hands its choices on. For
+    /// every install that also has its ARP entry, that is exactly the set of runs
+    /// <see cref="PriorInstallDirDefault"/> honours: a same-version reinstall, an
+    /// upgrade or a forced downgrade in the same scope. A blocked downgrade installs
+    /// nothing, and a cross-scope run loads the NEW scope's state, which a prior
+    /// install in the other scope does not have. (R98, R112)
+    /// </remarks>
     internal IReadOnlyDictionary<string, bool>? PriorOptionValues => PriorState?.Options;
 
     /// <summary>
@@ -965,15 +974,26 @@ public sealed class InstallSession
     public bool IsDowngradeBlocked => _plan.Action == UpgradeAction.DowngradeBlocked;
 
     /// <summary>
-    /// The prior install directory to honor as the default destination during an
-    /// upgrade / forced downgrade — the install lands in the existing location so
-    /// non-journaled user data is preserved. <c>null</c> for fresh / same installs,
-    /// and for a cross-scope re-install (the prior dir belongs to the OTHER scope, so
-    /// the new scope's own default is used instead), where the normal precedence applies.
+    /// The prior install directory to honor as the default destination when this run
+    /// replaces an existing install in the session's scope — a same-version reinstall,
+    /// an upgrade or a forced downgrade (<see cref="UpgradePlan.ReplacesPriorInstall"/>).
+    /// The install lands in the existing location, so the app never moves and
+    /// non-journaled user data is preserved. A wizard-collected path and <c>/D=</c>
+    /// still win over it. <c>null</c> for a fresh install, a blocked downgrade, and a
+    /// cross-scope run (the prior dir belongs to the OTHER scope, so the new scope's own
+    /// default is used instead). (R112)
     /// </summary>
-    private string? PriorInstallDirDefault =>
-        _plan.RemovesPriorVersion
-        && _plan.FoundScope == _scope       // same-scope upgrade only; a scope change uses the new scope's default
+    private string? PriorInstallDirDefault => PriorInstallDirFor(_scope);
+
+    /// <summary>
+    /// <see cref="PriorInstallDirDefault"/> evaluated for <paramref name="scope"/>, so the
+    /// wizard's scope toggle pre-fills the prior directory only for the scope the prior
+    /// install actually lives in. (R112)
+    /// </summary>
+    private string? PriorInstallDirFor(InstallScope scope) =>
+        _plan.ReplacesPriorInstall
+        && _plan.FoundScope == scope
+        && _scope == scope
         && !string.IsNullOrEmpty(_plan.PriorInstallDir)
             ? _plan.PriorInstallDir
             : null;
@@ -985,10 +1005,11 @@ public sealed class InstallSession
     /// <remarks>
     /// <para>
     /// Deliberately NOT <see cref="PriorInstallDirDefault"/>, which additionally
-    /// requires <c>_plan.RemovesPriorVersion</c> — an upgrade concept. An uninstall run
-    /// sees the installed version equal to the packed one and is classified
-    /// <c>UpgradeAction.Same</c>, so that property would leave the argument permanently
-    /// <c>null</c> and the grandfather clause inert on this path.
+    /// requires <see cref="UpgradePlan.ReplacesPriorInstall"/> — an install-time version
+    /// classification. An uninstall removes whatever is recorded, whichever version
+    /// packed the <c>uninstall.exe</c> that runs it, so this path must not depend on it:
+    /// an action outside that set would leave the argument <c>null</c> and the
+    /// grandfather clause inert on this path.
     /// </para>
     /// <para>
     /// It matters because for a grandfathered install (one outside the scope root
@@ -1184,10 +1205,17 @@ public sealed class InstallSession
     private StepContext BuildInstallContext(string? payloadRoot) =>
         StepContext.From(
             _blob, _parsed, payloadRoot, _collectedValues, _scope, _collectedOptions, CollectedInstallDir,
-            // An upgrade installs into the prior location (default destination).
+            // A reinstall, upgrade or forced downgrade installs into the prior
+            // location unless a collected path or /D= says otherwise. (R112)
             priorInstallDir: PriorInstallDirDefault,
             // Read here, before the prior version is torn down — see PriorState. (R98)
             priorOptions: PriorOptionValues);
+
+    /// <summary>
+    /// Test seam for <see cref="BuildInstallContext"/>, so a test observes the
+    /// <c>{install_dir}</c> the engine would install into without running an install.
+    /// </summary>
+    internal StepContext BuildInstallContextForTesting() => BuildInstallContext(payloadRoot: null);
 
     /// <summary>
     /// Core install lifecycle shared by every entry path: extract the embedded
@@ -1442,6 +1470,15 @@ public sealed class InstallSession
     /// store rather than ARP, so under elevation it can tear down a per-user install
     /// that the ARP-sourced upgrade plan could not see (R74).
     /// </summary>
+    /// <remarks>
+    /// The replay removes the prior install from where it RECORDED it landed, not from
+    /// this run's destination. The destination defaults to that same directory (R112),
+    /// so an ordinary reinstall removes and re-lays the app in place. When the user
+    /// deliberately picks another folder (wizard or <c>/D=</c>), the prior copy is
+    /// removed from its old folder and the app is installed into the new one, exactly
+    /// as an upgrade does when the folder is changed: non-journaled files in the old
+    /// folder are left where they are. (R112)
+    /// </remarks>
     private async Task PerformReinstallCleanupAsync(string? resolvedInstallDir, CancellationToken ct)
     {
         if (!ExistingInstallDetected)
@@ -2128,10 +2165,10 @@ public sealed class InstallSession
     /// <remarks>
     /// <c>priorInstallDir</c> is threaded through for the grandfather clause, and
     /// it comes from <see cref="RecordedInstallDirForUninstall"/> rather than
-    /// <see cref="PriorInstallDirDefault"/> — the latter is gated on an upgrade
-    /// concept that is never true on this path, which would leave the argument
-    /// permanently <c>null</c> and the clause inert. See that property for what
-    /// silently breaks without it. (R3)
+    /// <see cref="PriorInstallDirDefault"/> — the latter is gated on the install-time
+    /// version classification, which an uninstall must not depend on: outside that
+    /// set the argument would be <c>null</c> and the clause inert. See that property
+    /// for what silently breaks without it. (R3)
     /// </remarks>
     private StepContext BuildUninstallContext() =>
         StepContext.From(

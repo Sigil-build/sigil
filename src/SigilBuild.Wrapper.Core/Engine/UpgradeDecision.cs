@@ -75,8 +75,11 @@ public sealed record UpgradeState(
 /// </summary>
 /// <param name="Action">The chosen path (fresh / same / upgrade / downgrade-blocked / downgrade-forced).</param>
 /// <param name="InstalledVersion">The installed <c>DisplayVersion</c> (for the notice / message); "" when fresh.</param>
-/// <param name="PriorInstallDir">The prior install directory to honor as the default destination; "" when fresh/same.</param>
-/// <param name="PriorUninstallExe">The prior <c>uninstall.exe</c> to run before an upgrade; "" when fresh/same.</param>
+/// <param name="PriorInstallDir">
+/// The prior install directory, honored as the default destination by every
+/// <see cref="ReplacesPriorInstall"/> action in the same scope; "" when fresh or unresolvable.
+/// </param>
+/// <param name="PriorUninstallExe">The prior <c>uninstall.exe</c>, run before an upgrade or forced downgrade; "" when fresh.</param>
 /// <param name="FoundScope">The existing install's scope (wins over an auto-resolved scope).</param>
 /// <param name="InstalledVersionMalformed">
 /// True when the installed version was not a parseable dotted version and was therefore
@@ -97,8 +100,19 @@ public sealed record UpgradePlan(
     /// <summary>
     /// True when the plan removes a prior version before installing — an
     /// <see cref="UpgradeAction.Upgrade"/> or a <see cref="UpgradeAction.DowngradeForced"/>.
-    /// These run the prior <c>uninstall.exe</c> as a pre-body phase and honor the prior install dir.
+    /// These run the prior <c>uninstall.exe</c> as a pre-body phase.
     /// </summary>
     public bool RemovesPriorVersion =>
         Action is UpgradeAction.Upgrade or UpgradeAction.DowngradeForced;
+
+    /// <summary>
+    /// True when the run replaces an existing install of this app: a same-version
+    /// reinstall (<see cref="UpgradeAction.Same"/>), an <see cref="UpgradeAction.Upgrade"/>
+    /// or a <see cref="UpgradeAction.DowngradeForced"/>. Each tears the prior install down
+    /// before installing, so each keeps the prior install directory as the default
+    /// destination when the scope is unchanged. <see cref="UpgradeAction.DowngradeBlocked"/>
+    /// installs nothing and <see cref="UpgradeAction.Fresh"/> has nothing to replace. (R112)
+    /// </summary>
+    public bool ReplacesPriorInstall =>
+        Action is UpgradeAction.Same or UpgradeAction.Upgrade or UpgradeAction.DowngradeForced;
 }

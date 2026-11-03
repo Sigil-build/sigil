@@ -623,6 +623,26 @@ restarts — over a running copy, and uninstalling it, found three defects.
   produced, and secrets still cross in the R18 envelope. See
   `docs/setup-exe-reference.md` and `docs/guides/installer-wizard.md`.
 
+### Added — `installer.elevation` (R118)
+
+- **New manifest field `installer.elevation: on_demand | on_start`.** The
+  default, `on_demand`, is the behaviour so far: a `scope: auto` installer
+  starts without a prompt and asks for administrator rights only when "All
+  users" is picked. `on_start` prompts once at launch, like an NSIS installer
+  with `RequestExecutionLevel admin`, and the wizard's scope radios then switch
+  freely — no shield, no second prompt, no new window; silent runs prompt at
+  launch too. More generally, any elevated wizard now switches scope in-process
+  instead of handing off to another instance. `on_start` has no effect with
+  `scope: machine` and is refused with `scope: user` (new error SIG0262); an
+  unknown value is the warning SIG0261 and means `on_demand`.
+- **An elevation approved with another account's credentials no longer offers
+  "Just for me".** When a standard user types an administrator's password into
+  the prompt, a per-user install would go to the administrator's profile. Setup
+  now compares the elevated account with the user signed in to the desktop: when
+  they differ, "Just for me" is disabled with a note (English and Ukrainian), the
+  run installs for all users, and `/currentuser` is refused with exit `64`. See
+  `docs/guides/installer-wizard.md`.
+
 ### Known limitations
 
 > **Sigil 0.1.0-alpha is Windows-only and pre-production.** It builds and

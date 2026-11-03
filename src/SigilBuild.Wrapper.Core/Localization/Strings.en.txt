@@ -48,6 +48,7 @@ location.scope.user = Just for me (recommended)
 location.scope.user_hint = No administrator permission needed
 location.scope.machine = All users of this computer
 location.scope.machine_hint = Installs to Program Files — Windows will ask for permission
+location.scope.user_blocked_hint = "Just for me" isn't available: Setup is running with another account's administrator rights, so it would install into that account's profile, not yours.
 location.scope.locked_hint = {appName} is already installed this way, so this can't be changed here. To change it, uninstall the app first.
 location.disk_free = Free space on drive {drive}: {freeSpace}
 size.mb = {value} MB
@@ -60,6 +61,7 @@ location.error.not_absolute = Enter an absolute path (for example C:\Program Fil
 location.error.is_file = That location is a file. Choose a folder.
 location.error.denied = You don't have permission to install there. Choose another folder.
 location.error.outside_machine_scope = That folder can't be used to install for all users. Choose a folder inside Program Files.
+location.error.scope_switch_failed = Setup couldn't switch to that option. Another setup for this app may be running.
 location.error.elevation_declined = Installing for all users needs administrator approval. Setup is still set to install just for you.
 
 # --- options ---

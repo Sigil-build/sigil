@@ -29,6 +29,23 @@ The same host binary also renders two smaller flows:
 - **Uninstall.** Double-clicking `<install_dir>\uninstall.exe` with no flags, or pressing **Uninstall** in Apps & features / Add or Remove Programs (its `UninstallString` carries no `/S`): **Confirm → [Close apps] → Progress → Done | Failed**. Close apps appears only when an application is still holding the install after the `pre_uninstall` hooks have run; it is the install wizard's Close-applications screen, and nothing has been removed while it shows. A script or deployment tool that wants no window runs the registered `QuietUninstallString`, which adds `/S` and skips all of it — see [Uninstaller](uninstaller.md).
 - **Headed `/Update`.** A single status window rather than a paged flow: **Checking → Downloading → LaunchingChild → UpToDate | Done | Failed**. Headless `/Update` shows none of it.
 
+## When Setup asks for administrator rights (`installer.elevation`)
+
+With `installer.scope: auto` the wizard offers **Just for me** and **All users of this computer**. `installer.elevation` decides when Windows is asked for approval (R118):
+
+```yaml
+installer:
+  scope: auto
+  elevation: on_start   # or on_demand, the default
+```
+
+- **`on_demand`** (default). Setup starts without a prompt. Picking **All users** puts a UAC shield on Next on the location screen, and pressing it hands the run to an elevated instance that continues after the location screen (R90, R117). An install that resolves to machine scope at start — an upgrade of a per-machine install, or `/allusers` — prompts at launch instead.
+- **`on_start`**. Setup prompts once at launch, like an NSIS installer with `RequestExecutionLevel admin`, and the scope radios then switch freely: no shield, no second prompt, no new window. A silent run (`/S`) prompts at launch too. Only install runs elevate this way; a per-user `uninstall.exe` stays unelevated.
+
+`on_start` has no effect with `scope: machine`, which always elevates at start, and is refused with `scope: user` (SIG0262): an elevated per-user install would land in the profile of whoever approved the prompt.
+
+**Another account's credentials.** When the elevated run belongs to a different account than the one signed in — a standard user typed an administrator's password into the prompt — "Just for me" would mean the administrator's profile. Setup compares the elevated account with the desktop session's user; when they differ, **Just for me** is disabled with a short note under it, the run installs for all users, and a `/currentuser` on the command line is refused with exit code `64`. When the signed-in account approves its own prompt, both options stay available. A run with no signed-in desktop user (a deployment tool running as SYSTEM) is treated as the same account. Note that an elevated run does not look for a per-user install of this app — reading per-user uninstall entries from an elevated process is what R2 forbids — so `on_start` suits an app whose users install it per-machine or once per user, not one that relies on per-user upgrades being detected.
+
 ## Brand slots
 
 The wizard's chrome is themed from `installer.brand`:

@@ -44,10 +44,11 @@
 
     <!-- Scope choice, shown only when the manifest scope is `auto`. The radios start
          on the session's resolved scope, and are locked to it when this run replaces
-         an install in that scope (R116). -->
+         an install in that scope (R116). "Just for me" is disabled when Setup was
+         elevated with another account's credentials (R118). -->
     <StackPanel Spacing="8" Margin="0,8,0,0" IsVisible="{Binding ScopeSelectable}">
       <RadioButton GroupName="scope" IsChecked="{Binding IsUserScope, Mode=TwoWay}"
-                   IsEnabled="{Binding CanChangeScope}">
+                   IsEnabled="{Binding CanChooseUserScope}">
         <StackPanel>
           <TextBlock Text="{x:Static loc:S.LocationScopeUser}" FontWeight="SemiBold" />
           <TextBlock Text="{x:Static loc:S.LocationScopeUserHint}"
@@ -69,6 +70,10 @@
                  Foreground="{DynamicResource TextMutBrush}"
                  IsVisible="{Binding ScopeLocked}"
                  Text="{Binding ScopeLockedHint}" />
+      <TextBlock FontSize="12" TextWrapping="Wrap"
+                 Foreground="{DynamicResource TextMutBrush}"
+                 IsVisible="{Binding !UserScopeAvailable}"
+                 Text="{Binding UserScopeBlockedHint}" />
     </StackPanel>
   </StackPanel>
 </UserControl>

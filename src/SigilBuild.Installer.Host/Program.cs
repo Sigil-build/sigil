@@ -85,7 +85,9 @@ public static partial class Program
         // per-user install never triggers UAC; only a resolved per-machine scope
         // from a non-elevated process relaunches self with the `runas` verb,
         // forwarding ALL original args, and propagates the elevated child's exit
-        // code as this process's exit code. /Update never elevates itself (a
+        // code as this process's exit code. An `installer.elevation: on_start`
+        // install with `scope: auto` takes the same path in either scope, so its
+        // wizard switches scope without a second prompt (R118). /Update never elevates itself (a
         // known limitation) — a machine-scope /Update instead falls through and
         // runs unelevated, headless or headed depending on /silent, below.
         if (OperatingSystem.IsWindows()

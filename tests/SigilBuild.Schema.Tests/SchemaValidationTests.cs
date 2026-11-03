@@ -301,6 +301,32 @@ public class SchemaValidationTests
             string.Join("; ", errors.Select(e => e.ToString())));
     }
 
+    [Theory]
+    [InlineData("on_demand")]
+    [InlineData("on_start")]
+    public async Task EveryDeclaredElevationValue_IsAcceptedBySchema(string elevation)
+    {
+        // Arrange — every enum member individually, plus the fixture that proves the
+        // property is declared at all. (R118)
+        var schema = await LoadSchemaAsync();
+        var yaml =
+            "spec: v1.0\n" +
+            "app:\n  id: com.example.App\n  name: App\n  version: 0.1.0\n  publisher: P\n" +
+            "build:\n  source: ./out\n" +
+            $"installer:\n  scope: auto\n  elevation: {elevation}\n";
+        var fixture = YamlToJson(await File.ReadAllTextAsync("Fixtures/valid/elevation-on-start.yaml"));
+
+        // Act
+        var errors = schema.Validate(YamlToJson(yaml));
+        var fixtureErrors = schema.Validate(fixture);
+
+        // Assert
+        errors.Should().BeEmpty(
+            "'{0}' is a declared elevation value; got: {1}",
+            elevation, string.Join("; ", errors.Select(e => e.ToString())));
+        fixtureErrors.Should().BeEmpty();
+    }
+
     /// <summary>
     /// Every accepted <c>installer.require_signed_downloads</c> value, asserted
     /// individually. The valid fixture can only carry one of them, and an enum

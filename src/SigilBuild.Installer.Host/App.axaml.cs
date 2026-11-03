@@ -188,6 +188,24 @@ public partial class App : Application
                         path => session.AcceptsInstallDir(InstallScope.Machine, path));
                 }
 
+                // An elevated session — installer.elevation: on_start, or a run started
+                // elevated — re-scopes itself when a radio is picked: no prompt and no
+                // relaunch. (R118)
+                if (session.CanSwitchScopeInProcess)
+                {
+                    var switchVm = _vm;
+                    _vm.ConfigureScopeSwitch(isMachine => SwitchScopeInProcess(session, switchVm, isMachine));
+                }
+
+                // Elevated with another account's credentials: "Just for me" would be
+                // that account's profile, so it is unavailable; the session has already
+                // resolved to machine scope. (R118)
+                if (session.UserScopeBlockedByElevation && session.ScopeIsSelectable)
+                {
+                    InstallerLog.Info("scope: elevated as another account; per-user install unavailable");
+                    _vm.BlockUserScope();
+                }
+
                 // The elevated instance the machine-scope choice started opens where the
                 // unelevated wizard left off, with machine scope and the forwarded
                 // destination already seeded above. (R117)
@@ -308,6 +326,60 @@ public partial class App : Application
 
         InstallerLog.Info("machine scope chosen: handed off to an elevated instance");
         desktop.Shutdown();
+        return true;
+    }
+
+    // The single-instance guard this process holds per scope, the one Program took at
+    // start included. A guard is never re-acquired — this process already owns its
+    // name — and is held for the life of the process; the OS releases it at exit.
+    // (R118)
+    private static readonly Dictionary<InstallScope, SetupInstanceLock?> ScopeLocks = new();
+
+    /// <summary>
+    /// Switch an elevated session's scope in-process and refresh what the wizard shows
+    /// for it. Takes the new scope's single-instance guard first, so a second setup
+    /// already running in that scope refuses the switch rather than racing it. (R76,
+    /// R118)
+    /// </summary>
+    private static bool SwitchScopeInProcess(InstallSession session, InstallerViewModel vm, bool isMachine)
+    {
+        var scope = isMachine ? InstallScope.Machine : InstallScope.User;
+        if (scope == session.ResolvedScope)
+        {
+            return true;
+        }
+
+        ScopeLocks.TryAdd(session.ResolvedScope, session.InstanceLock);
+        var acquired = false;
+        if (!ScopeLocks.TryGetValue(scope, out var guard))
+        {
+            guard = SetupInstanceLock.TryAcquire(
+                session.AppId, scope, session.Mode, handoff: null, out var refusal);
+            if (guard is null)
+            {
+                InstallerLog.Info($"scope switch to {scope} refused: single-instance guard {refusal}");
+                return false;
+            }
+            acquired = true;
+        }
+        if (!session.SwitchScope(scope))
+        {
+            if (acquired)
+            {
+                guard?.Dispose();
+            }
+            InstallerLog.Info($"scope switch to {scope} refused by the session");
+            return false;
+        }
+
+        ScopeLocks[scope] = guard;
+        session.InstanceLock = guard;
+        InstallerLog.Info($"scope: switched to {scope} in-process");
+
+        // Everything the wizard seeded from the old scope's installed state.
+        vm.SetExistingInstall(session.ExistingInstallDetected && session.UpgradeAction == UpgradeAction.Same);
+        vm.SetUpgradeState(session.UpgradeAction, session.InstalledVersion);
+        vm.LoadOptions(session.Options, defaults: session.OptionDefaults);
         return true;
     }
 

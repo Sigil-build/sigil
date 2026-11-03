@@ -1,0 +1,13 @@
+# R118: an unrecognized `installer.elevation` value. The schema enum is the hard
+# gate; the parser's fallback to on_demand (SIG0261) covers paths that skip it.
+spec: v1.0
+app:
+  id: com.example.App
+  name: Example
+  version: 0.1.0
+  publisher: Example Inc.
+build:
+  source: ./out
+installer:
+  scope: auto
+  elevation: always

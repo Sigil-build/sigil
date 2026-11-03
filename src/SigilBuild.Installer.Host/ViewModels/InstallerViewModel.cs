@@ -1033,8 +1033,20 @@ public sealed class InstallerViewModel : ICloseAppsGate
 
             // A locked scope belongs to the install being replaced. Re-raise so a
             // two-way binding that pushed the change snaps back. (R116)
-            if (_scopeLocked)
+            // "Just for me" is unavailable in an over-the-shoulder elevation. (R118)
+            if (_scopeLocked || (!value && !_userScopeAvailable))
             {
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsUserScope));
+                return;
+            }
+
+            // An elevated session re-scopes itself here, before the path is recomputed
+            // for the new scope; a refused switch leaves the selection where it was.
+            // (R118)
+            if (_scopeSwitcher is not null && !_scopeSwitcher(value))
+            {
+                InstallPathError = Strings.LocationErrorScopeSwitchFailed(_lang);
                 OnPropertyChanged();
                 OnPropertyChanged(nameof(IsUserScope));
                 return;
@@ -1052,6 +1064,63 @@ public sealed class InstallerViewModel : ICloseAppsGate
             {
                 InstallPath = _defaultPathResolver(_isMachineScope);
             }
+        }
+    }
+
+    private Func<bool, bool>? _scopeSwitcher;
+
+    /// <summary>
+    /// Wire the in-process scope switch of an elevated session: invoked with
+    /// <c>isMachine</c> when the user picks a scope radio, and returns <c>false</c> when
+    /// the session could not switch. Mutually exclusive with the machine-scope handoff —
+    /// an elevated session needs no relaunch. (R118)
+    /// </summary>
+    public void ConfigureScopeSwitch(Func<bool, bool> switcher) =>
+        _scopeSwitcher = switcher ?? throw new ArgumentNullException(nameof(switcher));
+
+    private bool _userScopeAvailable = true;
+
+    /// <summary>
+    /// False when the process was elevated with another account's credentials, so
+    /// "Just for me" would install into that account's profile. (R118)
+    /// </summary>
+    public bool UserScopeAvailable
+    {
+        get => _userScopeAvailable;
+        private set
+        {
+            if (_userScopeAvailable != value)
+            {
+                _userScopeAvailable = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(CanChooseUserScope));
+                OnPropertyChanged(nameof(UserScopeBlockedHint));
+            }
+        }
+    }
+
+    /// <summary>True when the "Just for me" radio is enabled. (R116, R118)</summary>
+    public bool CanChooseUserScope => !_scopeLocked && _userScopeAvailable;
+
+    /// <summary>The line saying why "Just for me" is unavailable; empty otherwise. (R118)</summary>
+    public string UserScopeBlockedHint => _userScopeAvailable
+        ? string.Empty
+        : Strings.LocationScopeUserBlockedHint(_lang);
+
+    /// <summary>
+    /// Disable "Just for me" for an over-the-shoulder elevation, selecting "All users"
+    /// if it was not already — the host's session has resolved to machine scope by
+    /// then, so this only brings the radios in line. (R118)
+    /// </summary>
+    public void BlockUserScope()
+    {
+        UserScopeAvailable = false;
+        if (!_isMachineScope)
+        {
+            _isMachineScope = true;
+            OnPropertyChanged(nameof(IsMachineScope));
+            OnPropertyChanged(nameof(IsUserScope));
+            OnPropertyChanged(nameof(NextNeedsElevation));
         }
     }
 
@@ -1181,6 +1250,7 @@ public sealed class InstallerViewModel : ICloseAppsGate
                 _scopeLocked = value;
                 OnPropertyChanged();
                 OnPropertyChanged(nameof(CanChangeScope));
+                OnPropertyChanged(nameof(CanChooseUserScope));
                 OnPropertyChanged(nameof(ScopeLockedHint));
             }
         }

@@ -37,6 +37,12 @@ internal sealed record SerializableWrapperBlob
     public InstallScope Scope { get; init; } = InstallScope.Auto;
 
     /// <summary>
+    /// <c>installer.elevation</c>. Defaults to <see cref="InstallerElevation.OnDemand"/>,
+    /// so a blob stamped before the field existed elevates exactly as it did. (R118)
+    /// </summary>
+    public InstallerElevation Elevation { get; init; } = InstallerElevation.OnDemand;
+
+    /// <summary>
     /// The manifest's <c>App.Name</c>. The <c>&lt;App.Name&gt;</c> segment of
     /// the default install dir (<c>&lt;scope root&gt;\&lt;App.Name&gt;</c>) and the
     /// value of the <c>{app.name}</c> token in an <c>install_dir</c> override.
@@ -185,6 +191,7 @@ internal sealed record SerializableWrapperBlob
             PostInstall: ConvertSteps(s.PostInstall),
             UpdateSteps: ConvertSteps(s.UpdateSteps),
             Scope: s.Scope,
+            Elevation: s.Elevation,
             Options: ConvertOptions(s.Options),
             Vars: ConvertVars(s.Vars),
             AppName: s.AppName,
@@ -226,6 +233,7 @@ internal sealed record SerializableWrapperBlob
             PostInstall = SerializeSteps(blob.PostInstall),
             UpdateSteps = SerializeSteps(blob.UpdateSteps),
             Scope = blob.Scope,
+            Elevation = blob.Elevation,
             Options = SerializeOptions(blob.Options),
             Vars = SerializeVars(blob.Vars),
             AppName = blob.AppName,

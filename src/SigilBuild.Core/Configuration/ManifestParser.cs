@@ -330,7 +330,53 @@ public static class ManifestParser
             Language: ParseInstallerLanguage(node, diagnostics, fileName),
             // The downloaded-binary signature policy, declared rather than
             // inferred from the presence of a `sign` block. (R45)
-            RequireSignedDownloads: ParseRequireSignedDownloads(node, diagnostics, fileName));
+            RequireSignedDownloads: ParseRequireSignedDownloads(node, diagnostics, fileName),
+            // When a scope: auto installer asks for administrator rights. (R118)
+            Elevation: ParseElevation(node, scope, diagnostics, fileName));
+    }
+
+    /// <summary>
+    /// Parse <c>installer.elevation</c> (<c>on_demand</c> | <c>on_start</c>, default
+    /// <c>on_demand</c>). An unrecognized value falls back to <c>on_demand</c> with the
+    /// non-fatal SIG0261, like <c>installer.scope</c>; <c>on_start</c> with
+    /// <c>scope: user</c> is the fatal SIG0262. (R118)
+    /// </summary>
+    private static InstallerElevation ParseElevation(
+        YamlMappingNode node, InstallScope scope, List<Diagnostic> diagnostics, string fileName)
+    {
+        var raw = GetScalar(node, "elevation");
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return InstallerElevation.OnDemand;
+        }
+
+        var location = new SourceLocation(fileName, (int)node.Start.Line, (int)node.Start.Column);
+        switch (raw.Trim().ToLowerInvariant())
+        {
+            case "on_demand":
+                return InstallerElevation.OnDemand;
+            case "on_start":
+                if (scope == InstallScope.User)
+                {
+                    diagnostics.Add(new Diagnostic(
+                        DiagnosticSeverity.Error,
+                        DiagnosticCodes.ElevationOnStartWithUserScope,
+                        "installer.elevation: on_start cannot be combined with installer.scope: user — " +
+                        "an elevated per-user install lands in the profile of whoever approved the prompt. " +
+                        "Use scope: auto to offer both scopes, or remove elevation.",
+                        location,
+                        DiagnosticCodes.DocsUrl(DiagnosticCodes.ElevationOnStartWithUserScope)));
+                }
+                return InstallerElevation.OnStart;
+            default:
+                diagnostics.Add(new Diagnostic(
+                    DiagnosticSeverity.Warning,
+                    DiagnosticCodes.InvalidInstallerElevation,
+                    $"installer.elevation '{raw}' is not one of on_demand|on_start — defaulting to on_demand",
+                    location,
+                    DiagnosticCodes.DocsUrl(DiagnosticCodes.InvalidInstallerElevation)));
+                return InstallerElevation.OnDemand;
+        }
     }
 
     /// <summary>

@@ -56,9 +56,13 @@ public sealed class InstallSession
 {
     private readonly WrapperBlob _blob;
     private readonly ParsedCommandLine _parsed;
-    private readonly InstallScope _scope;
+    // Not readonly: an elevated wizard may switch scope in-process before the install
+    // starts (SwitchScope). Fixed for the rest of the run once it does. (R118)
+    private InstallScope _scope;
     private readonly WrapperMode _mode;
-    private readonly UpgradePlan _plan;
+    private UpgradePlan _plan;
+    private readonly Func<string, InstallScope, UpgradeState> _stateResolver;
+    private readonly ElevationFacts _elevation;
 
     // The install log for this run, opened lazily the first time a run path
     // executes when /LOG (or /LOG=path) was supplied. Null when logging was not
@@ -143,12 +147,20 @@ public sealed class InstallSession
     // map the generic failure onto FilesInUseExitCode.
     private bool _blockedByFilesInUse;
 
-    private InstallSession(WrapperBlob blob, ParsedCommandLine parsed, InstallScope scope, UpgradePlan plan)
+    private InstallSession(
+        WrapperBlob blob,
+        ParsedCommandLine parsed,
+        InstallScope scope,
+        UpgradePlan plan,
+        Func<string, InstallScope, UpgradeState> stateResolver,
+        ElevationFacts elevation)
     {
         _blob = blob;
         _parsed = parsed;
         _scope = scope;
         _plan = plan;
+        _stateResolver = stateResolver;
+        _elevation = elevation;
         _mode = ResolveEffectiveMode(parsed.Mode);
     }
 
@@ -274,7 +286,7 @@ public sealed class InstallSession
         ArgumentNullException.ThrowIfNull(args);
         var blob = WrapperBlob.LoadFromSelf();
         var parsed = CommandLineParser.Parse(args, blob.Parameters, CustomOptionNames(blob));
-        return Build(blob, parsed, DefaultStateResolver);
+        return Build(blob, parsed, DefaultStateResolver, ElevationFacts.Probe());
     }
 
     /// <summary>
@@ -421,9 +433,30 @@ public sealed class InstallSession
     private static InstallSession Build(
         WrapperBlob blob,
         ParsedCommandLine parsed,
-        Func<string, InstallScope, UpgradeState> stateResolver)
+        Func<string, InstallScope, UpgradeState> stateResolver,
+        ElevationFacts? elevation = null)
     {
+        var facts = elevation ?? ElevationFacts.None;
         var tentativeScope = ScopeResolver.Resolve(blob.Scope, parsed.Scope);
+
+        // Over-the-shoulder elevation: the token belongs to the account that approved
+        // the prompt, not the one at the desktop, so a per-user install would land in
+        // the approver's profile. An explicit /currentuser is refused (exit 64), and an
+        // auto scope with no flag resolves to machine. (R118)
+        if (facts.ElevatedAsAnotherUser
+            && ResolveEffectiveMode(parsed.Mode) == WrapperMode.Install
+            && blob.Scope == InstallScope.Auto)
+        {
+            if (parsed.Scope == ScopeOverride.CurrentUser)
+            {
+                throw new UsageException(
+                    "/currentuser cannot be used when Setup was elevated with another account's " +
+                    "credentials: the per-user install would go to that account's profile, not the " +
+                    "signed-in user's. Run Setup as the signed-in user without elevation, or use /allusers.");
+            }
+            tentativeScope = InstallScope.Machine;
+        }
+
         var state = ReferenceEquals(blob, WrapperBlob.Empty)
             ? UpgradeState.None
             : stateResolver(blob.AppId, tentativeScope);
@@ -441,7 +474,41 @@ public sealed class InstallSession
         }
 
         var plan = UpgradePlanner.Decide(state, blob.Version, parsed.ForceDowngrade);
-        return new InstallSession(blob, parsed, effectiveScope, plan);
+        return new InstallSession(blob, parsed, effectiveScope, plan, stateResolver, facts);
+    }
+
+    /// <summary>
+    /// What the process knows about its own elevation, captured once when the session
+    /// is built. Real probes in <see cref="Create"/>; injected by the test seams. (R118)
+    /// </summary>
+    /// <param name="Elevated">The process token is elevated.</param>
+    /// <param name="ElevatedAsAnotherUser">
+    /// Elevated with another account's credentials — see <see cref="ElevationIdentity"/>.
+    /// </param>
+    internal readonly record struct ElevationFacts(bool Elevated, bool ElevatedAsAnotherUser)
+    {
+        /// <summary>Unelevated, the test seams' default.</summary>
+        public static ElevationFacts None => default;
+
+        /// <summary>This process, as the OS reports it.</summary>
+        public static ElevationFacts Probe() =>
+            new(Elevation.IsProcessElevated(), ElevationIdentity.IsElevatedAsAnotherUser());
+    }
+
+    /// <summary>
+    /// Test seam: a session with an injected per-scope state probe and elevation facts,
+    /// for the elevation decision and the in-process scope switch. (R118)
+    /// </summary>
+    internal static InstallSession ForTesting(
+        WrapperBlob blob,
+        ParsedCommandLine parsed,
+        Func<string, InstallScope, UpgradeState> stateResolver,
+        ElevationFacts elevation)
+    {
+        ArgumentNullException.ThrowIfNull(blob);
+        ArgumentNullException.ThrowIfNull(parsed);
+        ArgumentNullException.ThrowIfNull(stateResolver);
+        return Build(blob, parsed, stateResolver, elevation);
     }
 
     /// <summary>
@@ -561,10 +628,46 @@ public sealed class InstallSession
     /// resolved but the current process is not elevated. The entry point
     /// relaunches itself via <see cref="Elevation.RelaunchElevatedAndWait"/> and
     /// propagates the child's exit code. Per-user (and auto-user) installs are
-    /// always <c>false</c>, so they stay prompt-free.
+    /// always <c>false</c>, so they stay prompt-free — unless the manifest asks for
+    /// <c>installer.elevation: on_start</c> on a <c>scope: auto</c> install, which
+    /// elevates every install run at launch so the wizard can switch scope without a
+    /// second prompt. (R118)
     /// </summary>
     public bool RequiresElevation =>
-        _scope == InstallScope.Machine && !Elevation.IsProcessElevated();
+        ElevatesAtStart(_blob.Scope, _blob.Elevation, _scope, _mode, Elevation.IsProcessElevated());
+
+    /// <summary>
+    /// The start-of-run elevation decision, pure so every combination is testable from
+    /// one unelevated run: a resolved machine scope always elevates (any mode); an
+    /// <c>on_start</c> manifest with <c>scope: auto</c> also elevates an install run in
+    /// user scope. Nothing elevates a process that already is. (R118)
+    /// </summary>
+    /// <remarks>
+    /// <c>on_start</c> is limited to install runs on purpose: <c>uninstall.exe</c>
+    /// carries the same blob, and a per-user uninstall must stay unelevated so it
+    /// removes the signed-in user's install rather than looking in the approver's
+    /// profile. <c>scope: user</c> with <c>on_start</c> never reaches here — the
+    /// packer refuses it (SIG0262).
+    /// </remarks>
+    internal static bool ElevatesAtStart(
+        InstallScope manifestScope,
+        InstallerElevation elevation,
+        InstallScope resolvedScope,
+        WrapperMode mode,
+        bool elevated)
+    {
+        if (elevated)
+        {
+            return false;
+        }
+        if (resolvedScope == InstallScope.Machine)
+        {
+            return true;
+        }
+        return elevation == InstallerElevation.OnStart
+            && manifestScope == InstallScope.Auto
+            && mode == WrapperMode.Install;
+    }
 
     /// <summary>
     /// The argument vector to hand <see cref="Elevation.RelaunchElevatedAndWait"/>,
@@ -586,14 +689,66 @@ public sealed class InstallSession
     /// "All users of this computer" option therefore needs a fresh, elevated run.
     /// </summary>
     /// <remarks>
-    /// The condition is the resolved scope, not elevation: an already-elevated process
-    /// whose scope resolved to <c>user</c> cannot honour the choice either, because
-    /// scope is fixed when the session is created — before the window exists — and
-    /// <c>install_dir</c> containment is checked against that scope's layout. Toggling
-    /// a radio afterwards only ever changed the path, which is what made the option a
-    /// guaranteed failure rather than a choice. (R90)
+    /// Scope selects the containment roots <c>install_dir</c> is checked against and
+    /// the elevation decision, so toggling a radio alone only ever changed the path,
+    /// which made the option a guaranteed failure rather than a choice (R90). An
+    /// elevated session switches scope in-process instead — see
+    /// <see cref="CanSwitchScopeInProcess"/> — so only an unelevated one needs the
+    /// handoff. (R118)
     /// </remarks>
-    public bool MachineScopeNeedsRelaunch => _scope != InstallScope.Machine;
+    public bool MachineScopeNeedsRelaunch => _scope != InstallScope.Machine && !CanSwitchScopeInProcess;
+
+    /// <summary>
+    /// True when the wizard's scope radios can re-scope this session in-process: the
+    /// process is elevated, so either scope is reachable without a prompt, the manifest
+    /// scope is <c>auto</c>, and this is an install run. (R118)
+    /// </summary>
+    public bool CanSwitchScopeInProcess =>
+        _elevation.Elevated && ScopeIsSelectable && _mode == WrapperMode.Install;
+
+    /// <summary>
+    /// True when this process was elevated with another account's credentials, so
+    /// "Just for me" would install into that account's profile and is unavailable.
+    /// (R118)
+    /// </summary>
+    public bool UserScopeBlockedByElevation => _elevation.ElevatedAsAnotherUser;
+
+    /// <summary>
+    /// Re-scope this session in-process, as an explicit scope choice: the installed-state
+    /// probe, upgrade plan and every scope-derived default are recomputed for
+    /// <paramref name="scope"/>. Call only before the install starts. Returns
+    /// <c>false</c>, changing nothing, when the switch is not available —
+    /// <see cref="CanSwitchScopeInProcess"/> is false, or <paramref name="scope"/> is
+    /// user scope in an over-the-shoulder elevation. (R118)
+    /// </summary>
+    /// <remarks>
+    /// The single-instance guard is per app and scope, so the caller takes the new
+    /// scope's guard first and hands it to <see cref="InstanceLock"/>; the upgrade
+    /// teardown then passes that guard to the prior version's uninstaller (R76).
+    /// </remarks>
+    public bool SwitchScope(InstallScope scope)
+    {
+        if (scope == _scope)
+        {
+            return true;
+        }
+        if (!CanSwitchScopeInProcess
+            || scope is not (InstallScope.User or InstallScope.Machine)
+            || (scope == InstallScope.User && UserScopeBlockedByElevation))
+        {
+            return false;
+        }
+
+        var state = ReferenceEquals(_blob, WrapperBlob.Empty)
+            ? UpgradeState.None
+            : _stateResolver(_blob.AppId, scope);
+        _scope = scope;
+        _plan = UpgradePlanner.Decide(state, _blob.Version, _parsed.ForceDowngrade);
+        _priorState = null;
+        _priorStateLoaded = false;
+        _log?.WriteLine($"scope: switched to {scope} in the wizard");
+        return true;
+    }
 
     /// <summary>
     /// True when this run replaces an install that lives in the session's own scope —

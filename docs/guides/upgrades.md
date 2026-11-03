@@ -58,6 +58,11 @@ still authoritative. If you force a *different* scope than the existing install
 own scope and installs fresh into the new scope's default directory — the prior
 directory is **not** carried across a scope change.
 
+In the wizard, an upgrade, forced downgrade or reinstall in the existing install's
+scope shows the scope toggle selected on that scope and **locked**, with a line
+saying the app is already installed that way (R116). A scope change is the
+command-line flag's job, not the radio's.
+
 ### Install directory is preserved
 
 An upgrade, a forced downgrade and a same-version reinstall install into the

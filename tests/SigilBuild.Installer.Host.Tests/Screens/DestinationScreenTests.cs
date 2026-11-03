@@ -216,6 +216,80 @@ public sealed class DestinationScreenTests
         vm.IsMachineScope.Should().BeTrue();
         vm.InstallPath.Should().Be(MachinePath);
     }
+
+    // ── R116: the radios start on the session's scope, locked on a replace ──────
+
+    private static InstallerViewModel SeededDestination(bool isMachine, bool locked)
+    {
+        var vm = AtDestination();
+        vm.ConfigureDestination(
+            scopeSelectable: true,
+            defaultPathResolver: m => m ? MachinePath : UserPath,
+            initialPath: isMachine ? MachinePath : UserPath,
+            isMachineScope: isMachine,
+            scopeLocked: locked);
+        return vm;
+    }
+
+    [Theory]
+    [InlineData(false, false)] // fresh per-user run
+    [InlineData(true, false)]  // fresh machine run, elevated at start (/allusers)
+    [InlineData(false, true)]  // per-user upgrade
+    [InlineData(true, true)]   // machine upgrade, elevated at start
+    public void The_radio_starts_on_the_sessions_scope(bool isMachine, bool locked)
+    {
+        // Arrange + Act
+        var vm = SeededDestination(isMachine, locked);
+
+        // Assert
+        vm.IsMachineScope.Should().Be(isMachine);
+        vm.IsUserScope.Should().Be(!isMachine);
+        vm.InstallPath.Should().Be(isMachine ? MachinePath : UserPath,
+            "seeding the radio keeps the session's resolved path rather than recomputing it");
+        vm.ScopeLocked.Should().Be(locked);
+        vm.CanChangeScope.Should().Be(!locked);
+    }
+
+    [Fact]
+    public void A_locked_scope_refuses_a_change_and_keeps_its_path()
+    {
+        // Arrange
+        var vm = SeededDestination(isMachine: true, locked: true);
+        vm.InstallPath = @"C:\Custom\Example";
+
+        // Act
+        vm.IsUserScope = true;
+
+        // Assert
+        vm.IsMachineScope.Should().BeTrue("the install being upgraded lives in machine scope");
+        vm.InstallPath.Should().Be(@"C:\Custom\Example");
+    }
+
+    [Fact]
+    public void A_locked_scope_says_why()
+    {
+        // Arrange + Act
+        var locked = SeededDestination(isMachine: false, locked: true);
+        var free = SeededDestination(isMachine: false, locked: false);
+
+        // Assert
+        locked.ScopeLockedHint.Should().Contain("Example").And.Contain("uninstall");
+        free.ScopeLockedHint.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void An_unlocked_machine_seed_still_toggles()
+    {
+        // Arrange
+        var vm = SeededDestination(isMachine: true, locked: false);
+
+        // Act
+        vm.IsUserScope = true;
+
+        // Assert
+        vm.IsMachineScope.Should().BeFalse();
+        vm.InstallPath.Should().Be(UserPath);
+    }
 }
 
 internal static class VmTestExtensions

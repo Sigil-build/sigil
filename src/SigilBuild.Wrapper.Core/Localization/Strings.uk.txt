@@ -39,6 +39,7 @@ location.scope.user = Лише для мене (рекомендовано)
 location.scope.user_hint = Права адміністратора не потрібні
 location.scope.machine = Для всіх користувачів цього комп'ютера
 location.scope.machine_hint = Встановлюється до Program Files — Windows запитає дозвіл
+location.scope.locked_hint = {appName} уже встановлено саме так, тож тут цього не змінити. Щоб змінити, спершу видаліть програму.
 location.disk_free = Вільно на диску {drive}: {freeSpace}
 size.mb = {value} МБ
 size.gb = {value} ГБ

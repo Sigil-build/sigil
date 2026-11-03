@@ -158,12 +158,17 @@ public partial class App : Application
                 // Seed the Destination screen from the session — the scope-aware
                 // default install dir (honoring /D= + the manifest install_dir), and
                 // whether the user/machine scope toggle shows (manifest `scope: auto`).
-                // Toggling scope recomputes the default path for the picked scope.
+                // Toggling scope recomputes the default path for the picked scope. The
+                // radio starts on the scope the session resolved — an elevated upgrade
+                // of a machine install shows "All users" — and is locked to it when the
+                // run replaces an install in that scope. (R116)
                 _vm.ConfigureDestination(
                     session.ScopeIsSelectable,
                     isMachine => session.ResolveDefaultInstallDir(
                         isMachine ? InstallScope.Machine : InstallScope.User),
-                    session.ResolveDefaultInstallDir());
+                    session.ResolveDefaultInstallDir(),
+                    isMachineScope: session.ResolvedScope == InstallScope.Machine,
+                    scopeLocked: session.ScopeLockedByExistingInstall);
 
                 // Picking "All users of this computer" cannot be honoured by a session
                 // whose scope already resolved to `user` — scope selects the

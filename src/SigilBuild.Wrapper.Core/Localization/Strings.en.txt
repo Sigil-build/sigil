@@ -48,6 +48,7 @@ location.scope.user = Just for me (recommended)
 location.scope.user_hint = No administrator permission needed
 location.scope.machine = All users of this computer
 location.scope.machine_hint = Installs to Program Files — Windows will ask for permission
+location.scope.locked_hint = {appName} is already installed this way, so this can't be changed here. To change it, uninstall the app first.
 location.disk_free = Free space on drive {drive}: {freeSpace}
 size.mb = {value} MB
 size.gb = {value} GB

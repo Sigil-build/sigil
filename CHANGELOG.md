@@ -590,6 +590,20 @@ restarts — over a running copy, and uninstalling it, found three defects.
   directory. It never stops a run and logs what it did. An elevated run does
   not sweep `%TEMP%`. See `docs/guides/uninstaller.md`.
 
+### Fixed — the wizard's scope choice (R116)
+
+- **R116 — an elevated machine-scope upgrade showed "Just for me" selected.**
+  The 0.5.9 `Setup.exe` found a 0.5.8 per-machine install, elevated at start and
+  pre-filled `C:\Program Files\Dictum` correctly, but the location screen's
+  scope toggle still showed "Just for me": the toggle always opened on per-user,
+  whatever the run had resolved. It now opens on the run's real scope. On an
+  upgrade, forced downgrade or same-version reinstall in the existing install's
+  scope the toggle is also locked to that scope, with a line (English and
+  Ukrainian) saying the app is already installed that way; changing scope there
+  would remove the installed copy and install afresh elsewhere, so it stays the
+  job of an explicit `/allusers` / `/currentuser`. See
+  `docs/guides/installer-wizard.md`.
+
 ### Known limitations
 
 > **Sigil 0.1.0-alpha is Windows-only and pre-production.** It builds and

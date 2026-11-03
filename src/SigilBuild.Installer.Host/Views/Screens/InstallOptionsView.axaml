@@ -42,16 +42,20 @@
                IsVisible="{Binding HasInstallPathError}"
                Text="{Binding InstallPathError}" />
 
-    <!-- Scope choice, shown only when the manifest scope is `auto`. -->
+    <!-- Scope choice, shown only when the manifest scope is `auto`. The radios start
+         on the session's resolved scope, and are locked to it when this run replaces
+         an install in that scope (R116). -->
     <StackPanel Spacing="8" Margin="0,8,0,0" IsVisible="{Binding ScopeSelectable}">
-      <RadioButton GroupName="scope" IsChecked="{Binding IsUserScope, Mode=TwoWay}">
+      <RadioButton GroupName="scope" IsChecked="{Binding IsUserScope, Mode=TwoWay}"
+                   IsEnabled="{Binding CanChangeScope}">
         <StackPanel>
           <TextBlock Text="{x:Static loc:S.LocationScopeUser}" FontWeight="SemiBold" />
           <TextBlock Text="{x:Static loc:S.LocationScopeUserHint}"
                      Foreground="{DynamicResource TextMutBrush}" FontSize="12" />
         </StackPanel>
       </RadioButton>
-      <RadioButton GroupName="scope" IsChecked="{Binding IsMachineScope, Mode=TwoWay}">
+      <RadioButton GroupName="scope" IsChecked="{Binding IsMachineScope, Mode=TwoWay}"
+                   IsEnabled="{Binding CanChangeScope}">
         <StackPanel>
           <!-- No shield here on purpose: picking a scope only swaps the pre-filled
                path, and nothing about it is irreversible. The shield sits on Next,
@@ -61,6 +65,10 @@
                      Foreground="{DynamicResource TextMutBrush}" FontSize="12" />
         </StackPanel>
       </RadioButton>
+      <TextBlock FontSize="12" TextWrapping="Wrap"
+                 Foreground="{DynamicResource TextMutBrush}"
+                 IsVisible="{Binding ScopeLocked}"
+                 Text="{Binding ScopeLockedHint}" />
     </StackPanel>
   </StackPanel>
 </UserControl>

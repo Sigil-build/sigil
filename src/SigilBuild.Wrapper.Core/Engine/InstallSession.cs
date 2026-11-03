@@ -596,6 +596,16 @@ public sealed class InstallSession
     public bool MachineScopeNeedsRelaunch => _scope != InstallScope.Machine;
 
     /// <summary>
+    /// True when this run replaces an install that lives in the session's own scope —
+    /// a same-version reinstall, an upgrade or a forced downgrade — so the wizard's
+    /// scope radios are locked to that scope. Changing scope there would remove the
+    /// existing install and install afresh elsewhere; an explicit
+    /// <c>/allusers</c> / <c>/currentuser</c> remains the way to ask for that. (R116)
+    /// </summary>
+    public bool ScopeLockedByExistingInstall =>
+        _plan.ReplacesPriorInstall && _plan.FoundScope == _scope;
+
+    /// <summary>
     /// The argument vector for the wizard's machine-scope relaunch: the original
     /// command line with any explicit scope flag replaced by <c>/allusers</c>, routed
     /// through the same secret handoff as every other elevated relaunch (R18).

@@ -1031,6 +1031,15 @@ public sealed class InstallerViewModel : ICloseAppsGate
                 return;
             }
 
+            // A locked scope belongs to the install being replaced. Re-raise so a
+            // two-way binding that pushed the change snaps back. (R116)
+            if (_scopeLocked)
+            {
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsUserScope));
+                return;
+            }
+
             _isMachineScope = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsUserScope));
@@ -1091,6 +1100,37 @@ public sealed class InstallerViewModel : ICloseAppsGate
         set { if (value) { IsMachineScope = false; } }
     }
 
+    private bool _scopeLocked;
+
+    /// <summary>
+    /// True when the scope radios are fixed to the scope of the install this run
+    /// replaces — a reinstall, upgrade or forced downgrade in the session's scope.
+    /// Switching scope there would remove that install and install afresh elsewhere,
+    /// which a radio on the way to "Next" must not do quietly. (R116)
+    /// </summary>
+    public bool ScopeLocked
+    {
+        get => _scopeLocked;
+        private set
+        {
+            if (_scopeLocked != value)
+            {
+                _scopeLocked = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(CanChangeScope));
+                OnPropertyChanged(nameof(ScopeLockedHint));
+            }
+        }
+    }
+
+    /// <summary>True when the scope radios are enabled — the inverse of <see cref="ScopeLocked"/>. (R116)</summary>
+    public bool CanChangeScope => !_scopeLocked;
+
+    /// <summary>The line under locked scope radios saying why they are locked; empty otherwise. (R116)</summary>
+    public string ScopeLockedHint => _scopeLocked
+        ? Strings.LocationScopeLockedHint(_lang, Brand.AppName)
+        : string.Empty;
+
     private string? _installPathError;
 
     /// <summary>
@@ -1117,14 +1157,37 @@ public sealed class InstallerViewModel : ICloseAppsGate
     /// <summary>
     /// Wire the Destination screen: whether the scope radios show, a resolver
     /// that maps a scope selection (<c>isMachine</c>) to its default install path,
-    /// and the initial pre-filled path. Called by the host from the session; unit
-    /// tests may call it directly or drive <see cref="InstallPath"/> alone.
+    /// the initial pre-filled path, which radio starts selected, and whether the
+    /// radios are locked. Called by the host from the session; unit tests may call it
+    /// directly or drive <see cref="InstallPath"/> alone.
     /// </summary>
-    public void ConfigureDestination(bool scopeSelectable, Func<bool, string> defaultPathResolver, string initialPath)
+    /// <param name="scopeSelectable">Show the scope radios (manifest <c>scope: auto</c>).</param>
+    /// <param name="defaultPathResolver">The default path for a radio selection.</param>
+    /// <param name="initialPath">The pre-filled path, already resolved for the session's scope.</param>
+    /// <param name="isMachineScope">
+    /// The session's resolved scope is machine. Seeds the radio so it agrees with the
+    /// scope the session will actually install in; <paramref name="initialPath"/> is
+    /// kept as given rather than recomputed for the radio. (R116)
+    /// </param>
+    /// <param name="scopeLocked">Fix the radios to that scope. (R116)</param>
+    public void ConfigureDestination(
+        bool scopeSelectable,
+        Func<bool, string> defaultPathResolver,
+        string initialPath,
+        bool isMachineScope = false,
+        bool scopeLocked = false)
     {
         System.ArgumentNullException.ThrowIfNull(defaultPathResolver);
         _defaultPathResolver = defaultPathResolver;
         ScopeSelectable = scopeSelectable;
+        if (_isMachineScope != isMachineScope)
+        {
+            _isMachineScope = isMachineScope;
+            OnPropertyChanged(nameof(IsMachineScope));
+            OnPropertyChanged(nameof(IsUserScope));
+            OnPropertyChanged(nameof(NextNeedsElevation));
+        }
+        ScopeLocked = scopeLocked;
         InstallPath = initialPath;
         RefreshInstallPathFreeSpace();
         InstallPathError = null;

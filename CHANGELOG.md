@@ -590,6 +590,28 @@ restarts — over a running copy, and uninstalling it, found three defects.
   directory. It never stops a run and logs what it did. An elevated run does
   not sweep `%TEMP%`. See `docs/guides/uninstaller.md`.
 
+### Fixed — a Windows service reading a file blocked the install (R115)
+
+- **R115 — a Windows service briefly reading a file in the install directory
+  blocked an install, upgrade or uninstall.** On a machine-scope upgrade the
+  Connected User Experiences and Telemetry service (DiagTrack) was inspecting the
+  freshly installed binaries in Program Files; the files-in-use check reported it
+  as a blocker, and the silent uninstall exited `4`. The check now classifies
+  every process the Restart Manager reports. Only applications a user can close,
+  and held `installer.app_mutex` names, are blockers. Windows services, critical
+  system processes and Explorer are not: the check waits up to about three
+  seconds for them to let go, then continues and logs any still holding a file by
+  name and process id. They never appear on the Close-applications screen and
+  never cause exit code `4`, on any path — install or uninstall, wizard or
+  silent. **Close for me** and `/closeapps` now register only the blocking
+  applications' processes with the Restart Manager, never the install
+  directory's files, so a service is never asked to stop. If such a holder
+  still has a file locked when a step replaces or deletes it, that step fails
+  as before: the install rolls back, and an uninstall reports the failure and
+  keeps its state for a retry. An upgrade from a version built without this fix
+  runs that version's own uninstaller, which still applies the old check. See
+  `docs/guides/upgrades.md` and `docs/setup-exe-reference.md`.
+
 ### Known limitations
 
 > **Sigil 0.1.0-alpha is Windows-only and pre-production.** It builds and

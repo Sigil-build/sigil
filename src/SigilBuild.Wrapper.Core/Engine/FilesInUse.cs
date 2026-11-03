@@ -8,6 +8,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using System.Threading;
+using System.Threading.Tasks;
 
 /// <summary>
 /// A single thing blocking the install / uninstall: either a declared
@@ -23,6 +25,109 @@ public readonly record struct AppBlocker(string Name, uint ProcessId, bool FromM
     public string Describe() => FromMutex
         ? $"{Name} (application mutex held)"
         : ProcessId == 0 ? Name : $"{Name} (pid {ProcessId})";
+}
+
+/// <summary>
+/// The Restart Manager's <c>RM_APP_TYPE</c>: what kind of process an <c>RmGetList</c>
+/// entry is. It decides whether the entry is something a user can close. (R115)
+/// </summary>
+internal enum RmAppType : uint
+{
+    /// <summary><c>RmUnknownApp</c> — RM could not classify it; treated as an application.</summary>
+    UnknownApp = 0,
+
+    /// <summary><c>RmMainWindow</c> — a windowed application with a top-level window.</summary>
+    MainWindow = 1,
+
+    /// <summary><c>RmOtherWindow</c> — a windowed application without a main window.</summary>
+    OtherWindow = 2,
+
+    /// <summary><c>RmService</c> — a Windows service (one entry per service, svchost-hosted ones included).</summary>
+    Service = 3,
+
+    /// <summary><c>RmExplorer</c> — the Windows shell, <c>explorer.exe</c>.</summary>
+    Explorer = 4,
+
+    /// <summary><c>RmConsole</c> — a console application.</summary>
+    Console = 5,
+
+    /// <summary><c>RmCritical</c> — a process Windows cannot shut down (csrss, winlogon, …).</summary>
+    Critical = 1000,
+}
+
+/// <summary>
+/// One process the Restart Manager reports holding a file under the swept directory,
+/// as reported — before it is classified into a user-facing blocker or a system holder.
+/// The installer's own process is never one of these (R58). (R115)
+/// </summary>
+/// <param name="ProcessId">The process id.</param>
+/// <param name="Name">The RM-reported application name (a service's display name).</param>
+/// <param name="ApplicationType">The RM application type, which decides the classification.</param>
+/// <param name="ServiceName">A service's short name (<c>DiagTrack</c>); <c>null</c> otherwise.</param>
+/// <param name="StartTime">
+/// The process start time as a packed <c>FILETIME</c>: with the pid it is the
+/// <c>RM_UNIQUE_PROCESS</c> identity the close path registers, so a reused pid is never
+/// targeted.
+/// </param>
+internal readonly record struct RmHolder(
+    uint ProcessId,
+    string Name,
+    RmAppType ApplicationType,
+    string? ServiceName = null,
+    ulong StartTime = 0)
+{
+    /// <summary>
+    /// True when this is an application a user can close, and so a blocker; false for a
+    /// service, a critical process, or the shell. (R115)
+    /// </summary>
+    public bool IsUserApplication => FilesInUse.IsUserApplication(ApplicationType);
+
+    /// <summary>A one-line description for the log, naming the kind of holder.</summary>
+    public string Describe()
+    {
+        var kind = ApplicationType switch
+        {
+            RmAppType.Service => "system service",
+            RmAppType.Critical => "critical system process",
+            RmAppType.Explorer => "Windows shell",
+            _ => "application",
+        };
+        var service = string.IsNullOrEmpty(ServiceName) ? string.Empty : $" [{ServiceName}]";
+        return $"{Name}{service} ({kind}, pid {ProcessId})";
+    }
+}
+
+/// <summary>
+/// One files-in-use sweep, classified. <see cref="Blockers"/> are what stops the run —
+/// held declared mutexes and applications a user can close; <see cref="SystemHolders"/>
+/// are services, critical processes and the shell that also held a file, which never
+/// block the run, never appear on the Close-applications screen and never count toward
+/// exit code 4. (R115)
+/// </summary>
+internal sealed record FilesInUseScan(IReadOnlyList<AppBlocker> Blockers, IReadOnlyList<RmHolder> SystemHolders)
+{
+    /// <summary>Nothing holds anything.</summary>
+    public static FilesInUseScan Clear { get; } = new(Array.Empty<AppBlocker>(), Array.Empty<RmHolder>());
+}
+
+/// <summary>
+/// How an <see cref="InstallSession"/> sweeps and closes: the production Restart Manager
+/// by default, or a fixed result in a test. Also carries the settle schedule the gate
+/// waits on while only system holders remain. (R115)
+/// </summary>
+internal sealed class FilesInUseProbe
+{
+    /// <summary>One classified sweep of the given install directory.</summary>
+    public required Func<string?, FilesInUseScan> Scan { get; init; }
+
+    /// <summary>Ask the user applications holding the directory to close; true when the request succeeded.</summary>
+    public required Func<string?, bool> Close { get; init; }
+
+    /// <summary>The waits between re-scans while only system holders remain.</summary>
+    public IReadOnlyList<TimeSpan> SettleDelays { get; init; } = FilesInUse.DefaultSettleDelays;
+
+    /// <summary>How a settle wait is spent; <see cref="Task.Delay(TimeSpan, CancellationToken)"/> in production.</summary>
+    public Func<TimeSpan, CancellationToken, Task> Delay { get; init; } = Task.Delay;
 }
 
 /// <summary>
@@ -50,6 +155,14 @@ public readonly record struct AppBlocker(string Name, uint ProcessId, bool FromM
 /// <see cref="IsRunningInstallerProcess"/>. The uninstaller runs from inside the
 /// directory this sweep registers, so without that exclusion the gate refuses its own
 /// ARP <c>UninstallString</c>. (R58)</para>
+/// <para>Only an application a user can close is a blocker. A Windows service, a
+/// critical system process and the shell (<c>RmService</c>, <c>RmCritical</c>,
+/// <c>RmExplorer</c>) holding a file is a <em>system holder</em>: typically a scanner
+/// (telemetry, indexing, antivirus, icon extraction) reading a freshly written binary for
+/// a moment. A user cannot close it, the Close-applications screen has nothing to offer
+/// for it, and the close path never asks the Restart Manager to stop it. The gate waits
+/// a few seconds for system holders to let go (<see cref="SettleAsync"/>) and then
+/// continues regardless, logging any that remain. (R115)</para>
 /// </remarks>
 public static partial class FilesInUse
 {
@@ -106,28 +219,155 @@ public static partial class FilesInUse
     /// </summary>
     internal static IReadOnlyList<AppBlocker> Scan(
         IReadOnlyList<string>? appMutexes, string? installDir, IReadOnlyList<string> installerImages)
+        => ScanDetailed(appMutexes, installDir, installerImages).Blockers;
+
+    /// <summary>
+    /// One sweep, classified: the user-facing blockers (held mutexes, applications) and
+    /// the system holders (services, critical processes, the shell) separately. Never
+    /// throws; always clear off Windows. (R58, R115)
+    /// </summary>
+    internal static FilesInUseScan ScanDetailed(
+        IReadOnlyList<string>? appMutexes, string? installDir, IReadOnlyList<string> installerImages)
     {
         ArgumentNullException.ThrowIfNull(installerImages);
         if (!OperatingSystem.IsWindows())
         {
-            return Array.Empty<AppBlocker>();
+            return FilesInUseScan.Clear;
         }
 
-        var found = new List<AppBlocker>();
-        found.AddRange(ScanMutexes(appMutexes));
-        found.AddRange(ScanRestartManager(installDir, installerImages));
+        return Classify(ScanMutexes(appMutexes), ScanRestartManager(installDir, installerImages));
+    }
 
-        // De-dupe on (name, pid) — a process can be reported by both probes.
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var result = new List<AppBlocker>(found.Count);
-        foreach (var b in found)
+    /// <summary>
+    /// Whether a Restart Manager entry of <paramref name="type"/> is an application a
+    /// user can close. Services, critical processes and the shell are not: none can be
+    /// closed from the Close-applications screen, and the gate never blocks on them.
+    /// An entry RM could not classify (<c>RmUnknownApp</c>) stays a blocker. (R115)
+    /// </summary>
+    /// <remarks>
+    /// The shell is grouped with services rather than applications because its holds are
+    /// incidental and brief (icon and thumbnail extraction, a preview handler), a user
+    /// cannot meaningfully "close" it, and a Restart Manager shutdown of
+    /// <c>explorer.exe</c> takes the desktop and taskbar down with it. A shell hold that
+    /// outlasts the settle wait surfaces, honestly, as the failed copy or delete of the
+    /// one file it holds.
+    /// </remarks>
+    internal static bool IsUserApplication(RmAppType type) => type switch
+    {
+        RmAppType.Service or RmAppType.Critical or RmAppType.Explorer => false,
+        _ => true,
+    };
+
+    /// <summary>
+    /// Split one sweep into blockers and system holders: every held mutex and every user
+    /// application is a blocker, de-duplicated on (name, pid); every service, critical
+    /// process and shell entry is a system holder, de-duplicated on (service or name,
+    /// pid). (R115)
+    /// </summary>
+    internal static FilesInUseScan Classify(IReadOnlyList<AppBlocker> mutexBlockers, IReadOnlyList<RmHolder> holders)
+    {
+        ArgumentNullException.ThrowIfNull(mutexBlockers);
+        ArgumentNullException.ThrowIfNull(holders);
+
+        var blockers = new List<AppBlocker>(mutexBlockers.Count + holders.Count);
+        var system = new List<RmHolder>();
+        var seenBlockers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenSystem = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var b in mutexBlockers)
         {
-            if (seen.Add(b.Name + "|" + b.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture)))
+            if (seenBlockers.Add(HolderKey(b.Name, b.ProcessId)))
             {
-                result.Add(b);
+                blockers.Add(b);
             }
         }
+
+        foreach (var h in holders)
+        {
+            if (h.IsUserApplication)
+            {
+                // De-dupe on (name, pid) — a process can be reported by both probes.
+                if (seenBlockers.Add(HolderKey(h.Name, h.ProcessId)))
+                {
+                    blockers.Add(new AppBlocker(h.Name, h.ProcessId, FromMutex: false));
+                }
+            }
+            else if (seenSystem.Add(HolderKey(h.ServiceName ?? h.Name, h.ProcessId)))
+            {
+                system.Add(h);
+            }
+        }
+
+        return blockers.Count == 0 && system.Count == 0
+            ? FilesInUseScan.Clear
+            : new FilesInUseScan(blockers, system);
+    }
+
+    private static string HolderKey(string name, uint pid)
+        => name + "|" + pid.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// The default settle schedule: four re-scans over three seconds in all, with a
+    /// growing backoff. Long enough for a scanner reading a freshly written binary to let
+    /// go, short enough that a hold which never clears costs the run three seconds. (R115)
+    /// </summary>
+    internal static IReadOnlyList<TimeSpan> DefaultSettleDelays { get; } = new[]
+    {
+        TimeSpan.FromMilliseconds(250),
+        TimeSpan.FromMilliseconds(500),
+        TimeSpan.FromMilliseconds(1000),
+        TimeSpan.FromMilliseconds(1250),
+    };
+
+    /// <summary>
+    /// Sweep, and while the only holders are system holders, wait and sweep again on
+    /// <paramref name="delays"/>. Returns the first sweep that has a user-facing blocker
+    /// or no system holder at all, else the last one — whose system holders the caller
+    /// logs and proceeds past. A sweep with a blocker returns at once: the settle wait is
+    /// for system holders only, and blockers are reported exactly as they are found.
+    /// (R115)
+    /// </summary>
+    internal static async Task<FilesInUseScan> SettleAsync(
+        Func<FilesInUseScan> scan,
+        IReadOnlyList<TimeSpan> delays,
+        Func<TimeSpan, CancellationToken, Task> delay,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(scan);
+        ArgumentNullException.ThrowIfNull(delays);
+        ArgumentNullException.ThrowIfNull(delay);
+
+        var result = scan();
+        foreach (var wait in delays)
+        {
+            if (result.Blockers.Count > 0 || result.SystemHolders.Count == 0)
+            {
+                break;
+            }
+            await delay(wait, ct).ConfigureAwait(false);
+            result = scan();
+        }
         return result;
+    }
+
+    /// <summary>
+    /// The holders the close path may ask the Restart Manager to shut down: user
+    /// applications only. A service, a critical process or the shell is never a target —
+    /// stopping a Windows service or the desktop shell is not something an installer asks
+    /// for on a user's behalf. (R115)
+    /// </summary>
+    internal static IReadOnlyList<RmHolder> SelectShutdownTargets(IReadOnlyList<RmHolder> holders)
+    {
+        ArgumentNullException.ThrowIfNull(holders);
+        var targets = new List<RmHolder>(holders.Count);
+        foreach (var h in holders)
+        {
+            if (h.IsUserApplication)
+            {
+                targets.Add(h);
+            }
+        }
+        return targets;
     }
 
     /// <summary>
@@ -160,13 +400,13 @@ public static partial class FilesInUse
 
     /// <summary>
     /// Ask the Restart Manager which processes hold files open under
-    /// <paramref name="installDir"/>. Empty when the directory does not exist yet (a
-    /// fresh install has nothing to block).
+    /// <paramref name="installDir"/>, unclassified. Empty when the directory does not
+    /// exist yet (a fresh install has nothing to block).
     /// </summary>
     [SupportedOSPlatform("windows")]
-    private static List<AppBlocker> ScanRestartManager(string? installDir, IReadOnlyList<string> installerImages)
+    private static List<RmHolder> ScanRestartManager(string? installDir, IReadOnlyList<string> installerImages)
     {
-        var blockers = new List<AppBlocker>();
+        var blockers = new List<RmHolder>();
         var files = EnumerateExistingFiles(installDir);
         if (files.Length == 0)
         {
@@ -199,28 +439,69 @@ public static partial class FilesInUse
     }
 
     /// <summary>
-    /// Ask the Restart Manager to shut down the processes holding files under
+    /// Ask the Restart Manager to shut down the user applications holding files under
     /// <paramref name="installDir"/> — a graceful close (apps get their normal
     /// shutdown path), never a force-kill, and <b>never</b> a restart afterwards.
     /// Returns true when the shutdown call succeeded. Declared-mutex blockers cannot
-    /// be closed this way (no process handle) — the caller re-scans to confirm.
+    /// be closed this way (no process handle) — the caller re-scans to confirm. A
+    /// service, a critical process or the shell is never asked to shut down. (R115)
     /// </summary>
     public static bool CloseBlockers(string? installDir)
+        => CloseBlockers(
+            installDir,
+            SelfImagePath() is { } self ? new[] { self } : Array.Empty<string>());
+
+    /// <summary>
+    /// <see cref="CloseBlockers(string)"/> with every image that is "this installer"
+    /// supplied, so the installer's own processes are never shutdown targets either.
+    /// (R58, R106, R115)
+    /// </summary>
+    internal static bool CloseBlockers(string? installDir, IReadOnlyList<string> installerImages)
     {
+        ArgumentNullException.ThrowIfNull(installerImages);
         if (!OperatingSystem.IsWindows())
         {
             return false;
         }
-        return CloseViaRestartManager(installDir);
+        return CloseViaRestartManager(installDir, installerImages);
     }
 
+    /// <summary>
+    /// The close path registers the user applications' PROCESSES with the Restart
+    /// Manager, not the install directory's files. <c>RmShutdown</c> acts on every
+    /// process and service affected by a session's registered resources and has no
+    /// per-entry filter: with the files registered, a service holding one of them is
+    /// stopped through the Service Control Manager alongside the apps. Registering exactly
+    /// the <c>RM_UNIQUE_PROCESS</c> (pid + start time) of each user application makes the
+    /// target set exactly those processes, and a pid reused since the sweep matches
+    /// nothing. Before <c>RmShutdown</c> the session's own list is read once more and the
+    /// close is refused if anything in it is a service, a critical process or the shell.
+    /// <c>RmForceShutdown</c> is never passed (an app that does not respond stays running
+    /// and is still reported as a blocker), and neither is
+    /// <c>RmShutdownOnlyRegistered</c>, which refuses to shut anything down unless every
+    /// affected app has registered for restart — most apps never do. (R115)
+    /// </summary>
     [SupportedOSPlatform("windows")]
-    private static bool CloseViaRestartManager(string? installDir)
+    private static bool CloseViaRestartManager(string? installDir, IReadOnlyList<string> installerImages)
     {
-        var files = EnumerateExistingFiles(installDir);
-        if (files.Length == 0)
+        var targets = SelectShutdownTargets(ScanRestartManager(installDir, installerImages));
+        if (targets.Count == 0)
         {
-            return true; // nothing registered → nothing to close.
+            return true; // no user application holds anything → nothing to close.
+        }
+
+        var processes = new RM_UNIQUE_PROCESS[targets.Count];
+        for (var i = 0; i < targets.Count; i++)
+        {
+            processes[i] = new RM_UNIQUE_PROCESS
+            {
+                dwProcessId = targets[i].ProcessId,
+                ProcessStartTime = new FILETIME_BLITTABLE
+                {
+                    dwLowDateTime = (uint)(targets[i].StartTime & 0xFFFFFFFF),
+                    dwHighDateTime = (uint)(targets[i].StartTime >> 32),
+                },
+            };
         }
 
         if (!TryStartSession(out var session))
@@ -229,10 +510,18 @@ public static partial class FilesInUse
         }
         try
         {
-            if (RmRegisterResources(session, (uint)files.Length, files, 0, null, 0, null) != 0)
+            if (RmRegisterResources(session, 0, null, (uint)processes.Length, processes, 0, null) != 0)
             {
                 return false;
             }
+
+            // The session must name user applications only, or nothing is shut down.
+            var listed = ReadList(session);
+            if (listed is null || SelectShutdownTargets(listed).Count != listed.Count)
+            {
+                return false;
+            }
+
             // lActionFlags = 0 → request a graceful shutdown. RmRestart is deliberately
             // never called: relaunching the user's apps is an explicit non-goal.
             return RmShutdown(session, 0, IntPtr.Zero) == 0;
@@ -264,33 +553,67 @@ public static partial class FilesInUse
         return RmStartSession(out session, 0, ref buffer[0]) == 0;
     }
 
+    /// <summary>
+    /// Every entry of the session's <c>RmGetList</c>, unfiltered, or <c>null</c> when the
+    /// list could not be read.
+    /// </summary>
     [SupportedOSPlatform("windows")]
-    private static List<AppBlocker> GetList(uint session, IReadOnlyList<string> installerImages)
+    private static List<RmHolder>? ReadList(uint session)
     {
-        var blockers = new List<AppBlocker>();
+        var entries = new List<RmHolder>();
 
         // First call with an empty buffer to learn how many entries are needed.
         uint count = 0;
         var rc = RmGetList(session, out var needed, ref count, null, out _);
         if (rc == ERROR_SUCCESS || needed == 0)
         {
-            return blockers; // nothing holding the files.
+            return entries; // nothing holding the files.
         }
         if (rc != ERROR_MORE_DATA)
         {
-            return blockers;
+            return null;
         }
 
         count = needed;
         var infos = new RM_PROCESS_INFO[count];
         if (RmGetList(session, out needed, ref count, infos, out _) != ERROR_SUCCESS)
         {
-            return blockers;
+            return null;
         }
 
         for (var i = 0; i < count; i++)
         {
             var pid = infos[i].Process.dwProcessId;
+            var name = ReadFixed(infos[i].strAppName);
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                name = $"pid {pid}";
+            }
+            var service = ReadFixedService(infos[i].strServiceShortName);
+            var start = infos[i].Process.ProcessStartTime;
+            entries.Add(new RmHolder(
+                pid,
+                name,
+                (RmAppType)infos[i].ApplicationType,
+                string.IsNullOrWhiteSpace(service) ? null : service,
+                ((ulong)start.dwHighDateTime << 32) | start.dwLowDateTime));
+        }
+        return entries;
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static List<RmHolder> GetList(uint session, IReadOnlyList<string> installerImages)
+    {
+        var holders = new List<RmHolder>();
+        var entries = ReadList(session);
+        if (entries is null)
+        {
+            return holders;
+        }
+
+        foreach (var entry in entries)
+        {
+            var pid = entry.ProcessId;
 
             // The running installer is never a blocker of ITSELF. Install survivability
             // copies the running setup image into the install directory as
@@ -305,23 +628,18 @@ public static partial class FilesInUse
             // install directory by the temporary copy the uninstall runs from (R106), or
             // deleted at the next reboot — never by closing an application. The original
             // uninstaller that copy was started from counts as the installer too: it is the
-            // image of the relaunch parent waiting on the copy. This is the ONLY exclusion
-            // — a third-party process holding anything under the install directory is
-            // still a blocker, including an app whose own image lives there, which is
-            // the case the gate exists for. (R58)
+            // image of the relaunch parent waiting on the copy. This is the ONLY identity
+            // exclusion — a third-party process holding anything under the install
+            // directory is still reported, including an app whose own image lives there,
+            // which is the case the gate exists for. Whether a reported process BLOCKS is
+            // decided by its application type in Classify. (R58, R115)
             if (IsRunningAnyInstallerImage(pid, installerImages))
             {
                 continue;
             }
-
-            var name = ReadFixed(infos[i].strAppName);
-            if (string.IsNullOrWhiteSpace(name))
-            {
-                name = $"pid {pid}";
-            }
-            blockers.Add(new AppBlocker(name, pid, FromMutex: false));
+            holders.Add(entry);
         }
-        return blockers;
+        return holders;
     }
 
     /// <summary>
@@ -341,9 +659,10 @@ public static partial class FilesInUse
     /// would therefore leave every <c>/allusers</c> ARP uninstall blocked on its own
     /// parent.</para>
     /// <para>The match is on the identity of the image FILE, deliberately not on "is an
-    /// ancestor of mine": <c>uninstall.exe</c> is commonly launched from Explorer, and
-    /// Explorer very plausibly holds a handle under the install directory, so excluding
-    /// the parent process as such would silently disarm the gate for a real blocker. Only
+    /// ancestor of mine": <c>uninstall.exe</c> is launched by whatever the user ran it
+    /// from — a file manager, a script, the app itself — and that launcher very plausibly
+    /// holds a handle under the install directory, so excluding the parent process as
+    /// such would silently disarm the gate for a real blocker. Only
     /// a process running the identical image file is skipped, and the single-instance
     /// guard (<see cref="SetupInstanceLock"/>) is what refuses genuinely concurrent
     /// installer instances — that is not this gate's job.</para>
@@ -584,6 +903,13 @@ public static partial class FilesInUse
     private static unsafe string ReadFixed(FixedAppName buffer)
     {
         var span = new ReadOnlySpan<char>(buffer.Value, CCH_RM_MAX_APP_NAME + 1);
+        var nul = span.IndexOf('\0');
+        return new string(nul >= 0 ? span[..nul] : span);
+    }
+
+    private static unsafe string ReadFixedService(FixedSvcName buffer)
+    {
+        var span = new ReadOnlySpan<char>(buffer.Value, CCH_RM_MAX_SVC_NAME + 1);
         var nul = span.IndexOf('\0');
         return new string(nul >= 0 ? span[..nul] : span);
     }

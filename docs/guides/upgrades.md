@@ -21,8 +21,16 @@ At startup the installer reads the scope-correct ARP entry for `app.id`
 | **Newer installed** | **Downgrade — blocked.** The wizard shows a notice screen; a silent install exits with code **3**. Pass `/force-downgrade` to override. |
 
 An upgrade over a **running** app is the other common non-zero outcome: files held
-open by a running process abort the run with exit **4** unless `/closeapps` was
-passed. See [the setup.exe reference](../setup-exe-reference.md). The
+open by a running application abort the run with exit **4** unless `/closeapps` was
+passed. See [the setup.exe reference](../setup-exe-reference.md). Windows services,
+critical system processes and Explorer do not count: a telemetry, indexing or
+antivirus service reading the freshly installed binaries in Program Files is the
+usual case, and nobody can close it. Setup waits up to about three seconds for such a
+holder to let go, then continues and names it in the log. If it still has a file
+locked when the upgrade replaces it, that step fails and the install rolls back, as
+with any locked file. The old version's `uninstall.exe` makes this check too, with
+**its own** logic, so an upgrade from a version built before this behaviour can still
+be refused by that older uninstaller. The
 `installer.hooks.pre_install` steps run before that check, so an app that ships its
 own `--quit` can be stopped by a hook instead — see below.
 

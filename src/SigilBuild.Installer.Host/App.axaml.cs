@@ -180,8 +180,24 @@ public partial class App : Application
                     // The inner platform check is not redundant to the analyzer: it
                     // cannot carry the guard above across the lambda boundary, and the
                     // handoff is Windows-only (ShellExecuteExW "runas").
-                    _vm.ConfigureMachineScopeElevation(() =>
-                        OperatingSystem.IsWindows() && TryHandOffToElevatedInstance(session, desktop));
+                    // The destination on screen travels with the handoff, and one the
+                    // elevated instance's containment would refuse is refused before
+                    // the prompt. (R117)
+                    _vm.ConfigureMachineScopeElevation(
+                        path => OperatingSystem.IsWindows() && TryHandOffToElevatedInstance(session, desktop, path),
+                        path => session.AcceptsInstallDir(InstallScope.Machine, path));
+                }
+
+                // The elevated instance the machine-scope choice started opens where the
+                // unelevated wizard left off, with machine scope and the forwarded
+                // destination already seeded above. (R117)
+                if (session.ResumesFromScopeHandoff)
+                {
+                    var pastDestination = session.ScopeHandoffDestinationAccepted;
+                    InstallerLog.Info(pastDestination
+                        ? "machine scope handoff: resuming after the destination screen"
+                        : "machine scope handoff: forwarded destination refused; resuming on the destination screen");
+                    _vm.ResumeAfterMachineScopeHandoff(pastDestination);
                 }
 
                 // Bind the wizard-collected parameter values into param.* and the
@@ -268,12 +284,12 @@ public partial class App : Application
     /// </remarks>
     [SupportedOSPlatform("windows")]
     private static bool TryHandOffToElevatedInstance(
-        InstallSession session, IClassicDesktopStyleApplicationLifetime desktop)
+        InstallSession session, IClassicDesktopStyleApplicationLifetime desktop, string installPath)
     {
         IReadOnlyList<string> relaunchArgs;
         try
         {
-            relaunchArgs = session.BuildMachineScopeRelaunchArgs(HostRuntime.Args);
+            relaunchArgs = session.BuildMachineScopeRelaunchArgs(HostRuntime.Args, installPath);
         }
         catch (UsageException ex)
         {

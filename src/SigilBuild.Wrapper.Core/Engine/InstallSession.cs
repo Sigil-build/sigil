@@ -606,37 +606,187 @@ public sealed class InstallSession
         _plan.ReplacesPriorInstall && _plan.FoundScope == _scope;
 
     /// <summary>
-    /// The argument vector for the wizard's machine-scope relaunch: the original
-    /// command line with any explicit scope flag replaced by <c>/allusers</c>, routed
-    /// through the same secret handoff as every other elevated relaunch (R18).
+    /// The reserved token that marks the elevated instance started by the wizard's
+    /// machine-scope choice, so its wizard resumes where the user left off. (R117)
     /// </summary>
+    public const string ScopeHandoffSwitch = "/ScopeHandoff";
+
+    /// <summary>
+    /// The argument vector for the wizard's machine-scope relaunch: the original
+    /// command line with any explicit scope flag replaced by <c>/allusers</c>, the
+    /// destination the user typed carried as <c>/D=</c>, and the reserved
+    /// <see cref="ScopeHandoffSwitch"/> appended — routed through the same secret
+    /// handoff as every other elevated relaunch (R18).
+    /// </summary>
+    /// <param name="originalArgs">This process's own argument vector.</param>
+    /// <param name="collectedInstallDir">
+    /// The path on the Destination screen when the user pressed Next, or <c>null</c>.
+    /// </param>
     /// <remarks>
+    /// <para>
     /// Scope is re-decided by re-running <see cref="Create"/> in the child rather than
-    /// by mutating this session, so the child resolves its own destination, its own
-    /// upgrade plan against the machine hive, and its own containment roots. Nothing
-    /// the user has typed is forwarded because nothing has been typed yet — the choice
-    /// is made on the Destination screen, before any other value is collected, and the
-    /// child computes the machine default itself. (R90)
+    /// by mutating this session, so the child resolves its own upgrade plan against
+    /// the machine hive and its own containment roots. (R90)
+    /// </para>
+    /// <para>
+    /// The destination is the only value the wizard has collected at this point: the
+    /// Destination screen precedes the License, Options and declared screens. It is
+    /// forwarded as <c>/D=</c>, which replaces any <c>/D=</c> the parent was given,
+    /// and only when it differs from the machine default this session would pre-fill.
+    /// An untouched default is left for the child to compute, because the child alone
+    /// can see a machine-scope install whose directory must be kept. A forwarded path
+    /// is an ordinary <c>/D=</c> to the child, so the child's machine-scope
+    /// containment check still decides whether it is usable. (R117)
+    /// </para>
     /// </remarks>
-    public IReadOnlyList<string> BuildMachineScopeRelaunchArgs(IReadOnlyList<string> originalArgs)
+    public IReadOnlyList<string> BuildMachineScopeRelaunchArgs(
+        IReadOnlyList<string> originalArgs, string? collectedInstallDir = null)
     {
         ArgumentNullException.ThrowIfNull(originalArgs);
 
-        var rewritten = new List<string>(originalArgs.Count + 1);
+        var forwardDir = IsEditedMachineDestination(collectedInstallDir) ? collectedInstallDir!.Trim() : null;
+
+        var rewritten = new List<string>(originalArgs.Count + 3);
         foreach (var arg in originalArgs)
         {
             // Drop any scope flag the parent was given; /allusers replaces it. Leaving
             // both on the line would hand the child a contradiction to resolve.
             if (arg.Equals("/currentuser", StringComparison.OrdinalIgnoreCase) ||
-                arg.Equals("/allusers", StringComparison.OrdinalIgnoreCase))
+                arg.Equals("/allusers", StringComparison.OrdinalIgnoreCase) ||
+                arg.Equals(ScopeHandoffSwitch, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            // The forwarded destination supersedes the parent's own /D=. (R117)
+            if (forwardDir is not null && arg.StartsWith("/D=", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
             rewritten.Add(arg);
         }
         rewritten.Add("/allusers");
+        if (forwardDir is not null)
+        {
+            rewritten.Add("/D=" + forwardDir);
+        }
+        rewritten.Add(ScopeHandoffSwitch);
 
         return BuildElevationRelaunchArgs(rewritten);
+    }
+
+    /// <summary>
+    /// True when <paramref name="path"/> is a destination the user changed on the
+    /// machine radio, rather than the machine default this session pre-fills. (R117)
+    /// </summary>
+    private bool IsEditedMachineDestination(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+        return !string.Equals(
+            NormalizeForComparison(path),
+            NormalizeForComparison(ResolveDefaultInstallDir(InstallScope.Machine)),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeForComparison(string path)
+    {
+        var trimmed = path.Trim();
+        try
+        {
+            trimmed = Path.GetFullPath(trimmed);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            // Compare the raw text: an unparseable path is never equal to the default.
+        }
+        return Path.TrimEndingDirectorySeparator(trimmed);
+    }
+
+    /// <summary>
+    /// True when <paramref name="path"/> passes <paramref name="scope"/>'s
+    /// <c>install_dir</c> containment as a wizard-collected destination. Lets the
+    /// wizard refuse a destination the elevated instance would refuse, before it asks
+    /// for administrator approval; the install itself still re-checks. (R3, R117)
+    /// </summary>
+    public bool AcceptsInstallDir(InstallScope scope, string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+        try
+        {
+            InstallDirResolver.Resolve(
+                scope: scope,
+                appName: _blob.AppName,
+                appId: _blob.AppId,
+                manifestInstallDir: _blob.InstallDir,
+                cliOverride: _parsed.InstallDir,
+                collected: path.Trim(),
+                priorInstallDir: PriorInstallDirFor(scope));
+            return true;
+        }
+        catch (InstallDirRejectedException)
+        {
+            return false;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or IOException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// True when this run is the elevated instance the wizard's machine-scope choice
+    /// started: the reserved <see cref="ScopeHandoffSwitch"/> came with an explicit
+    /// <c>/allusers</c>, on an interactive install that resolved to machine scope —
+    /// the only shape <see cref="BuildMachineScopeRelaunchArgs"/> produces. On any
+    /// other run the token is ignored. (R117)
+    /// </summary>
+    /// <remarks>
+    /// The token is caller-reachable like every other one, and nothing here tries to
+    /// prove where it came from: it decides which wizard page shows first and nothing
+    /// else. A run that claims it falsely still has every screen one Back away, and
+    /// every scope, containment and elevation decision is made exactly as on a run
+    /// without it.
+    /// </remarks>
+    public bool ResumesFromScopeHandoff =>
+        _parsed.ScopeHandoff
+        && _mode == WrapperMode.Install
+        && !_parsed.Silent
+        && _parsed.Scope == ScopeOverride.AllUsers
+        && _scope == InstallScope.Machine;
+
+    /// <summary>
+    /// True when the handoff's destination — a forwarded <c>/D=</c>, or the machine
+    /// default when none was forwarded — passes machine-scope containment, so the
+    /// resumed wizard may start past the Destination screen. When it does not, the
+    /// pre-fill has fallen back to the scope default and the user must see that
+    /// change on the Destination screen. (R3, R117)
+    /// </summary>
+    public bool ScopeHandoffDestinationAccepted
+    {
+        get
+        {
+            try
+            {
+                InstallDirResolver.Resolve(
+                    scope: _scope,
+                    appName: _blob.AppName,
+                    appId: _blob.AppId,
+                    manifestInstallDir: _blob.InstallDir,
+                    cliOverride: _parsed.InstallDir,
+                    collected: null,
+                    priorInstallDir: PriorInstallDirDefault);
+                return true;
+            }
+            catch (InstallDirRejectedException)
+            {
+                return false;
+            }
+        }
     }
 
     /// <summary>

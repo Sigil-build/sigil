@@ -604,6 +604,25 @@ restarts — over a running copy, and uninstalling it, found three defects.
   job of an explicit `/allusers` / `/currentuser`. See
   `docs/guides/installer-wizard.md`.
 
+### Fixed — choosing "All users" restarted the wizard (R117)
+
+- **R117 — after the UAC prompt the wizard started over from Welcome.**
+  Choosing "All users of this computer" hands the run to an elevated instance
+  (R90), and that instance opened on Welcome: the user went through Welcome, the
+  location screen and the scope choice a second time, and any folder they had
+  typed was gone. The elevated instance now continues where they left off — on
+  the screen after the location screen (License when the manifest has one),
+  with "All users" selected and their folder, Welcome and the location screen
+  marked done on the rail. License is asked again by the process that installs;
+  when the next screen would be Installing it opens on the location screen
+  instead, so nothing starts by itself. A folder outside Program Files is now
+  refused on the location screen before the prompt (English and Ukrainian),
+  and the elevated instance still checks it. The folder travels as `/D=`, and a
+  new reserved token, `/ScopeHandoff`, tells the elevated wizard to resume; it
+  only picks the first page, is ignored on any run the handoff could not have
+  produced, and secrets still cross in the R18 envelope. See
+  `docs/setup-exe-reference.md` and `docs/guides/installer-wizard.md`.
+
 ### Known limitations
 
 > **Sigil 0.1.0-alpha is Windows-only and pre-production.** It builds and

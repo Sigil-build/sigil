@@ -1055,7 +1055,7 @@ public sealed class InstallerViewModel : ICloseAppsGate
         }
     }
 
-    private Func<bool>? _machineScopeElevator;
+    private Func<string, bool>? _machineScopeElevator;
 
     /// <summary>
     /// Wire the machine-scope handoff. Invoked when the user picks "All users of
@@ -1071,8 +1071,71 @@ public sealed class InstallerViewModel : ICloseAppsGate
     /// </remarks>
     public void ConfigureMachineScopeElevation(Func<bool> elevator)
     {
+        ArgumentNullException.ThrowIfNull(elevator);
+        ConfigureMachineScopeElevation(_ => elevator());
+    }
+
+    /// <summary>
+    /// Wire the machine-scope handoff with the destination the user chose:
+    /// <paramref name="elevator"/> receives the path on the Destination screen so the
+    /// elevated instance can resume with it, and <paramref name="acceptsMachinePath"/>,
+    /// when given, refuses a path machine-scope containment would refuse before any
+    /// prompt appears. (R117)
+    /// </summary>
+    public void ConfigureMachineScopeElevation(Func<string, bool> elevator, Func<string, bool>? acceptsMachinePath = null)
+    {
         _machineScopeElevator = elevator ?? throw new ArgumentNullException(nameof(elevator));
+        _acceptsMachinePath = acceptsMachinePath;
         OnPropertyChanged(nameof(NextNeedsElevation));
+    }
+
+    private Func<string, bool>? _acceptsMachinePath;
+
+    /// <summary>
+    /// Open the wizard where the run it was handed from left off, in the elevated
+    /// instance the machine-scope choice started. Only the Destination screen precedes
+    /// the License, Options and declared screens, so nothing else was collected and
+    /// nothing else is lost; License is shown again, because acceptance belongs to the
+    /// process that installs. (R117)
+    /// </summary>
+    /// <param name="pastDestination">
+    /// The forwarded destination passed machine-scope containment. When it did not,
+    /// the pre-fill fell back to the scope default and the wizard opens on the
+    /// Destination screen so the user sees the change.
+    /// </param>
+    /// <remarks>
+    /// The wizard opens on the Destination screen, too, when the next screen would be
+    /// Installing: the install starts from a Next pressed in the window that performs
+    /// it, after the pre-install hooks and the files-in-use gate, and never on its own.
+    /// A blocked downgrade keeps its notice screen.
+    /// </remarks>
+    public void ResumeAfterMachineScopeHandoff(bool pastDestination)
+    {
+        if (_step == InstallerStep.DowngradeBlocked)
+        {
+            return;
+        }
+
+        var destination = _flow.FindIndex(n => n.Step == InstallerStep.InstallOptions);
+        if (destination < 0)
+        {
+            return;
+        }
+
+        var target = destination;
+        if (pastDestination)
+        {
+            var next = destination + 1;
+            while (next < _flow.Count && _flow[next].Screen is { } s && !EvaluateWhen(s))
+            {
+                next++;
+            }
+            if (next < _flow.Count && _flow[next].Step != InstallerStep.Installing)
+            {
+                target = next;
+            }
+        }
+        MoveTo(target);
     }
 
     /// <summary>
@@ -1439,7 +1502,16 @@ public sealed class InstallerViewModel : ICloseAppsGate
             // seen the destination and pressed the button carrying the shield. (R90)
             if (_isMachineScope && _machineScopeElevator is not null)
             {
-                if (_machineScopeElevator())
+                // A destination the elevated instance would refuse is refused here,
+                // before Windows asks for anything. (R117)
+                var path = _installPath.Trim();
+                if (_acceptsMachinePath is not null && !_acceptsMachinePath(path))
+                {
+                    InstallPathError = Strings.LocationErrorOutsideMachineScope(_lang);
+                    return;
+                }
+
+                if (_machineScopeElevator(path))
                 {
                     // An elevated instance owns the install now; this one is closing.
                     return;

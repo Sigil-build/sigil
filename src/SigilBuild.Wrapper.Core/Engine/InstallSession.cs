@@ -1321,7 +1321,7 @@ public sealed class InstallSession
             // app mutexes + Restart Manager over it. Runs before prerequisites
             // download anything, before the prior version is torn down, and before the
             // journal opens — so a blocked run changes nothing the hooks did not.
-            var blocked = CheckFilesInUse(ctx, ctx.InstallDir, effectiveProgress);
+            var blocked = await CheckFilesInUseAsync(ctx, ctx.InstallDir, effectiveProgress, ct).ConfigureAwait(false);
             if (blocked is not null)
             {
                 return blocked;
@@ -2111,7 +2111,7 @@ public sealed class InstallSession
         // uninstall.exe inherits the same parser, so it honors the same gate — a
         // running app would block the journal replay from deleting its files.
         // /closeapps closes them; otherwise refuse before anything is removed.
-        var blocked = CheckFilesInUse(ctx, ctx.InstallDir, progress);
+        var blocked = await CheckFilesInUseAsync(ctx, ctx.InstallDir, progress, ct).ConfigureAwait(false);
         if (blocked is not null)
         {
             error.WriteLine(blocked.Error);
@@ -2283,7 +2283,7 @@ public sealed class InstallSession
         // make the replay fail on every file it holds open, after the earlier records
         // were already reversed; refusing here names the application instead and
         // leaves the install intact for the wizard's Close-applications step. (R103)
-        var blocked = CheckFilesInUse(ctx, ctx.InstallDir, effectiveProgress);
+        var blocked = await CheckFilesInUseAsync(ctx, ctx.InstallDir, effectiveProgress, ct).ConfigureAwait(false);
         if (blocked is not null)
         {
             return blocked;
@@ -2345,17 +2345,39 @@ public sealed class InstallSession
     /// use). Empty means clear. Used by the wizard's "Close applications" screen and,
     /// defensively, by the install path itself.
     /// </summary>
+    /// <remarks>
+    /// Only user-facing blockers: a service, a critical process or the shell holding a
+    /// file is never listed, so it never opens the Close-applications screen. This probe
+    /// does not wait for such holders to let go — the gate does, just before it
+    /// proceeds. (R115)
+    /// </remarks>
     public IReadOnlyList<AppBlocker> ScanBlockers(string? installDir = null)
-        => FilesInUse.Scan(_blob.AppMutex, installDir ?? EffectiveInstallDir(), InstallerImages());
+        => FilesInUseGate.Scan(installDir ?? EffectiveInstallDir()).Blockers;
 
     /// <summary>
     /// Ask the Restart Manager to gracefully close the applications holding the
     /// install directory — the wizard's "Close for me" and the silent
     /// <c>/closeapps</c> path. No restart is attempted and nothing is force-killed;
-    /// the caller re-scans to confirm the blockers are gone.
+    /// the caller re-scans to confirm the blockers are gone. Services, critical
+    /// processes and the shell are never asked to shut down. (R115)
     /// </summary>
     public bool CloseBlockers(string? installDir = null)
-        => FilesInUse.CloseBlockers(installDir ?? EffectiveInstallDir());
+        => FilesInUseGate.Close(installDir ?? EffectiveInstallDir());
+
+    /// <summary>
+    /// Replaces the production files-in-use probe (the Restart Manager over the real
+    /// install directory). Set only by tests, which hand it a fixed RM result and a
+    /// settle delay that does not sleep; <c>null</c> in production. (R115)
+    /// </summary>
+    internal FilesInUseProbe? FilesInUseProbeOverride { get; set; }
+
+    // The probe every scan, close and settle of this session goes through, so the
+    // wizard's screens, the gate and /closeapps classify identically. (R115)
+    private FilesInUseProbe FilesInUseGate => FilesInUseProbeOverride ?? new FilesInUseProbe
+    {
+        Scan = dir => FilesInUse.ScanDetailed(_blob.AppMutex, dir, InstallerImages()),
+        Close = dir => FilesInUse.CloseBlockers(dir, InstallerImages()),
+    };
 
     // The memoized outcome of this session's pre_uninstall hooks, so an interactive
     // uninstall resumed after the Close-applications step does not run them a second
@@ -2368,14 +2390,14 @@ public sealed class InstallSession
     /// wizard's Retry sees exactly what the gate will. (R103)
     /// </summary>
     public IReadOnlyList<AppBlocker> ScanUninstallBlockers()
-        => FilesInUse.Scan(_blob.AppMutex, UninstallGateDir(), InstallerImages());
+        => FilesInUseGate.Scan(UninstallGateDir()).Blockers;
 
     /// <summary>
     /// <see cref="CloseBlockers"/> for the uninstall — the uninstall wizard's
     /// "Close for me", over the directory its gate sweeps. (R103)
     /// </summary>
     public bool CloseUninstallBlockers()
-        => FilesInUse.CloseBlockers(UninstallGateDir());
+        => FilesInUseGate.Close(UninstallGateDir());
 
     // The install dir the uninstall's files-in-use gate sweeps. A destination the
     // resolver refuses sweeps nothing (mutexes only); the run itself reports the
@@ -2406,26 +2428,43 @@ public sealed class InstallSession
     /// already cleared blockers on the Close-applications screen, so this is normally
     /// a no-op there.
     /// </summary>
-    private InstallOutcome? CheckFilesInUse(StepContext ctx, string? installDir, IProgress<StepProgress>? progress)
+    /// <remarks>
+    /// Only user-facing blockers refuse the run or count toward exit code 4. While the
+    /// only holders are system holders (services, critical processes, the shell) the
+    /// gate re-scans on the settle schedule; whatever is still held after it is logged by
+    /// name and pid, and the run continues. A file such a holder still has locked when a
+    /// step replaces or removes it fails that step exactly as any locked file does: the
+    /// install rolls back, an uninstall keeps its state for a retry — nothing is reported
+    /// as done that was not. (R1, R15, R115)
+    /// </remarks>
+    private async Task<InstallOutcome?> CheckFilesInUseAsync(
+        StepContext ctx, string? installDir, IProgress<StepProgress>? progress, CancellationToken ct)
     {
-        var blockers = FilesInUse.Scan(_blob.AppMutex, installDir, InstallerImages());
-        if (blockers.Count == 0)
-        {
-            return null; // clear
-        }
+        var gate = FilesInUseGate;
+        var scan = await FilesInUse
+            .SettleAsync(() => gate.Scan(installDir), gate.SettleDelays, gate.Delay, ct)
+            .ConfigureAwait(false);
 
-        if (_parsed.CloseApps)
+        if (scan.Blockers.Count > 0 && _parsed.CloseApps)
         {
-            Report(progress, ctx, $"close-apps: closing {blockers.Count} blocking application(s)…", isError: false);
-            FilesInUse.CloseBlockers(installDir);
-            blockers = FilesInUse.Scan(_blob.AppMutex, installDir, InstallerImages());
-            if (blockers.Count == 0)
+            Report(progress, ctx, $"close-apps: closing {scan.Blockers.Count} blocking application(s)…", isError: false);
+            gate.Close(installDir);
+            scan = await FilesInUse
+                .SettleAsync(() => gate.Scan(installDir), gate.SettleDelays, gate.Delay, ct)
+                .ConfigureAwait(false);
+            if (scan.Blockers.Count == 0)
             {
                 Report(progress, ctx, "close-apps: all blocking applications closed", isError: false);
-                return null;
             }
         }
 
+        if (scan.Blockers.Count == 0)
+        {
+            ReportSystemHolders(progress, ctx, scan.SystemHolders);
+            return null; // clear
+        }
+
+        var blockers = scan.Blockers;
         _blockedByFilesInUse = true;
         var message = BuildBlockerMessage(blockers);
         foreach (var b in blockers)
@@ -2450,6 +2489,23 @@ public sealed class InstallSession
             "these applications are using files this install needs and must be closed first: " +
             string.Join(", ", names) +
             " — close them and retry, or re-run with /closeapps";
+    }
+
+    // A system holder the settle wait outlasted: named in the log, never a blocker. The
+    // wording says what happens next and nothing more — a file it still holds when a
+    // step replaces or removes it fails that step, and is reported as failed. (R115)
+    private static void ReportSystemHolders(
+        IProgress<StepProgress>? progress, StepContext ctx, IReadOnlyList<RmHolder> holders)
+    {
+        foreach (var h in holders)
+        {
+            Report(
+                progress,
+                ctx,
+                $"files-in-use: held by {h.Describe()}, not an application to close — continuing; " +
+                "if it still holds a file when that file is replaced or removed, that step fails and is reported",
+                isError: false);
+        }
     }
 
     private static void Report(IProgress<StepProgress>? progress, StepContext ctx, string message, bool isError)

@@ -91,7 +91,7 @@ hooks and prerequisites that run around it — see below).
 | Inno directive | Sigil equivalent | Notes |
 |---|---|---|
 | `AppMutex` | `installer.app_mutex` (array of names) | Direct analog (gap G7, shipped P6) — setup opens each named mutex before touching the install directory; a mutex that opens means the app is running. Use the exact name the app passes to `CreateMutex`, including any `Global\` prefix. |
-| `CloseApplications` / `CloseApplicationsFilter` (Restart Manager integration) | (automatic, complements `app_mutex`) | Sigil always sweeps the install directory with Windows Restart Manager, catching processes holding files open even when no mutex is declared — a superset of Inno's filter-based approach. |
+| `CloseApplications` / `CloseApplicationsFilter` (Restart Manager integration) | (automatic, complements `app_mutex`) | Sigil always sweeps the install directory with Windows Restart Manager, catching processes holding files open even when no mutex is declared — a superset of Inno's filter-based approach. Windows services, critical system processes and Explorer are never treated as blockers or asked to close. |
 | Wizard "these applications are using files that need to be updated" screen | Close-applications wizard screen | Offers Retry / close-for-me. |
 | `/CLOSEAPPLICATIONS` silent switch | `/closeapps` | Without it, a blocked silent install exits with a dedicated nonzero code rather than failing on a locked file. |
 

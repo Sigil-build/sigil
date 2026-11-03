@@ -95,7 +95,10 @@ internal sealed partial record WrapperBlob(
     // <c>UpdateRunner</c>, which likewise hands off to a child installer and
     // deliberately re-implements no install-completion logic of its own.
     // False (the default) for every embedded-payload pack — unchanged behavior.
-    bool IsDelegatingStub = false)
+    bool IsDelegatingStub = false,
+    // installer.elevation: whether a scope: auto install elevates once at launch
+    // instead of only when machine scope is chosen. (R118)
+    InstallerElevation Elevation = InstallerElevation.OnDemand)
 {
     /// <summary>
     /// Empty sentinel blob: well-known <c>AppId</c> placeholder and zero-length

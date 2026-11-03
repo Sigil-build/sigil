@@ -60,6 +60,9 @@ public sealed record InstallerBrand(
 /// chain (installer.language -&gt; /lang -&gt; OS list -&gt; en) resolved by the
 /// language resolver in SigilBuild.Wrapper.Core.Localization. <c>null</c> when
 /// the manifest doesn't fix a language, letting the OS/flag chain decide.</param>
+/// <param name="RequireSignedDownloads">The downloaded-binary signature policy (R45).</param>
+/// <param name="Elevation">When a <c>scope: auto</c> installer elevates —
+/// <c>installer.elevation</c>; defaults to <see cref="InstallerElevation.OnDemand"/>. (R118)</param>
 public sealed record InstallerSection(
     InstallerBrand? Brand,
     InstallerOptions? Options = null,
@@ -74,7 +77,8 @@ public sealed record InstallerSection(
     IReadOnlyList<InstallerPrerequisite>? Prerequisites = null,
     IReadOnlyList<string>? AppMutex = null,
     string? Language = null,
-    RequireSignedDownloads RequireSignedDownloads = RequireSignedDownloads.SignDeclared);
+    RequireSignedDownloads RequireSignedDownloads = RequireSignedDownloads.SignDeclared,
+    InstallerElevation Elevation = InstallerElevation.OnDemand);
 
 /// <summary>
 /// The declared policy for whether a binary this run pulled off the network must be

@@ -1031,6 +1031,27 @@ public sealed class InstallerViewModel : ICloseAppsGate
                 return;
             }
 
+            // A locked scope belongs to the install being replaced. Re-raise so a
+            // two-way binding that pushed the change snaps back. (R116)
+            // "Just for me" is unavailable in an over-the-shoulder elevation. (R118)
+            if (_scopeLocked || (!value && !_userScopeAvailable))
+            {
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsUserScope));
+                return;
+            }
+
+            // An elevated session re-scopes itself here, before the path is recomputed
+            // for the new scope; a refused switch leaves the selection where it was.
+            // (R118)
+            if (_scopeSwitcher is not null && !_scopeSwitcher(value))
+            {
+                InstallPathError = Strings.LocationErrorScopeSwitchFailed(_lang);
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsUserScope));
+                return;
+            }
+
             _isMachineScope = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsUserScope));
@@ -1046,7 +1067,64 @@ public sealed class InstallerViewModel : ICloseAppsGate
         }
     }
 
-    private Func<bool>? _machineScopeElevator;
+    private Func<bool, bool>? _scopeSwitcher;
+
+    /// <summary>
+    /// Wire the in-process scope switch of an elevated session: invoked with
+    /// <c>isMachine</c> when the user picks a scope radio, and returns <c>false</c> when
+    /// the session could not switch. Mutually exclusive with the machine-scope handoff —
+    /// an elevated session needs no relaunch. (R118)
+    /// </summary>
+    public void ConfigureScopeSwitch(Func<bool, bool> switcher) =>
+        _scopeSwitcher = switcher ?? throw new ArgumentNullException(nameof(switcher));
+
+    private bool _userScopeAvailable = true;
+
+    /// <summary>
+    /// False when the process was elevated with another account's credentials, so
+    /// "Just for me" would install into that account's profile. (R118)
+    /// </summary>
+    public bool UserScopeAvailable
+    {
+        get => _userScopeAvailable;
+        private set
+        {
+            if (_userScopeAvailable != value)
+            {
+                _userScopeAvailable = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(CanChooseUserScope));
+                OnPropertyChanged(nameof(UserScopeBlockedHint));
+            }
+        }
+    }
+
+    /// <summary>True when the "Just for me" radio is enabled. (R116, R118)</summary>
+    public bool CanChooseUserScope => !_scopeLocked && _userScopeAvailable;
+
+    /// <summary>The line saying why "Just for me" is unavailable; empty otherwise. (R118)</summary>
+    public string UserScopeBlockedHint => _userScopeAvailable
+        ? string.Empty
+        : Strings.LocationScopeUserBlockedHint(_lang);
+
+    /// <summary>
+    /// Disable "Just for me" for an over-the-shoulder elevation, selecting "All users"
+    /// if it was not already — the host's session has resolved to machine scope by
+    /// then, so this only brings the radios in line. (R118)
+    /// </summary>
+    public void BlockUserScope()
+    {
+        UserScopeAvailable = false;
+        if (!_isMachineScope)
+        {
+            _isMachineScope = true;
+            OnPropertyChanged(nameof(IsMachineScope));
+            OnPropertyChanged(nameof(IsUserScope));
+            OnPropertyChanged(nameof(NextNeedsElevation));
+        }
+    }
+
+    private Func<string, bool>? _machineScopeElevator;
 
     /// <summary>
     /// Wire the machine-scope handoff. Invoked when the user picks "All users of
@@ -1062,8 +1140,71 @@ public sealed class InstallerViewModel : ICloseAppsGate
     /// </remarks>
     public void ConfigureMachineScopeElevation(Func<bool> elevator)
     {
+        ArgumentNullException.ThrowIfNull(elevator);
+        ConfigureMachineScopeElevation(_ => elevator());
+    }
+
+    /// <summary>
+    /// Wire the machine-scope handoff with the destination the user chose:
+    /// <paramref name="elevator"/> receives the path on the Destination screen so the
+    /// elevated instance can resume with it, and <paramref name="acceptsMachinePath"/>,
+    /// when given, refuses a path machine-scope containment would refuse before any
+    /// prompt appears. (R117)
+    /// </summary>
+    public void ConfigureMachineScopeElevation(Func<string, bool> elevator, Func<string, bool>? acceptsMachinePath = null)
+    {
         _machineScopeElevator = elevator ?? throw new ArgumentNullException(nameof(elevator));
+        _acceptsMachinePath = acceptsMachinePath;
         OnPropertyChanged(nameof(NextNeedsElevation));
+    }
+
+    private Func<string, bool>? _acceptsMachinePath;
+
+    /// <summary>
+    /// Open the wizard where the run it was handed from left off, in the elevated
+    /// instance the machine-scope choice started. Only the Destination screen precedes
+    /// the License, Options and declared screens, so nothing else was collected and
+    /// nothing else is lost; License is shown again, because acceptance belongs to the
+    /// process that installs. (R117)
+    /// </summary>
+    /// <param name="pastDestination">
+    /// The forwarded destination passed machine-scope containment. When it did not,
+    /// the pre-fill fell back to the scope default and the wizard opens on the
+    /// Destination screen so the user sees the change.
+    /// </param>
+    /// <remarks>
+    /// The wizard opens on the Destination screen, too, when the next screen would be
+    /// Installing: the install starts from a Next pressed in the window that performs
+    /// it, after the pre-install hooks and the files-in-use gate, and never on its own.
+    /// A blocked downgrade keeps its notice screen.
+    /// </remarks>
+    public void ResumeAfterMachineScopeHandoff(bool pastDestination)
+    {
+        if (_step == InstallerStep.DowngradeBlocked)
+        {
+            return;
+        }
+
+        var destination = _flow.FindIndex(n => n.Step == InstallerStep.InstallOptions);
+        if (destination < 0)
+        {
+            return;
+        }
+
+        var target = destination;
+        if (pastDestination)
+        {
+            var next = destination + 1;
+            while (next < _flow.Count && _flow[next].Screen is { } s && !EvaluateWhen(s))
+            {
+                next++;
+            }
+            if (next < _flow.Count && _flow[next].Step != InstallerStep.Installing)
+            {
+                target = next;
+            }
+        }
+        MoveTo(target);
     }
 
     /// <summary>
@@ -1091,6 +1232,38 @@ public sealed class InstallerViewModel : ICloseAppsGate
         set { if (value) { IsMachineScope = false; } }
     }
 
+    private bool _scopeLocked;
+
+    /// <summary>
+    /// True when the scope radios are fixed to the scope of the install this run
+    /// replaces — a reinstall, upgrade or forced downgrade in the session's scope.
+    /// Switching scope there would remove that install and install afresh elsewhere,
+    /// which a radio on the way to "Next" must not do quietly. (R116)
+    /// </summary>
+    public bool ScopeLocked
+    {
+        get => _scopeLocked;
+        private set
+        {
+            if (_scopeLocked != value)
+            {
+                _scopeLocked = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(CanChangeScope));
+                OnPropertyChanged(nameof(CanChooseUserScope));
+                OnPropertyChanged(nameof(ScopeLockedHint));
+            }
+        }
+    }
+
+    /// <summary>True when the scope radios are enabled — the inverse of <see cref="ScopeLocked"/>. (R116)</summary>
+    public bool CanChangeScope => !_scopeLocked;
+
+    /// <summary>The line under locked scope radios saying why they are locked; empty otherwise. (R116)</summary>
+    public string ScopeLockedHint => _scopeLocked
+        ? Strings.LocationScopeLockedHint(_lang, Brand.AppName)
+        : string.Empty;
+
     private string? _installPathError;
 
     /// <summary>
@@ -1117,14 +1290,37 @@ public sealed class InstallerViewModel : ICloseAppsGate
     /// <summary>
     /// Wire the Destination screen: whether the scope radios show, a resolver
     /// that maps a scope selection (<c>isMachine</c>) to its default install path,
-    /// and the initial pre-filled path. Called by the host from the session; unit
-    /// tests may call it directly or drive <see cref="InstallPath"/> alone.
+    /// the initial pre-filled path, which radio starts selected, and whether the
+    /// radios are locked. Called by the host from the session; unit tests may call it
+    /// directly or drive <see cref="InstallPath"/> alone.
     /// </summary>
-    public void ConfigureDestination(bool scopeSelectable, Func<bool, string> defaultPathResolver, string initialPath)
+    /// <param name="scopeSelectable">Show the scope radios (manifest <c>scope: auto</c>).</param>
+    /// <param name="defaultPathResolver">The default path for a radio selection.</param>
+    /// <param name="initialPath">The pre-filled path, already resolved for the session's scope.</param>
+    /// <param name="isMachineScope">
+    /// The session's resolved scope is machine. Seeds the radio so it agrees with the
+    /// scope the session will actually install in; <paramref name="initialPath"/> is
+    /// kept as given rather than recomputed for the radio. (R116)
+    /// </param>
+    /// <param name="scopeLocked">Fix the radios to that scope. (R116)</param>
+    public void ConfigureDestination(
+        bool scopeSelectable,
+        Func<bool, string> defaultPathResolver,
+        string initialPath,
+        bool isMachineScope = false,
+        bool scopeLocked = false)
     {
         System.ArgumentNullException.ThrowIfNull(defaultPathResolver);
         _defaultPathResolver = defaultPathResolver;
         ScopeSelectable = scopeSelectable;
+        if (_isMachineScope != isMachineScope)
+        {
+            _isMachineScope = isMachineScope;
+            OnPropertyChanged(nameof(IsMachineScope));
+            OnPropertyChanged(nameof(IsUserScope));
+            OnPropertyChanged(nameof(NextNeedsElevation));
+        }
+        ScopeLocked = scopeLocked;
         InstallPath = initialPath;
         RefreshInstallPathFreeSpace();
         InstallPathError = null;
@@ -1376,7 +1572,16 @@ public sealed class InstallerViewModel : ICloseAppsGate
             // seen the destination and pressed the button carrying the shield. (R90)
             if (_isMachineScope && _machineScopeElevator is not null)
             {
-                if (_machineScopeElevator())
+                // A destination the elevated instance would refuse is refused here,
+                // before Windows asks for anything. (R117)
+                var path = _installPath.Trim();
+                if (_acceptsMachinePath is not null && !_acceptsMachinePath(path))
+                {
+                    InstallPathError = Strings.LocationErrorOutsideMachineScope(_lang);
+                    return;
+                }
+
+                if (_machineScopeElevator(path))
                 {
                     // An elevated instance owns the install now; this one is closing.
                     return;

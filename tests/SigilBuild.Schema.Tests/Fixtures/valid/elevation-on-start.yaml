@@ -1,0 +1,14 @@
+# R118: `installer.elevation: on_start` on a `scope: auto` installer. The schema
+# must declare the property — `additionalProperties: false` on `installer` turns an
+# undeclared key into a rejection.
+spec: v1.0
+app:
+  id: com.example.App
+  name: Example
+  version: 0.1.0
+  publisher: Example Inc.
+build:
+  source: ./out
+installer:
+  scope: auto
+  elevation: on_start

@@ -156,6 +156,17 @@ public sealed class ParsedCommandLine
     public string? RelaunchedFrom { get; init; }
 
     /// <summary>
+    /// True when the reserved <c>/ScopeHandoff</c> token was supplied: this run claims
+    /// to be the elevated instance the wizard's "All users of this computer" choice
+    /// started, so its wizard resumes past the screens the user already went through.
+    /// Not user-facing. It selects the first wizard page and nothing else — no scope,
+    /// containment or elevation decision reads it — and
+    /// <see cref="InstallSession.ResumesFromScopeHandoff"/> ignores it on any run the
+    /// handoff could not have produced. (R117)
+    /// </summary>
+    public bool ScopeHandoff { get; init; }
+
+    /// <summary>
     /// Re-renders the parsed args as a single space-joined string, with secret
     /// parameter values replaced by <c>***</c>. Suitable for logging without
     /// leaking license keys / passwords / tokens.
@@ -260,6 +271,12 @@ public sealed class ParsedCommandLine
             sb.Append(UninstallerRelaunch.Switch).Append(RelaunchedFrom);
         }
 
+        if (ScopeHandoff)
+        {
+            Space();
+            sb.Append(InstallSession.ScopeHandoffSwitch);
+        }
+
         foreach (var kv in Values)
         {
             Space();
@@ -319,6 +336,10 @@ public sealed class ParsedCommandLine
 ///   <item><description><c>/RelaunchedFrom=&lt;path&gt;</c> — <b>reserved</b>, not
 ///   user-facing: names the original <c>uninstall.exe</c> when the uninstaller runs
 ///   from its private temporary copy (R106). See <see cref="UninstallerRelaunch"/>.</description></item>
+///   <item><description><c>/ScopeHandoff</c> — <b>reserved</b>, not user-facing: marks
+///   the elevated instance the wizard's machine-scope choice started, so its wizard
+///   resumes past the destination screen (R117). See
+///   <see cref="InstallSession.BuildMachineScopeRelaunchArgs"/>.</description></item>
 /// </list>
 /// Anything else is a <see cref="UsageException"/> — the parser is intentionally
 /// closed so silent typos never reach the step engine.
@@ -387,6 +408,7 @@ public static class CommandLineParser
         var closeApps = false;
         string? lang = null;
         string? relaunchedFrom = null;
+        var scopeHandoff = false;
 
         // The reserved /SecretHandoff=<path> switch is consumed BEFORE the token loop,
         // and its decrypted pairs are seeded into `values` through the same
@@ -458,6 +480,13 @@ public static class CommandLineParser
             if (string.Equals(body, "force-downgrade", StringComparison.OrdinalIgnoreCase))
             {
                 forceDowngrade = true;
+                continue;
+            }
+            // /ScopeHandoff — reserved: the wizard's machine-scope relaunch. Matched
+            // whole, so it cannot shadow /S or /SecretHandoff=. (R117)
+            if (string.Equals(rawArg, InstallSession.ScopeHandoffSwitch, StringComparison.OrdinalIgnoreCase))
+            {
+                scopeHandoff = true;
                 continue;
             }
 
@@ -596,6 +625,7 @@ public static class CommandLineParser
             CloseApps = closeApps,
             Lang = lang,
             RelaunchedFrom = relaunchedFrom,
+            ScopeHandoff = scopeHandoff,
         };
     }
 

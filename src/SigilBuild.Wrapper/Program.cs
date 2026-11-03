@@ -60,7 +60,8 @@ internal static class Program
             // Self-elevation. A resolved per-machine scope from a non-elevated
             // process relaunches self with the `runas` verb, forwarding all args,
             // and propagates the elevated child's exit code. Per-user installs
-            // stay prompt-free. Mirrors the host entry path.
+            // stay prompt-free unless the manifest asks for `installer.elevation:
+            // on_start` (R118). Mirrors the host entry path.
             if (OperatingSystem.IsWindows()
                 && session.RequiresElevation
                 && session.Mode != WrapperMode.Update)

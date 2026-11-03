@@ -259,6 +259,22 @@ of silently dropping the image.
 parser falls back to `auto`. The schema enum is the hard gate; this covers the
 paths that reach the parser directly.
 
+### SIG0261 — invalid `installer.elevation` {#sig0261}
+
+**Warning, not an error.** The value is outside `{on_demand, on_start}` and the
+parser falls back to `on_demand`, the behaviour of a manifest that does not set
+the field. The schema enum is the hard gate; this covers the paths that reach
+the parser directly (register row R118).
+
+### SIG0262 — `installer.elevation: on_start` with `installer.scope: user` {#sig0262}
+
+**Error.** An elevated per-user install lands in the profile of whoever approved
+the UAC prompt — an administrator's, when a standard user is at the desktop —
+which is never what a per-user installer means. Use `scope: auto` to offer both
+scopes behind one prompt at launch, or drop `elevation` so the per-user install
+stays prompt-free (register row R118). With `scope: machine` the field has no
+effect: a per-machine installer always elevates at start.
+
 ### SIG0270 — invalid `installer.vars` entry {#sig0270}
 
 A variable expression is malformed, or the variables form a reference cycle.

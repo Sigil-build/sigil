@@ -334,6 +334,8 @@ public sealed class ExeWrapperPackager : IPackager
             PostInstall: Array.Empty<InstallStep>(),
             UpdateSteps: Array.Empty<InstallStep>(),
             Scope: manifest.Installer?.Scope ?? InstallScope.Auto,
+            // When a scope: auto install asks for administrator rights. (R118)
+            Elevation: manifest.Installer?.Elevation ?? InstallerElevation.OnDemand,
             AppName: manifest.App.Name,
             DisplayName: manifest.App.Name,
             Publisher: manifest.App.Publisher,
@@ -427,6 +429,8 @@ public sealed class ExeWrapperPackager : IPackager
             // /allusers /currentuser flags) and elevate when a machine install is
             // requested from a non-elevated process.
             Scope: manifest.Installer?.Scope ?? InstallScope.Auto,
+            // When a scope: auto install asks for administrator rights. (R118)
+            Elevation: manifest.Installer?.Elevation ?? InstallerElevation.OnDemand,
             // The enabled option components the runtime + wizard consume.
             Options: optionComponents,
             // Carry App.Name (the default install-dir base + {app.name} token)

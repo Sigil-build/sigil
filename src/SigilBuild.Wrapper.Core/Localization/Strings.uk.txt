@@ -39,6 +39,8 @@ location.scope.user = Лише для мене (рекомендовано)
 location.scope.user_hint = Права адміністратора не потрібні
 location.scope.machine = Для всіх користувачів цього комп'ютера
 location.scope.machine_hint = Встановлюється до Program Files — Windows запитає дозвіл
+location.scope.user_blocked_hint = Варіант «Лише для мене» недоступний: інсталятор працює з правами адміністратора іншого облікового запису, тож програму буде встановлено в його профіль, а не у ваш.
+location.scope.locked_hint = {appName} уже встановлено саме так, тож тут цього не змінити. Щоб змінити, спершу видаліть програму.
 location.disk_free = Вільно на диску {drive}: {freeSpace}
 size.mb = {value} МБ
 size.gb = {value} ГБ
@@ -49,6 +51,8 @@ location.error.empty = Укажіть розташування для встан
 location.error.not_absolute = Укажіть абсолютний шлях (наприклад, C:\Program Files\App).
 location.error.is_file = Це розташування є файлом. Виберіть папку.
 location.error.denied = У вас немає дозволу на встановлення в цю папку. Виберіть іншу.
+location.error.outside_machine_scope = Цю папку не можна використати для встановлення для всіх користувачів. Виберіть папку в Program Files.
+location.error.scope_switch_failed = Не вдалося перейти на цей варіант. Можливо, вже запущено інший інсталятор цієї програми.
 location.error.elevation_declined = Встановлення для всіх користувачів потребує підтвердження адміністратора. Залишено встановлення лише для вас.
 
 # --- options ---

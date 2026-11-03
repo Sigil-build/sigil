@@ -590,6 +590,59 @@ restarts — over a running copy, and uninstalling it, found three defects.
   directory. It never stops a run and logs what it did. An elevated run does
   not sweep `%TEMP%`. See `docs/guides/uninstaller.md`.
 
+### Fixed — the wizard's scope choice (R116)
+
+- **R116 — an elevated machine-scope upgrade showed "Just for me" selected.**
+  The 0.5.9 `Setup.exe` found a 0.5.8 per-machine install, elevated at start and
+  pre-filled `C:\Program Files\Dictum` correctly, but the location screen's
+  scope toggle still showed "Just for me": the toggle always opened on per-user,
+  whatever the run had resolved. It now opens on the run's real scope. On an
+  upgrade, forced downgrade or same-version reinstall in the existing install's
+  scope the toggle is also locked to that scope, with a line (English and
+  Ukrainian) saying the app is already installed that way; changing scope there
+  would remove the installed copy and install afresh elsewhere, so it stays the
+  job of an explicit `/allusers` / `/currentuser`. See
+  `docs/guides/installer-wizard.md`.
+
+### Fixed — choosing "All users" restarted the wizard (R117)
+
+- **R117 — after the UAC prompt the wizard started over from Welcome.**
+  Choosing "All users of this computer" hands the run to an elevated instance
+  (R90), and that instance opened on Welcome: the user went through Welcome, the
+  location screen and the scope choice a second time, and any folder they had
+  typed was gone. The elevated instance now continues where they left off — on
+  the screen after the location screen (License when the manifest has one),
+  with "All users" selected and their folder, Welcome and the location screen
+  marked done on the rail. License is asked again by the process that installs;
+  when the next screen would be Installing it opens on the location screen
+  instead, so nothing starts by itself. A folder outside Program Files is now
+  refused on the location screen before the prompt (English and Ukrainian),
+  and the elevated instance still checks it. The folder travels as `/D=`, and a
+  new reserved token, `/ScopeHandoff`, tells the elevated wizard to resume; it
+  only picks the first page, is ignored on any run the handoff could not have
+  produced, and secrets still cross in the R18 envelope. See
+  `docs/setup-exe-reference.md` and `docs/guides/installer-wizard.md`.
+
+### Added — `installer.elevation` (R118)
+
+- **New manifest field `installer.elevation: on_demand | on_start`.** The
+  default, `on_demand`, is the behaviour so far: a `scope: auto` installer
+  starts without a prompt and asks for administrator rights only when "All
+  users" is picked. `on_start` prompts once at launch, like an NSIS installer
+  with `RequestExecutionLevel admin`, and the wizard's scope radios then switch
+  freely — no shield, no second prompt, no new window; silent runs prompt at
+  launch too. More generally, any elevated wizard now switches scope in-process
+  instead of handing off to another instance. `on_start` has no effect with
+  `scope: machine` and is refused with `scope: user` (new error SIG0262); an
+  unknown value is the warning SIG0261 and means `on_demand`.
+- **An elevation approved with another account's credentials no longer offers
+  "Just for me".** When a standard user types an administrator's password into
+  the prompt, a per-user install would go to the administrator's profile. Setup
+  now compares the elevated account with the user signed in to the desktop: when
+  they differ, "Just for me" is disabled with a note (English and Ukrainian), the
+  run installs for all users, and `/currentuser` is refused with exit `64`. See
+  `docs/guides/installer-wizard.md`.
+
 ### Known limitations
 
 > **Sigil 0.1.0-alpha is Windows-only and pre-production.** It builds and

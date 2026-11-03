@@ -158,12 +158,17 @@ public partial class App : Application
                 // Seed the Destination screen from the session — the scope-aware
                 // default install dir (honoring /D= + the manifest install_dir), and
                 // whether the user/machine scope toggle shows (manifest `scope: auto`).
-                // Toggling scope recomputes the default path for the picked scope.
+                // Toggling scope recomputes the default path for the picked scope. The
+                // radio starts on the scope the session resolved — an elevated upgrade
+                // of a machine install shows "All users" — and is locked to it when the
+                // run replaces an install in that scope. (R116)
                 _vm.ConfigureDestination(
                     session.ScopeIsSelectable,
                     isMachine => session.ResolveDefaultInstallDir(
                         isMachine ? InstallScope.Machine : InstallScope.User),
-                    session.ResolveDefaultInstallDir());
+                    session.ResolveDefaultInstallDir(),
+                    isMachineScope: session.ResolvedScope == InstallScope.Machine,
+                    scopeLocked: session.ScopeLockedByExistingInstall);
 
                 // Picking "All users of this computer" cannot be honoured by a session
                 // whose scope already resolved to `user` — scope selects the
@@ -175,8 +180,42 @@ public partial class App : Application
                     // The inner platform check is not redundant to the analyzer: it
                     // cannot carry the guard above across the lambda boundary, and the
                     // handoff is Windows-only (ShellExecuteExW "runas").
-                    _vm.ConfigureMachineScopeElevation(() =>
-                        OperatingSystem.IsWindows() && TryHandOffToElevatedInstance(session, desktop));
+                    // The destination on screen travels with the handoff, and one the
+                    // elevated instance's containment would refuse is refused before
+                    // the prompt. (R117)
+                    _vm.ConfigureMachineScopeElevation(
+                        path => OperatingSystem.IsWindows() && TryHandOffToElevatedInstance(session, desktop, path),
+                        path => session.AcceptsInstallDir(InstallScope.Machine, path));
+                }
+
+                // An elevated session — installer.elevation: on_start, or a run started
+                // elevated — re-scopes itself when a radio is picked: no prompt and no
+                // relaunch. (R118)
+                if (session.CanSwitchScopeInProcess)
+                {
+                    var switchVm = _vm;
+                    _vm.ConfigureScopeSwitch(isMachine => SwitchScopeInProcess(session, switchVm, isMachine));
+                }
+
+                // Elevated with another account's credentials: "Just for me" would be
+                // that account's profile, so it is unavailable; the session has already
+                // resolved to machine scope. (R118)
+                if (session.UserScopeBlockedByElevation && session.ScopeIsSelectable)
+                {
+                    InstallerLog.Info("scope: elevated as another account; per-user install unavailable");
+                    _vm.BlockUserScope();
+                }
+
+                // The elevated instance the machine-scope choice started opens where the
+                // unelevated wizard left off, with machine scope and the forwarded
+                // destination already seeded above. (R117)
+                if (session.ResumesFromScopeHandoff)
+                {
+                    var pastDestination = session.ScopeHandoffDestinationAccepted;
+                    InstallerLog.Info(pastDestination
+                        ? "machine scope handoff: resuming after the destination screen"
+                        : "machine scope handoff: forwarded destination refused; resuming on the destination screen");
+                    _vm.ResumeAfterMachineScopeHandoff(pastDestination);
                 }
 
                 // Bind the wizard-collected parameter values into param.* and the
@@ -263,12 +302,12 @@ public partial class App : Application
     /// </remarks>
     [SupportedOSPlatform("windows")]
     private static bool TryHandOffToElevatedInstance(
-        InstallSession session, IClassicDesktopStyleApplicationLifetime desktop)
+        InstallSession session, IClassicDesktopStyleApplicationLifetime desktop, string installPath)
     {
         IReadOnlyList<string> relaunchArgs;
         try
         {
-            relaunchArgs = session.BuildMachineScopeRelaunchArgs(HostRuntime.Args);
+            relaunchArgs = session.BuildMachineScopeRelaunchArgs(HostRuntime.Args, installPath);
         }
         catch (UsageException ex)
         {
@@ -287,6 +326,60 @@ public partial class App : Application
 
         InstallerLog.Info("machine scope chosen: handed off to an elevated instance");
         desktop.Shutdown();
+        return true;
+    }
+
+    // The single-instance guard this process holds per scope, the one Program took at
+    // start included. A guard is never re-acquired — this process already owns its
+    // name — and is held for the life of the process; the OS releases it at exit.
+    // (R118)
+    private static readonly Dictionary<InstallScope, SetupInstanceLock?> ScopeLocks = new();
+
+    /// <summary>
+    /// Switch an elevated session's scope in-process and refresh what the wizard shows
+    /// for it. Takes the new scope's single-instance guard first, so a second setup
+    /// already running in that scope refuses the switch rather than racing it. (R76,
+    /// R118)
+    /// </summary>
+    private static bool SwitchScopeInProcess(InstallSession session, InstallerViewModel vm, bool isMachine)
+    {
+        var scope = isMachine ? InstallScope.Machine : InstallScope.User;
+        if (scope == session.ResolvedScope)
+        {
+            return true;
+        }
+
+        ScopeLocks.TryAdd(session.ResolvedScope, session.InstanceLock);
+        var acquired = false;
+        if (!ScopeLocks.TryGetValue(scope, out var guard))
+        {
+            guard = SetupInstanceLock.TryAcquire(
+                session.AppId, scope, session.Mode, handoff: null, out var refusal);
+            if (guard is null)
+            {
+                InstallerLog.Info($"scope switch to {scope} refused: single-instance guard {refusal}");
+                return false;
+            }
+            acquired = true;
+        }
+        if (!session.SwitchScope(scope))
+        {
+            if (acquired)
+            {
+                guard?.Dispose();
+            }
+            InstallerLog.Info($"scope switch to {scope} refused by the session");
+            return false;
+        }
+
+        ScopeLocks[scope] = guard;
+        session.InstanceLock = guard;
+        InstallerLog.Info($"scope: switched to {scope} in-process");
+
+        // Everything the wizard seeded from the old scope's installed state.
+        vm.SetExistingInstall(session.ExistingInstallDetected && session.UpgradeAction == UpgradeAction.Same);
+        vm.SetUpgradeState(session.UpgradeAction, session.InstalledVersion);
+        vm.LoadOptions(session.Options, defaults: session.OptionDefaults);
         return true;
     }
 
